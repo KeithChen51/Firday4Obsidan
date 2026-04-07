@@ -1,0 +1,882 @@
+.friday-daily-board {
+	height: 100%;
+}
+
+.friday-shell {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	height: 100%;
+	min-height: 0;
+}
+
+.friday-page-content {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+	min-height: 0;
+	flex: 1 1 auto;
+}
+
+.friday-top-nav {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+	background:
+		linear-gradient(
+			130deg,
+			color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary-alt)) 0%,
+			var(--background-primary-alt) 55%,
+			color-mix(in srgb, var(--text-muted) 5%, var(--background-primary-alt)) 100%
+		);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 7px;
+	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-primary) 50%, transparent);
+	flex-shrink: 0;
+}
+
+.friday-nav-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px 10px;
+	min-height: 34px;
+	border-radius: 9px;
+	border: 1px solid transparent;
+	background: var(--background-primary);
+	cursor: pointer;
+	text-align: center;
+	font-size: 0.92em;
+	font-weight: 600;
+	color: var(--text-muted);
+	white-space: nowrap;
+	transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.friday-nav-button:hover {
+	border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-nav-button.is-active {
+	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-page-header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.friday-page-header h3 {
+	margin: 0;
+	font-size: 1.02em;
+}
+
+.friday-page-actions {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+	align-items: center;
+}
+
+.friday-page-actions button {
+	padding: 5px 9px;
+	border-radius: 8px;
+	white-space: nowrap;
+}
+
+.friday-kanban-columns {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	align-items: start;
+	gap: 8px;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding-bottom: 8px;
+}
+
+.friday-kanban-column {
+	background: var(--background-primary-alt);
+	border-radius: 8px;
+	padding: 6px;
+}
+
+.friday-kanban-column-header {
+	font-weight: 600;
+	padding: 8px;
+	border-bottom: 2px solid var(--background-modifier-border);
+	margin-bottom: 6px;
+}
+
+.friday-kanban-column-header.urgent {
+	border-color: var(--color-red);
+}
+
+.friday-kanban-column-header.high {
+	border-color: var(--color-orange);
+}
+
+.friday-kanban-column-header.medium {
+	border-color: var(--color-yellow);
+}
+
+.friday-kanban-column-header.low {
+	border-color: var(--color-green);
+}
+
+.friday-kanban-column-header.completed {
+	border-color: var(--color-cyan);
+}
+
+.friday-kanban-column-body {
+	min-height: 120px;
+}
+
+.friday-task-card {
+	background: var(--background-secondary);
+	border-radius: 6px;
+	padding: 8px 10px;
+	margin-bottom: 6px;
+	border-left: 3px solid transparent;
+	cursor: grab;
+}
+
+.friday-task-card:hover {
+	background: var(--background-secondary-alt);
+}
+
+.friday-task-card.overdue {
+	border-left-color: var(--color-red);
+}
+
+.friday-task-card .task-title {
+	display: block;
+	width: 100%;
+	text-align: left;
+	border: 0;
+	background: transparent;
+	color: var(--text-normal);
+	font-weight: 500;
+	padding: 0;
+	margin-bottom: 4px;
+	cursor: pointer;
+}
+
+.friday-task-card .task-meta {
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+.friday-project-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+	gap: 10px;
+	overflow-y: auto;
+	padding-bottom: 8px;
+}
+
+.friday-project-card {
+	background: var(--background-primary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	padding: 10px;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.friday-project-card.is-active {
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+}
+
+.friday-project-title {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.friday-project-title h4 {
+	margin: 0;
+	font-size: 0.95em;
+}
+
+.friday-project-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+}
+
+.friday-badge {
+	font-size: 0.72em;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 999px;
+	padding: 1px 6px;
+}
+
+.friday-project-meta p {
+	margin: 0;
+	font-size: 0.82em;
+	color: var(--text-muted);
+	word-break: break-all;
+}
+
+.friday-project-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.friday-project-actions button {
+	padding: 4px 8px;
+}
+
+.friday-empty-state,
+.friday-ai-placeholder,
+.friday-ai-chat-panel {
+	background: var(--background-primary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	padding: 12px;
+}
+
+.friday-empty-state h4 {
+	margin: 0 0 4px;
+}
+
+.friday-empty-state p,
+.friday-ai-placeholder p {
+	margin: 0 0 8px;
+}
+
+.friday-ai-muted {
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.friday-ai-page-header {
+	background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary-alt));
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
+	border-radius: 12px;
+	padding: 10px;
+}
+
+.friday-ai-heading {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.friday-ai-subtitle {
+	margin: 0;
+	font-size: 0.82em;
+	color: var(--text-muted);
+}
+
+.friday-ai-actions {
+	gap: 7px;
+}
+
+.friday-ai-agent-select-wrap {
+	display: inline-flex;
+	align-items: center;
+}
+
+.friday-ai-agent-select {
+	min-height: 28px;
+	border-radius: 8px;
+	padding: 0 8px;
+	font-size: 0.82em;
+}
+
+.friday-ai-agent-info {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 2px 2px 6px;
+}
+
+.friday-ai-session-tabs {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.friday-ai-session-tab-list {
+	display: flex;
+	gap: 6px;
+	flex-wrap: nowrap;
+	overflow-x: auto;
+	padding-bottom: 2px;
+}
+
+.friday-ai-session-tab {
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	font-size: 0.76em;
+	padding: 4px 10px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.friday-ai-session-tab:hover {
+	color: var(--text-normal);
+}
+
+.friday-ai-session-tab.is-active {
+	background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-secondary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-ai-session-new {
+	border-radius: 999px;
+	white-space: nowrap;
+	padding: 4px 10px;
+	font-size: 0.76em;
+}
+
+.friday-ai-conn-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	min-height: 28px;
+	font-size: 0.76em;
+	font-weight: 600;
+	padding: 4px 10px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	background: color-mix(in srgb, var(--background-secondary) 70%, transparent);
+}
+
+.friday-ai-conn-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 999px;
+	background: currentColor;
+	box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 25%, transparent);
+}
+
+.friday-ai-conn-status.is-online {
+	color: color-mix(in srgb, var(--color-green) 88%, var(--text-normal));
+	background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--color-green) 60%, var(--background-modifier-border));
+}
+
+.friday-ai-conn-status.is-offline {
+	color: color-mix(in srgb, var(--color-orange) 86%, var(--text-normal));
+	background: color-mix(in srgb, var(--color-orange) 12%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--color-orange) 60%, var(--background-modifier-border));
+}
+
+.friday-ai-chat-panel {
+	display: flex;
+	flex-direction: column;
+	flex: 1 1 auto;
+	min-height: 0;
+	gap: 10px;
+}
+
+.friday-ai-chat-shell {
+	padding: 10px;
+	border-radius: 12px;
+	background: linear-gradient(
+		180deg,
+		color-mix(in srgb, var(--background-primary-alt) 86%, var(--interactive-accent) 6%) 0%,
+		var(--background-primary-alt) 100%
+	);
+}
+
+.friday-ai-message-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	flex: 1 1 auto;
+	min-height: 160px;
+	overflow-y: auto;
+	padding: 4px 4px 2px;
+}
+
+.friday-ai-empty {
+	border: 1px dashed color-mix(in srgb, var(--interactive-accent) 25%, var(--background-modifier-border));
+	border-radius: 10px;
+	padding: 12px;
+	background: color-mix(in srgb, var(--background-secondary) 55%, transparent);
+}
+
+.friday-ai-empty h4 {
+	margin: 0 0 6px;
+}
+
+.friday-ai-empty p {
+	margin: 0 0 7px;
+}
+
+.friday-ai-message {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	padding: 9px 11px;
+	max-width: 92%;
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--background-primary) 44%, transparent);
+}
+
+.friday-ai-message.is-user {
+	align-self: flex-end;
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-secondary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+}
+
+.friday-ai-message.is-assistant {
+	align-self: flex-start;
+}
+
+.friday-ai-message,
+.friday-ai-message * {
+	user-select: text;
+	-webkit-user-select: text;
+}
+
+.friday-ai-message-role {
+	font-size: 0.72em;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.friday-ai-message-content {
+	white-space: normal;
+	word-break: break-word;
+	line-height: 1.5;
+}
+
+.friday-ai-message-content > :first-child {
+	margin-top: 0;
+}
+
+.friday-ai-message-content > :last-child {
+	margin-bottom: 0;
+}
+
+.friday-ai-message-content.is-streaming::after {
+	content: " ▍";
+	opacity: 0.75;
+	animation: friday-stream-caret 1s steps(1) infinite;
+}
+
+@keyframes friday-stream-caret {
+	0%,
+	45% {
+		opacity: 0.85;
+	}
+	46%,
+	100% {
+		opacity: 0.2;
+	}
+}
+
+.friday-ai-message-content pre {
+	overflow-x: auto;
+	padding: 8px;
+	border-radius: 8px;
+}
+
+.friday-ai-message-content code {
+	word-break: break-word;
+}
+
+.friday-ai-error {
+	font-size: 0.85em;
+	color: var(--color-red);
+	background: color-mix(in srgb, var(--color-red) 12%, var(--background-secondary));
+	border: 1px solid color-mix(in srgb, var(--color-red) 35%, var(--background-modifier-border));
+	border-radius: 8px;
+	padding: 6px 8px;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.friday-ai-composer {
+	display: flex;
+	align-items: flex-end;
+	gap: 8px;
+	padding-top: 8px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	position: relative;
+}
+
+.friday-ai-composer-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+}
+
+.friday-ai-attachment-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.friday-ai-attachment-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-secondary));
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+	font-size: 0.74em;
+	color: var(--text-normal);
+}
+
+.friday-ai-attachment-name {
+	max-width: 190px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.friday-ai-attachment-remove {
+	background: transparent;
+	border: 0;
+	color: var(--text-muted);
+	cursor: pointer;
+	padding: 0;
+	line-height: 1;
+	font-size: 1em;
+}
+
+.friday-ai-attachment-remove:hover {
+	color: var(--text-normal);
+}
+
+.friday-ai-image-picker {
+	display: none;
+}
+
+.friday-ai-image-button {
+	white-space: nowrap;
+	min-width: 54px;
+	border-radius: 9px;
+}
+
+.friday-ai-input {
+	flex: 1 1 auto;
+	min-height: 72px;
+	resize: vertical;
+	border-radius: 10px;
+	padding: 10px;
+	background: color-mix(in srgb, var(--background-secondary) 72%, var(--background-primary));
+}
+
+.friday-ai-composer button {
+	white-space: nowrap;
+	min-width: 54px;
+	border-radius: 9px;
+}
+
+.friday-mention-dropdown {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(100% + 6px);
+	z-index: 20;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 10px;
+	box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+	padding: 6px;
+	max-height: 240px;
+	overflow-y: auto;
+}
+
+.friday-mention-dropdown.is-hidden {
+	display: none;
+}
+
+.friday-mention-dropdown-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.friday-mention-item {
+	border: 1px solid transparent;
+	border-radius: 8px;
+	padding: 3px 6px 4px;
+	background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+}
+
+.friday-mention-item.is-active {
+	border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 11%, var(--background-secondary));
+}
+
+.friday-mention-item-button {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	font-size: 0.86em;
+	font-weight: 600;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.friday-mention-item-description {
+	margin-top: 2px;
+	font-size: 0.75em;
+	color: var(--text-muted);
+	word-break: break-all;
+}
+
+.friday-llm-header-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.friday-llm-header-row h3 {
+	margin: 0;
+}
+
+.friday-llm-status-pill {
+	font-size: 0.78em;
+	padding: 2px 8px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+}
+
+.friday-llm-status-pill.is-connected {
+	color: var(--color-green);
+	border-color: color-mix(in srgb, var(--color-green) 60%, var(--background-modifier-border));
+}
+
+.friday-llm-status-pill.is-checking {
+	color: var(--text-accent);
+	border-color: color-mix(in srgb, var(--interactive-accent) 60%, var(--background-modifier-border));
+}
+
+.friday-llm-status-pill.is-failed {
+	color: var(--color-red);
+	border-color: color-mix(in srgb, var(--color-red) 60%, var(--background-modifier-border));
+}
+
+.friday-llm-status-pill.is-unconfigured,
+.friday-llm-status-pill.is-idle {
+	color: var(--text-muted);
+}
+
+.friday-llm-error-detail-wrap {
+	margin-top: 8px;
+	padding: 8px;
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--color-red) 8%, var(--background-secondary));
+	border: 1px solid color-mix(in srgb, var(--color-red) 25%, var(--background-modifier-border));
+}
+
+.friday-llm-error-detail-title {
+	font-size: 0.86em;
+	color: var(--text-muted);
+	margin-bottom: 6px;
+}
+
+.friday-llm-error-detail {
+	margin: 0;
+	padding: 8px;
+	border-radius: 6px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	font-size: 0.82em;
+	line-height: 1.4;
+	max-height: 220px;
+	overflow: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	cursor: copy;
+}
+
+.friday-sync-project {
+	padding: 8px 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.friday-sync-conflict-row {
+	margin: 6px 0;
+	padding: 6px;
+	background: var(--background-secondary);
+	border-radius: 6px;
+}
+
+@media (max-width: 720px) {
+	.friday-nav-button {
+		font-size: 0.86em;
+		padding: 7px 4px;
+	}
+
+	.friday-ai-page-header {
+		padding: 9px;
+	}
+
+	.friday-ai-actions {
+		width: 100%;
+		justify-content: flex-start;
+	}
+
+	.friday-ai-conn-status {
+		order: -1;
+	}
+
+	.friday-ai-composer {
+		flex-direction: column;
+		align-items: stretch;
+	}
+}
+
+/* ========== Approval Card ========== */
+.friday-approval-card {
+	background: color-mix(in srgb, var(--color-yellow) 6%, var(--background-secondary));
+	border: 1px solid color-mix(in srgb, var(--color-yellow) 30%, var(--background-modifier-border));
+	border-radius: 12px;
+	padding: 12px 14px;
+	margin: 8px 0;
+}
+
+.friday-approval-card.is-resolved {
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.friday-approval-header {
+	font-weight: 600;
+	font-size: 0.9em;
+	margin-bottom: 6px;
+	color: var(--text-normal);
+}
+
+.friday-approval-detail {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	font-family: var(--font-monospace);
+	line-height: 1.5;
+	padding: 1px 0;
+}
+
+.friday-approval-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.friday-approval-btn {
+	padding: 5px 10px;
+	border-radius: 6px;
+	font-size: 0.82em;
+	cursor: pointer;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.friday-approval-btn:hover {
+	opacity: 0.85;
+}
+
+.friday-approval-btn.is-allow {
+	background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--color-green) 40%, var(--background-modifier-border));
+}
+
+.friday-approval-btn.is-session {
+	background: color-mix(in srgb, var(--color-cyan) 12%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--color-cyan) 40%, var(--background-modifier-border));
+}
+
+.friday-approval-btn.is-always {
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+}
+
+.friday-approval-btn.is-deny {
+	background: color-mix(in srgb, var(--color-red) 10%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--color-red) 35%, var(--background-modifier-border));
+}
+
+/* ========== Diff Preview ========== */
+.friday-diff-preview {
+	font-family: var(--font-monospace);
+	font-size: 0.82em;
+	line-height: 1.6;
+	background: var(--background-secondary);
+	border-radius: 8px;
+	padding: 8px 10px;
+	margin: 6px 0;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.friday-diff-add {
+	background: color-mix(in srgb, var(--color-green) 15%, transparent);
+	border-radius: 2px;
+	padding: 0 2px;
+}
+
+.friday-diff-remove {
+	background: color-mix(in srgb, var(--color-red) 12%, transparent);
+	text-decoration: line-through;
+	border-radius: 2px;
+	padding: 0 2px;
+}
+
+/* ========== Exec Output ========== */
+.friday-exec-output {
+	font-family: var(--font-monospace);
+	font-size: 0.8em;
+	line-height: 1.5;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 8px 10px;
+	margin: 6px 0;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	word-break: break-word;
+	max-height: 300px;
+	overflow-y: auto;
+}
+
+.friday-exec-header {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	margin-bottom: 4px;
+}
+
+.friday-exec-exit-ok {
+	color: var(--color-green);
+}
+
+.friday-exec-exit-fail {
+	color: var(--color-red);
+}

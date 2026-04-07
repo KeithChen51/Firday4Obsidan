@@ -1,0 +1,1251 @@
+﻿import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import path from "path";
+import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { RegisterProjectModal } from "../modals/RegisterProjectModal";
+import type { ModelCapabilityInfo } from "../services/AIService";
+import { FridayPluginApi } from "../types/plugin";
+import { ProjectEntry } from "../types/project";
+import { SlashCommandTemplate } from "../types/settings";
+import type { LocaleCode } from "../i18n/types";
+
+type SettingsHost = FridayPluginApi & Plugin;
+type LlmMode = "openai" | "group";
+type LlmStatus = "unconfigured" | "idle" | "checking" | "connected" | "failed";
+
+const MANUAL_MODEL_OPTION = "__manual__";
+const BUILTIN_GROUP_MODELS = [
+	"glm-4.7",
+	"kimi-k2.5",
+	"MiniMax-M2.1",
+	"glm-5",
+	"MiniMax-M2.5",
+	"qwen3-coder-plus",
+	"Deepseek-V3.2-Exp",
+	"qwen3.5-plus",
+	"Qwen3-Max-Preview",
+	"qwen3.5-flash",
+	"Qwen3-Max",
+];
+
+interface ModelPresetResult {
+	models: string[];
+	source: string;
+	editablePaths: string[];
+}
+
+export class FridaySettingTab extends PluginSettingTab {
+	private readonly host: SettingsHost;
+	private llmStatus: LlmStatus = "idle";
+	private llmStatusDetail = "";
+	private modelPresetResult: ModelPresetResult | null = null;
+
+	constructor(app: App, plugin: SettingsHost) {
+		super(app, plugin);
+		this.host = plugin;
+	}
+
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+		containerEl.createEl("h2", { text: this.host.t("settings.title") });
+
+		this.renderUserSection(containerEl);
+		this.renderSyncSection(containerEl);
+		this.renderLlmSection(containerEl);
+		this.renderAgentSection(containerEl);
+		this.renderKnowledgeCuratorSection(containerEl);
+		this.renderDailyNoteSection(containerEl);
+		this.renderSlashCommandSection(containerEl);
+		this.renderProjectSection(containerEl);
+	}
+
+	private renderUserSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.user") });
+
+		new Setting(containerEl)
+			.setName(this.host.t("settings.locale.name"))
+			.setDesc(this.host.t("settings.locale.desc"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("zh-CN", this.host.t("settings.locale.zh"));
+				dropdown.addOption("en-US", this.host.t("settings.locale.en"));
+				dropdown.setValue(this.host.settings.locale ?? "zh-CN");
+				dropdown.onChange(async (value) => {
+					this.host.settings.locale = (value === "en-US" ? "en-US" : "zh-CN") as LocaleCode;
+					await this.host.saveSettings();
+					this.display();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.user.autoDetect.name", "自动识别用户 ID"))
+			.setDesc(this.t("settings.user.autoDetect.desc", "若下方用户 ID 为空，则使用当前机器名推断。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.user.autoDetect).onChange(async (value) => {
+					this.host.settings.user.autoDetect = value;
+					if (value && !this.host.settings.user.userId) {
+						this.host.settings.user.userId = this.host.getDetectedUserId();
+					}
+					await this.host.saveSettings();
+					this.display();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.user.userId.name", "用户 ID"))
+			.setDesc(this.t("settings.user.userId.desc", "用于匹配任务负责人。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("keith")
+					.setValue(this.host.settings.user.userId)
+					.onChange(async (value) => {
+						this.host.settings.user.userId = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl).setName(this.t("settings.user.displayName.name", "显示名称")).addText((text) =>
+			text
+				.setPlaceholder("Keith")
+				.setValue(this.host.settings.user.displayName)
+				.onChange(async (value) => {
+					this.host.settings.user.displayName = value.trim();
+					await this.host.saveSettings();
+				}),
+		);
+	}
+
+	private renderSyncSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.sync") });
+
+		new Setting(containerEl).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
+			toggle.setValue(this.host.settings.sync.autoPush).onChange(async (value) => {
+				this.host.settings.sync.autoPush = value;
+				await this.host.saveSettings();
+			}),
+		);
+
+		new Setting(containerEl).setName(this.t("settings.sync.onStartup", "启动时同步")).addToggle((toggle) =>
+			toggle.setValue(this.host.settings.sync.syncOnStartup).onChange(async (value) => {
+				this.host.settings.sync.syncOnStartup = value;
+				await this.host.saveSettings();
+			}),
+		);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.sync.interval.name", "同步间隔（分钟）"))
+			.setDesc(this.t("settings.sync.interval.desc", "0 表示关闭定时同步。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("0")
+					.setValue(String(this.host.settings.sync.syncInterval))
+					.onChange(async (value) => {
+						const parsed = Number.parseInt(value, 10);
+						this.host.settings.sync.syncInterval = Number.isFinite(parsed) ? parsed : 0;
+						await this.host.saveSettings();
+					}),
+			);
+	}
+
+	private renderLlmSection(containerEl: HTMLElement): void {
+		this.syncLlmStatusWithConfig();
+		const mode = (this.host.settings.llm.mode ?? "openai") as LlmMode;
+		if (this.host.settings.llm.mode !== mode) {
+			this.host.settings.llm.mode = mode;
+		}
+
+		const header = containerEl.createDiv({ cls: "friday-llm-header-row" });
+		header.createEl("h3", { text: this.host.t("settings.section.llm") });
+		header.createSpan({
+			cls: `friday-llm-status-pill is-${this.llmStatus}`,
+			text: this.getLlmStatusLabel(),
+		});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.connection.name", "连通状态"))
+			.setDesc(this.getLlmStatusDesc())
+			.addButton((button) =>
+				button
+					.setButtonText(
+						this.llmStatus === "checking"
+							? this.t("settings.llm.connection.checking", "检测中...")
+							: this.t("settings.llm.connection.test", "测试连通"),
+					)
+					.setDisabled(this.llmStatus === "checking")
+					.onClick(async () => {
+						await this.runLlmConnectionTest();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.mode.name", "接入模式"))
+			.setDesc(this.t("settings.llm.mode.desc", "可选通用 OpenAI 协议，或集团集采网关模式。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("openai", this.t("settings.llm.mode.openai", "OpenAI 协议模式"));
+				dropdown.addOption("group", this.t("settings.llm.mode.group", "集团集采模式"));
+				dropdown.setValue(mode);
+				dropdown.onChange(async (value: LlmMode) => {
+					this.host.settings.llm.mode = value;
+					if (value === "group" && !this.host.settings.llm.model.trim()) {
+						const presets = this.getModelPresetResult();
+						this.host.settings.llm.model = presets.models[0] ?? "";
+					}
+					await this.host.saveSettings();
+					this.markLlmStatusDirty();
+					this.display();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.apiUrl.name", "API 地址（必填）"))
+			.setDesc(this.t("settings.llm.apiUrl.desc", "可填网关基础地址或完整 chat/completions 地址。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.llm.apiUrl.placeholder", "例如: https://api.openai.com/v1"))
+					.setValue(this.host.settings.llm.apiUrl)
+					.onChange(async (value) => {
+						this.host.settings.llm.apiUrl = value.trim();
+						await this.host.saveSettings();
+						this.markLlmStatusDirty();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.apiKey.name", "API 密钥（选填）"))
+			.setDesc(this.t("settings.llm.apiKey.desc", "如果网关不需要密钥，可留空。"))
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text
+					.setPlaceholder(this.t("settings.llm.apiKey.placeholder", "可留空"))
+					.setValue(this.host.settings.llm.apiKey)
+					.onChange(async (value) => {
+						this.host.settings.llm.apiKey = value.trim();
+						await this.host.saveSettings();
+						this.markLlmStatusDirty();
+					});
+			});
+
+		if (mode === "group") {
+			const modelPresets = this.getModelPresetResult();
+			const currentModel = this.host.settings.llm.model.trim();
+			const selected = modelPresets.models.includes(currentModel)
+				? currentModel
+				: MANUAL_MODEL_OPTION;
+			new Setting(containerEl)
+				.setName(this.t("settings.llm.presetModel.name", "预置模型"))
+				.setDesc(this.t("settings.llm.presetModel.source", "来源: {source}", { source: modelPresets.source }))
+				.addDropdown((dropdown) => {
+					dropdown.addOption(MANUAL_MODEL_OPTION, this.t("settings.llm.presetModel.manual", "手动输入"));
+					for (const model of modelPresets.models) {
+						dropdown.addOption(model, model);
+					}
+					dropdown.setValue(selected);
+					dropdown.onChange(async (value) => {
+						if (value === MANUAL_MODEL_OPTION) return;
+						this.host.settings.llm.model = value;
+						await this.host.saveSettings();
+						this.markLlmStatusDirty();
+						this.display();
+					});
+				})
+				.addExtraButton((button) =>
+					button
+						.setIcon("refresh-cw")
+						.setTooltip(this.t("settings.llm.presetModel.reload", "重新读取模型预置"))
+						.onClick(() => {
+							this.modelPresetResult = null;
+							this.display();
+						}),
+				);
+		}
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
+			.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.llm.defaultModel.placeholder", "例如: glm-5 或 gpt-4o-mini"))
+					.setValue(this.host.settings.llm.model)
+					.onChange(async (value) => {
+						this.host.settings.llm.model = value.trim();
+						await this.host.saveSettings();
+						this.markLlmStatusDirty();
+					}),
+			);
+
+		const activeAgentModel = this.host.getActiveAgent()?.model?.trim() ?? "";
+		const effectiveModel = activeAgentModel || this.host.settings.llm.model.trim();
+		const capability = this.host.aiService.getModelCapability(effectiveModel || undefined);
+		const confidenceLabel =
+			capability.confidence === "high"
+				? this.t("settings.llm.vision.confidence.high", "高")
+				: capability.confidence === "medium"
+					? this.t("settings.llm.vision.confidence.medium", "中")
+					: this.t("settings.llm.vision.confidence.low", "低");
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.vision.name", "视觉能力（推断）"))
+			.setDesc(
+				this.t("settings.llm.vision.desc", "结果：{result} | 置信度：{confidence} | {reason}", {
+					result: this.formatVisionCapability(capability),
+					confidence: confidenceLabel,
+					reason: capability.reason,
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.temperature.name", "温度（选填）"))
+			.setDesc(this.t("settings.llm.temperature.desc", "留空时不发送 temperature 参数。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.llm.temperature.placeholder", "例如 0.7"))
+					.setValue(this.host.settings.llm.temperature == null ? "" : String(this.host.settings.llm.temperature))
+					.onChange(async (value) => {
+						this.host.settings.llm.temperature = this.parseOptionalFloat(value);
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.maxTokens.name", "最大 Token（选填）"))
+			.setDesc(this.t("settings.llm.maxTokens.desc", "留空时不发送 max_tokens 参数。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.llm.maxTokens.placeholder", "例如 4096"))
+					.setValue(this.host.settings.llm.maxTokens == null ? "" : String(this.host.settings.llm.maxTokens))
+					.onChange(async (value) => {
+						this.host.settings.llm.maxTokens = this.parseOptionalPositiveInt(value);
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.streaming.name", "流式输出"))
+			.setDesc(this.t("settings.llm.streaming.desc", "开启后，聊天回复将实时逐字显示。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.llm.enableStreaming ?? true).onChange(async (value) => {
+					this.host.settings.llm.enableStreaming = value;
+					await this.host.saveSettings();
+				}),
+			);
+
+		if (this.llmStatus === "failed" && this.llmStatusDetail) {
+			const wrap = containerEl.createDiv({ cls: "friday-llm-error-detail-wrap" });
+			wrap.createDiv({
+				cls: "friday-llm-error-detail-title",
+				text: this.t("settings.llm.errorDetail.title", "错误详情（点击文本可复制）"),
+			});
+			const detail = wrap.createEl("pre", {
+				cls: "friday-llm-error-detail",
+				text: this.llmStatusDetail,
+			});
+			detail.onclick = async () => {
+				try {
+					await navigator.clipboard.writeText(this.llmStatusDetail);
+					new Notice(this.t("settings.llm.errorDetail.copySuccess", "已复制错误详情"), 2500);
+				} catch {
+					new Notice(this.t("settings.llm.errorDetail.copyFailed", "复制失败，请手动复制"), 2500);
+				}
+			};
+		}
+	}
+
+	private renderAgentSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.agent") });
+		const agents = this.host.settings.agents;
+		const activeAgent = this.host.getActiveAgent();
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.current.name", "当前 Agent"))
+			.setDesc(this.t("settings.agent.current.desc", "切换后，模型、对话、记忆和知识都会隔离。"))
+			.addDropdown((dropdown) => {
+				for (const agent of agents) {
+					dropdown.addOption(agent.id, `${agent.name} (${agent.id})`);
+				}
+				if (agents.length > 0) {
+					dropdown.setValue(this.host.settings.activeAgentId || agents[0]!.id);
+				}
+				dropdown.onChange(async (value) => {
+					await this.host.setActiveAgent(value);
+					this.display();
+				});
+			})
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.agent.create.button", "新建 Agent")).setCta().onClick(async () => {
+					const suggestedName = `Agent-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
+					const accepted = window.confirm(
+						this.t(
+							"settings.agent.create.confirm",
+							"将创建新 Agent（默认名称：{name}）。\n创建后可在配置文件或后续设置页中重命名。\n\n点击“确定”继续，点击“取消”放弃。",
+							{ name: suggestedName },
+						),
+					);
+					if (!accepted) {
+						return;
+					}
+					const created = await this.host.createAgent({
+						name: suggestedName,
+						description: this.t("settings.agent.create.manualDesc", "手动创建"),
+						model: "",
+					});
+					new Notice(this.t("settings.agent.create.success", "已创建 Agent: {name}", { name: created.name }), 3000);
+					this.display();
+				}),
+			);
+
+		if (activeAgent) {
+			new Setting(containerEl)
+				.setName(this.t("settings.agent.model.name", "当前 Agent 模型"))
+				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.agent.model.placeholder", "例如 glm-5"))
+						.setValue(activeAgent.model)
+						.onChange(async (value) => {
+							activeAgent.model = value.trim();
+							activeAgent.updatedAt = new Date().toISOString();
+							await this.host.agentService.writeAgentProfile(activeAgent);
+							await this.host.saveSettings();
+						}),
+				);
+		}
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.runtime.name", "启用 Agent 工具运行时"))
+			.setDesc(this.t("settings.agent.runtime.desc", "开启后，AI 将按需调用 read/grep/glob/ls/write/delete/subagent。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.agentRuntime.toolRuntimeEnabled).onChange(async (value) => {
+					this.host.settings.agentRuntime.toolRuntimeEnabled = value;
+					await this.host.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.toolCalling.name", "Tool Calling 模式"))
+			.setDesc(
+				this.t(
+					"settings.agent.toolCalling.desc",
+					"auto：优先 native tools，失败后回退 prompt；native：仅 native；prompt：仅提示词 JSON 模式。",
+				),
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("auto", this.t("settings.agent.toolCalling.auto", "auto（推荐）"));
+				dropdown.addOption("native", this.t("settings.agent.toolCalling.native", "native only"));
+				dropdown.addOption("prompt", this.t("settings.agent.toolCalling.prompt", "prompt only"));
+				dropdown.setValue(this.host.settings.agentRuntime.toolCallingMode ?? "auto");
+				dropdown.onChange(async (value) => {
+					this.host.settings.agentRuntime.toolCallingMode = value as "auto" | "native" | "prompt";
+					await this.host.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.maxToolIterations.name", "单轮最大工具步数"))
+			.setDesc(this.t("settings.agent.maxToolIterations.desc", "限制单次对话中的工具循环次数，防止无限调用。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("6")
+					.setValue(String(this.host.settings.agentRuntime.maxToolIterations))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.agentRuntime.maxToolIterations = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.permissionMode.name", "工具权限模式"))
+			.setDesc(
+				this.t(
+					"settings.agent.permissionMode.desc",
+					"全自动：所有工具自动通过 | 标准：读操作自动，写入/执行需审批 | 严格：全部需审批",
+				),
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("auto", this.t("settings.agent.permissionMode.auto", "🚀 全自动"));
+				dropdown.addOption("standard", this.t("settings.agent.permissionMode.standard", "🛡️ 标准"));
+				dropdown.addOption("strict", this.t("settings.agent.permissionMode.strict", "🔒 严格"));
+				dropdown.setValue(this.host.settings.agentRuntime.toolPermissionMode);
+				dropdown.onChange(async (value) => {
+					this.host.settings.agentRuntime.toolPermissionMode = value as "auto" | "standard" | "strict";
+					await this.host.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.enableSubagent.name", "启用子代理"))
+			.setDesc(this.t("settings.agent.enableSubagent.desc", "允许 Agent 将子任务委托给子代理执行。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.agentRuntime.enableSubagent).onChange(async (value) => {
+					this.host.settings.agentRuntime.enableSubagent = value;
+					await this.host.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.enableExec.name", "启用命令执行 (exec)"))
+			.setDesc(this.t("settings.agent.enableExec.desc", "⚠️ 允许 Agent 在系统中执行 shell 命令（spawn 模式）。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.agentRuntime.enableExecTool).onChange(async (value) => {
+					this.host.settings.agentRuntime.enableExecTool = value;
+					await this.host.saveSettings();
+					this.display();
+				}),
+			);
+
+		if (this.host.settings.agentRuntime.enableExecTool) {
+			new Setting(containerEl)
+				.setName(this.t("settings.agent.execTimeout.name", "命令超时（秒）"))
+				.setDesc(this.t("settings.agent.execTimeout.desc", "单条命令执行的最大等待时间。"))
+				.addText((text) =>
+					text
+						.setPlaceholder("30")
+						.setValue(String(this.host.settings.agentRuntime.execTimeout))
+						.onChange(async (value) => {
+							const parsed = this.parseOptionalPositiveInt(value);
+							if (parsed != null) {
+								this.host.settings.agentRuntime.execTimeout = parsed;
+								await this.host.saveSettings();
+							}
+						}),
+				);
+		}
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.maxSubagentDepth.name", "子代理最大深度"))
+			.setDesc(this.t("settings.agent.maxSubagentDepth.desc", "避免无限递归。默认 1 表示仅允许一层子代理。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("1")
+					.setValue(String(this.host.settings.agentRuntime.maxSubagentDepth))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.agentRuntime.maxSubagentDepth = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		this.renderPathListSetting(
+			containerEl,
+			this.t("settings.agent.path.vaultFocus.name", "Vault 聚焦路径"),
+			this.t("settings.agent.path.vaultFocus.desc", "每行一个相对 Vault 的目录；为空表示允许读取整个 Vault。"),
+			this.host.settings.agentRuntime.vaultFocusPaths,
+			async (paths) => {
+				this.host.settings.agentRuntime.vaultFocusPaths = paths;
+				await this.host.saveSettings();
+			},
+		);
+
+		this.renderPathListSetting(
+			containerEl,
+			this.t("settings.agent.path.externalReadonly.name", "外路径只读白名单"),
+			this.t("settings.agent.path.externalReadonly.desc", "每行一个绝对路径，供 Agent 只读访问。"),
+			this.host.settings.agentRuntime.externalReadOnlyPaths,
+			async (paths) => {
+				this.host.settings.agentRuntime.externalReadOnlyPaths = paths;
+				await this.host.saveSettings();
+			},
+		);
+
+		this.renderPathListSetting(
+			containerEl,
+			this.t("settings.agent.path.skillExternal.name", "Skill 外路径"),
+			this.t("settings.agent.path.skillExternal.desc", "每行一个绝对路径，用于加载外部 skill 元数据。"),
+			this.host.settings.agentRuntime.externalSkillPaths,
+			async (paths) => {
+				this.host.settings.agentRuntime.externalSkillPaths = paths;
+				await this.host.saveSettings();
+			},
+		);
+
+		this.renderPathListSetting(
+			containerEl,
+			this.t("settings.agent.path.excludedTags.name", "排除标签（扫描过滤）"),
+			this.t(
+				"settings.agent.path.excludedTags.desc",
+				"每行一个标签（可带 #）。命中标签的 Markdown 文件会被 Vault 上下文扫描跳过。",
+			),
+			this.host.settings.agentRuntime.excludedTags,
+			async (paths) => {
+				this.host.settings.agentRuntime.excludedTags = paths;
+				await this.host.saveSettings();
+			},
+		);
+	}
+
+	private renderKnowledgeCuratorSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.knowledge") });
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.manualOnly.name", "仅手动触发提炼"))
+			.setDesc(this.t("settings.knowledge.manualOnly.desc", "开启后，全局知识提炼 Agent 仅响应用户主动触发。"))
+			.addToggle((toggle) =>
+				toggle.setValue(this.host.settings.knowledgeCurator.enabledManualOnly).onChange(async (value) => {
+					this.host.settings.knowledgeCurator.enabledManualOnly = value;
+					await this.host.saveSettings();
+				}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.maxSessions.name", "单次最大会话数"))
+			.setDesc(this.t("settings.knowledge.maxSessions.desc", "默认 30。用于限制提炼输入规模。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("30")
+					.setValue(String(this.host.settings.knowledgeCurator.maxSessionsPerRun))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.knowledgeCurator.maxSessionsPerRun = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.maxCharsPerSession.name", "单会话字符上限"))
+			.setDesc(this.t("settings.knowledge.maxCharsPerSession.desc", "默认 4000。超出将截断。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("4000")
+					.setValue(String(this.host.settings.knowledgeCurator.maxCharsPerSession))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.knowledgeCurator.maxCharsPerSession = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.maxModelInputChars.name", "模型输入总上限"))
+			.setDesc(this.t("settings.knowledge.maxModelInputChars.desc", "默认 32000。用于避免上下文爆炸。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("32000")
+					.setValue(String(this.host.settings.knowledgeCurator.maxModelInputChars))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.knowledgeCurator.maxModelInputChars = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.staleAfterDays.name", "过期天数"))
+			.setDesc(this.t("settings.knowledge.staleAfterDays.desc", "默认 30。超过该天数会进入待回查。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("30")
+					.setValue(String(this.host.settings.knowledgeCurator.staleAfterDays))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalPositiveInt(value);
+						if (parsed != null) {
+							this.host.settings.knowledgeCurator.staleAfterDays = parsed;
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.confidenceThreshold.name", "置信度阈值"))
+			.setDesc(this.t("settings.knowledge.confidenceThreshold.desc", "默认 0.6，低于该值自动标记待回查。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("0.6")
+					.setValue(String(this.host.settings.knowledgeCurator.confidenceThreshold))
+					.onChange(async (value) => {
+						const parsed = this.parseOptionalFloat(value);
+						if (parsed != null) {
+							this.host.settings.knowledgeCurator.confidenceThreshold = Math.max(0, Math.min(1, parsed));
+							await this.host.saveSettings();
+						}
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.knowledge.actions.name", "执行操作"))
+			.setDesc(this.t("settings.knowledge.actions.desc", "手动触发知识提炼与回查。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.knowledge.actions.curate", "提炼知识")).setCta().onClick(async () => {
+					try {
+						const summary = await this.host.runKnowledgeCuration();
+						new Notice(
+							this.host.t("notice.knowledgeCurationDone", {
+								global: summary.globalUserCount,
+								project: summary.projectCount,
+								review: summary.needsReviewCount,
+							}),
+							6000,
+						);
+					} catch (error) {
+						new Notice(this.t("settings.knowledge.actions.curateFailed", "提炼失败：{error}", { error: String(error) }), 7000);
+					}
+				}),
+			)
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.knowledge.actions.revalidate", "回查知识")).onClick(async () => {
+					try {
+						const summary = await this.host.runKnowledgeRevalidation();
+						new Notice(this.host.t("notice.knowledgeRevalidateDone", { review: summary.needsReviewCount }), 5000);
+					} catch (error) {
+						new Notice(this.t("settings.knowledge.actions.revalidateFailed", "回查失败：{error}", { error: String(error) }), 7000);
+					}
+				}),
+			);
+	}
+
+	private renderDailyNoteSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.daily") });
+
+		new Setting(containerEl).setName(this.t("settings.daily.autoGenerate", "启动时自动生成")).addToggle((toggle) =>
+			toggle.setValue(this.host.settings.dailyNote.autoGenerate).onChange(async (value) => {
+				this.host.settings.dailyNote.autoGenerate = value;
+				await this.host.saveSettings();
+			}),
+		);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.daily.templatePath.name", "模板路径"))
+			.setDesc(this.t("settings.daily.templatePath.desc", "相对 Vault 的路径，留空则使用默认模板。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.daily.templatePath.placeholder", "F.R.I.D.A.Y/模板/每日任务.md"))
+					.setValue(this.host.settings.dailyNote.templatePath)
+					.onChange(async (value) => {
+						this.host.settings.dailyNote.templatePath = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+	}
+
+	private renderSlashCommandSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.slash") });
+
+		new Setting(containerEl)
+			.setName(this.t("settings.slash.manage.name", "命令管理"))
+			.setDesc(this.t("settings.slash.manage.desc", "支持 {arg}（必填）与 {arg?}（选填）占位符，并可限制可用工具与模型。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.slash.manage.new", "新建命令")).setCta().onClick(async () => {
+					this.host.settings.slashCommands.push(this.createDefaultSlashCommand());
+					await this.host.saveSettings();
+					this.display();
+				}),
+			)
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.slash.manage.import", "导入剪贴板")).onClick(async () => {
+					try {
+						if (!navigator?.clipboard?.readText) {
+							throw new Error(this.t("settings.slash.error.clipboardReadUnsupported", "当前环境不支持读取剪贴板。"));
+						}
+						const raw = await navigator.clipboard.readText();
+						const parsed = JSON.parse(raw);
+						if (!Array.isArray(parsed)) {
+							throw new Error(this.t("settings.slash.error.importNotArray", "导入内容必须是命令数组 JSON。"));
+						}
+						const normalized = parsed
+							.map((item, index) => this.sanitizeSlashCommandTemplate(item, index))
+							.filter((item): item is SlashCommandTemplate => item != null);
+						if (normalized.length === 0) {
+							throw new Error(this.t("settings.slash.error.importEmpty", "未发现有效命令。"));
+						}
+						this.host.settings.slashCommands = normalized;
+						await this.host.saveSettings();
+						new Notice(this.t("settings.slash.notice.imported", "已导入 {count} 条命令。", { count: normalized.length }), 4000);
+						this.display();
+					} catch (error) {
+						new Notice(this.t("settings.slash.notice.importFailed", "导入失败：{error}", { error: String(error) }), 6000);
+					}
+				}),
+			)
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.slash.manage.export", "导出剪贴板")).onClick(async () => {
+					try {
+						if (!navigator?.clipboard?.writeText) {
+							throw new Error(this.t("settings.slash.error.clipboardWriteUnsupported", "当前环境不支持写入剪贴板。"));
+						}
+						const payload = JSON.stringify(this.host.settings.slashCommands, null, 2);
+						await navigator.clipboard.writeText(payload);
+						new Notice(this.t("settings.slash.notice.exported", "斜杠命令 JSON 已复制到剪贴板。"), 3000);
+					} catch (error) {
+						new Notice(this.t("settings.slash.notice.exportFailed", "导出失败：{error}", { error: String(error) }), 6000);
+					}
+				}),
+			);
+
+		if (this.host.settings.slashCommands.length === 0) {
+			containerEl.createEl("p", {
+				text: this.t("settings.slash.empty", "暂无自定义命令。示例：/draft {arg} -> 请起草{arg}的技术方案。"),
+			});
+			return;
+		}
+
+		const commands = [...this.host.settings.slashCommands].sort((a, b) =>
+			a.name.localeCompare(b.name, "zh-CN"),
+		);
+		for (const command of commands) {
+			const card = containerEl.createDiv({ cls: "friday-card" });
+			card.createEl("h4", { text: `/${command.name}` });
+
+			new Setting(card)
+				.setName(this.t("settings.slash.command.enabled.name", "启用"))
+				.setDesc(this.t("settings.slash.command.enabled.desc", "关闭后该命令不会被识别。"))
+				.addToggle((toggle) =>
+					toggle.setValue(command.enabled).onChange(async (value) => {
+						const target = this.host.settings.slashCommands.find((item) => item.id === command.id);
+						if (!target) return;
+						target.enabled = value;
+						await this.host.saveSettings();
+					}),
+				);
+
+			new Setting(card).setName(this.t("settings.slash.command.name", "命令名")).addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.slash.command.namePlaceholder", "例如 draft"))
+					.setValue(command.name)
+					.onChange(async (value) => {
+						const normalized = this.normalizeSlashCommandName(value);
+						const target = this.host.settings.slashCommands.find((item) => item.id === command.id);
+						if (!target) return;
+						target.name = normalized || target.name;
+						await this.host.saveSettings();
+					}),
+			);
+
+			new Setting(card)
+				.setName(this.t("settings.slash.command.template.name", "模板"))
+				.setDesc(this.t("settings.slash.command.template.desc", "支持占位符：{arg}、{arg?}。"))
+				.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder(this.t("settings.slash.command.template.placeholder", "例如：请整理 {arg} 的任务拆解与风险清单。"))
+					.setValue(command.template)
+					.onChange(async (value) => {
+						const target = this.host.settings.slashCommands.find((item) => item.id === command.id);
+						if (!target) return;
+						target.template = value.trim();
+						await this.host.saveSettings();
+					});
+				textArea.inputEl.rows = 3;
+				textArea.inputEl.style.width = "100%";
+				});
+
+			new Setting(card)
+				.setName(this.t("settings.slash.command.allowedTools.name", "允许工具"))
+				.setDesc(this.t("settings.slash.command.allowedTools.desc", "逗号分隔。留空表示不限制，例如：read,write,grep"))
+				.addText((text) =>
+					text
+						.setPlaceholder("read,write")
+						.setValue(command.allowedTools.join(","))
+						.onChange(async (value) => {
+							const target = this.host.settings.slashCommands.find((item) => item.id === command.id);
+							if (!target) return;
+							target.allowedTools = this.parseCsvList(value).map((item) => item.toLowerCase());
+							await this.host.saveSettings();
+						}),
+				);
+
+			new Setting(card)
+				.setName(this.t("settings.slash.command.allowedModels.name", "允许模型"))
+				.setDesc(
+					this.t(
+						"settings.slash.command.allowedModels.desc",
+						"逗号分隔。留空表示不限制，例如：glm-5,qwen3-coder-plus",
+					),
+				)
+				.addText((text) =>
+					text
+						.setPlaceholder("glm-5,qwen3-coder-plus")
+						.setValue(command.allowedModels.join(","))
+						.onChange(async (value) => {
+							const target = this.host.settings.slashCommands.find((item) => item.id === command.id);
+							if (!target) return;
+							target.allowedModels = this.parseCsvList(value);
+							await this.host.saveSettings();
+						}),
+				)
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.slash.command.delete", "删除")).setWarning().onClick(async () => {
+						this.host.settings.slashCommands = this.host.settings.slashCommands.filter(
+							(item) => item.id !== command.id,
+						);
+						await this.host.saveSettings();
+						this.display();
+					}),
+				);
+		}
+	}
+
+	private renderProjectSection(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", { text: this.host.t("settings.section.project") });
+
+		new Setting(containerEl).addButton((button) =>
+			button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
+				this.openRegisterProjectModal();
+			}),
+		);
+
+		if (this.host.settings.projects.length === 0) {
+			containerEl.createEl("p", { text: this.t("settings.project.empty", "尚未注册项目。") });
+			return;
+		}
+
+		for (const project of this.host.settings.projects) {
+			new Setting(containerEl)
+				.setName(project.slug)
+				.setDesc(this.buildProjectDescription(project))
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.project.edit", "编辑")).onClick(() => {
+						this.openRegisterProjectModal(project);
+					}),
+				)
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.project.sync", "同步")).onClick(async () => {
+						const result = await this.host.syncService.sync(project);
+						if (result.success) {
+							project.lastSyncAt = new Date().toISOString();
+							await this.host.saveSettings();
+							new Notice(this.host.t("notice.syncSuccess", { slug: project.slug }), 3000);
+						} else {
+							new Notice(this.host.t("notice.syncFailed", { error: result.error ?? project.slug }), 6000);
+						}
+					}),
+				)
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.project.remove", "移除")).onClick(async () => {
+						await this.host.removeProject(project.slug);
+						this.display();
+					}),
+				);
+		}
+	}
+
+	private renderPathListSetting(
+		containerEl: HTMLElement,
+		name: string,
+		desc: string,
+		value: string[],
+		onSave: (paths: string[]) => Promise<void>,
+	): void {
+		new Setting(containerEl)
+			.setName(name)
+			.setDesc(desc)
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder(this.t("settings.pathList.placeholder", "每行一个路径"))
+					.setValue(value.join("\n"))
+					.onChange(async (raw) => {
+						const paths = this.parsePathList(raw);
+						await onSave(paths);
+					});
+				textArea.inputEl.rows = 4;
+				textArea.inputEl.style.width = "100%";
+			});
+	}
+
+	private t(
+		key: string,
+		fallback: string,
+		params?: Record<string, string | number | boolean | null | undefined>,
+	): string {
+		const translated = this.host.t(key, params);
+		if (translated !== key) {
+			return translated;
+		}
+		if (!params) {
+			return fallback;
+		}
+		return fallback.replace(/\{([a-zA-Z0-9_.-]+)\}/g, (_full, name: string) => {
+			const value = params[name];
+			return value == null ? "" : String(value);
+		});
+	}
+
+	private parsePathList(raw: string): string[] {
+		return raw
+			.split(/\r?\n|,/)
+			.map((item) => item.trim())
+			.filter((item) => item.length > 0);
+	}
+
+	private parseCsvList(raw: string): string[] {
+		return raw
+			.split(/,|\r?\n/)
+			.map((item) => item.trim())
+			.filter((item) => item.length > 0);
+	}
+
+	private normalizeSlashCommandName(value: string): string {
+		return value
+			.trim()
+			.toLowerCase()
+			.replace(/^\/+/, "")
+			.replace(/[^a-z0-9_-]/g, "");
+	}
+
+	private createDefaultSlashCommand(): SlashCommandTemplate {
+		const nextIndex = this.host.settings.slashCommands.length + 1;
+		return {
+			id: `slash-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+			name: `cmd${nextIndex}`,
+			template: this.t("settings.slash.defaultTemplate", "请根据 {arg} 生成结构化任务拆解与执行建议。"),
+			allowedTools: [],
+			allowedModels: [],
+			enabled: true,
+		};
+	}
+
+	private sanitizeSlashCommandTemplate(input: unknown, index: number): SlashCommandTemplate | null {
+		if (!input || typeof input !== "object") {
+			return null;
+		}
+		const source = input as Partial<SlashCommandTemplate>;
+		const name = this.normalizeSlashCommandName(String(source.name ?? ""));
+		const template = String(source.template ?? "").trim();
+		if (!name || !template) {
+			return null;
+		}
+		return {
+			id: String(source.id ?? `slash-import-${Date.now()}-${index}`),
+			name,
+			template,
+			allowedTools: Array.isArray(source.allowedTools)
+				? source.allowedTools
+						.map((item) => String(item).trim().toLowerCase())
+						.filter((item) => item.length > 0)
+				: [],
+			allowedModels: Array.isArray(source.allowedModels)
+				? source.allowedModels.map((item) => String(item).trim()).filter((item) => item.length > 0)
+				: [],
+			enabled: source.enabled !== false,
+		};
+	}
+
+	private parseOptionalFloat(value: string): number | null {
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+		const parsed = Number.parseFloat(trimmed);
+		return Number.isFinite(parsed) ? parsed : null;
+	}
+
+	private parseOptionalPositiveInt(value: string): number | null {
+		const trimmed = value.trim();
+		if (!trimmed) return null;
+		const parsed = Number.parseInt(trimmed, 10);
+		return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+	}
+
+	private getOpencodeConfigPaths(): string[] {
+		return [
+			path.join(homedir(), ".config", "opencode", "config.json"),
+			path.join(homedir(), ".config", "opencode", "config.local.json"),
+		];
+	}
+
+	private getModelPresetResult(): ModelPresetResult {
+		if (this.modelPresetResult) return this.modelPresetResult;
+
+		const loaded = this.loadModelPresetsFromOpencodeConfig();
+		if (loaded) {
+			this.modelPresetResult = loaded;
+			return loaded;
+		}
+
+		this.modelPresetResult = {
+			models: [...BUILTIN_GROUP_MODELS],
+			source: this.t("settings.llm.presetModel.builtinSource", "内置集团模型预设"),
+			editablePaths: this.getOpencodeConfigPaths(),
+		};
+		return this.modelPresetResult;
+	}
+
+	private loadModelPresetsFromOpencodeConfig(): ModelPresetResult | null {
+		const configPaths = this.getOpencodeConfigPaths();
+		const discoveredModels: string[] = [];
+		const loadedPaths: string[] = [];
+
+		for (const configPath of configPaths) {
+			try {
+				if (!existsSync(configPath)) continue;
+				const raw = readFileSync(configPath, "utf8");
+				const models = this.extractModelPresetsFromConfig(raw);
+				if (models.length > 0) {
+					discoveredModels.push(...models);
+					loadedPaths.push(configPath);
+				}
+			} catch (error) {
+				console.warn("[Friday] Failed to read opencode model presets:", configPath, error);
+			}
+		}
+
+		if (discoveredModels.length === 0) return null;
+
+		return {
+			models: Array.from(new Set([...discoveredModels, ...BUILTIN_GROUP_MODELS])),
+			source: loadedPaths.join(" | "),
+			editablePaths: loadedPaths,
+		};
+	}
+
+	private extractModelPresetsFromConfig(raw: string): string[] {
+		try {
+			const parsed = JSON.parse(raw) as {
+				provider?: Record<string, { models?: Record<string, unknown> }>;
+			};
+			if (!parsed.provider || typeof parsed.provider !== "object") return [];
+
+			const names: string[] = [];
+			for (const provider of Object.values(parsed.provider)) {
+				const models = provider?.models;
+				if (!models || typeof models !== "object") continue;
+				for (const modelName of Object.keys(models)) {
+					const normalized = modelName.trim();
+					if (normalized) names.push(normalized);
+				}
+			}
+			return Array.from(new Set(names));
+		} catch {
+			return [];
+		}
+	}
+
+	private markLlmStatusDirty(): void {
+		if (!this.host.aiService.isConfigured()) {
+			this.llmStatus = "unconfigured";
+			this.llmStatusDetail = this.t("settings.llm.status.needApiUrl", "请先填写 API 地址。");
+			return;
+		}
+		this.llmStatus = "idle";
+		this.llmStatusDetail = "";
+	}
+
+	private syncLlmStatusWithConfig(): void {
+		if (!this.host.aiService.isConfigured()) {
+			this.llmStatus = "unconfigured";
+			this.llmStatusDetail = this.t("settings.llm.status.needApiUrl", "请先填写 API 地址。");
+			return;
+		}
+		if (this.llmStatus === "unconfigured") {
+			this.llmStatus = "idle";
+			this.llmStatusDetail = "";
+		}
+	}
+
+	private getLlmStatusLabel(): string {
+		const labelMap: Record<LlmStatus, string> = {
+			unconfigured: this.t("settings.llm.status.unconfigured", "未配置"),
+			idle: this.t("settings.llm.status.idle", "未检测"),
+			checking: this.t("settings.llm.status.checking", "检测中"),
+			connected: this.t("settings.llm.status.connected", "已连接"),
+			failed: this.t("settings.llm.status.failed", "连接失败"),
+		};
+		return labelMap[this.llmStatus];
+	}
+
+	private getLlmStatusDesc(): string {
+		if (this.llmStatus === "unconfigured") return this.t("settings.llm.status.needApiUrl", "请先填写 API 地址。");
+		if (this.llmStatus === "checking") return this.t("settings.llm.status.checkingDesc", "正在检测 LLM 连通性。");
+		if (this.llmStatus === "connected") return this.llmStatusDetail || this.t("settings.llm.status.passed", "检测通过。");
+		if (this.llmStatus === "failed") return this.t("settings.llm.status.failedDesc", "连接失败，请查看下方错误详情。");
+		return this.t("settings.llm.status.idleDesc", "点击右侧按钮进行连通测试。");
+	}
+
+	private formatVisionCapability(capability: ModelCapabilityInfo): string {
+		if (capability.vision === "supported") {
+			return this.host.t("vision.supported", { model: capability.model || "N/A" });
+		}
+		if (capability.vision === "unsupported") {
+			return this.host.t("vision.unsupported", { model: capability.model || "N/A" });
+		}
+		return this.host.t("vision.unknown", { model: capability.model || "N/A" });
+	}
+
+	private formatErrorMessage(error: unknown): string {
+		const raw = error instanceof Error ? error.message : String(error ?? "");
+		return raw.replace(/\r\n/g, "\n").trim();
+	}
+
+	private firstLine(text: string): string {
+		return (
+			text
+				.split("\n")
+				.map((line) => line.trim())
+				.find((line) => line.length > 0) ?? ""
+		);
+	}
+
+	private async runLlmConnectionTest(): Promise<void> {
+		if (!this.host.aiService.isConfigured()) {
+			this.llmStatus = "unconfigured";
+			this.llmStatusDetail = this.t("settings.llm.status.needApiUrl", "请先填写 API 地址。");
+			this.display();
+			return;
+		}
+
+		this.llmStatus = "checking";
+		this.llmStatusDetail = "";
+		this.display();
+
+		try {
+			const probe = await this.host.aiService.checkConnection();
+			const preview = probe.replace(/\s+/g, " ").trim();
+			this.llmStatus = "connected";
+			this.llmStatusDetail = preview
+				? this.t("settings.llm.status.modelReply", "模型返回：{preview}", { preview: preview.slice(0, 80) })
+				: this.t("settings.llm.status.passed", "检测通过。");
+			new Notice(this.t("settings.llm.notice.success", "LLM 连通成功"), 3000);
+		} catch (error) {
+			const message = this.formatErrorMessage(error);
+			this.llmStatus = "failed";
+			this.llmStatusDetail = message || this.t("settings.llm.status.failed", "连接失败");
+			new Notice(
+				this.t("settings.llm.notice.failed", "LLM 连通失败：{error}", {
+					error: this.firstLine(this.llmStatusDetail) || this.t("settings.llm.status.failed", "连接失败"),
+				}),
+				6000,
+			);
+		}
+		this.display();
+	}
+
+	private openRegisterProjectModal(initial?: ProjectEntry): void {
+		const existingSlugs = new Set(this.host.settings.projects.map((project) => project.slug));
+		new RegisterProjectModal(this.app, {
+			initial,
+			existingSlugs,
+			fridayRoot: this.host.dataService.getFridayRoot(),
+			currentUserId: this.host.getPrimaryUserId(),
+			syncService: this.host.syncService,
+			t: this.host.t.bind(this.host),
+			onSubmit: async (entry) => {
+				await this.host.upsertProject(entry);
+				new Notice(
+					initial
+						? this.t("settings.project.notice.updated", "项目已更新：{slug}", { slug: entry.slug })
+						: this.t("settings.project.notice.registered", "项目已注册：{slug}", { slug: entry.slug }),
+					3000,
+				);
+				this.display();
+			},
+		}).open();
+	}
+
+	private buildProjectDescription(project: ProjectEntry): string {
+		const syncText = project.lastSyncAt
+			? this.t("settings.project.desc.lastSync", "最近同步：{value}", { value: project.lastSyncAt })
+			: this.t("settings.project.desc.lastSyncNever", "从未同步");
+		const remoteText = project.gitRemote
+			? this.t("settings.project.desc.remote", "远程：{value}", { value: project.gitRemote })
+			: this.t("settings.project.desc.remoteNotSet", "未设置远程");
+		const modeText = project.autoSync
+			? this.t("settings.project.desc.autoSyncOn", "自动同步：开")
+			: this.t("settings.project.desc.autoSyncOff", "自动同步：关");
+		return `${remoteText} | ${modeText} | ${syncText}`;
+	}
+}
+
