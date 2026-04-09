@@ -1,9 +1,9 @@
 ﻿import { promises as fs } from "fs";
 import path from "path";
-import { App, Modal, Notice, Setting } from "obsidian";
+import { App, Modal, Notice, Setting, TFolder, normalizePath } from "obsidian";
 import { LEGACY_PATHS, PRIMARY_PATHS } from "../constants/paths";
 import { SyncService } from "../services/SyncService";
-import { ProjectEntry } from "../types/project";
+import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { getVaultBasePath } from "../utils/vaultPath";
 
 type TranslateFn = (
@@ -14,6 +14,7 @@ type TranslateFn = (
 interface RegisterProjectModalOptions {
 	initial?: ProjectEntry;
 	existingSlugs: Set<string>;
+	projectGroups: ProjectGroupEntry[];
 	fridayRoot: string;
 	currentUserId: string;
 	syncService: SyncService;
@@ -22,7 +23,10 @@ interface RegisterProjectModalOptions {
 }
 
 export class RegisterProjectModal extends Modal {
+	private groupId = "default-group";
 	private slug = "";
+	private projectRootPath = "";
+	private projectRootPathTouched = false;
 	private localPath = "";
 	private gitRemote = "";
 	private gitUsername = "";
@@ -33,13 +37,26 @@ export class RegisterProjectModal extends Modal {
 	constructor(app: App, private readonly options: RegisterProjectModalOptions) {
 		super(app);
 		if (options.initial) {
+			this.groupId = options.initial.groupId || "default-group";
 			this.slug = options.initial.slug;
-			this.localPath = options.initial.localPath;
+			this.projectRootPath = normalizePath(
+				options.initial.projectRootPath || this.buildDefaultProjectRootPath(options.initial.slug),
+			);
+			this.projectRootPathTouched = true;
+			this.localPath = options.initial.localPath ?? "";
 			this.gitRemote = options.initial.gitRemote;
 			this.gitUsername = options.initial.gitUsername;
 			this.gitUserEmail = options.initial.gitUserEmail ?? "";
 			this.gitToken = options.initial.gitToken;
 			this.autoSync = options.initial.autoSync;
+		} else if (options.projectGroups.length > 0) {
+			const firstGroupId = options.projectGroups[0]?.id?.trim();
+			if (firstGroupId) {
+				this.groupId = firstGroupId;
+			}
+		}
+		if (!this.projectRootPath) {
+			this.projectRootPath = this.buildDefaultProjectRootPath(this.slug);
 		}
 	}
 
@@ -53,6 +70,42 @@ export class RegisterProjectModal extends Modal {
 		});
 
 		new Setting(contentEl)
+			.setName(this.t("modal.project.field.group", "项目组"))
+			.setDesc(this.t("modal.project.desc.group", "项目归属分组，用于管理与切换。"))
+			.addDropdown((dropdown) => {
+				const groups = this.options.projectGroups.length
+					? this.options.projectGroups
+					: [
+							{
+								id: "default-group",
+								name: "Default Group",
+								description: "",
+								projectSlugs: [],
+								createdAt: "",
+								updatedAt: "",
+							},
+					  ];
+				if (this.groupId && !groups.some((item) => item.id === this.groupId)) {
+					groups.push({
+						id: this.groupId,
+						name: this.groupId,
+						description: "",
+						projectSlugs: [],
+						createdAt: "",
+						updatedAt: "",
+					});
+				}
+				for (const group of groups) {
+					dropdown.addOption(group.id, `${group.name} (${group.id})`);
+				}
+				const fallback = groups[0]?.id ?? "default-group";
+				dropdown.setValue(this.groupId || fallback);
+				dropdown.onChange((value) => {
+					this.groupId = value;
+				});
+			});
+
+		new Setting(contentEl)
 			.setName(this.t("modal.project.field.slug", "项目标识（Slug）"))
 			.setDesc(this.t("modal.project.desc.slug", "仅支持小写字母、数字和连字符"))
 			.addText((text) =>
@@ -60,9 +113,54 @@ export class RegisterProjectModal extends Modal {
 					.setPlaceholder("payment-refactor")
 					.setValue(this.slug)
 					.onChange((value) => {
-						this.slug = value.trim().toLowerCase();
+						const nextSlug = value.trim().toLowerCase();
+						const previousDefaultRoot = this.buildDefaultProjectRootPath(this.slug);
+						this.slug = nextSlug;
+						const nextDefaultRoot = this.buildDefaultProjectRootPath(this.slug);
+						if (!this.projectRootPathTouched || this.projectRootPath === previousDefaultRoot) {
+							this.projectRootPath = nextDefaultRoot;
+						}
 					}),
 			);
+
+		new Setting(contentEl)
+			.setName(this.t("modal.project.field.projectRoot", "项目根目录（Vault 内）"))
+			.setDesc(
+				this.t(
+					"modal.project.desc.projectRoot",
+					"用于定义项目边界。填写 Vault 相对路径，如 F.R.I.D.A.Y/项目/my-project",
+				),
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder(`${this.options.fridayRoot}/${PRIMARY_PATHS.projects}/my-project`)
+					.setValue(this.projectRootPath)
+					.onChange((value) => {
+						this.projectRootPathTouched = true;
+						this.projectRootPath = normalizePath(value.trim());
+					}),
+			);
+
+		new Setting(contentEl)
+			.setName(this.t("modal.project.field.vaultFolder", "从 Vault 选择文件夹"))
+			.setDesc(this.t("modal.project.desc.vaultFolder", "直接选择已有 Vault 文件夹作为项目根目录。"))
+			.addDropdown((dropdown) => {
+				const options = this.listVaultFolderOptions();
+				dropdown.addOption("", this.t("modal.project.option.vaultFolder.placeholder", "请选择文件夹..."));
+				for (const folderPath of options) {
+					dropdown.addOption(folderPath, folderPath);
+				}
+				if (this.projectRootPath && options.includes(this.projectRootPath)) {
+					dropdown.setValue(this.projectRootPath);
+				}
+				dropdown.onChange((value) => {
+					if (!value) {
+						return;
+					}
+					this.projectRootPathTouched = true;
+					this.projectRootPath = normalizePath(value);
+				});
+			});
 
 		new Setting(contentEl)
 			.setName(this.t("modal.project.field.localPath", "本地路径"))
@@ -177,7 +275,9 @@ export class RegisterProjectModal extends Modal {
 			}
 
 			const entry: ProjectEntry = {
+				groupId: this.groupId,
 				slug: this.slug,
+				projectRootPath: this.resolveVaultProjectRootPath(),
 				localPath: this.localPath.trim(),
 				gitRemote: this.gitRemote,
 				gitUsername: this.gitUsername,
@@ -220,19 +320,15 @@ export class RegisterProjectModal extends Modal {
 				),
 			);
 		}
+
+		this.resolveVaultProjectRootPath();
 	}
 
 	private async resolveProjectPath(): Promise<string> {
-		const vaultBasePath = getVaultBasePath(this.app);
+		const expectedPath = this.getVaultProjectAbsolutePath();
 		if (!this.localPath) {
-			const defaultPath = path.join(
-				vaultBasePath,
-				this.options.fridayRoot,
-				PRIMARY_PATHS.projects,
-				this.slug,
-			);
-			await fs.mkdir(defaultPath, { recursive: true });
-			return defaultPath;
+			await fs.mkdir(expectedPath, { recursive: true });
+			return expectedPath;
 		}
 
 		const target = path.normalize(this.localPath);
@@ -245,13 +341,9 @@ export class RegisterProjectModal extends Modal {
 	}
 
 	private async ensureProjectScaffold(localProjectPath: string): Promise<void> {
-		const primaryTasksPath = path.join(localProjectPath, PRIMARY_PATHS.tasks);
-		const legacyTasksPath = path.join(localProjectPath, LEGACY_PATHS.tasks);
-		const primaryTasks = await fs.stat(primaryTasksPath).catch(() => null);
-		const legacyTasks = await fs.stat(legacyTasksPath).catch(() => null);
-		if (!primaryTasks && !legacyTasks) {
-			await fs.mkdir(primaryTasksPath, { recursive: true });
-		}
+		await fs.mkdir(path.join(localProjectPath, "raw"), { recursive: true });
+		await fs.mkdir(path.join(localProjectPath, "wiki"), { recursive: true });
+		await fs.mkdir(path.join(localProjectPath, ".friday"), { recursive: true });
 
 		const metaPath = await this.resolveProjectMetaPath(localProjectPath);
 		const existingMeta = await fs.stat(metaPath).catch(() => null);
@@ -301,14 +393,36 @@ members:
 		}
 	}
 
-	private async ensureVaultLinkIfNeeded(localProjectPath: string): Promise<void> {
+	private buildDefaultProjectRootPath(slug: string): string {
+		const safeSlug = slug.trim().toLowerCase() || "new-project";
+		return normalizePath(`${this.options.fridayRoot}/${PRIMARY_PATHS.projects}/${safeSlug}`);
+	}
+
+	private resolveVaultProjectRootPath(): string {
+		const raw = (this.projectRootPath || this.buildDefaultProjectRootPath(this.slug)).trim();
+		if (!raw) {
+			throw new Error(this.t("modal.project.error.projectRootEmpty", "项目根目录不能为空。"));
+		}
+		const normalized = normalizePath(raw);
+		if (!normalized || normalized === "." || normalized.startsWith("/")) {
+			throw new Error(
+				this.t(
+					"modal.project.error.projectRootInvalid",
+					"项目根目录必须是 Vault 相对路径，例如 F.R.I.D.A.Y/项目/my-project。",
+				),
+			);
+		}
+		return normalized;
+	}
+
+	private getVaultProjectAbsolutePath(): string {
 		const vaultBasePath = getVaultBasePath(this.app);
-		const expectedPath = path.join(
-			vaultBasePath,
-			this.options.fridayRoot,
-			PRIMARY_PATHS.projects,
-			this.slug,
-		);
+		const projectRootPath = this.resolveVaultProjectRootPath();
+		return path.join(vaultBasePath, ...projectRootPath.split("/"));
+	}
+
+	private async ensureVaultLinkIfNeeded(localProjectPath: string): Promise<void> {
+		const expectedPath = this.getVaultProjectAbsolutePath();
 		const localNormalized = path.normalize(localProjectPath);
 		const expectedNormalized = path.normalize(expectedPath);
 
@@ -374,6 +488,20 @@ members:
 		return path.join(localProjectPath, PRIMARY_PATHS.projectMembersFile);
 	}
 
+	private listVaultFolderOptions(): string[] {
+		const folders = this.app.vault
+			.getAllLoadedFiles()
+			.filter((item): item is TFolder => item instanceof TFolder)
+			.map((item) => normalizePath(item.path))
+			.filter((item) => item.length > 0 && !item.startsWith(".obsidian"));
+		const unique = [...new Set(folders)];
+		const normalizedCurrent = normalizePath(this.projectRootPath);
+		if (normalizedCurrent && !unique.includes(normalizedCurrent)) {
+			unique.push(normalizedCurrent);
+		}
+		return unique.sort((a, b) => a.localeCompare(b, "zh-CN"));
+	}
+
 	private t(
 		key: string,
 		fallback: string,
@@ -391,3 +519,5 @@ members:
 		});
 	}
 }
+
+

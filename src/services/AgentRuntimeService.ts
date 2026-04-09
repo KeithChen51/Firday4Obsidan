@@ -1,4 +1,4 @@
-import { promises as fsPromises } from "fs";
+﻿import { promises as fsPromises } from "fs";
 import path from "path";
 import {
 	normalizePath,
@@ -18,6 +18,7 @@ import { CommandExecService } from "./CommandExecService";
 import { InlineEditService, EditOperation } from "./InlineEditService";
 import { ToolDefinition } from "../types/tools";
 import { SkillCommandService, SuggestedSkill } from "./SkillCommandService";
+import { ProjectBoundaryService } from "./ProjectBoundaryService";
 
 interface RuntimeToolCall {
 	name: string;
@@ -69,6 +70,7 @@ export interface RuntimeProgressEvent {
 		| "start"
 		| "model_request"
 		| "model_response"
+		| "tool_approval"
 		| "tool_call"
 		| "tool_result"
 		| "subagent_start"
@@ -80,6 +82,19 @@ export interface RuntimeProgressEvent {
 	step?: number;
 	tool?: string;
 	message: string;
+}
+
+export interface RuntimeWikiCompileSummary {
+	projectSlug: string;
+	projectRoot: string;
+	requested: number;
+	processed: number;
+	succeeded: number;
+	failed: number;
+	rawPaths: string[];
+	updatedDocs: string[];
+	updatedIndex: string;
+	updatedLog: string;
 }
 
 interface RuntimeTurnInput {
@@ -112,6 +127,10 @@ export class AgentRuntimeService {
 		private readonly commandExecService: CommandExecService,
 		private readonly inlineEditService: InlineEditService,
 		private readonly skillCommandService: SkillCommandService,
+		private readonly projectBoundaryService: ProjectBoundaryService,
+		private readonly compileWikiForActiveProject: (
+			rawPaths?: string[],
+		) => Promise<RuntimeWikiCompileSummary>,
 		private readonly getSettings: () => FridaySettings,
 	) {}
 
@@ -237,13 +256,13 @@ export class AgentRuntimeService {
 					assistantText: finalReply,
 					traces,
 					rawFinalReply: finalReply,
-					parseError: "运行时响应不是合法 JSON，已按普通回复返回。",
+					parseError: "Runtime response is not valid JSON; returned as plain text.",
 				};
 			}
 
 			if (parsed.type === "response" || (!parsed.type && !parsed.tool && !parsed.subagent)) {
 				return {
-					assistantText: (parsed.assistant ?? finalReply).trim() || "（模型未返回有效内容）",
+					assistantText: (parsed.assistant ?? finalReply).trim() || "(Model returned no usable content)",
 					traces,
 					rawFinalReply: finalReply,
 				};
@@ -277,10 +296,10 @@ export class AgentRuntimeService {
 				const tool = parsed.tool;
 				if (!tool || !tool.name) {
 					return {
-						assistantText: "工具调用缺少 tool.name，已终止本轮执行。",
+						assistantText: "Tool call is missing tool.name. Runtime execution stopped for this turn.",
 						traces,
 						rawFinalReply: finalReply,
-						parseError: "tool.name 缂哄け",
+						parseError: "tool.name is missing",
 					};
 				}
 
@@ -291,7 +310,7 @@ export class AgentRuntimeService {
 					tool: tool.name,
 					message: `Step ${step}: calling tool ${tool.name}`,
 				});
-				const executedResult = await this.executeTool(step, input.agentId, tool, allowedToolSet);
+				const executedResult = await this.executeTool(step, input, tool, allowedToolSet);
 				traces.push(executedResult.trace);
 				this.reportProgress(input, {
 					phase: "tool_result",
@@ -312,11 +331,11 @@ export class AgentRuntimeService {
 				assistantText: finalReply,
 				traces,
 				rawFinalReply: finalReply,
-				parseError: "未知运行时类型。",
+				parseError: "Unknown runtime envelope type.",
 			};
 		}
 
-		const overflowTip = "达到最大工具迭代次数，已停止继续调用工具。";
+		const overflowTip = "Maximum tool-iteration limit reached. Stopped further tool calls.";
 		return {
 			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
 			traces,
@@ -346,7 +365,7 @@ export class AgentRuntimeService {
 		const tools = this.buildNativeToolDefinitions(settings, allowedToolSet);
 		if (tools.length === 0) {
 			return {
-				assistantText: "当前命令未允许任何工具执行。",
+				assistantText: "No tool is allowed for this command.",
 				traces,
 				rawFinalReply: "",
 			};
@@ -372,8 +391,84 @@ export class AgentRuntimeService {
 			});
 
 			if (!response.toolCall) {
+				const assistantPayload = response.assistantText?.trim() || finalReply || "";
+				const parsed = this.parseRuntimeEnvelope(assistantPayload);
+				if (parsed) {
+					if (parsed.type === "response" || (!parsed.type && !parsed.tool && !parsed.subagent)) {
+						return {
+							assistantText: (parsed.assistant ?? assistantPayload).trim() || "(Model returned no usable content)",
+							traces,
+							rawFinalReply: assistantPayload || finalReply,
+						};
+					}
+
+					if (parsed.type === "subagent" || parsed.subagent) {
+						const subGoal = parsed.subagent?.goal?.trim() || "(empty goal)";
+						this.reportProgress(input, {
+							phase: "subagent_start",
+							depth,
+							step,
+							message: `Step ${step}: starting subagent - ${this.truncateText(subGoal, 120)}`,
+						});
+						const subResult = await this.executeSubagent(step, input, parsed.subagent);
+						traces.push(subResult.trace);
+						this.reportProgress(input, {
+							phase: "subagent_result",
+							depth,
+							step,
+							message: `Step ${step}: subagent completed - ${subResult.trace.summary}`,
+						});
+						modelMessages.push({
+							role: "assistant",
+							content: assistantPayload || "Subagent call generated from JSON envelope.",
+						});
+						modelMessages.push({
+							role: "user",
+							content: this.formatToolResultForModel(subResult.payload),
+						});
+						continue;
+					}
+
+					if (parsed.type === "tool_call" || parsed.tool) {
+						const tool = parsed.tool;
+						if (!tool || !tool.name) {
+							return {
+								assistantText: "Tool call is missing tool.name. Runtime execution stopped for this turn.",
+								traces,
+								rawFinalReply: assistantPayload || finalReply,
+								parseError: "tool.name is missing",
+							};
+						}
+						this.reportProgress(input, {
+							phase: "tool_call",
+							depth,
+							step,
+							tool: tool.name,
+							message: `Step ${step}: calling tool ${tool.name} (JSON envelope fallback)`,
+						});
+						const toolResult = await this.executeTool(step, input, tool, allowedToolSet);
+						traces.push(toolResult.trace);
+						this.reportProgress(input, {
+							phase: "tool_result",
+							depth,
+							step,
+							tool: tool.name,
+							message: `Step ${step}: tool ${tool.name} finished - ${toolResult.trace.summary}`,
+						});
+						modelMessages.push({
+							role: "assistant",
+							content: assistantPayload || `Calling tool: ${tool.name}`,
+						});
+						modelMessages.push({
+							role: "user",
+							content: this.formatToolResultForModel(toolResult.payload),
+						});
+						continue;
+					}
+				}
+
 				return {
-					assistantText: response.assistantText?.trim() || finalReply || "（模型未返回有效内容）",
+					assistantText: assistantPayload || "(Model returned no usable content)",
 					traces,
 					rawFinalReply: finalReply,
 				};
@@ -386,7 +481,7 @@ export class AgentRuntimeService {
 				tool: response.toolCall.name,
 				message: `Step ${step}: calling tool ${response.toolCall.name}`,
 			});
-			const toolResult = await this.executeTool(step, input.agentId, {
+			const toolResult = await this.executeTool(step, input, {
 				name: response.toolCall.name,
 				args: response.toolCall.args,
 			}, allowedToolSet);
@@ -411,7 +506,7 @@ export class AgentRuntimeService {
 			});
 		}
 
-		const overflowTip = "达到最大工具迭代次数，已停止继续调用工具。";
+		const overflowTip = "Maximum tool-iteration limit reached. Stopped further tool calls.";
 		return {
 			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
 			traces,
@@ -451,18 +546,19 @@ export class AgentRuntimeService {
 			: "agent.md not found";
 
 		const lines = [
-			"你是 F.R.I.D.A.Y Agent Runtime。",
-			"必须输出严格 JSON，不要输出 Markdown。",
+			"You are F.R.I.D.A.Y Agent Runtime.",
+			"You must output strict JSON only. Do not output Markdown.",
 			"",
 			"Allowed response schema (choose one):",
 			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"ls|read|grep|glob|write|edit|delete","args":{...}}}',
+			'{"type":"tool_call","assistant":"optional note","tool":{"name":"ls|read|grep|glob|compile_wiki|write|edit|delete","args":{...}}}',
 			'{"type":"subagent","assistant":"optional note","subagent":{"goal":"task goal","model":"optional"}}',
 			"",
 			"Rules:",
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
 			"- Call at most one tool each step, then reason with TOOL_RESULT.",
 			"- write/delete only supports Vault-relative paths.",
+			"- If user asks to compile/rebuild Wiki, call compile_wiki tool first.",
 			"- If user asks to create/update/save a file, you MUST call write tool to execute it.",
 			"- Never say 'I cannot create/write files' when write tool is available.",
 			"- If user says '当前文档/这个文档', prioritize current active file path.",
@@ -473,22 +569,23 @@ export class AgentRuntimeService {
 			'- read: {"path":"file path","maxChars":10000}',
 			'- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
 			'- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
+			'- compile_wiki: {"mode":"all|changed(optional)","path":"optional raw path","paths":["optional raw paths"]}',
 			'- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
-			'- edit: {"path":"Vault-relative path","edits":[{"search":"要替换的原文","replace":"替换后的内容"}]}',
+			'- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',
 			'- delete: {"path":"Vault-relative path"}',
 			...(settings.agentRuntime.enableExecTool
-				? ['- exec: {"command":"命令名","args":["参数1","参数2"],"cwd":"可选工作目录"}']
+				? ['- exec: {"command":"command-name","args":["arg1","arg2"],"cwd":"optional-working-directory"}']
 				: []),
 			"",
 			"--- Few-shot examples ---",
-			"User: 列出根目录文件",
-			'Assistant: {"type":"tool_call","assistant":"列出根目录","tool":{"name":"ls","args":{"path":"","recursive":false}}}',
+			"User: list files in project root",
+			'Assistant: {"type":"tool_call","assistant":"List files in root.","tool":{"name":"ls","args":{"path":"","recursive":false}}}',
 			"",
-			"User: 读取 notes/todo.md",
-			'Assistant: {"type":"tool_call","assistant":"读取文件","tool":{"name":"read","args":{"path":"notes/todo.md"}}}',
+			"User: read notes/todo.md",
+			'Assistant: {"type":"tool_call","assistant":"Read file.","tool":{"name":"read","args":{"path":"notes/todo.md"}}}',
 			"",
-			'User: 创建文件 test.md 内容为 hello',
-			'Assistant: {"type":"tool_call","assistant":"创建文件","tool":{"name":"write","args":{"path":"test.md","content":"hello","mode":"create"}}}',
+			'User: create test.md with content "hello"',
+			'Assistant: {"type":"tool_call","assistant":"Create file.","tool":{"name":"write","args":{"path":"test.md","content":"hello","mode":"create"}}}',
 			"--- End examples ---",
 			"",
 			`Runtime depth: ${depth}`,
@@ -637,7 +734,7 @@ export class AgentRuntimeService {
 
 		if (depth >= settings.agentRuntime.maxSubagentDepth) {
 			return {
-				trace: this.traceFromError(step, "subagent", "vault", "", "达到子代理最大深度限制"),
+				trace: this.traceFromError(step, "subagent", "vault", "", "Subagent depth limit reached"),
 				payload: { ok: false, tool: "subagent", error: "subagent depth limit reached" },
 			};
 		}
@@ -646,7 +743,7 @@ export class AgentRuntimeService {
 			agentId: input.agentId,
 			tool: "subagent",
 			scope: "vault",
-			description: `执行子代理任务：${this.truncateText(goal, 160)}`,
+			description: `Run subagent task: ${this.truncateText(goal, 160)}`,
 		});
 
 		if (!approval.allowed) {
@@ -706,16 +803,19 @@ export class AgentRuntimeService {
 
 	private async executeTool(
 		step: number,
-		agentId: string,
+		input: RuntimeTurnInput,
 		tool: RuntimeToolCall,
 		allowedTools: Set<string> | null,
 	): Promise<{ trace: RuntimeToolTrace; payload: RuntimeToolResultPayload }> {
+		const depth = input.depth ?? 0;
+		const agentId = input.agentId;
 		const name = tool.name.trim().toLowerCase();
 		const args = tool.args ?? {};
 		const targetPath = this.resolveToolTargetPath(name, args);
 		const scope = this.resolveScope(targetPath);
+		const shouldReportApproval = !["ls", "read", "grep", "glob"].includes(name);
 		if (allowedTools && allowedTools.size > 0 && !allowedTools.has(name)) {
-			const reason = `工具 ${name} 不在当前命令允许列表中`;
+			const reason = `Tool ${name} is not allowed by the current command policy.`;
 			return {
 				trace: {
 					step,
@@ -738,6 +838,17 @@ export class AgentRuntimeService {
 			};
 		}
 
+		if (shouldReportApproval) {
+			const target = targetPath ? `（${targetPath}）` : "";
+			this.reportProgress(input, {
+				phase: "tool_approval",
+				depth,
+				step,
+				tool: name,
+				message: `正在申请工具权限：${name}${target}`,
+			});
+		}
+
 		const approval = await this.approvalService.requestApproval({
 			agentId,
 			tool: name,
@@ -747,6 +858,15 @@ export class AgentRuntimeService {
 		});
 
 		if (!approval.allowed) {
+			if (shouldReportApproval) {
+				this.reportProgress(input, {
+					phase: "tool_approval",
+					depth,
+					step,
+					tool: name,
+					message: `工具权限被拒绝：${name}`,
+				});
+			}
 			return {
 				trace: {
 					step,
@@ -758,11 +878,26 @@ export class AgentRuntimeService {
 					persistedRule: approval.persisted,
 					viaRule: approval.viaRule,
 					ok: false,
-					summary: `${name} 被拒绝`,
+					summary: `${name} blocked`,
 					error: approval.reason,
 				},
 				payload: { ok: false, tool: name, error: approval.reason },
 			};
+		}
+
+		if (shouldReportApproval) {
+			const approvalStatus = approval.viaRule
+				? "命中已保存规则，自动授权"
+				: approval.persisted
+					? "已授权并保存规则"
+					: "已授权";
+			this.reportProgress(input, {
+				phase: "tool_approval",
+				depth,
+				step,
+				tool: name,
+				message: `${name} 权限${approvalStatus}`,
+			});
 		}
 
 		try {
@@ -796,8 +931,8 @@ export class AgentRuntimeService {
 					persistedRule: approval.persisted,
 					viaRule: approval.viaRule,
 					ok: false,
-					summary: `${name} 执行失败`,
-					error: message || "未知错误",
+					summary: `${name} failed`,
+					error: message || "Unknown error",
 				},
 				payload: {
 					ok: false,
@@ -821,6 +956,9 @@ export class AgentRuntimeService {
 		if (name === "glob") {
 			return this.toolGlob(args);
 		}
+		if (name === "compile_wiki") {
+			return this.toolCompileWiki(args);
+		}
 		if (name === "write") {
 			return this.toolWrite(args, agentId);
 		}
@@ -834,7 +972,7 @@ export class AgentRuntimeService {
 			return this.toolExec(args);
 		}
 
-		throw new Error(`不支持的工具：${name}`);
+		throw new Error(`Unsupported tool: ${name}`);
 	}
 
 	private async toolList(args: Record<string, unknown>): Promise<unknown> {
@@ -844,7 +982,7 @@ export class AgentRuntimeService {
 		const scope = this.resolveScope(rawPath);
 		if (scope === "external") {
 			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`无权读取外部路径：${rawPath || "(空路径)"}`);
+				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
 			}
 			const rows = await this.listExternal(rawPath, recursive, maxEntries);
 			return {
@@ -856,7 +994,7 @@ export class AgentRuntimeService {
 
 		const targetPath = normalizePath(rawPath || "");
 		if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-			throw new Error(`无权读取 Vault 路径：${targetPath}`);
+			throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
 		}
 
 		const rows = this.listVault(targetPath, recursive, maxEntries);
@@ -874,11 +1012,11 @@ export class AgentRuntimeService {
 
 		if (scope === "external") {
 			if (!this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`无权读取外部路径：${rawPath}`);
+				throw new Error(`No permission to read external path: ${rawPath}`);
 			}
 			const stat = await fsPromises.stat(rawPath);
 			if (!stat.isFile()) {
-				throw new Error(`外部路径不是文件：${rawPath}`);
+				throw new Error(`External path is not a file: ${rawPath}`);
 			}
 			const text = await fsPromises.readFile(rawPath, "utf8");
 			return {
@@ -891,11 +1029,11 @@ export class AgentRuntimeService {
 
 		const targetPath = this.resolveVaultFilePath(rawPath);
 		if (!this.workspaceAccessService.canReadVaultPath(targetPath)) {
-			throw new Error(`无权读取 Vault 路径：${targetPath}`);
+			throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
 		}
 		const file = this.vault.getAbstractFileByPath(targetPath);
 		if (!(file instanceof TFile)) {
-			throw new Error(`Vault 文件不存在：${targetPath}`);
+			throw new Error(`Vault file does not exist: ${targetPath}`);
 		}
 		const text = await this.vault.cachedRead(file);
 		return {
@@ -917,7 +1055,7 @@ export class AgentRuntimeService {
 		const matches: Array<{ path: string; line: number; text: string }> = [];
 		if (scope === "external") {
 			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`无权读取外部路径：${rawPath || "(空路径)"}`);
+				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
 			}
 			const fileList = await this.collectExternalFiles(rawPath, 120);
 			for (const filePath of fileList) {
@@ -928,7 +1066,7 @@ export class AgentRuntimeService {
 		} else {
 			const targetPath = normalizePath(rawPath || "");
 			if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-				throw new Error(`无权读取 Vault 路径：${targetPath}`);
+				throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
 			}
 			const files = this.vault
 				.getFiles()
@@ -962,7 +1100,7 @@ export class AgentRuntimeService {
 		const matched: string[] = [];
 		if (scope === "external") {
 			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`无权读取外部路径：${rawPath || "(空路径)"}`);
+				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
 			}
 			const files = await this.collectExternalFiles(rawPath, 300);
 			for (const filePath of files) {
@@ -976,7 +1114,7 @@ export class AgentRuntimeService {
 		} else {
 			const targetPath = normalizePath(rawPath || "");
 			if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-				throw new Error(`无权读取 Vault 路径：${targetPath}`);
+				throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
 			}
 			for (const file of this.vault.getFiles()) {
 				if (targetPath && !this.isPathWithin(file.path, targetPath)) {
@@ -1003,14 +1141,44 @@ export class AgentRuntimeService {
 		};
 	}
 
+	private async toolCompileWiki(args: Record<string, unknown>): Promise<unknown> {
+		const mode = this.getStringArg(args, "mode").toLowerCase();
+		if (mode === "all") {
+			return this.compileWikiForActiveProject(undefined);
+		}
+
+		const requestedPaths: string[] = [];
+		const singlePath = this.getStringArg(args, "path");
+		if (singlePath) {
+			requestedPaths.push(singlePath);
+		}
+
+		const multiPaths = args["paths"];
+		if (Array.isArray(multiPaths)) {
+			for (const item of multiPaths) {
+				if (typeof item !== "string") {
+					continue;
+				}
+				const normalized = item.trim();
+				if (normalized) {
+					requestedPaths.push(normalized);
+				}
+			}
+		}
+
+		const normalized = [...new Set(requestedPaths.map((item) => normalizePath(item)))].filter(Boolean);
+		return this.compileWikiForActiveProject(normalized.length > 0 ? normalized : undefined);
+	}
+
 	private async toolWrite(args: Record<string, unknown>, agentId: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("write 仅支持 Vault 相对路径。");
+			throw new Error("write only supports Vault-relative paths.");
 		}
 		const normalizedPath = normalizePath(pathValue);
 		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
 		const effectivePath = resolvedExistingPath ?? normalizedPath;
+		this.assertVaultWritePath(effectivePath);
 		const modeRaw = this.getStringArg(args, "mode").toLowerCase();
 		const content = this.getRequiredStringArg(args, "content");
 		const existing = this.vault.getAbstractFileByPath(effectivePath);
@@ -1048,11 +1216,12 @@ export class AgentRuntimeService {
 	private async toolDelete(args: Record<string, unknown>, agentId: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("delete 仅支持 Vault 相对路径。");
+			throw new Error("delete only supports Vault-relative paths.");
 		}
 		const normalizedPath = normalizePath(pathValue);
 		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
 		const effectivePath = resolvedExistingPath ?? normalizedPath;
+		this.assertVaultWritePath(effectivePath);
 		const action: AgentAction = {
 			type: "delete",
 			targetType: effectivePath.toLowerCase().endsWith(".canvas") ? "canvas" : "markdown",
@@ -1068,21 +1237,22 @@ export class AgentRuntimeService {
 	private async toolEdit(args: Record<string, unknown>, agentId: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("edit 仅支持 Vault 相对路径。");
+			throw new Error("edit only supports Vault-relative paths.");
 		}
 		const normalizedPath = normalizePath(pathValue);
 		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
 		const effectivePath = resolvedExistingPath ?? normalizedPath;
+		this.assertVaultWritePath(effectivePath);
 		const file = this.vault.getAbstractFileByPath(effectivePath);
 		if (!(file instanceof TFile)) {
-			throw new Error(`Vault 文件不存在：${effectivePath}`);
+			throw new Error(`Vault file does not exist: ${effectivePath}`);
 		}
 		const beforeContent = await this.vault.cachedRead(file);
 		const edits = this.parseEditOperations(args);
 		const editResult = this.inlineEditService.applyEdits(beforeContent, edits);
 
 		if (editResult.appliedCount === 0) {
-			throw new Error(`未找到匹配的文本：${editResult.failedReasons.join("; ")}`);
+			throw new Error(`No matching text found: ${editResult.failedReasons.join("; ")}`);
 		}
 
 		const action: AgentAction = {
@@ -1105,7 +1275,7 @@ export class AgentRuntimeService {
 	private parseEditOperations(args: Record<string, unknown>): EditOperation[] {
 		const rawEdits = args["edits"];
 		if (!Array.isArray(rawEdits)) {
-			throw new Error("edit 工具需要 edits 数组参数。");
+			throw new Error("edit tool requires an edits array argument.");
 		}
 		return rawEdits
 			.filter((item): item is Record<string, unknown> => item && typeof item === "object")
@@ -1119,7 +1289,7 @@ export class AgentRuntimeService {
 	private async toolExec(args: Record<string, unknown>): Promise<unknown> {
 		const settings = this.getSettings();
 		if (!settings.agentRuntime.enableExecTool) {
-			throw new Error("命令执行功能未启用，请在设置中开启。");
+			throw new Error("exec tool is disabled. Enable it in settings first.");
 		}
 		const command = this.getRequiredStringArg(args, "command");
 		const rawArgs = args["args"];
@@ -1141,7 +1311,7 @@ export class AgentRuntimeService {
 	private resolveVaultFilePath(rawPath: string): string {
 		const resolved = this.resolveExistingVaultFilePath(rawPath);
 		if (!resolved) {
-			throw new Error(`Vault 文件不存在：${normalizePath(rawPath)}`);
+			throw new Error(`Vault file does not exist: ${normalizePath(rawPath)}`);
 		}
 		return resolved;
 	}
@@ -1165,8 +1335,13 @@ export class AgentRuntimeService {
 			return null;
 		}
 
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		const activeProjectRoot = activeProject ? this.projectBoundaryService.getProjectRoot(activeProject) : "";
 		const hasExtension = normalized.includes(".");
 		const candidates = this.vault.getFiles().filter((file) => {
+			if (activeProjectRoot && !this.isPathWithin(file.path, activeProjectRoot)) {
+				return false;
+			}
 			if (hasExtension) {
 				return file.name.toLowerCase() === normalizedLower;
 			}
@@ -1181,17 +1356,55 @@ export class AgentRuntimeService {
 				.slice(0, 5)
 				.map((item) => item.path)
 				.join(", ");
-			throw new Error(`文件名不唯一：${normalized}。候选：${sample}`);
+			throw new Error(`File name is not unique: ${normalized}. Candidates: ${sample}`);
 		}
 		return null;
 	}
 
+	private assertVaultWritePath(targetPath: string): void {
+		if (this.workspaceAccessService.canWriteVaultPath(targetPath)) {
+			return;
+		}
+		throw new Error(this.buildVaultScopeDeniedError(targetPath, "write"));
+	}
+
+	private buildVaultScopeDeniedError(targetPath: string, mode: "read" | "write"): string {
+		const normalizedPath = normalizePath(targetPath || "");
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		if (!activeProject) {
+			return `${mode === "write" ? "Write" : "Read"} denied for Vault path: ${normalizedPath}`;
+		}
+		const projectRoot = this.projectBoundaryService.getProjectRoot(activeProject);
+		return `${mode === "write" ? "Write" : "Read"} denied for Vault path: ${normalizedPath} (activeProject=${activeProject.slug}, projectRoot=${projectRoot})`;
+	}
+
 	private resolveToolTargetPath(name: string, args: Record<string, unknown>): string {
+		if (name === "compile_wiki") {
+			const single = this.getStringArg(args, "path");
+			if (single) {
+				return single;
+			}
+			const many = args["paths"];
+			if (Array.isArray(many)) {
+				for (const item of many) {
+					if (typeof item !== "string") {
+						continue;
+					}
+					const normalized = item.trim();
+					if (normalized) {
+						return normalized;
+					}
+				}
+			}
+			return "raw";
+		}
+
 		const keysByTool: Record<string, string[]> = {
 			ls: ["path"],
 			read: ["path"],
 			grep: ["path"],
 			glob: ["path"],
+			compile_wiki: ["path"],
 			write: ["path"],
 			edit: ["path"],
 			delete: ["path"],
@@ -1315,7 +1528,7 @@ export class AgentRuntimeService {
 		try {
 			return new RegExp(pattern, flags || "i");
 		} catch (error) {
-			throw new Error(`正则表达式非法：${String(error)}`);
+			throw new Error(`Invalid regular expression: ${String(error)}`);
 		}
 	}
 
@@ -1340,38 +1553,54 @@ export class AgentRuntimeService {
 	private buildSummaryFromData(tool: string, data: unknown): string {
 		if (tool === "read") {
 			const payload = data as { path?: string; truncated?: boolean };
-			return `读取 ${payload.path ?? ""}${payload.truncated ? "（已截断）" : ""}`.trim();
+			return `Read ${payload.path ?? ""}${payload.truncated ? " (truncated)" : ""}`.trim();
 		}
 		if (tool === "ls") {
 			const payload = data as { items?: unknown[] };
-			return `列出 ${payload.items?.length ?? 0} 项`;
+			return `Listed ${payload.items?.length ?? 0} item(s)`;
 		}
 		if (tool === "grep") {
 			const payload = data as { matches?: unknown[] };
-			return `grep 命中 ${payload.matches?.length ?? 0} 条`;
+			return `grep matched ${payload.matches?.length ?? 0} result(s)`;
 		}
 		if (tool === "glob") {
 			const payload = data as { files?: unknown[] };
-			return `glob 匹配 ${payload.files?.length ?? 0} 个文件`;
+			return `glob matched ${payload.files?.length ?? 0} file(s)`;
+		}
+		if (tool === "compile_wiki") {
+			const payload = data as {
+				projectSlug?: string;
+				requested?: number;
+				processed?: number;
+				succeeded?: number;
+				failed?: number;
+				updatedDocs?: string[];
+				updatedIndex?: string;
+				updatedLog?: string;
+			};
+			const updatedDocs = Array.isArray(payload.updatedDocs) ? payload.updatedDocs.length : 0;
+			const indexState = payload.updatedIndex ? "index updated" : "index unchanged";
+			const logState = payload.updatedLog ? "log updated" : "log unchanged";
+			return `Wiki compile ${payload.projectSlug ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
 		}
 		if (tool === "write") {
 			const payload = data as { path?: string };
-			return `写入完成 ${payload.path ?? ""}`.trim();
+			return `Write completed ${payload.path ?? ""}`.trim();
 		}
 		if (tool === "delete") {
 			const payload = data as { path?: string };
-			return `删除完成 ${payload.path ?? ""}`.trim();
+			return `Delete completed ${payload.path ?? ""}`.trim();
 		}
 		if (tool === "edit") {
 			const payload = data as { path?: string; appliedEdits?: number };
-			return `编辑 ${payload.path ?? ""} (${payload.appliedEdits ?? 0} 处替换)`.trim();
+			return `Edited ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
 		}
 		if (tool === "exec") {
 			const payload = data as { exitCode?: number; timedOut?: boolean };
-			const status = payload.timedOut ? "超时" : `退出码 ${payload.exitCode ?? "?"}`;
-			return `命令执行完成 (${status})`;
+			const status = payload.timedOut ? "timed out" : `exit code ${payload.exitCode ?? "?"}`;
+			return `Exec completed (${status})`;
 		}
-		return `${tool} 执行完成`;
+		return `${tool} completed`;
 	}
 
 	private traceFromError(
@@ -1387,11 +1616,11 @@ export class AgentRuntimeService {
 			scope,
 			targetPath,
 			approved: true,
-			approvalReason: "未触发审批",
+			approvalReason: "No approval required",
 			persistedRule: false,
 			viaRule: false,
 			ok: false,
-			summary: `${tool} 执行失败`,
+			summary: `${tool} failed`,
 			error,
 		};
 	}
@@ -1426,7 +1655,7 @@ export class AgentRuntimeService {
 	private getRequiredStringArg(args: Record<string, unknown>, key: string): string {
 		const value = this.getStringArg(args, key);
 		if (!value) {
-			throw new Error(`鍙傛暟缂哄け锛?{key}`);
+			throw new Error(`Missing required argument: ${key}`);
 		}
 		return value;
 	}
@@ -1517,6 +1746,26 @@ export class AgentRuntimeService {
 						maxMatches: { type: "number", default: 80 },
 					},
 					required: ["pattern"],
+					additionalProperties: false,
+				},
+			},
+			{
+				name: "compile_wiki",
+				description: "Compile active project raw files into wiki outputs (raw -> wiki re-ingest).",
+				parameters: {
+					type: "object",
+					properties: {
+						mode: { type: "string", enum: ["changed", "all"] },
+						path: {
+							type: "string",
+							description: "Optional single raw path (raw-relative, project-relative, or Vault path).",
+						},
+						paths: {
+							type: "array",
+							items: { type: "string" },
+							description: "Optional raw path list to compile.",
+						},
+					},
 					additionalProperties: false,
 				},
 			},

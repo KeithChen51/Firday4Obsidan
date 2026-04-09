@@ -1,12 +1,21 @@
 import path from "path";
 import { normalizePath } from "obsidian";
 import { FridaySettings } from "../types/settings";
+import { ProjectBoundaryService } from "./ProjectBoundaryService";
 
 export class WorkspaceAccessService {
-	constructor(private readonly getSettings: () => FridaySettings) {}
+	constructor(
+		private readonly getSettings: () => FridaySettings,
+		private readonly projectBoundaryService: ProjectBoundaryService,
+	) {}
 
 	canReadVaultPath(vaultRelativePath: string): boolean {
 		const normalizedPath = normalizePath(vaultRelativePath);
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		if (activeProject && !this.projectBoundaryService.isWithinProject(activeProject, normalizedPath)) {
+			return false;
+		}
+
 		const focusPaths = this.getSettings().agentRuntime.vaultFocusPaths
 			.map((item) => normalizePath(item))
 			.filter((item) => item.length > 0);
@@ -40,4 +49,3 @@ export class WorkspaceAccessService {
 		return normalizePath(resolved);
 	}
 }
-

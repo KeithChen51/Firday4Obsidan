@@ -1,4 +1,4 @@
-import { normalizePath, parseYaml, TFile, Vault } from "obsidian";
+﻿import { normalizePath, parseYaml, TFile, TFolder, Vault } from "obsidian";
 import { ChatMessage } from "./AIService";
 import { AgentService } from "./AgentService";
 
@@ -61,11 +61,22 @@ export class ConversationService {
 			} satisfies SessionLine),
 		);
 		const payload = rows.join("\n");
-		const file = this.vault.getAbstractFileByPath(targetPath);
+		const file = await this.resolveFileConflict(targetPath);
 		if (file instanceof TFile) {
 			await this.vault.modify(file, payload);
 		} else {
-			await this.vault.create(targetPath, payload);
+			try {
+				await this.vault.create(targetPath, payload);
+			} catch (error) {
+				if (!this.isAlreadyExistsError(error)) {
+					throw error;
+				}
+				const created = await this.resolveFileConflict(targetPath);
+				if (!(created instanceof TFile)) {
+					throw error;
+				}
+				await this.vault.modify(created, payload);
+			}
 		}
 
 		return {
@@ -115,6 +126,37 @@ export class ConversationService {
 		return merged.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, sessionLimit);
 	}
 
+	private async resolveFileConflict(filePath: string): Promise<TFile | null> {
+		const normalized = normalizePath(filePath);
+		const direct = this.vault.getAbstractFileByPath(normalized);
+		if (direct instanceof TFile) {
+			return direct;
+		}
+		if (direct instanceof TFolder) {
+			const backup = normalizePath(`${normalized}.legacy-folder-${Date.now()}`);
+			await this.vault.rename(direct, backup);
+			return null;
+		}
+		return this.getFileByPathRelaxed(normalized);
+	}
+
+	private getFileByPathRelaxed(filePath: string): TFile | null {
+		const normalized = normalizePath(filePath);
+		const direct = this.vault.getAbstractFileByPath(normalized);
+		if (direct instanceof TFile) {
+			return direct;
+		}
+		const lower = normalized.toLowerCase();
+		return this.vault
+			.getFiles()
+			.find((item) => normalizePath(item.path).toLowerCase() === lower) ?? null;
+	}
+
+	private isAlreadyExistsError(error: unknown): boolean {
+		const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
+		return message.includes("already exists") || message.includes("eexist");
+	}
+
 	private truncateMessages(messages: ChatMessage[], charLimit: number): ChatMessage[] {
 		const result: ChatMessage[] = [];
 		let consumed = 0;
@@ -123,7 +165,7 @@ export class ConversationService {
 				break;
 			}
 			const remaining = charLimit - consumed;
-			const text = message.content.length > remaining ? `${message.content.slice(0, remaining)}…` : message.content;
+			const text = message.content.length > remaining ? `${message.content.slice(0, remaining)}...` : message.content;
 			result.push({
 				role: message.role,
 				content: text,
@@ -197,4 +239,6 @@ export class ConversationService {
 		};
 	}
 }
+
+
 

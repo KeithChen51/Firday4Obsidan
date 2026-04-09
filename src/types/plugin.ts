@@ -1,24 +1,20 @@
-import { App, Plugin } from "obsidian";
-import { AgentProfile } from "./agent";
-import { KnowledgeSummary } from "./knowledge";
+﻿import { App, Plugin } from "obsidian";
 import { AgentService } from "../services/AgentService";
 import { AgentActionService } from "../services/AgentActionService";
-import { AgentRuntimeService } from "../services/AgentRuntimeService";
+import { AgentRuntimeService, RuntimeWikiCompileSummary } from "../services/AgentRuntimeService";
 import { AIService } from "../services/AIService";
 import { CanvasService } from "../services/CanvasService";
 import { ConversationService } from "../services/ConversationService";
 import { DataService } from "../services/DataService";
-import { KnowledgeCuratorService } from "../services/KnowledgeCuratorService";
-import { KnowledgeValidationService } from "../services/KnowledgeValidationService";
 import { SyncService } from "../services/SyncService";
 import { ToolApprovalService } from "../services/ToolApprovalService";
 import { CommandExecService } from "../services/CommandExecService";
 import { InlineEditService } from "../services/InlineEditService";
-import { VaultContextService } from "../services/VaultContextService";
 import { WorkspaceAccessService } from "../services/WorkspaceAccessService";
 import { SkillCommandService } from "../services/SkillCommandService";
 import { SlashCommandService } from "../services/SlashCommandService";
-import { ProjectEntry } from "./project";
+import { AgentProfile } from "./agent";
+import { ProjectEntry, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { I18nParams, LocaleCode } from "../i18n/types";
 
@@ -31,8 +27,6 @@ export interface FridayPluginApi {
 	aiService: AIService;
 	agentService: AgentService;
 	conversationService: ConversationService;
-	knowledgeCuratorService: KnowledgeCuratorService;
-	knowledgeValidationService: KnowledgeValidationService;
 	canvasService: CanvasService;
 	agentActionService: AgentActionService;
 	toolApprovalService: ToolApprovalService;
@@ -40,7 +34,6 @@ export interface FridayPluginApi {
 	inlineEditService: InlineEditService;
 	agentRuntimeService: AgentRuntimeService;
 	workspaceAccessService: WorkspaceAccessService;
-	vaultContextService: VaultContextService;
 	skillCommandService: SkillCommandService;
 	slashCommandService: SlashCommandService;
 	addCommand: Plugin["addCommand"];
@@ -50,16 +43,17 @@ export interface FridayPluginApi {
 	saveSettings(): Promise<void>;
 	upsertProject(project: ProjectEntry): Promise<void>;
 	removeProject(slug: string): Promise<void>;
+	setActiveProject(projectSlug: string): Promise<void>;
+	compileWikiForActiveProject(rawPaths?: string[]): Promise<RuntimeWikiCompileSummary>;
+	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
+	removeProjectGroup(groupId: string): Promise<void>;
 	openSettingsTab(): void;
-	activateDailyBoardView(): Promise<void>;
+	openWorkspaceView(): Promise<void>;
 	getLocale(): LocaleCode;
 	t(key: string, params?: I18nParams): string;
 	getPrimaryUserId(): string;
 	getDetectedUserId(): string;
-	getBoardIconId(): string;
 	getActiveAgent(): AgentProfile | null;
 	setActiveAgent(agentId: string): Promise<void>;
 	createAgent(input: { name: string; description: string; model?: string }): Promise<AgentProfile>;
-	runKnowledgeCuration(activeAgentId?: string): Promise<KnowledgeSummary>;
-	runKnowledgeRevalidation(activeAgentId?: string): Promise<KnowledgeSummary>;
 }

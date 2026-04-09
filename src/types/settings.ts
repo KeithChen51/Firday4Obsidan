@@ -1,5 +1,5 @@
-import { ProjectEntry } from "./project";
-import { AgentProfile, AgentRuntimeSettings, KnowledgeCuratorSettings } from "./agent";
+import { ProjectEntry, ProjectGroupEntry } from "./project";
+import { AgentProfile, AgentRuntimeSettings } from "./agent";
 import { LocaleCode } from "../i18n/types";
 
 export interface SlashCommandTemplate {
@@ -33,19 +33,16 @@ export interface FridaySettings {
 		syncInterval: number;
 		syncOnStartup: boolean;
 	};
-	dailyNote: {
-		autoGenerate: boolean;
-		templatePath: string;
-	};
+	projectGroups: ProjectGroupEntry[];
 	projects: ProjectEntry[];
+	activeProjectId: string;
 	agents: AgentProfile[];
 	activeAgentId: string;
 	agentRuntime: AgentRuntimeSettings;
-	knowledgeCurator: KnowledgeCuratorSettings;
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 5;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -69,11 +66,9 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		syncInterval: 0,
 		syncOnStartup: true,
 	},
-	dailyNote: {
-		autoGenerate: true,
-		templatePath: "",
-	},
+	projectGroups: [],
 	projects: [],
+	activeProjectId: "",
 	agents: [],
 	activeAgentId: "",
 	agentRuntime: {
@@ -104,14 +99,6 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 			"del\\s+/s\\s+/q\\s+[a-zA-Z]:",
 		],
 		toolCallingMode: "auto",
-	},
-	knowledgeCurator: {
-		enabledManualOnly: true,
-		maxSessionsPerRun: 30,
-		maxCharsPerSession: 4000,
-		maxModelInputChars: 32000,
-		staleAfterDays: 30,
-		confidenceThreshold: 0.6,
 	},
 	slashCommands: [],
 };

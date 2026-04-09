@@ -15,6 +15,55 @@ const MAX_ASSET_FILE_CHARS = 900;
 const MAX_ASSET_FILES_PER_BUCKET = 4;
 const MAX_CATALOG_ITEMS = 120;
 const INDEX_CACHE_TTL_MS = 60_000;
+const BUILTIN_SKILL_SCHEME = "builtin://";
+const BUILTIN_COMPILE_WIKI_COMMAND = "compile-wiki";
+const BUILTIN_COMPILE_WIKI_FILE_PATH = `${BUILTIN_SKILL_SCHEME}${BUILTIN_COMPILE_WIKI_COMMAND}/SKILL.md`;
+const BUILTIN_COMPILE_WIKI_COMMAND_ALIASES = [
+	BUILTIN_COMPILE_WIKI_COMMAND,
+	"wiki-compile",
+	"compilewiki",
+	"wikicompile",
+	"编译wiki",
+	"重建wiki",
+];
+const BUILTIN_COMPILE_WIKI_INTENT_PATTERNS: RegExp[] = [
+	/(^|\s)\/(?:compile-wiki|wiki-compile)\b/i,
+	/(?:^|\s)\/skill\s+(?:compile-wiki|wiki-compile|编译wiki|重建wiki)\b/i,
+	/(?:compile|rebuild|re-ingest|reingest|refresh|update)\s+wiki\b/i,
+	/\bwiki\s+(?:compile|rebuild|re-ingest|reingest|refresh|update)\b/i,
+	/(?:编译|重建|重编译|刷新|更新)\s*wiki/i,
+	/wiki\s*(?:编译|重建|重编译|刷新|更新)/i,
+	/(?:编译|重建|重编译|刷新|更新)\s*索引/i,
+	/(?:wiki\s*索引|知识库\s*索引)\s*(?:编译|重建|刷新|更新)/i,
+];
+const BUILTIN_COMPILE_WIKI_CONTEXT = [
+	"---",
+	"name: compile-wiki",
+	"description: Compile active project raw files into wiki knowledge docs and index outputs.",
+	"command: compile-wiki",
+	"aliases: [compile-wiki, wiki-compile, compile wiki, rebuild wiki, 编译wiki, 编译 wiki, 重建wiki, 重建 wiki]",
+	"tags: [wiki, ingest, index, 编译, 索引]",
+	"trigger: auto",
+	"---",
+	"# Compile Wiki Builtin Skill",
+	"",
+	"## Goal",
+	"- Compile current active project raw sources into wiki outputs.",
+	"- Keep project boundary strict: only active project root is allowed.",
+	"",
+	"## Trigger",
+	"- User asks to compile/rebuild wiki or refresh wiki index.",
+	"- User asks to update wiki knowledge docs from raw content.",
+	"",
+	"## Execution Rule",
+	"- Prefer calling tool `compile_wiki` before other actions.",
+	"- If user specified target raw path(s), pass them to `compile_wiki` args.",
+	"- After compile, summarize processed/succeeded/failed and updated docs/index/log.",
+	"",
+	"## Safety",
+	"- Never compile outside active project boundary.",
+	"- On partial failures, keep user-visible summary explicit and actionable.",
+].join("\n");
 
 export type SkillTriggerMode = "auto" | "manual";
 
@@ -106,6 +155,31 @@ export class SkillCommandService {
 			};
 		}
 		return { type: "use", skillName: commandName, taskPrompt };
+	}
+
+	isCompileWikiSkillIntent(rawPrompt: string): boolean {
+		const prompt = rawPrompt.trim();
+		if (!prompt) {
+			return false;
+		}
+
+		for (const pattern of BUILTIN_COMPILE_WIKI_INTENT_PATTERNS) {
+			if (pattern.test(prompt)) {
+				return true;
+			}
+		}
+
+		const slashSkill = prompt.match(/^\/skill\s+([^\s]+)/i)?.[1] ?? "";
+		if (slashSkill && this.isCompileWikiCommand(slashSkill)) {
+			return true;
+		}
+
+		const shortCommand = prompt.match(/^\/([^\s/]+)/)?.[1] ?? "";
+		if (shortCommand && this.isCompileWikiCommand(shortCommand)) {
+			return true;
+		}
+
+		return false;
 	}
 
 	async listSkills(limit = MAX_CATALOG_ITEMS): Promise<SkillDescriptor[]> {
@@ -209,6 +283,21 @@ export class SkillCommandService {
 			}
 		}
 
+		const compileEntry = autoEntries.find((entry) => this.isCompileWikiCommand(entry.command));
+		if (compileEntry && this.isCompileWikiSkillIntent(normalizedPrompt)) {
+			const existing = scored.find((item) => this.isCompileWikiCommand(item.skill.command));
+			if (existing) {
+				existing.score += 40;
+				existing.reasons = [...new Set(["命中内置编译 Wiki 技能触发规则", ...existing.reasons])].slice(0, 4);
+			} else {
+				scored.push({
+					skill: this.toDescriptor(compileEntry),
+					score: 60,
+					reasons: ["命中内置编译 Wiki 技能触发规则"],
+				});
+			}
+		}
+
 		return scored
 			.sort((left, right) => {
 				if (right.score !== left.score) {
@@ -225,7 +314,7 @@ export class SkillCommandService {
 			throw new Error(`未找到技能：${skillName}。可先输入 /skills 查看可用技能。`);
 		}
 
-		const markdown = await this.safeReadText(skill.filePath);
+		const markdown = this.getBuiltinSkillMarkdown(skill) ?? await this.safeReadText(skill.filePath);
 		const content = this.truncateText(markdown.trim(), MAX_SKILL_CONTEXT_CHARS);
 		const assets = await this.loadSkillAssetContext(skill.filePath);
 		const systemContextLines = [
@@ -271,6 +360,9 @@ export class SkillCommandService {
 
 		const roots = this.getSkillRoots();
 		const records = new Map<string, SkillIndexEntry>();
+		for (const builtin of this.getBuiltinSkillEntries()) {
+			records.set(builtin.filePath.toLowerCase(), builtin);
+		}
 		for (const root of roots) {
 			const files = await this.collectSkillFiles(root);
 			for (const filePath of files) {
@@ -503,6 +595,52 @@ export class SkillCommandService {
 			.map((item) => this.normalizeAbsolutePath(item))
 			.filter((item) => item.length > 0);
 		return [...new Set(roots)];
+	}
+
+	private getBuiltinSkillEntries(): SkillIndexEntry[] {
+		return [this.createBuiltinCompileWikiSkillEntry()];
+	}
+
+	private createBuiltinCompileWikiSkillEntry(): SkillIndexEntry {
+		const aliases = [
+			"compile-wiki",
+			"wiki-compile",
+			"compile wiki",
+			"rebuild wiki",
+			"re-ingest wiki",
+			"reingest wiki",
+			"编译wiki",
+			"编译 wiki",
+			"重建wiki",
+			"重建 wiki",
+			"刷新wiki",
+			"更新wiki索引",
+		];
+		const tags = ["wiki", "ingest", "index", "compile", "编译", "索引"];
+		return {
+			name: "Compile Wiki",
+			description: "Compile active project raw files into wiki knowledge docs and indexes.",
+			filePath: BUILTIN_COMPILE_WIKI_FILE_PATH,
+			command: BUILTIN_COMPILE_WIKI_COMMAND,
+			aliases,
+			tags,
+			globs: ["**/raw/**"],
+			trigger: "auto",
+			normalizedAliases: aliases.map((item) => this.normalizeToken(item)).filter((item) => item.length > 0),
+			normalizedTags: tags.map((item) => this.normalizeTag(item)).filter((item) => item.length > 0),
+		};
+	}
+
+	private getBuiltinSkillMarkdown(skill: SkillDescriptor): string | null {
+		if (this.isCompileWikiCommand(skill.command) || skill.filePath === BUILTIN_COMPILE_WIKI_FILE_PATH) {
+			return BUILTIN_COMPILE_WIKI_CONTEXT;
+		}
+		return null;
+	}
+
+	private isCompileWikiCommand(raw: string): boolean {
+		const normalized = this.normalizeToken(raw);
+		return BUILTIN_COMPILE_WIKI_COMMAND_ALIASES.includes(normalized);
 	}
 
 	private parseFrontmatter(markdown: string): ParsedSkillFrontmatter {

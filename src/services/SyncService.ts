@@ -7,10 +7,21 @@ import { ProjectEntry, SyncResult, SyncStatus } from "../types/project";
 import { formatDate } from "../utils/dateUtils";
 import { getVaultBasePath } from "../utils/vaultPath";
 
+type PostPullHandler = (
+	project: ProjectEntry,
+	pulledFiles: string[],
+	headRevision: string,
+) => Promise<void> | void;
+
 export class SyncService {
 	private gitAvailable: boolean | null = null;
+	private postPullHandler: PostPullHandler | null = null;
 
 	constructor(private readonly app: App, private readonly fridayRoot = PRIMARY_PATHS.root) {}
+
+	setPostPullHandler(handler: PostPullHandler | null): void {
+		this.postPullHandler = handler;
+	}
 
 	async prepareRepository(project: ProjectEntry): Promise<void> {
 		await this.ensureGitAvailable();
@@ -46,38 +57,48 @@ export class SyncService {
 				};
 			}
 
-			const status = await git.status();
-			let hasStash = false;
+				const status = await git.status();
+				let hasStash = false;
+				const headBeforePull = await this.getHeadRevision(git);
 
-			if (!status.isClean()) {
-				await git.stash(["push", "-u", "-m", "friday-auto-stash"]);
-				hasStash = true;
-			}
+				if (!status.isClean()) {
+					await git.stash(["push", "-u", "-m", "friday-auto-stash"]);
+					hasStash = true;
+				}
 
-			await git.raw([...this.authArgs(project), "pull", "--rebase"]);
+				await git.raw([...this.authArgs(project), "pull", "--rebase"]);
+				const headAfterPull = await this.getHeadRevision(git);
+				const pulledFiles = await this.collectPulledFiles(git, headBeforePull, headAfterPull);
 
-			if (hasStash) {
-				try {
-					await git.stash(["pop"]);
-				} catch (error) {
+				if (hasStash) {
+					try {
+						await git.stash(["pop"]);
+					} catch (error) {
 					console.warn("[Friday] Stash pop produced conflict:", error);
 				}
 			}
 
 			const conflicts = await this.getConflicts(project);
-			const conflictSnapshots =
-				conflicts.length > 0
-					? await this.createConflictSnapshots(project, conflicts, git)
-					: undefined;
+				const conflictSnapshots =
+					conflicts.length > 0
+						? await this.createConflictSnapshots(project, conflicts, git)
+						: undefined;
+				if (this.postPullHandler && pulledFiles.length > 0) {
+					try {
+						await this.postPullHandler(project, pulledFiles, headAfterPull);
+					} catch (error) {
+						console.warn("[Friday] Post-pull handler failed:", error);
+					}
+				}
 
-			return {
-				success: conflicts.length === 0,
-				projectSlug: project.slug,
-				pulledFiles: [],
-				pushedFiles: [],
-				conflicts,
-				conflictSnapshots,
-			};
+				return {
+					success: conflicts.length === 0,
+					projectSlug: project.slug,
+					pulledFiles,
+					pushedFiles: [],
+					conflicts,
+					conflictSnapshots,
+				};
 		} catch (error) {
 			return this.makeErrorResult(project.slug, error);
 		}
@@ -276,9 +297,45 @@ export class SyncService {
 		return Boolean(branches[branch]?.tracking);
 	}
 
+	private async getHeadRevision(git: SimpleGit): Promise<string> {
+		try {
+			return (await git.revparse(["HEAD"])).trim();
+		} catch {
+			return "";
+		}
+	}
+
+	private async collectPulledFiles(
+		git: SimpleGit,
+		headBeforePull: string,
+		headAfterPull: string,
+	): Promise<string[]> {
+		if (!headBeforePull || !headAfterPull || headBeforePull === headAfterPull) {
+			return [];
+		}
+		try {
+			const output = await git.diff(["--name-only", `${headBeforePull}..${headAfterPull}`]);
+			return output
+				.split(/\r?\n/)
+				.map((item) => normalizePath(item.trim()))
+				.filter(Boolean);
+		} catch (error) {
+			console.warn("[Friday] Failed to collect pulled files:", error);
+			return [];
+		}
+	}
+
 	private resolveProjectPath(project: ProjectEntry): string {
 		if (project.localPath?.trim()) {
 			return path.normalize(project.localPath);
+		}
+
+		if (project.projectRootPath?.trim()) {
+			const normalizedRootPath = normalizePath(project.projectRootPath);
+			if (!path.isAbsolute(normalizedRootPath)) {
+				const vaultBasePath = getVaultBasePath(this.app);
+				return path.join(vaultBasePath, ...normalizedRootPath.split("/"));
+			}
 		}
 
 		const vaultBasePath = getVaultBasePath(this.app);

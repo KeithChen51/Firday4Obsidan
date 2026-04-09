@@ -5,7 +5,7 @@ import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { RegisterProjectModal } from "../modals/RegisterProjectModal";
 import type { ModelCapabilityInfo } from "../services/AIService";
 import { FridayPluginApi } from "../types/plugin";
-import { ProjectEntry } from "../types/project";
+import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
 import type { LocaleCode } from "../i18n/types";
 
@@ -54,8 +54,6 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.renderSyncSection(containerEl);
 		this.renderLlmSection(containerEl);
 		this.renderAgentSection(containerEl);
-		this.renderKnowledgeCuratorSection(containerEl);
-		this.renderDailyNoteSection(containerEl);
 		this.renderSlashCommandSection(containerEl);
 		this.renderProjectSection(containerEl);
 	}
@@ -91,10 +89,10 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
-			.setName(this.t("settings.user.userId.name", "用户 ID"))
-			.setDesc(this.t("settings.user.userId.desc", "用于匹配任务负责人。"))
-			.addText((text) =>
+			new Setting(containerEl)
+				.setName(this.t("settings.user.userId.name", "用户 ID"))
+				.setDesc(this.t("settings.user.userId.desc", "用于标识当前用户。"))
+				.addText((text) =>
 				text
 					.setPlaceholder("keith")
 					.setValue(this.host.settings.user.userId)
@@ -561,168 +559,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			},
 		);
 
-		this.renderPathListSetting(
-			containerEl,
-			this.t("settings.agent.path.excludedTags.name", "排除标签（扫描过滤）"),
-			this.t(
-				"settings.agent.path.excludedTags.desc",
-				"每行一个标签（可带 #）。命中标签的 Markdown 文件会被 Vault 上下文扫描跳过。",
-			),
-			this.host.settings.agentRuntime.excludedTags,
-			async (paths) => {
-				this.host.settings.agentRuntime.excludedTags = paths;
-				await this.host.saveSettings();
-			},
-		);
-	}
-
-	private renderKnowledgeCuratorSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.knowledge") });
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.manualOnly.name", "仅手动触发提炼"))
-			.setDesc(this.t("settings.knowledge.manualOnly.desc", "开启后，全局知识提炼 Agent 仅响应用户主动触发。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.knowledgeCurator.enabledManualOnly).onChange(async (value) => {
-					this.host.settings.knowledgeCurator.enabledManualOnly = value;
-					await this.host.saveSettings();
-				}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.maxSessions.name", "单次最大会话数"))
-			.setDesc(this.t("settings.knowledge.maxSessions.desc", "默认 30。用于限制提炼输入规模。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("30")
-					.setValue(String(this.host.settings.knowledgeCurator.maxSessionsPerRun))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.knowledgeCurator.maxSessionsPerRun = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.maxCharsPerSession.name", "单会话字符上限"))
-			.setDesc(this.t("settings.knowledge.maxCharsPerSession.desc", "默认 4000。超出将截断。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("4000")
-					.setValue(String(this.host.settings.knowledgeCurator.maxCharsPerSession))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.knowledgeCurator.maxCharsPerSession = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.maxModelInputChars.name", "模型输入总上限"))
-			.setDesc(this.t("settings.knowledge.maxModelInputChars.desc", "默认 32000。用于避免上下文爆炸。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("32000")
-					.setValue(String(this.host.settings.knowledgeCurator.maxModelInputChars))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.knowledgeCurator.maxModelInputChars = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.staleAfterDays.name", "过期天数"))
-			.setDesc(this.t("settings.knowledge.staleAfterDays.desc", "默认 30。超过该天数会进入待回查。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("30")
-					.setValue(String(this.host.settings.knowledgeCurator.staleAfterDays))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.knowledgeCurator.staleAfterDays = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.confidenceThreshold.name", "置信度阈值"))
-			.setDesc(this.t("settings.knowledge.confidenceThreshold.desc", "默认 0.6，低于该值自动标记待回查。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("0.6")
-					.setValue(String(this.host.settings.knowledgeCurator.confidenceThreshold))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalFloat(value);
-						if (parsed != null) {
-							this.host.settings.knowledgeCurator.confidenceThreshold = Math.max(0, Math.min(1, parsed));
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.knowledge.actions.name", "执行操作"))
-			.setDesc(this.t("settings.knowledge.actions.desc", "手动触发知识提炼与回查。"))
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.knowledge.actions.curate", "提炼知识")).setCta().onClick(async () => {
-					try {
-						const summary = await this.host.runKnowledgeCuration();
-						new Notice(
-							this.host.t("notice.knowledgeCurationDone", {
-								global: summary.globalUserCount,
-								project: summary.projectCount,
-								review: summary.needsReviewCount,
-							}),
-							6000,
-						);
-					} catch (error) {
-						new Notice(this.t("settings.knowledge.actions.curateFailed", "提炼失败：{error}", { error: String(error) }), 7000);
-					}
-				}),
-			)
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.knowledge.actions.revalidate", "回查知识")).onClick(async () => {
-					try {
-						const summary = await this.host.runKnowledgeRevalidation();
-						new Notice(this.host.t("notice.knowledgeRevalidateDone", { review: summary.needsReviewCount }), 5000);
-					} catch (error) {
-						new Notice(this.t("settings.knowledge.actions.revalidateFailed", "回查失败：{error}", { error: String(error) }), 7000);
-					}
-				}),
-			);
-	}
-
-	private renderDailyNoteSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.daily") });
-
-		new Setting(containerEl).setName(this.t("settings.daily.autoGenerate", "启动时自动生成")).addToggle((toggle) =>
-			toggle.setValue(this.host.settings.dailyNote.autoGenerate).onChange(async (value) => {
-				this.host.settings.dailyNote.autoGenerate = value;
-				await this.host.saveSettings();
-			}),
-		);
-
-		new Setting(containerEl)
-			.setName(this.t("settings.daily.templatePath.name", "模板路径"))
-			.setDesc(this.t("settings.daily.templatePath.desc", "相对 Vault 的路径，留空则使用默认模板。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.daily.templatePath.placeholder", "F.R.I.D.A.Y/模板/每日任务.md"))
-					.setValue(this.host.settings.dailyNote.templatePath)
-					.onChange(async (value) => {
-						this.host.settings.dailyNote.templatePath = value.trim();
-						await this.host.saveSettings();
-					}),
-			);
 	}
 
 	private renderSlashCommandSection(containerEl: HTMLElement): void {
@@ -883,6 +719,8 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private renderProjectSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h3", { text: this.host.t("settings.section.project") });
+		this.renderActiveProjectSelector(containerEl);
+		this.renderProjectGroupSection(containerEl);
 
 		new Setting(containerEl).addButton((button) =>
 			button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
@@ -895,34 +733,197 @@ export class FridaySettingTab extends PluginSettingTab {
 			return;
 		}
 
-		for (const project of this.host.settings.projects) {
+		for (const group of this.getProjectGroupsForDisplay()) {
+			const projectsInGroup = this.host.settings.projects.filter(
+				(item) => (item.groupId || "default-group") === group.id,
+			);
+			if (projectsInGroup.length === 0) {
+				continue;
+			}
+			containerEl.createEl("h4", {
+				text: `${group.name} (${projectsInGroup.length})`,
+				cls: "friday-setting-project-group-title",
+			});
+
+			for (const project of projectsInGroup) {
+				const active = project.slug === this.host.settings.activeProjectId;
+				new Setting(containerEl)
+					.setName(active ? `${project.slug} · ${this.t("settings.project.active.badge", "当前")}` : project.slug)
+					.setDesc(this.buildProjectDescription(project))
+					.addButton((button) =>
+						button
+							.setButtonText(
+								active
+									? this.t("settings.project.active.badge", "当前")
+									: this.t("settings.project.setActive", "设为当前"),
+							)
+							.setDisabled(active)
+							.onClick(async () => {
+								await this.host.setActiveProject(project.slug);
+								this.display();
+							}),
+					)
+					.addButton((button) =>
+						button.setButtonText(this.t("settings.project.edit", "编辑")).onClick(() => {
+							this.openRegisterProjectModal(project);
+						}),
+					)
+					.addButton((button) =>
+						button.setButtonText(this.t("settings.project.sync", "同步")).onClick(async () => {
+							const result = await this.host.syncService.sync(project);
+							if (result.success) {
+								project.lastSyncAt = new Date().toISOString();
+								await this.host.saveSettings();
+								new Notice(this.host.t("notice.syncSuccess", { slug: project.slug }), 3000);
+							} else {
+								new Notice(this.host.t("notice.syncFailed", { error: result.error ?? project.slug }), 6000);
+							}
+						}),
+					)
+					.addButton((button) =>
+						button.setButtonText(this.t("settings.project.remove", "移除")).onClick(async () => {
+							await this.host.removeProject(project.slug);
+							this.display();
+						}),
+					);
+			}
+		}
+	}
+
+	private renderActiveProjectSelector(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName(this.t("settings.project.active.name", "当前项目"))
+			.setDesc(this.t("settings.project.active.desc", "Agent 与工具读写将严格限制在该项目根目录下。"))
+			.addDropdown((dropdown) => {
+				for (const project of this.host.settings.projects) {
+					dropdown.addOption(project.slug, project.slug);
+				}
+				const fallback = this.host.settings.projects[0]?.slug ?? "";
+				const current = this.host.settings.activeProjectId || fallback;
+				if (current) {
+					dropdown.setValue(current);
+				}
+				dropdown.setDisabled(this.host.settings.projects.length === 0);
+				dropdown.onChange(async (value) => {
+					await this.host.setActiveProject(value);
+					this.display();
+				});
+			});
+	}
+
+	private renderProjectGroupSection(containerEl: HTMLElement): void {
+		new Setting(containerEl)
+			.setName(this.t("settings.project.group.manage", "项目组管理"))
+			.setDesc(this.t("settings.project.group.manageDesc", "支持创建、重命名、删除项目组。删除时项目会迁移到 default-group。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.project.group.create", "新建项目组")).onClick(async () => {
+					const input = window.prompt(this.t("settings.project.group.createPrompt", "输入项目组名称"), "");
+					const name = (input ?? "").trim();
+					if (!name) {
+						return;
+					}
+					const id = name
+						.toLowerCase()
+						.replace(/[^a-z0-9_-]+/g, "-")
+						.replace(/^-+|-+$/g, "");
+					if (!id) {
+						new Notice(this.t("settings.project.group.invalidId", "项目组名称无法生成合法 ID。"), 3000);
+						return;
+					}
+					if (this.host.settings.projectGroups.some((item) => item.id === id)) {
+						new Notice(this.t("settings.project.group.idExists", "项目组 ID 已存在：{id}", { id }), 3000);
+						return;
+					}
+					const now = new Date().toISOString();
+					await this.host.upsertProjectGroup({
+						id,
+						name,
+						description: "",
+						projectSlugs: [],
+						createdAt: now,
+						updatedAt: now,
+					});
+					this.display();
+				}),
+			);
+
+		for (const group of this.getProjectGroupsForDisplay()) {
+			const count = this.host.settings.projects.filter((item) => item.groupId === group.id).length;
 			new Setting(containerEl)
-				.setName(project.slug)
-				.setDesc(this.buildProjectDescription(project))
+				.setName(`${group.name} (${count})`)
+				.setDesc(`${group.id}`)
 				.addButton((button) =>
-					button.setButtonText(this.t("settings.project.edit", "编辑")).onClick(() => {
-						this.openRegisterProjectModal(project);
-					}),
-				)
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.project.sync", "同步")).onClick(async () => {
-						const result = await this.host.syncService.sync(project);
-						if (result.success) {
-							project.lastSyncAt = new Date().toISOString();
-							await this.host.saveSettings();
-							new Notice(this.host.t("notice.syncSuccess", { slug: project.slug }), 3000);
-						} else {
-							new Notice(this.host.t("notice.syncFailed", { error: result.error ?? project.slug }), 6000);
+					button.setButtonText(this.t("settings.project.group.rename", "重命名")).onClick(async () => {
+						const input = window.prompt(
+							this.t("settings.project.group.renamePrompt", "输入新名称"),
+							group.name,
+						);
+						const name = (input ?? "").trim();
+						if (!name || name === group.name) {
+							return;
 						}
-					}),
-				)
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.project.remove", "移除")).onClick(async () => {
-						await this.host.removeProject(project.slug);
+						await this.host.upsertProjectGroup({
+							...group,
+							name,
+							updatedAt: new Date().toISOString(),
+						});
 						this.display();
 					}),
+				)
+				.addButton((button) =>
+					button
+						.setButtonText(this.t("settings.project.group.remove", "删除"))
+						.setDisabled(group.id === "default-group")
+						.onClick(async () => {
+							const confirmed = window.confirm(
+								this.t("settings.project.group.removeConfirm", "确认删除项目组 {name} 吗？", {
+									name: group.name,
+								}),
+							);
+							if (!confirmed) {
+								return;
+							}
+							await this.host.removeProjectGroup(group.id);
+							this.display();
+						}),
 				);
 		}
+	}
+
+	private getProjectGroupsForDisplay(): ProjectGroupEntry[] {
+		const now = new Date().toISOString();
+		const map = new Map<string, ProjectGroupEntry>();
+		for (const group of this.host.settings.projectGroups) {
+			map.set(group.id, group);
+		}
+		if (!map.has("default-group")) {
+			map.set("default-group", {
+				id: "default-group",
+				name: "Default Group",
+				description: "",
+				projectSlugs: [],
+				createdAt: now,
+				updatedAt: now,
+			});
+		}
+		for (const project of this.host.settings.projects) {
+			const groupId = project.groupId || "default-group";
+			if (!map.has(groupId)) {
+				map.set(groupId, {
+					id: groupId,
+					name: groupId,
+					description: "",
+					projectSlugs: [],
+					createdAt: now,
+					updatedAt: now,
+				});
+			}
+		}
+		return [...map.values()].sort((a, b) => {
+			if (a.id === "default-group") return -1;
+			if (b.id === "default-group") return 1;
+			return a.name.localeCompare(b.name, "zh-CN");
+		});
 	}
 
 	private renderPathListSetting(
@@ -1218,6 +1219,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		new RegisterProjectModal(this.app, {
 			initial,
 			existingSlugs,
+			projectGroups: this.getProjectGroupsForDisplay(),
 			fridayRoot: this.host.dataService.getFridayRoot(),
 			currentUserId: this.host.getPrimaryUserId(),
 			syncService: this.host.syncService,

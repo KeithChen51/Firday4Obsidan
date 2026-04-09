@@ -3,6 +3,7 @@ import { AgentService } from "./AgentService";
 import { CanvasService } from "./CanvasService";
 import { AgentAction, AgentActionPreview } from "../types/action";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
+import { ProjectBoundaryService } from "./ProjectBoundaryService";
 
 export class AgentActionService {
 	constructor(
@@ -10,6 +11,7 @@ export class AgentActionService {
 		private readonly agentService: AgentService,
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly canvasService: CanvasService,
+		private readonly projectBoundaryService: ProjectBoundaryService,
 	) {}
 
 	preview(action: AgentAction): AgentActionPreview {
@@ -33,7 +35,7 @@ export class AgentActionService {
 	async execute(action: AgentAction, agentId: string): Promise<void> {
 		const targetPath = normalizePath(action.path);
 		if (!this.workspaceAccessService.canWriteVaultPath(targetPath)) {
-			throw new Error(`无权写入路径：${targetPath}`);
+			throw new Error(this.buildScopeDeniedMessage(targetPath));
 		}
 
 		if ((action.type === "create" || action.type === "update") && action.targetType === "canvas") {
@@ -45,6 +47,15 @@ export class AgentActionService {
 
 		await this.snapshotBeforeWrite(targetPath, agentId);
 		await this.applyAction(targetPath, action);
+	}
+
+	private buildScopeDeniedMessage(targetPath: string): string {
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		if (!activeProject) {
+			return `无权写入路径：${targetPath}`;
+		}
+		const projectRoot = this.projectBoundaryService.getProjectRoot(activeProject);
+		return `无权写入路径：${targetPath}（activeProject=${activeProject.slug}, projectRoot=${projectRoot}）`;
 	}
 
 	private async applyAction(targetPath: string, action: AgentAction): Promise<void> {

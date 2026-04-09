@@ -1,40 +1,50 @@
-import { hostname } from "os";
-import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
-import { registerDailyCommands } from "./commands/dailyCommands";
+﻿import { hostname } from "os";
+import { Notice, Plugin, TAbstractFile, WorkspaceLeaf, normalizePath } from "obsidian";
 import { registerInitCommand } from "./commands/initCommand";
-import { registerKnowledgeCommands } from "./commands/knowledgeCommands";
 import { registerProjectCommands } from "./commands/projectCommands";
 import { registerSyncCommands } from "./commands/syncCommands";
-import { registerTaskCommands } from "./commands/taskCommands";
 import { FRIDAY_ICON_ID } from "./constants/icon";
 import { PRIMARY_PATHS } from "./constants/paths";
 import { resolveLocale, translate } from "./i18n";
-import { AgentService } from "./services/AgentService";
+import { I18nParams, LocaleCode } from "./i18n/types";
+import { FridaySettingTab } from "./settings/FridaySettingTab";
 import { AgentActionService } from "./services/AgentActionService";
 import { AgentRuntimeService } from "./services/AgentRuntimeService";
+import { AgentService } from "./services/AgentService";
 import { AIService } from "./services/AIService";
 import { CanvasService } from "./services/CanvasService";
+import { CommandExecService } from "./services/CommandExecService";
 import { ConversationService } from "./services/ConversationService";
 import { DataService } from "./services/DataService";
-import { KnowledgeCuratorService } from "./services/KnowledgeCuratorService";
-import { KnowledgeValidationService } from "./services/KnowledgeValidationService";
-import { SyncService } from "./services/SyncService";
-import { ToolApprovalService } from "./services/ToolApprovalService";
-import { CommandExecService } from "./services/CommandExecService";
 import { InlineEditService } from "./services/InlineEditService";
-import { VaultContextService } from "./services/VaultContextService";
-import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
 import { SkillCommandService } from "./services/SkillCommandService";
 import { SlashCommandService } from "./services/SlashCommandService";
-import { FridaySettingTab } from "./settings/FridaySettingTab";
+import { SyncService } from "./services/SyncService";
+import { ToolApprovalService } from "./services/ToolApprovalService";
+import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
+import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
+import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
+import { IngestEventStore } from "./services/IngestEventStore";
+import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { AgentProfile } from "./types/agent";
-import { KnowledgeSummary } from "./types/knowledge";
 import { FridayPluginApi } from "./types/plugin";
-import { ProjectEntry } from "./types/project";
+import { ProjectEntry, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
-import { formatDate } from "./utils/dateUtils";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
-import { I18nParams, LocaleCode } from "./i18n/types";
+
+const DEFAULT_PROJECT_GROUP_ID = "default-group";
+type WikiCompileResult = {
+	projectSlug: string;
+	projectRoot: string;
+	requested: number;
+	processed: number;
+	succeeded: number;
+	failed: number;
+	rawPaths: string[];
+	updatedDocs: string[];
+	updatedIndex: string;
+	updatedLog: string;
+};
 
 export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	settings: FridaySettings = DEFAULT_SETTINGS;
@@ -43,8 +53,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	aiService!: AIService;
 	agentService!: AgentService;
 	conversationService!: ConversationService;
-	knowledgeCuratorService!: KnowledgeCuratorService;
-	knowledgeValidationService!: KnowledgeValidationService;
 	workspaceAccessService!: WorkspaceAccessService;
 	canvasService!: CanvasService;
 	agentActionService!: AgentActionService;
@@ -52,109 +60,127 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	commandExecService!: CommandExecService;
 	inlineEditService!: InlineEditService;
 	agentRuntimeService!: AgentRuntimeService;
-	vaultContextService!: VaultContextService;
 	skillCommandService!: SkillCommandService;
 	slashCommandService!: SlashCommandService;
-	private boardIconId = FRIDAY_ICON_ID;
+	projectBoundaryService!: ProjectBoundaryService;
+	projectContentService!: ProjectContentService;
+	ingestEventStore!: IngestEventStore;
+	wikiIngestService!: WikiIngestService;
+	private readonly rawIngestTimers = new Map<string, number>();
+	private compileWikiInFlight: Promise<WikiCompileResult> | null = null;
 	private detectedUserId = "";
 
 	async onload(): Promise<void> {
-		this.dataService = new DataService(this.app.vault, this.app.fileManager, PRIMARY_PATHS.root);
-		this.syncService = new SyncService(this.app, this.dataService.getFridayRoot());
-		await this.dataService.ensureDirectoryStructure();
-		await this.loadSettings();
+		try {
+			this.dataService = new DataService(this.app.vault, PRIMARY_PATHS.root);
+			this.syncService = new SyncService(this.app, this.dataService.getFridayRoot());
+			await this.dataService.ensureDirectoryStructure();
+			await this.loadSettings();
 
-		this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
-		const changedByBootstrap = await this.agentService.bootstrap(this.settings);
+			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
+			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
 
-		this.conversationService = new ConversationService(this.app.vault, this.agentService);
-		this.knowledgeCuratorService = new KnowledgeCuratorService(
-			this.app.vault,
-			this.agentService,
-			this.conversationService,
-		);
-		this.knowledgeValidationService = new KnowledgeValidationService(
-			this.app.vault,
-			this.agentService,
-			this.knowledgeCuratorService,
-		);
-		this.workspaceAccessService = new WorkspaceAccessService(() => this.settings);
-		this.canvasService = new CanvasService();
-		this.agentActionService = new AgentActionService(
-			this.app.vault,
-			this.agentService,
-			this.workspaceAccessService,
-			this.canvasService,
-		);
-		this.toolApprovalService = new ToolApprovalService(
-			this.app.vault,
-			this.agentService,
-			() => this.settings,
-		);
-		this.commandExecService = new CommandExecService(
-			() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
-			() => this.settings,
-		);
-		this.inlineEditService = new InlineEditService();
-		this.vaultContextService = new VaultContextService(
-			this.app.vault,
-			this.workspaceAccessService,
-			() => this.settings,
-		);
-		this.skillCommandService = new SkillCommandService(
-			this.workspaceAccessService,
-			() => this.settings,
-			() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
-		);
-		this.slashCommandService = new SlashCommandService(() => this.settings);
-		this.aiService = new AIService(() => this.getEffectiveLlmSettings());
-		this.agentRuntimeService = new AgentRuntimeService(
-			this.app.vault,
-			this.aiService,
-			this.agentService,
-			this.workspaceAccessService,
-			this.agentActionService,
-			this.toolApprovalService,
-			this.commandExecService,
-			this.inlineEditService,
-			this.skillCommandService,
-			() => this.settings,
-		);
+				this.conversationService = new ConversationService(this.app.vault, this.agentService);
+				this.projectBoundaryService = new ProjectBoundaryService(() => this.settings);
+				this.projectContentService = new ProjectContentService(this.app.vault);
+				this.ingestEventStore = new IngestEventStore(this.app.vault);
+				this.wikiIngestService = new WikiIngestService(
+					this.app.vault,
+					this.projectContentService,
+					this.ingestEventStore,
+				);
+				this.workspaceAccessService = new WorkspaceAccessService(
+					() => this.settings,
+					this.projectBoundaryService,
+				);
+			this.canvasService = new CanvasService();
+			this.agentActionService = new AgentActionService(
+				this.app.vault,
+				this.agentService,
+				this.workspaceAccessService,
+				this.canvasService,
+				this.projectBoundaryService,
+			);
+			this.toolApprovalService = new ToolApprovalService(
+				this.app.vault,
+				this.agentService,
+				() => this.settings,
+			);
+			this.commandExecService = new CommandExecService(
+				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+				() => this.settings,
+			);
+			this.inlineEditService = new InlineEditService();
+			this.skillCommandService = new SkillCommandService(
+				this.workspaceAccessService,
+				() => this.settings,
+				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+			);
+			this.slashCommandService = new SlashCommandService(() => this.settings);
+			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
+				this.agentRuntimeService = new AgentRuntimeService(
+					this.app.vault,
+					this.aiService,
+					this.agentService,
+				this.workspaceAccessService,
+				this.agentActionService,
+				this.toolApprovalService,
+				this.commandExecService,
+				this.inlineEditService,
+				this.skillCommandService,
+					this.projectBoundaryService,
+					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
+					() => this.settings,
+				);
+				this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
+					await this.handlePulledRawChanges(project, pulledFiles, headRevision);
+				});
+				this.registerEvent(
+					this.app.vault.on("create", (file) => {
+						this.scheduleRawIngest(file, "local_create");
+					}),
+				);
+				this.registerEvent(
+					this.app.vault.on("modify", (file) => {
+						this.scheduleRawIngest(file, "local_create");
+					}),
+				);
 
-		if (changedByBootstrap) {
-			await this.saveSettings();
-		}
+				if (changedByBootstrap) {
+					await this.saveSettings();
+				}
 
-		this.registerView(VIEW_TYPE_DAILY_BOARD, (leaf) => new DailyBoardView(leaf, this));
-		registerTaskCommands(this);
-		registerDailyCommands(this);
-		registerProjectCommands(this);
-		registerSyncCommands(this);
-		registerKnowledgeCommands(this);
-		registerInitCommand(this);
-		this.addSettingTab(new FridaySettingTab(this.app, this));
+			this.registerView(VIEW_TYPE_DAILY_BOARD, (leaf) => new DailyBoardView(leaf, this));
+			registerProjectCommands(this);
+			registerSyncCommands(this);
+			registerInitCommand(this);
+			this.addSettingTab(new FridaySettingTab(this.app, this));
+			this.addRibbonIcon(FRIDAY_ICON_ID, this.t("app.name"), () => {
+				void this.openWorkspaceView();
+			});
 
-		this.addRibbonIcon(this.boardIconId, this.t("view.board.title"), () => {
-			void this.activateDailyBoardView();
-		});
+			this.addStatusBarItem().setText(this.t("status.ready"));
 
-		if (this.settings.dailyNote.autoGenerate) {
-			await this.tryAutoGenerateDailyNote();
-		}
+			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
+				void this.runStartupSync();
+			}
 
-		this.addStatusBarItem().setText(this.t("status.ready"));
-
-		if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
-			void this.runStartupSync();
-		}
-
-		this.startSyncInterval();
-		if (this.settings.sync.autoPush) {
-			this.startAutoPush();
+			this.startSyncInterval();
+			if (this.settings.sync.autoPush) {
+				this.startAutoPush();
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			console.error("[Friday] Plugin onload failed:", error);
+			new Notice(`F.R.I.D.A.Y 加载异常：${message}`, 8000);
 		}
 	}
 
 	onunload(): void {
+		for (const timer of this.rawIngestTimers.values()) {
+			window.clearTimeout(timer);
+		}
+		this.rawIngestTimers.clear();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_BOARD);
 	}
 
@@ -178,19 +204,13 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				...DEFAULT_SETTINGS.sync,
 				...(migrated.sync ?? {}),
 			},
-			dailyNote: {
-				...DEFAULT_SETTINGS.dailyNote,
-				...(migrated.dailyNote ?? {}),
-			},
 			agentRuntime: {
 				...DEFAULT_SETTINGS.agentRuntime,
 				...(migrated.agentRuntime ?? {}),
 			},
-			knowledgeCurator: {
-				...DEFAULT_SETTINGS.knowledgeCurator,
-				...(migrated.knowledgeCurator ?? {}),
-			},
+			projectGroups: migrated.projectGroups ?? [],
 			projects: migrated.projects ?? [],
+			activeProjectId: migrated.activeProjectId ?? "",
 			agents: migrated.agents ?? [],
 			activeAgentId: migrated.activeAgentId ?? "",
 			slashCommands: migrated.slashCommands ?? [],
@@ -222,10 +242,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return this.detectedUserId || detectUserId();
 	}
 
-	getBoardIconId(): string {
-		return this.boardIconId;
-	}
-
 	getActiveAgent(): AgentProfile | null {
 		return this.settings.agents.find((item) => item.id === this.settings.activeAgentId) ?? null;
 	}
@@ -247,39 +263,75 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return created;
 	}
 
-	async runKnowledgeCuration(activeAgentId?: string): Promise<KnowledgeSummary> {
-		const targetAgentId = activeAgentId || this.settings.activeAgentId || this.settings.agents[0]?.id;
-		if (!targetAgentId) {
-			throw new Error("没有可用 Agent。");
-		}
-		const summary = await this.knowledgeCuratorService.runCuration(
-			this.settings,
-			this.settings.agents,
-			targetAgentId,
-		);
-		return summary;
-	}
-
-	async runKnowledgeRevalidation(activeAgentId?: string): Promise<KnowledgeSummary> {
-		const targetAgentId = activeAgentId || this.settings.activeAgentId || this.settings.agents[0]?.id;
-		if (!targetAgentId) {
-			throw new Error("没有可用 Agent。");
-		}
-		return this.knowledgeValidationService.runRevalidation(this.settings, targetAgentId);
-	}
-
 	async upsertProject(project: ProjectEntry): Promise<void> {
-		const existingIndex = this.settings.projects.findIndex((item) => item.slug === project.slug);
+		const normalizedProject = this.normalizeProjectEntry(project);
+		const existingIndex = this.settings.projects.findIndex((item) => item.slug === normalizedProject.slug);
 		if (existingIndex >= 0) {
-			this.settings.projects[existingIndex] = project;
+			this.settings.projects[existingIndex] = normalizedProject;
 		} else {
-			this.settings.projects.push(project);
+			this.settings.projects.push(normalizedProject);
+		}
+
+		this.ensureProjectGroupInSettings(normalizedProject.groupId);
+		for (const group of this.settings.projectGroups) {
+			const nextSlugs = group.projectSlugs.filter((slug) => slug !== normalizedProject.slug);
+			if (group.id === normalizedProject.groupId) {
+				nextSlugs.push(normalizedProject.slug);
+			}
+			group.projectSlugs = nextSlugs;
+			group.updatedAt = new Date().toISOString();
+		}
+
+		if (!this.settings.activeProjectId) {
+			this.settings.activeProjectId = normalizedProject.slug;
 		}
 		await this.saveSettings();
 	}
 
 	async removeProject(slug: string): Promise<void> {
 		this.settings.projects = this.settings.projects.filter((project) => project.slug !== slug);
+		for (const group of this.settings.projectGroups) {
+			group.projectSlugs = group.projectSlugs.filter((projectSlug) => projectSlug !== slug);
+		}
+		if (this.settings.activeProjectId === slug) {
+			this.settings.activeProjectId = this.settings.projects[0]?.slug ?? "";
+		}
+		await this.saveSettings();
+	}
+
+	async setActiveProject(projectSlug: string): Promise<void> {
+		const target = this.settings.projects.find((item) => item.slug === projectSlug);
+		if (!target) {
+			throw new Error(`未找到项目: ${projectSlug}`);
+		}
+		this.settings.activeProjectId = target.slug;
+		await this.saveSettings();
+	}
+
+	async upsertProjectGroup(group: ProjectGroupEntry): Promise<void> {
+		const normalizedGroup = this.normalizeProjectGroupEntry(group);
+		const existingIndex = this.settings.projectGroups.findIndex((item) => item.id === normalizedGroup.id);
+		if (existingIndex >= 0) {
+			this.settings.projectGroups[existingIndex] = normalizedGroup;
+		} else {
+			this.settings.projectGroups.push(normalizedGroup);
+		}
+		await this.saveSettings();
+	}
+
+	async removeProjectGroup(groupId: string): Promise<void> {
+		if (groupId === DEFAULT_PROJECT_GROUP_ID) {
+			throw new Error("默认项目组不可删除");
+		}
+		const defaultGroup = this.ensureProjectGroupInSettings(DEFAULT_PROJECT_GROUP_ID);
+		const movedProjects = this.settings.projects.filter((item) => item.groupId === groupId);
+		for (const project of movedProjects) {
+			project.groupId = defaultGroup.id;
+			if (!defaultGroup.projectSlugs.includes(project.slug)) {
+				defaultGroup.projectSlugs.push(project.slug);
+			}
+		}
+		this.settings.projectGroups = this.settings.projectGroups.filter((group) => group.id !== groupId);
 		await this.saveSettings();
 	}
 
@@ -299,7 +351,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return translate(this.getLocale(), key, params);
 	}
 
-	async activateDailyBoardView(): Promise<void> {
+	async openWorkspaceView(): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DAILY_BOARD);
 		let leaf: WorkspaceLeaf | null = leaves[0] ?? null;
 		if (!leaf) {
@@ -322,34 +374,370 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	private migrateSettings(raw: Partial<FridaySettings> | null): Partial<FridaySettings> {
 		if (!raw) {
-			return { version: SETTINGS_VERSION };
+			return {
+				version: SETTINGS_VERSION,
+				projectGroups: [this.createDefaultProjectGroup()],
+				projects: [],
+				activeProjectId: "",
+			};
 		}
+
+		const rawProjects = Array.isArray(raw.projects) ? raw.projects : [];
+		const normalizedProjects = rawProjects.map((item) => this.normalizeProjectEntry(item as ProjectEntry));
+		const migratedGroups = this.migrateProjectGroups(
+			(raw as { projectGroups?: ProjectGroupEntry[] }).projectGroups,
+			normalizedProjects,
+		);
+		const activeProjectId = this.resolveInitialActiveProjectId(raw.activeProjectId, normalizedProjects);
+
 		return {
 			...raw,
-			version: raw.version ?? SETTINGS_VERSION,
+			version: SETTINGS_VERSION,
+			projects: normalizedProjects,
+			projectGroups: migratedGroups,
+			activeProjectId,
 		};
 	}
 
-	private async tryAutoGenerateDailyNote(): Promise<void> {
-		const today = formatDate();
-		const dailyNotePath = this.dataService.resolveDailyNotePath(today);
-		const inMemory = this.app.vault.getAbstractFileByPath(dailyNotePath);
-		const onDisk = await this.app.vault.adapter.exists(dailyNotePath);
-		if (inMemory || onDisk) {
+	private migrateProjectGroups(
+		rawGroups: ProjectGroupEntry[] | undefined,
+		projects: ProjectEntry[],
+	): ProjectGroupEntry[] {
+		const now = new Date().toISOString();
+		const groupMap = new Map<string, ProjectGroupEntry>();
+		const sourceGroups = Array.isArray(rawGroups) ? rawGroups : [];
+		for (const group of sourceGroups) {
+			const normalized = this.normalizeProjectGroupEntry(group);
+			groupMap.set(normalized.id, normalized);
+		}
+		if (!groupMap.has(DEFAULT_PROJECT_GROUP_ID)) {
+			groupMap.set(DEFAULT_PROJECT_GROUP_ID, this.createDefaultProjectGroup(now));
+		}
+
+		for (const project of projects) {
+			const groupId = project.groupId || DEFAULT_PROJECT_GROUP_ID;
+			if (!groupMap.has(groupId)) {
+				groupMap.set(
+					groupId,
+					this.normalizeProjectGroupEntry({
+						id: groupId,
+						name: groupId === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : groupId,
+						description: "",
+						projectSlugs: [],
+						createdAt: now,
+						updatedAt: now,
+					}),
+				);
+			}
+			const group = groupMap.get(groupId)!;
+			if (!group.projectSlugs.includes(project.slug)) {
+				group.projectSlugs.push(project.slug);
+			}
+		}
+
+		const validSlugs = new Set(projects.map((item) => item.slug));
+		for (const group of groupMap.values()) {
+			group.projectSlugs = [...new Set(group.projectSlugs.filter((slug) => validSlugs.has(slug)))];
+			group.updatedAt = now;
+		}
+
+		return [...groupMap.values()];
+	}
+
+	private resolveInitialActiveProjectId(
+		activeProjectId: string | undefined,
+		projects: ProjectEntry[],
+	): string {
+		const requestedId = (activeProjectId ?? "").trim();
+		if (requestedId && projects.some((item) => item.slug === requestedId)) {
+			return requestedId;
+		}
+		return projects[0]?.slug ?? "";
+	}
+
+	private normalizeProjectEntry(project: ProjectEntry): ProjectEntry {
+		const normalizedSlug = (project.slug ?? "").trim();
+		const normalizedGroupId = (project.groupId ?? "").trim() || DEFAULT_PROJECT_GROUP_ID;
+		const normalizedRootPath = this.resolveProjectRootPath(project);
+		return {
+			...project,
+			slug: normalizedSlug,
+			groupId: normalizedGroupId,
+			projectRootPath: normalizedRootPath,
+			localPath: project.localPath?.trim() || "",
+		};
+	}
+
+	private resolveProjectRootPath(project: ProjectEntry): string {
+		const candidateRoot = project.projectRootPath?.trim();
+		if (candidateRoot && !candidateRoot.match(/^[a-zA-Z]:\\/)) {
+			return normalizeVaultPath(candidateRoot);
+		}
+		const localPath = project.localPath?.trim() ?? "";
+		if (localPath && !localPath.match(/^[a-zA-Z]:\\/)) {
+			return normalizeVaultPath(localPath);
+		}
+		return normalizeVaultPath(`${PRIMARY_PATHS.root}/${PRIMARY_PATHS.projects}/${project.slug}`);
+	}
+
+	private normalizeProjectGroupEntry(group: ProjectGroupEntry): ProjectGroupEntry {
+		const now = new Date().toISOString();
+		const id = (group.id ?? "").trim() || DEFAULT_PROJECT_GROUP_ID;
+		return {
+			id,
+			name: (group.name ?? "").trim() || (id === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : id),
+			description: (group.description ?? "").trim(),
+			projectSlugs: [...new Set((group.projectSlugs ?? []).map((item) => item.trim()).filter(Boolean))],
+			createdAt: group.createdAt || now,
+			updatedAt: now,
+		};
+	}
+
+	private createDefaultProjectGroup(now = new Date().toISOString()): ProjectGroupEntry {
+		return {
+			id: DEFAULT_PROJECT_GROUP_ID,
+			name: "默认项目组",
+			description: "",
+			projectSlugs: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+	}
+
+	private ensureProjectGroupInSettings(groupId: string): ProjectGroupEntry {
+		const normalizedId = groupId?.trim() || DEFAULT_PROJECT_GROUP_ID;
+		let found = this.settings.projectGroups.find((item) => item.id === normalizedId);
+		if (found) {
+			return found;
+		}
+		found = this.normalizeProjectGroupEntry({
+			id: normalizedId,
+			name: normalizedId === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : normalizedId,
+			description: "",
+			projectSlugs: [],
+			createdAt: new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		});
+		this.settings.projectGroups.push(found);
+		return found;
+	}
+
+	private scheduleRawIngest(file: TAbstractFile, sourceType: SourceType): void {
+		const rawPath = normalizePath(file.path || "");
+		if (!rawPath) {
 			return;
+		}
+		const previousTimer = this.rawIngestTimers.get(rawPath);
+		if (previousTimer != null) {
+			window.clearTimeout(previousTimer);
+		}
+		const timer = window.setTimeout(() => {
+			this.rawIngestTimers.delete(rawPath);
+			void this.runLocalRawIngest(rawPath, sourceType);
+		}, 700);
+		this.rawIngestTimers.set(rawPath, timer);
+	}
+
+	private async runLocalRawIngest(rawPath: string, sourceType: SourceType): Promise<void> {
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		if (!activeProject) {
+			return;
+		}
+		try {
+			await this.runIngestForRawPaths(activeProject, [rawPath], sourceType, "", false);
+		} catch (error) {
+			console.error("[Friday] Local raw ingest failed:", error);
+		}
+	}
+
+	private async handlePulledRawChanges(
+		project: ProjectEntry,
+		pulledFiles: string[],
+		headRevision: string,
+	): Promise<void> {
+		if (this.settings.activeProjectId && project.slug !== this.settings.activeProjectId) {
+			return;
+		}
+		const projectRoot = this.projectBoundaryService.getProjectRoot(project);
+		const rawPaths = pulledFiles
+			.map((item) => normalizePath(`${projectRoot}/${item}`))
+			.filter((item) => this.projectContentService.isRawPath(projectRoot, item));
+		if (rawPaths.length === 0) {
+			return;
+		}
+		try {
+			await this.runIngestForRawPaths(project, rawPaths, "git_sync", headRevision, true);
+		} catch (error) {
+			console.error("[Friday] Git sync raw ingest failed:", error);
+		}
+	}
+
+	private async runIngestForRawPaths(
+		project: ProjectEntry,
+		rawPaths: string[],
+		sourceType: SourceType,
+		sourceCommit: string,
+		showFailureNotice: boolean,
+		rethrowError = false,
+	): Promise<IngestSummary> {
+		const projectRoot = this.projectBoundaryService.getProjectRoot(project);
+		const scopedRawPaths = [...new Set(rawPaths.map((item) => normalizePath(item)))].filter(
+			(item) =>
+				this.projectContentService.isRawPath(projectRoot, item) &&
+				this.projectBoundaryService.isWithinProject(project, item),
+		);
+		if (scopedRawPaths.length === 0) {
+			return {
+				processed: 0,
+				succeeded: 0,
+				failed: 0,
+				events: [],
+				updatedDocs: [],
+				updatedIndex: "",
+				updatedLog: "",
+			};
 		}
 
 		try {
-			await this.dataService.generateDailyNote(
-				this.getPrimaryUserId(),
-				today,
-				this.settings.dailyNote.templatePath,
-				this.getDetectedUserId(),
+			const summary = await this.wikiIngestService.ingestRawFiles(
+				project,
+				scopedRawPaths,
+				this.buildRawSourceContext(sourceType, project, sourceCommit),
 			);
+			if (showFailureNotice && summary.failed > 0) {
+				new Notice(
+					`Wiki re-ingest finished with ${summary.failed} failed file(s) in project ${project.slug}.`,
+					6000,
+				);
+			}
+			return summary;
 		} catch (error) {
-			console.error("[Friday] Failed to auto-generate daily note:", error);
-			new Notice("自动生成每日任务失败", 4000);
+			console.error("[Friday] Wiki ingest failed:", error);
+			if (showFailureNotice) {
+				const message = error instanceof Error ? error.message : String(error);
+				new Notice(`Wiki re-ingest failed: ${message}`, 6000);
+			}
+			if (rethrowError) {
+				throw error;
+			}
+			return {
+				processed: 0,
+				succeeded: 0,
+				failed: scopedRawPaths.length,
+				events: [],
+				updatedDocs: [],
+				updatedIndex: "",
+				updatedLog: "",
+			};
 		}
+	}
+
+	async compileWikiForActiveProject(rawPaths?: string[]): Promise<WikiCompileResult> {
+		if (this.compileWikiInFlight) {
+			return this.compileWikiInFlight;
+		}
+
+		const task = this.compileWikiForActiveProjectInternal(rawPaths);
+		this.compileWikiInFlight = task.finally(() => {
+			if (this.compileWikiInFlight === task) {
+				this.compileWikiInFlight = null;
+			}
+		});
+		return this.compileWikiInFlight;
+	}
+
+	private async compileWikiForActiveProjectInternal(rawPaths?: string[]): Promise<WikiCompileResult> {
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		if (!activeProject) {
+			throw new Error("No active project selected.");
+		}
+		const projectRoot = this.projectBoundaryService.getProjectRoot(activeProject);
+		const normalizedRequested = Array.isArray(rawPaths)
+			? [...new Set(rawPaths.map((item) => this.resolveRequestedRawPath(projectRoot, item)).filter(Boolean))]
+			: [];
+		const targetRawPaths = normalizedRequested.length > 0
+			? normalizedRequested
+			: await this.projectContentService.listRawFiles(projectRoot);
+		const scopedRawPaths = targetRawPaths.filter(
+			(item) =>
+				this.projectContentService.isRawPath(projectRoot, item) &&
+				this.projectBoundaryService.isWithinProject(activeProject, item),
+		);
+
+		if (scopedRawPaths.length === 0) {
+			if (normalizedRequested.length > 0) {
+				throw new Error(`No valid raw files found in active project: ${activeProject.slug}`);
+			}
+			return {
+				projectSlug: activeProject.slug,
+				projectRoot,
+				requested: 0,
+				processed: 0,
+				succeeded: 0,
+				failed: 0,
+				rawPaths: [],
+				updatedDocs: [],
+				updatedIndex: "",
+				updatedLog: "",
+			};
+		}
+
+		const summary = await this.runIngestForRawPaths(
+			activeProject,
+			scopedRawPaths,
+			"local_create",
+			"",
+			true,
+			true,
+		);
+		return {
+			projectSlug: activeProject.slug,
+			projectRoot,
+			requested: scopedRawPaths.length,
+			processed: summary.processed,
+			succeeded: summary.succeeded,
+			failed: summary.failed,
+			rawPaths: scopedRawPaths,
+			updatedDocs: summary.updatedDocs,
+			updatedIndex: summary.updatedIndex,
+			updatedLog: summary.updatedLog,
+		};
+	}
+
+	private resolveRequestedRawPath(projectRoot: string, rawPath: string): string {
+		const normalizedInput = normalizePath(rawPath.trim()).replace(/^\/+/, "");
+		if (!normalizedInput) {
+			return "";
+		}
+		if (normalizedInput.match(/^[a-zA-Z]:\//)) {
+			return "";
+		}
+		if (normalizedInput.startsWith(`${projectRoot}/`)) {
+			return normalizedInput;
+		}
+		if (this.projectContentService.isRawPath(projectRoot, normalizedInput)) {
+			return normalizedInput;
+		}
+		if (normalizedInput.startsWith("raw/")) {
+			return normalizePath(`${projectRoot}/${normalizedInput}`);
+		}
+		return normalizePath(`${projectRoot}/raw/${normalizedInput}`);
+	}
+
+	private buildRawSourceContext(
+		sourceType: SourceType,
+		project: ProjectEntry,
+		sourceCommit: string,
+	): RawSourceContext {
+		const userId = this.getPrimaryUserId();
+		return {
+			sourceType,
+			sourceUserId: userId,
+			sourceUserName: this.settings.user.displayName || userId,
+			sourceRepo: project.gitRemote || "",
+			sourceBranch: "",
+			sourceCommit: sourceCommit || "",
+		};
 	}
 
 	private async runStartupSync(): Promise<void> {
@@ -403,10 +791,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const debounceMs = 10_000;
 
 		this.registerEvent(
-			this.app.vault.on("modify", (file) => {
-				if (!this.dataService.isManagedTaskPath(file.path)) {
-					return;
-				}
+			this.app.vault.on("modify", () => {
 				if (pushTimer !== null) {
 					window.clearTimeout(pushTimer);
 				}
@@ -439,3 +824,8 @@ function detectUserId(): string {
 		.replace(/^(desktop|laptop)[-_]/i, "");
 	return cleaned || machineName;
 }
+
+function normalizeVaultPath(pathValue: string): string {
+	return normalizePath(pathValue.trim());
+}
+

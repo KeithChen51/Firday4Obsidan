@@ -30,12 +30,3 @@ export interface AgentRuntimeSettings {
 	blockedCommands: string[];
 	toolCallingMode: ToolCallingMode;
 }
-
-export interface KnowledgeCuratorSettings {
-	enabledManualOnly: boolean;
-	maxSessionsPerRun: number;
-	maxCharsPerSession: number;
-	maxModelInputChars: number;
-	staleAfterDays: number;
-	confidenceThreshold: number;
-}

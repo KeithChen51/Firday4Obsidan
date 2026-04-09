@@ -1,0 +1,130 @@
+{
+  "version": 5,
+  "locale": "zh-CN",
+  "user": {
+    "userId": "5rbihtd5",
+    "displayName": "",
+    "autoDetect": true
+  },
+  "llm": {
+    "mode": "openai",
+    "apiUrl": "https://zenmux.ai/api/v1",
+    "apiKey": "sk-ai-v1-9c3702761523e1a6dcc476bcf25812ebb6d03eeb874becfcb8ddd115ed4af9c0",
+    "model": "xiaomi/mimo-v2-pro",
+    "temperature": 0.7,
+    "maxTokens": 4096,
+    "enableStreaming": true
+  },
+  "sync": {
+    "autoPush": false,
+    "syncInterval": 0,
+    "syncOnStartup": true
+  },
+  "projectGroups": [
+    {
+      "id": "default-group",
+      "name": "默认项目组",
+      "description": "",
+      "projectSlugs": [
+        "test01",
+        "know",
+        "lantern"
+      ],
+      "createdAt": "2026-04-08T06:21:03.135Z",
+      "updatedAt": "2026-04-08T06:31:20.685Z"
+    }
+  ],
+  "projects": [
+    {
+      "slug": "test01",
+      "localPath": "",
+      "gitRemote": "",
+      "gitUsername": "",
+      "gitToken": "",
+      "autoSync": false,
+      "lastSyncAt": "",
+      "groupId": "default-group",
+      "projectRootPath": "F.R.I.D.A.Y/椤圭洰/test01"
+    },
+    {
+      "slug": "know",
+      "localPath": "C:\\Own Docm\\Coding\\Friday - Ob\\Friday\\知识库",
+      "gitRemote": "",
+      "gitUsername": "",
+      "gitToken": "",
+      "autoSync": false,
+      "lastSyncAt": "",
+      "groupId": "default-group",
+      "projectRootPath": "F.R.I.D.A.Y/椤圭洰/know"
+    },
+    {
+      "groupId": "default-group",
+      "slug": "lantern",
+      "projectRootPath": "00_02_哲学",
+      "localPath": "",
+      "gitRemote": "",
+      "gitUsername": "",
+      "gitUserEmail": "",
+      "gitToken": "",
+      "autoSync": false,
+      "lastSyncAt": ""
+    }
+  ],
+  "activeProjectId": "lantern",
+  "agents": [
+    {
+      "id": "default",
+      "name": "默认 Agent",
+      "description": "系统默认通用助手",
+      "model": "xiaomi/mimo-v2-pro",
+      "agentFilePath": "F.R.I.D.A.Y/Agents/default/agent.md",
+      "createdAt": "2026-03-30T13:47:43.830Z",
+      "updatedAt": "2026-03-30T15:53:11.353Z"
+    }
+  ],
+  "activeAgentId": "default",
+  "agentRuntime": {
+    "requireWriteConfirmation": true,
+    "toolPermissionMode": "standard",
+    "enableExecTool": false,
+    "execTimeout": 30000,
+    "execWorkingDir": "vault",
+    "execCustomCwd": "",
+    "vaultFocusPaths": [],
+    "externalReadOnlyPaths": [],
+    "externalSkillPaths": [
+      "C:\\Users\\Keith\\my-skills"
+    ],
+    "excludedTags": [],
+    "toolRuntimeEnabled": true,
+    "maxToolIterations": 6,
+    "enableSubagent": true,
+    "maxSubagentDepth": 1,
+    "blockedCommands": [
+      "rm\\s+-rf\\s+/",
+      "rmdir\\s+/s",
+      "format\\s+[a-zA-Z]:",
+      "mkfs",
+      "dd\\s+if=",
+      ":(){ :|:& };:",
+      "shutdown",
+      "reboot",
+      "init\\s+0",
+      "del\\s+/s\\s+/q\\s+[a-zA-Z]:"
+    ],
+    "toolCallingMode": "auto"
+  },
+  "slashCommands": [],
+  "dailyNote": {
+    "autoGenerate": false,
+    "templatePath": ""
+  },
+  "knowledgeCurator": {
+    "enabledManualOnly": true,
+    "maxSessionsPerRun": 30,
+    "maxCharsPerSession": 4000,
+    "maxModelInputChars": 32000,
+    "staleAfterDays": 30,
+    "confidenceThreshold": 0.6
+  }
+}
