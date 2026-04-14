@@ -25,7 +25,8 @@ import { SessionOverrideAdapter } from "../core/session-control/SessionOverrideA
 import { PolicyResolverCore } from "../core/security/policy-resolver/PolicyResolverCore";
 import { buildPolicyMatrix, PolicyMatrixRow } from "../core/security/policy-resolver/PolicyMatrix";
 import { PolicyEffect, PolicyRule } from "../core/security/policy-resolver/types";
-import { ContextAssembler } from "../core/context/ContextAssembler";
+import { HistoryCompactor } from "../core/context/HistoryCompactor";
+import { PromptContextEngine } from "../core/context/PromptContextEngine";
 import { FileMemoryStore } from "../core/memory/FileMemoryStore";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
@@ -195,7 +196,8 @@ export class AgentRuntimeService {
 	private readonly sessionOverrideAdapter: SessionOverrideAdapter;
 	private readonly toolRunAuditStore: ToolRunAuditStore;
 	private readonly stepTraceStore: StepTraceStore;
-	private readonly contextAssembler: ContextAssembler;
+	private readonly historyCompactor: HistoryCompactor;
+	private readonly promptContextEngine: PromptContextEngine;
 	private readonly fileMemoryStore: FileMemoryStore;
 	private readonly wikiKnowledgeProvider: WikiKnowledgeProvider;
 	private readonly executionGate: ExecutionGate;
@@ -232,7 +234,8 @@ export class AgentRuntimeService {
 		this.sessionOverrideAdapter = new SessionOverrideAdapter();
 		this.toolRunAuditStore = new ToolRunAuditStore(this.vault);
 		this.stepTraceStore = new StepTraceStore(this.vault);
-		this.contextAssembler = new ContextAssembler();
+		this.historyCompactor = new HistoryCompactor();
+		this.promptContextEngine = new PromptContextEngine();
 		this.fileMemoryStore = new FileMemoryStore(this.vault);
 		this.wikiKnowledgeProvider = new WikiKnowledgeProvider();
 		this.executionGate = new ExecutionGate(this.getSettings);
@@ -1038,11 +1041,11 @@ export class AgentRuntimeService {
 	}
 
 	private buildRuntimeHistory(conversation: ChatMessage[]): ChatMessage[] {
-		const maxHistory = 12;
-		return conversation.slice(-maxHistory).map((message) => ({
-			role: message.role,
-			content: this.truncateText(message.content, 1800),
-		}));
+		return this.historyCompactor.compact(conversation, {
+			preserveRecent: true,
+			maxMessages: 12,
+			maxCharsPerMessage: 1800,
+		}).messages;
 	}
 
 	private async buildSystemPrompt(
@@ -1071,141 +1074,41 @@ export class AgentRuntimeService {
 			? this.truncateText(await this.vault.cachedRead(agentFile), 3000)
 			: "agent.md not found";
 
-		const lines = [
-			"You are F.R.I.D.A.Y Agent Runtime.",
-			"You must output strict JSON only. Do not output Markdown.",
-			"",
-			"Allowed response schema (choose one):",
-			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"ls|read|grep|search_text|glob|compile_wiki|write|edit|delete","args":{...}}}',
-			'{"type":"subagent","assistant":"optional note","subagent":{"goal":"task goal","model":"optional"}}',
-			"",
-			"Rules:",
-			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
-			"- Call at most one tool each step, then reason with TOOL_RESULT.",
-			"- When an active project root is available, prefer scoping ls/grep/search_text/glob to that root.",
-			"- For ls/grep/search_text/glob, an empty path auto-scopes to the active project root when one is selected.",
-			"- Never use '/' or '\\' as the path for Vault discovery tools; use the active project root instead.",
-			"- write/delete only supports Vault-relative paths.",
-			"- When removing a Vault file or folder, use delete instead of exec or shell builtins like rmdir/rm.",
-			"- raw/ is user-curated project input. Never write, edit, or delete files under <projectRoot>/raw/.",
-			"- AI-generated drafts, process files, and interim outputs must go under <projectRoot>/workspace/.",
-			"- When creating a new project file without an explicit folder, default to <projectRoot>/workspace/.",
-			"- If user asks to compile/rebuild Wiki, call compile_wiki tool first.",
-			"- If user asks to create/update/save a file, you MUST call write tool to execute it.",
-			"- Never say 'I cannot create/write files' when write tool is available.",
-			"- If user says '当前文档/这个文档', prioritize current active file path.",
-			"- Before final response, ensure conclusions are based on tool results.",
-			"",
-			"Tool arguments:",
-			'- ls: {"path":"optional path","recursive":false,"maxEntries":120}',
-			'- read: {"path":"file path","maxChars":10000}',
-			'- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
-			'- search_text: {"path":"optional directory or file path","query":"plain text query","maxMatches":40}',
-			'- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
-			'- compile_wiki: {"mode":"all|changed(optional)","path":"optional raw path","paths":["optional raw paths"]}',
-			'- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
-			'- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',
-			'- delete: {"path":"Vault-relative path"}',
-			...(settings.agentRuntime.enableExecTool
-				? ['- exec: {"command":"command-name","args":["arg1","arg2"],"cwd":"optional-working-directory"}']
-				: []),
-			"",
-			"--- Few-shot examples ---",
-			"User: list files in project root",
-			'Assistant: {"type":"tool_call","assistant":"List files in root.","tool":{"name":"ls","args":{"path":"","recursive":false}}}',
-			"",
-			"User: read notes/project-overview.md",
-			'Assistant: {"type":"tool_call","assistant":"Read file.","tool":{"name":"read","args":{"path":"notes/project-overview.md"}}}',
-			"",
-			'User: create test.md with content "hello"',
-			'Assistant: {"type":"tool_call","assistant":"Create file in workspace.","tool":{"name":"write","args":{"path":"workspace/test.md","content":"hello","mode":"create"}}}',
-			"--- End examples ---",
-			"",
-			`Runtime depth: ${depth}`,
-			`Current active file: ${currentFilePath?.trim() || "(none)"}`,
-			`Active project root: ${activeProjectRoot}`,
-			`Vault focus paths: ${focusPaths}`,
-			`External read-only paths: ${externalPaths}`,
-			`Runtime profile: ${this.activeRuntimeProfile.id} (supported=${this.activeRuntimeProfile.supported})`,
-			`Runtime capabilities: exec=${this.activeRuntimeProfile.capabilities.supportsExecTool}, externalRead=${this.activeRuntimeProfile.capabilities.supportsExternalRead}, subagent=${this.activeRuntimeProfile.capabilities.supportsSubagent}`,
-		];
-
-		// Layer 1: FRIDAY.md (project-level persistent instructions)
-		if (fridayMd) {
-			lines.push("");
-			lines.push("--- Project instructions (FRIDAY.md) ---");
-			lines.push(fridayMd);
-			lines.push("--- End project instructions ---");
-		}
-
-		// Layer 2: agent.md (agent-specific profile)
-		lines.push("");
-		lines.push("Current agent.md excerpt:");
-		lines.push(agentProfile);
-
 		const trimmedExtra = extraSystemContext?.trim();
-		if (trimmedExtra) {
-			lines.push("");
-			lines.push("Extra runtime context:");
-			lines.push(trimmedExtra);
-		}
 
 		this.reportContextProgress(input, depth, "skills", "匹配相关技能与命令约束");
 		const autoSkillContext = await this.buildAutoSkillContext(userPrompt, currentFilePath, trimmedExtra);
-		if (autoSkillContext) {
-			lines.push("");
-			lines.push(autoSkillContext);
-		}
 
 		this.reportContextProgress(input, depth, "wiki", "检索项目知识与候选文档");
 		const wikiKnowledgeContext = await this.wikiLookupCapability.execute(userPrompt ?? "");
-		if (wikiKnowledgeContext) {
-			lines.push("");
-			lines.push("--- Wiki knowledge context ---");
-			lines.push(wikiKnowledgeContext);
-			lines.push("--- End wiki knowledge context ---");
-		}
 
 		this.reportContextProgress(input, depth, "memory", "加载长期记忆与项目偏好");
 		const memoryContext = await this.loadMemoryContext();
-		if (memoryContext) {
-			lines.push("");
-			lines.push("--- Memory context ---");
-			lines.push(memoryContext);
-			lines.push("--- End memory context ---");
-		}
 
 		this.reportContextProgress(input, depth, "compact", "压缩上下文并生成提示包");
-		const assembledContext = this.contextAssembler.assemble({
-			userQuery: userPrompt ?? "",
-			system: fridayMd ?? "",
-			policy: trimmedExtra ?? "",
-			history: memoryContext,
-			secondaryContext: autoSkillContext,
-			attachments: wikiKnowledgeContext,
+		const promptContext = this.promptContextEngine.build({
+			mode: settings.agentRuntime.toolCallingMode ?? "auto",
+			depth,
+			permissionMode: "auto",
+			runtimeProfileId: this.activeRuntimeProfile.id,
+			runtimeSupported: this.activeRuntimeProfile.supported,
+			runtimeCapabilities: this.activeRuntimeProfile.capabilities,
+			focusPaths,
+			externalPaths,
+			currentFilePath,
+			activeProjectRoot,
+			userPrompt: userPrompt ?? "",
+			fridayMd,
+			agentProfile,
+			extraSystemContext: trimmedExtra,
+			autoSkillContext,
+			wikiKnowledgeContext,
+			memoryContext,
+			enableExecTool: settings.agentRuntime.enableExecTool,
 			hardLimit: 1600,
 		});
-		this.lastContextSummary = {
-			used: assembledContext.used,
-			softLimit: assembledContext.softLimit,
-			hardLimit: assembledContext.hardLimit,
-			trimmedChannels: [...assembledContext.trimmedChannels],
-			hasWikiContext: Boolean(wikiKnowledgeContext),
-			hasMemoryContext: Boolean(memoryContext),
-			hasAutoSkillContext: Boolean(autoSkillContext),
-		};
-		if (assembledContext.text) {
-			lines.push("");
-			lines.push("--- Assembled context bundle ---");
-			lines.push(assembledContext.text);
-			lines.push(
-				`Context budget: used=${assembledContext.used}, soft=${assembledContext.softLimit}, hard=${assembledContext.hardLimit}, trimmed=${assembledContext.trimmedChannels.join(",") || "none"}`,
-			);
-			lines.push("--- End assembled context bundle ---");
-		}
-
-		return lines.join("\n");
+		this.lastContextSummary = promptContext.summary;
+		return promptContext.prompt;
 	}
 
 	private async buildAutoSkillContext(

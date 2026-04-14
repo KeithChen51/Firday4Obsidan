@@ -1,4 +1,5 @@
 ﻿import { normalizePath, parseYaml, TFile, TFolder, Vault } from "obsidian";
+import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { ChatMessage } from "./AIService";
 import { AgentService } from "./AgentService";
 
@@ -30,6 +31,8 @@ export interface ConversationSession {
 }
 
 export class ConversationService {
+	private readonly historyCompactor = new HistoryCompactor();
+
 	constructor(
 		private readonly vault: Vault,
 		private readonly agentService: AgentService,
@@ -167,7 +170,12 @@ export class ConversationService {
 		for (const agentId of agentIds) {
 			const sessions = await this.listSessions(agentId, sessionLimit);
 			for (const session of sessions) {
-				const truncatedMessages = this.truncateMessages(session.messages, charLimitPerSession);
+				const truncatedMessages = this.historyCompactor.compact(session.messages, {
+					preserveRecent: false,
+					maxMessages: session.messages.length || 1,
+					maxCharsPerMessage: charLimitPerSession,
+					maxTotalChars: charLimitPerSession,
+				}).messages;
 				merged.push({
 					...session,
 					messages: truncatedMessages,
@@ -223,24 +231,6 @@ export class ConversationService {
 	private isAlreadyExistsError(error: unknown): boolean {
 		const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
 		return message.includes("already exists") || message.includes("eexist");
-	}
-
-	private truncateMessages(messages: ChatMessage[], charLimit: number): ChatMessage[] {
-		const result: ChatMessage[] = [];
-		let consumed = 0;
-		for (const message of messages) {
-			if (consumed >= charLimit) {
-				break;
-			}
-			const remaining = charLimit - consumed;
-			const text = message.content.length > remaining ? `${message.content.slice(0, remaining)}...` : message.content;
-			result.push({
-				role: message.role,
-				content: text,
-			});
-			consumed += text.length;
-		}
-		return result;
 	}
 
 	private async readSessionFromFile(file: TFile, agentId: string): Promise<ConversationSession | null> {
