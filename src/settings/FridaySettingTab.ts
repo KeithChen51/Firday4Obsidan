@@ -7,7 +7,7 @@ import { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
 import type { LocaleCode } from "../i18n/types";
-import { TOOL_MANIFESTS } from "../platform/tools/ToolManifestCatalog";
+import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 
 type SettingsHost = FridayPluginApi & Plugin;
 type LlmMode = "openai" | "group";
@@ -650,7 +650,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 			});
 
-		for (const tool of TOOL_MANIFESTS) {
+		for (const tool of CapabilityRegistry.getInstance().listUserVisibleTools()) {
 			const action = `tool:${tool.name}`;
 			const matched = (this.host.settings.agentRuntime.projectToolPolicyRules[this.policyEditorProjectSlug] ?? [])
 				.find((item) => item.action === action);

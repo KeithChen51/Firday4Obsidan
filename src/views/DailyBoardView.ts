@@ -13,9 +13,10 @@ import {
 	type ProjectEditorDraft,
 	submitProjectDraft,
 } from "../features/workbench/ProjectEditorService";
-import { TOOL_MANIFESTS, type ToolManifest } from "../platform/tools/ToolManifestCatalog";
+import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
+import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
 import {
 	RuntimeProgressEvent,
@@ -28,6 +29,7 @@ import type { ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
+import { SkillRegistry } from "../core/execution/SkillRegistry";
 import { MentionDropdown, type MentionSuggestion } from "./components/MentionDropdown";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
@@ -1043,7 +1045,7 @@ export class DailyBoardView extends ItemView {
 				.map((item) => item.trim().toLowerCase())
 				.filter((item) => item.length > 0),
 		);
-		for (const tool of TOOL_MANIFESTS) {
+		for (const tool of CapabilityRegistry.getInstance().listUserVisibleTools()) {
 			const item = list.createDiv({ cls: "friday-control-center-item" });
 			const meta = item.createDiv({ cls: "friday-control-center-item-meta" });
 			meta.createDiv({ cls: "friday-control-center-item-title", text: tool.name });
@@ -1147,8 +1149,7 @@ export class DailyBoardView extends ItemView {
 			}
 		}
 		const orderedSkills = [...merged.values()].sort((left, right) => left.command.localeCompare(right.command, "zh-CN"));
-		const builtinSkills = orderedSkills.filter((skill) => skill.filePath.startsWith("builtin://"));
-		const personalSkills = orderedSkills.filter((skill) => !skill.filePath.startsWith("builtin://"));
+		const { builtinSkills, personalSkills } = SkillRegistry.getInstance().groupDescriptors(orderedSkills);
 		this.renderSkillControlGroup(
 			section,
 			this.t("policy.skills.builtin", "Builtin skills"),
