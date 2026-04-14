@@ -1,6 +1,5 @@
 ﻿import { Notice } from "obsidian";
 import { PERSONAL_SLUG } from "../constants/paths";
-import { SyncStatusModal } from "../modals/SyncStatusModal";
 import { FridayPluginApi } from "../types/plugin";
 
 export function registerSyncCommands(plugin: FridayPluginApi): void {
@@ -16,13 +15,22 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 			const results = await plugin.syncService.syncAll(plugin.settings.projects);
 			updateProjectSyncTimestamps(plugin, results);
 			await plugin.saveSettings();
-
-			new SyncStatusModal(plugin.app, {
-				projects: plugin.settings.projects,
-				syncService: plugin.syncService,
-				results,
-				t: plugin.t.bind(plugin),
-			}).open();
+			const recordedAt = new Date().toISOString();
+			plugin.workbenchStateStore.setSyncReports(
+				plugin.settings.projects.map((project) => ({
+					projectSlug: project.slug,
+					result: results.get(project.slug) ?? {
+						success: false,
+						projectSlug: project.slug,
+						pulledFiles: [],
+						pushedFiles: [],
+						conflicts: [],
+						error: "No sync result",
+					},
+					recordedAt,
+				})),
+			);
+			await plugin.openWorkspaceView();
 		},
 	});
 
@@ -45,31 +53,24 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 				new Notice(plugin.t("notice.syncFailed", { error: result.error ?? currentProject.slug }), 6000);
 			}
 
-			const one = new Map<string, typeof result>();
-			one.set(currentProject.slug, result);
-			new SyncStatusModal(plugin.app, {
-				projects: [currentProject],
-				syncService: plugin.syncService,
-				results: one,
-				t: plugin.t.bind(plugin),
-			}).open();
+			plugin.workbenchStateStore.recordSyncReport({
+				projectSlug: currentProject.slug,
+				result,
+				recordedAt: new Date().toISOString(),
+			});
+			await plugin.openWorkspaceView();
 		},
 	});
 
 	plugin.addCommand({
 		id: "sync-status",
 		name: plugin.t("command.syncStatus"),
-		callback: () => {
+		callback: async () => {
 			if (plugin.settings.projects.length === 0) {
 				new Notice(plugin.t("notice.noProjectsConfigured"), 3000);
 				return;
 			}
-
-			new SyncStatusModal(plugin.app, {
-				projects: plugin.settings.projects,
-				syncService: plugin.syncService,
-				t: plugin.t.bind(plugin),
-			}).open();
+			await plugin.openWorkspaceView();
 		},
 	});
 }

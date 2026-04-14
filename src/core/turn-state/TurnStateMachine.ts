@@ -1,0 +1,46 @@
+export type StepEventName =
+	| "STEP_START"
+	| "STEP_CONTEXT"
+	| "STEP_MODEL_REQUEST"
+	| "STEP_MODEL_RESPONSE"
+	| "STEP_TOOL_APPROVAL"
+	| "STEP_TOOL_CALL"
+	| "STEP_TOOL_RESULT"
+	| "STEP_SUBAGENT_START"
+	| "STEP_SUBAGENT_RESULT"
+	| "STEP_FALLBACK"
+	| "STEP_DONE"
+	| "STEP_ERROR";
+
+export interface StepTraceEvent {
+	turnId: string;
+	index: number;
+	stepName: StepEventName;
+	timestamp: string;
+	depth: number;
+	step?: number;
+	tool?: string;
+	message: string;
+}
+
+export class TurnStateMachine {
+	private readonly traces: StepTraceEvent[] = [];
+	private index = 0;
+
+	constructor(private readonly turnId: string) {}
+
+	append(event: Omit<StepTraceEvent, "turnId" | "index" | "timestamp">): StepTraceEvent {
+		const trace: StepTraceEvent = {
+			turnId: this.turnId,
+			index: ++this.index,
+			timestamp: new Date().toISOString(),
+			...event,
+		};
+		this.traces.push(trace);
+		return trace;
+	}
+
+	snapshot(): StepTraceEvent[] {
+		return [...this.traces];
+	}
+}

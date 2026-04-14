@@ -14,6 +14,7 @@ export interface SlashCommandTemplate {
 export interface FridaySettings {
 	version: number;
 	locale: LocaleCode;
+	localeFollowSystem: boolean;
 	user: {
 		userId: string;
 		displayName: string;
@@ -47,6 +48,7 @@ export const SETTINGS_VERSION = 5;
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
 	locale: "zh-CN",
+	localeFollowSystem: true,
 	user: {
 		userId: "",
 		displayName: "",
@@ -74,6 +76,8 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 	agentRuntime: {
 		requireWriteConfirmation: true,
 		toolPermissionMode: "standard",
+		disabledTools: [],
+		disabledSkills: [],
 		enableExecTool: false,
 		execTimeout: 30000,
 		execWorkingDir: "vault",
@@ -99,6 +103,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 			"del\\s+/s\\s+/q\\s+[a-zA-Z]:",
 		],
 		toolCallingMode: "auto",
+		projectToolPolicyRules: {},
 	},
 	slashCommands: [],
 };

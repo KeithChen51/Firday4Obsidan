@@ -18,7 +18,7 @@ export class AgentActionService {
 		const path = normalizePath(action.path);
 		let summary = "";
 		if (action.type === "delete") {
-			summary = `删除文件 ${path}`;
+			summary = action.targetType === "folder" ? `删除文件夹 ${path}` : `删除文件 ${path}`;
 		} else if (action.type === "create") {
 			summary = `新建文件 ${path}`;
 		} else {
@@ -61,8 +61,8 @@ export class AgentActionService {
 	private async applyAction(targetPath: string, action: AgentAction): Promise<void> {
 		const existing = this.vault.getAbstractFileByPath(targetPath);
 		if (action.type === "delete") {
-			if (!(existing instanceof TFile)) {
-				throw new Error(`文件不存在：${targetPath}`);
+			if (!(existing instanceof TFile) && !(existing instanceof TFolder)) {
+				throw new Error(`文件或文件夹不存在：${targetPath}`);
 			}
 			await this.vault.delete(existing);
 			return;

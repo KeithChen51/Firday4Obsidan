@@ -2,12 +2,12 @@
 import { homedir } from "os";
 import path from "path";
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { RegisterProjectModal } from "../modals/RegisterProjectModal";
 import type { ModelCapabilityInfo } from "../services/AIService";
 import { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
 import type { LocaleCode } from "../i18n/types";
+import { TOOL_MANIFESTS } from "../platform/tools/ToolManifestCatalog";
 
 type SettingsHost = FridayPluginApi & Plugin;
 type LlmMode = "openai" | "group";
@@ -39,6 +39,11 @@ export class FridaySettingTab extends PluginSettingTab {
 	private llmStatus: LlmStatus = "idle";
 	private llmStatusDetail = "";
 	private modelPresetResult: ModelPresetResult | null = null;
+	private activeSection: SettingsSection = "user";
+	private newAgentDraft = "";
+	private newProjectGroupDraft = "";
+	private pendingDeleteGroupId = "";
+	private policyEditorProjectSlug = "";
 
 	constructor(app: App, plugin: SettingsHost) {
 		super(app, plugin);
@@ -49,31 +54,80 @@ export class FridaySettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.createEl("h2", { text: this.host.t("settings.title") });
+		this.renderSectionTabs(containerEl);
 
-		this.renderUserSection(containerEl);
-		this.renderSyncSection(containerEl);
-		this.renderLlmSection(containerEl);
-		this.renderAgentSection(containerEl);
-		this.renderSlashCommandSection(containerEl);
+		if (this.activeSection === "user") {
+			this.renderUserSection(containerEl);
+			return;
+		}
+		if (this.activeSection === "sync") {
+			this.renderSyncSection(containerEl);
+			return;
+		}
+		if (this.activeSection === "llm") {
+			this.renderLlmSection(containerEl);
+			return;
+		}
+		if (this.activeSection === "agent") {
+			this.renderAgentSection(containerEl);
+			return;
+		}
+		if (this.activeSection === "slash") {
+			this.renderSlashCommandSection(containerEl);
+			return;
+		}
 		this.renderProjectSection(containerEl);
+	}
+
+	private renderSectionTabs(containerEl: HTMLElement): void {
+		const nav = containerEl.createDiv({ cls: "friday-top-nav" });
+		const items: Array<{ id: SettingsSection; label: string }> = [
+			{ id: "user", label: this.host.t("settings.section.user") },
+			{ id: "sync", label: this.host.t("settings.section.sync") },
+			{ id: "llm", label: this.host.t("settings.section.llm") },
+			{ id: "agent", label: this.host.t("settings.section.agent") },
+			{ id: "slash", label: this.host.t("settings.section.slash") },
+			{ id: "project", label: this.host.t("settings.section.project") },
+		];
+		for (const item of items) {
+			const button = nav.createEl("button", {
+				cls: `friday-nav-button${this.activeSection === item.id ? " is-active" : ""}`,
+				text: item.label,
+			});
+			button.onclick = () => {
+				this.activeSection = item.id;
+				this.display();
+			};
+		}
 	}
 
 	private renderUserSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h3", { text: this.host.t("settings.section.user") });
 
-		new Setting(containerEl)
+		const localeSetting = new Setting(containerEl)
 			.setName(this.host.t("settings.locale.name"))
-			.setDesc(this.host.t("settings.locale.desc"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("zh-CN", this.host.t("settings.locale.zh"));
-				dropdown.addOption("en-US", this.host.t("settings.locale.en"));
-				dropdown.setValue(this.host.settings.locale ?? "zh-CN");
-				dropdown.onChange(async (value) => {
-					this.host.settings.locale = (value === "en-US" ? "en-US" : "zh-CN") as LocaleCode;
+			.setDesc(this.host.t("settings.locale.desc"));
+		localeSetting.addDropdown((dropdown) => {
+			dropdown.addOption("zh-CN", this.host.t("settings.locale.zh"));
+			dropdown.addOption("en-US", this.host.t("settings.locale.en"));
+			dropdown.setValue(this.host.settings.locale ?? "zh-CN");
+			dropdown.setDisabled(this.host.settings.localeFollowSystem);
+			dropdown.onChange(async (value) => {
+				this.host.settings.locale = (value === "en-US" ? "en-US" : "zh-CN") as LocaleCode;
+				await this.host.saveSettings();
+				this.display();
+			});
+		});
+		localeSetting.addToggle((toggle) => {
+			toggle
+				.setValue(this.host.settings.localeFollowSystem)
+				.setTooltip(this.t("settings.locale.followSystem", "跟随系统"))
+				.onChange(async (value) => {
+					this.host.settings.localeFollowSystem = value;
 					await this.host.saveSettings();
 					this.display();
 				});
-			});
+		});
 
 		new Setting(containerEl)
 			.setName(this.t("settings.user.autoDetect.name", "自动识别用户 ID"))
@@ -367,24 +421,24 @@ export class FridaySettingTab extends PluginSettingTab {
 					this.display();
 				});
 			})
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.agent.create.placeholder", "新 Agent 名称"))
+					.setValue(this.newAgentDraft)
+					.onChange((value) => {
+						this.newAgentDraft = value.trim();
+					}),
+			)
 			.addButton((button) =>
 				button.setButtonText(this.t("settings.agent.create.button", "新建 Agent")).setCta().onClick(async () => {
 					const suggestedName = `Agent-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
-					const accepted = window.confirm(
-						this.t(
-							"settings.agent.create.confirm",
-							"将创建新 Agent（默认名称：{name}）。\n创建后可在配置文件或后续设置页中重命名。\n\n点击“确定”继续，点击“取消”放弃。",
-							{ name: suggestedName },
-						),
-					);
-					if (!accepted) {
-						return;
-					}
+					const nextName = this.newAgentDraft || suggestedName;
 					const created = await this.host.createAgent({
-						name: suggestedName,
+						name: nextName,
 						description: this.t("settings.agent.create.manualDesc", "手动创建"),
 						model: "",
 					});
+					this.newAgentDraft = "";
 					new Notice(this.t("settings.agent.create.success", "已创建 Agent: {name}", { name: created.name }), 3000);
 					this.display();
 				}),
@@ -470,6 +524,8 @@ export class FridaySettingTab extends PluginSettingTab {
 					await this.host.saveSettings();
 				});
 			});
+
+		this.renderProjectPolicyEditor(containerEl);
 
 		new Setting(containerEl)
 			.setName(this.t("settings.agent.enableSubagent.name", "启用子代理"))
@@ -559,6 +615,65 @@ export class FridaySettingTab extends PluginSettingTab {
 			},
 		);
 
+	}
+
+	private renderProjectPolicyEditor(containerEl: HTMLElement): void {
+		const projects = this.host.settings.projects;
+		if (projects.length === 0) {
+			return;
+		}
+		if (!this.policyEditorProjectSlug || !projects.some((item) => item.slug === this.policyEditorProjectSlug)) {
+			this.policyEditorProjectSlug = this.host.settings.activeProjectId || projects[0]!.slug;
+		}
+
+		containerEl.createEl("h4", {
+			text: this.t("settings.agent.policy.title", "项目工具策略"),
+		});
+		containerEl.createEl("p", {
+			text: this.t(
+				"settings.agent.policy.desc",
+				"持久化层按 project > global 合并；session 级临时覆写在工作台对话页设置，只影响当前会话。",
+			),
+		});
+
+		new Setting(containerEl)
+			.setName(this.t("settings.agent.policy.project", "策略作用项目"))
+			.setDesc(this.t("settings.agent.policy.projectDesc", "编辑当前项目的工具策略覆盖。"))
+			.addDropdown((dropdown) => {
+				for (const project of projects) {
+					dropdown.addOption(project.slug, project.slug);
+				}
+				dropdown.setValue(this.policyEditorProjectSlug);
+				dropdown.onChange((value) => {
+					this.policyEditorProjectSlug = value;
+					this.display();
+				});
+			});
+
+		for (const tool of TOOL_MANIFESTS) {
+			const action = `tool:${tool.name}`;
+			const matched = (this.host.settings.agentRuntime.projectToolPolicyRules[this.policyEditorProjectSlug] ?? [])
+				.find((item) => item.action === action);
+			new Setting(containerEl)
+				.setName(action)
+				.setDesc(this.t("settings.agent.policy.itemDesc", "inherit 表示沿用全局权限模式。"))
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", "inherit");
+					dropdown.addOption("allow", "allow");
+					dropdown.addOption("ask", "ask");
+					dropdown.addOption("deny", "deny");
+					dropdown.setValue(matched?.effect ?? "");
+					dropdown.onChange(async (value) => {
+						const currentRules = this.host.settings.agentRuntime.projectToolPolicyRules[this.policyEditorProjectSlug] ?? [];
+						const nextRules = currentRules.filter((item) => item.action !== action);
+						if (value === "allow" || value === "ask" || value === "deny") {
+							nextRules.push({ action, effect: value });
+						}
+						this.host.settings.agentRuntime.projectToolPolicyRules[this.policyEditorProjectSlug] = nextRules;
+						await this.host.saveSettings();
+					});
+				});
+		}
 	}
 
 	private renderSlashCommandSection(containerEl: HTMLElement): void {
@@ -815,10 +930,17 @@ export class FridaySettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName(this.t("settings.project.group.manage", "项目组管理"))
 			.setDesc(this.t("settings.project.group.manageDesc", "支持创建、重命名、删除项目组。删除时项目会迁移到 default-group。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.project.group.createPrompt", "输入项目组名称"))
+					.setValue(this.newProjectGroupDraft)
+					.onChange((value) => {
+						this.newProjectGroupDraft = value.trim();
+					}),
+			)
 			.addButton((button) =>
 				button.setButtonText(this.t("settings.project.group.create", "新建项目组")).onClick(async () => {
-					const input = window.prompt(this.t("settings.project.group.createPrompt", "输入项目组名称"), "");
-					const name = (input ?? "").trim();
+					const name = this.newProjectGroupDraft.trim();
 					if (!name) {
 						return;
 					}
@@ -843,6 +965,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						createdAt: now,
 						updatedAt: now,
 					});
+					this.newProjectGroupDraft = "";
 					this.display();
 				}),
 			);
@@ -852,38 +975,38 @@ export class FridaySettingTab extends PluginSettingTab {
 			new Setting(containerEl)
 				.setName(`${group.name} (${count})`)
 				.setDesc(`${group.id}`)
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.project.group.rename", "重命名")).onClick(async () => {
-						const input = window.prompt(
-							this.t("settings.project.group.renamePrompt", "输入新名称"),
-							group.name,
-						);
-						const name = (input ?? "").trim();
-						if (!name || name === group.name) {
-							return;
-						}
-						await this.host.upsertProjectGroup({
-							...group,
-							name,
-							updatedAt: new Date().toISOString(),
-						});
-						this.display();
-					}),
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.project.group.renamePrompt", "输入新名称"))
+						.setValue(group.name)
+						.onChange(async (value) => {
+							const name = value.trim();
+							if (!name || name === group.name) {
+								return;
+							}
+							await this.host.upsertProjectGroup({
+								...group,
+								name,
+								updatedAt: new Date().toISOString(),
+							});
+						}),
 				)
 				.addButton((button) =>
 					button
-						.setButtonText(this.t("settings.project.group.remove", "删除"))
+						.setButtonText(
+							this.pendingDeleteGroupId === group.id
+								? this.t("settings.project.group.removeConfirmInline", "再次点击删除")
+								: this.t("settings.project.group.remove", "删除"),
+						)
 						.setDisabled(group.id === "default-group")
 						.onClick(async () => {
-							const confirmed = window.confirm(
-								this.t("settings.project.group.removeConfirm", "确认删除项目组 {name} 吗？", {
-									name: group.name,
-								}),
-							);
-							if (!confirmed) {
+							if (this.pendingDeleteGroupId !== group.id) {
+								this.pendingDeleteGroupId = group.id;
+								this.display();
 								return;
 							}
 							await this.host.removeProjectGroup(group.id);
+							this.pendingDeleteGroupId = "";
 							this.display();
 						}),
 				);
@@ -1215,26 +1338,18 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private openRegisterProjectModal(initial?: ProjectEntry): void {
-		const existingSlugs = new Set(this.host.settings.projects.map((project) => project.slug));
-		new RegisterProjectModal(this.app, {
-			initial,
-			existingSlugs,
-			projectGroups: this.getProjectGroupsForDisplay(),
-			fridayRoot: this.host.dataService.getFridayRoot(),
-			currentUserId: this.host.getPrimaryUserId(),
-			syncService: this.host.syncService,
-			t: this.host.t.bind(this.host),
-			onSubmit: async (entry) => {
-				await this.host.upsertProject(entry);
-				new Notice(
-					initial
-						? this.t("settings.project.notice.updated", "项目已更新：{slug}", { slug: entry.slug })
-						: this.t("settings.project.notice.registered", "项目已注册：{slug}", { slug: entry.slug }),
-					3000,
-				);
-				this.display();
-			},
-		}).open();
+		this.host.workbenchStateStore.setProjectEditorRequest(
+			initial
+				? { mode: "edit", projectSlug: initial.slug }
+				: { mode: "create" },
+		);
+		void this.host.openWorkspaceView();
+		new Notice(
+			initial
+				? this.t("settings.project.openEditor.edit", "已在工作台打开项目编辑器：{slug}", { slug: initial.slug })
+				: this.t("settings.project.openEditor.create", "已在工作台打开项目注册器"),
+			3000,
+		);
 	}
 
 	private buildProjectDescription(project: ProjectEntry): string {
@@ -1250,4 +1365,6 @@ export class FridaySettingTab extends PluginSettingTab {
 		return `${remoteText} | ${modeText} | ${syncText}`;
 	}
 }
+
+type SettingsSection = "user" | "sync" | "llm" | "agent" | "slash" | "project";
 

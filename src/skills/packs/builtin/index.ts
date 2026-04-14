@@ -1,0 +1,168 @@
+import {
+	BUILTIN_JSON_CANVAS_MARKDOWN,
+	BUILTIN_OBSIDIAN_BASES_MARKDOWN,
+	BUILTIN_OBSIDIAN_CLI_MARKDOWN,
+	BUILTIN_OBSIDIAN_MARKDOWN_MARKDOWN,
+} from "./obsidian-extra";
+
+export type BuiltinSkillTriggerMode = "auto" | "manual";
+
+export interface BuiltinSkillDefinition {
+	name: string;
+	description: string;
+	descriptionZh: string;
+	command: string;
+	aliases: string[];
+	tags: string[];
+	globs: string[];
+	trigger: BuiltinSkillTriggerMode;
+	filePath: string;
+	markdown: string;
+}
+
+export const BUILTIN_SKILL_SCHEME = "builtin://";
+
+const BUILTIN_COMPILE_WIKI_MARKDOWN = "---\nname: compile-wiki\ndescription: 将当前项目的 Raw 笔记编译为高密度的双层 Wiki 页面（Compiled Truth + Timeline），并维护项目级索引 index.md、关系图和标签归档。\ncommand: compile-wiki\naliases: [compile, build-wiki, sync-wiki]\ntags: [knowledge, wiki, ingest]\ntrigger: 用户主动 `/compile-wiki`，或 Agent 在写入大量新 Raw 笔记后主动触发\nexecutionMode: agent_orchestrated\n---\n\n# Skill: compile-wiki\n\n> **架构哲学**：Thin Harness, Fat Skills —— 判断力上移到 Skill（本文件），确定性执行下沉到 Harness（代码层）。\n\n## 1. 核心定位\n\n此技能是 F.R.I.D.A.Y 知识体系的**写入端**。它将当前项目 `<projectRoot>/raw/` 或 `<projectRoot>/workspace/`（经用户审核后）下的散乱笔记、对话片段编译并浓缩为标准的双层结构 Wiki 页面，存储到 `<projectRoot>/wiki/pages/`。同时同步维护 `<projectRoot>/wiki/index.md`、关系图谱和标签归档。\n\n此技能与 `lookup-wiki`（读取端）共同构成知识的**存取闭环**。\n\n## 2. 强约束\n\n1. **重写而非增强**：Compiled Truth 部分必须是基于最新全量理解的**完全重写**，形成当前共识快照。禁止在旧文本上做增量拼接。\n2. **不可篡改的 Timeline**：Timeline 区域是追加式（Append-only）的原始证据链接。严禁修改或删除已有的 Timeline 条目。\n3. **相对路径引用**：所有文件操作必须使用 `<projectRoot>/...` 形式的相对路径，不得硬编码全局路径。\n4. **标签保护**：用户在 Obsidian 中手工维护的文档标签是一级输入信号，不可被 AI 无依据覆写。AI 可在规则命中时补充标签，但必须记录证据。\n5. **归档可追溯**：每次编译操作必须可追溯到\"命中规则 + 标签来源 + 路由决策\"的审计记录。\n\n## 3. 依赖工具\n\n| 工具 | 用途 |\n|------|------|\n| `read` | 读取源文件、现有 Wiki 页面、标签规则 |\n| `write` | 写入新的 Wiki 页面或覆盖 Compiled Truth |\n| `append` | 向 Timeline 追加证据条目 |\n| `search_text` | 在项目中搜索相关实体或上下文 |\n\n## 4. 执行步骤\n\n### Step 1: 输入解析与源材料读取\n\n1. 识别触发源：当前编辑的文件、指定的 `raw/` 子目录、`workspace/` 中已审核的文件，或对话选区。\n   > `workspace/` 是人机共享暂存区，AI 生成文件默认落地于此，用户草稿亦可存放。只有经用户审核确认的内容才应被编译入 Wiki。\n2. 使用 `read` 工具读取源内容。\n3. 提取核心实体（人物、概念、项目、决策）、定义、关键事实和关系。\n\n**失败分类**：若触发源不存在或不可读，返回 `invalid_input` 错误并终止。\n\n### Step 2: 标签规则加载与分类\n\n1. 使用 `read` 读取 `<projectRoot>/wiki/_governance/tag-policy/` 下的标签规则文件。\n2. 根据规则对源材料进行分类（文档类型 → 标签 → 归档路由）。\n3. 提取源材料中用户已手工标注的标签（`#tag` 或 frontmatter tags），将其作为一级输入信号。\n4. 若 AI 判断需要补充标签，必须基于规则命中，并在后续审计记录中注明证据。\n\n**失败分类**：若标签规则文件不存在，降级为\"无规则模式\"继续执行，但在输出中标注 `tag_policy_missing` 警告。\n\n### Step 3: 评估与路由\n\n1. 判断提取的信息属于\"新实体（CREATE）\"还是\"现有实体的补充（UPDATE）\"。\n2. 若为 UPDATE，使用 `read` 读取 `<projectRoot>/wiki/pages/` 下的当前 Wiki 页面。\n3. 若为 CREATE，确定新页面的 slug（文件名），遵循项目命名规范。\n4. 根据标签分类结果，确定归档路由（页面应存放在 `wiki/pages/` 的哪个子路径下）。\n\n### Step 4: 提炼 Compiled Truth (上半部分 — 重写)\n\n1. 综合源内容与现有知识（若为 UPDATE），**完全重写**一份高密度的\"共识快照\"。\n2. 结构要求：\n   - **一段式执行摘要**：如果只读这一段，就能了解该实体的当前状态。\n   - **结构化状态字段**：如 `Status`、`Owner`、`Tags`、`Related` 等。\n   - **Open Threads**：当前未解决的活跃问题（解决后移入 Timeline）。\n   - **See Also**：指向相关 Wiki 页面的 `[[双链]]`。\n3. 抹除冗余的时间线噪音，只保留当前有效的结论。\n\n### Step 5: 构建 Timeline 证据链 (下半部分 — 追加)\n\n1. 将本次编译的原始片段或源文件链接（附带时间戳）追加到页面的 Timeline 区域。\n2. 格式：`- [YYYY-MM-DD] [来源路径或链接]: [原始事件/事实描述]`\n3. 如果 Open Threads 中有已解决的问题，将其从 Compiled Truth 移入 Timeline 并标注解决方案。\n4. **严禁修改或删除已有的 Timeline 条目。**\n\n### Step 6: 页面组装与写入\n\n1. 按以下结构组装最终的 Markdown 页面：\n\n```markdown\n---\ntags: [tag1, tag2]\ncreated: YYYY-MM-DD\nupdated: YYYY-MM-DD\nslug: entity-name\n---\n\n# [页面标题]\n\n## Compiled Truth\n\n[一段式执行摘要]\n\n**Status:** ...\n**Owner:** ...\n**Tags:** ...\n\n### Open Threads\n- ...\n\n### See Also\n- [[related-page-1]]\n- [[related-page-2]]\n\n---\n\n## Timeline\n\n- [YYYY-MM-DD] [来源]: [事件描述]\n- [YYYY-MM-DD] [来源]: [事件描述]\n```\n\n2. 使用 `write` 工具将组装好的内容写入 `<projectRoot>/wiki/pages/[slug].md`。\n\n**失败分类**：若写入失败，返回 `tool_runtime_error` 并保留源材料不丢失。\n\n### Step 7: 更新索引与关系图\n\n1. 使用 `read` 读取 `<projectRoot>/wiki/index.md`。\n2. 若是新页面，在合适的分类下追加其路径、功能标签和一句话描述。\n3. 若是更新页面，刷新 `index.md` 中该页面的描述和标签。\n4. 提取页面中的 `[[双链]]` 和 `#标签`，更新关系图谱：\n   - **节点**：文档（必须）、章节（可选二级节点）。\n   - **边**：`wikilink`、反向链接、标签共现、目录父子、显式引用。\n5. 使用 `write` 保存更新后的 `index.md`。\n\n**失败分类**：若 `index.md` 更新失败，返回 `tool_runtime_error`，但已写入的 Wiki 页面不回滚（允许后续重试索引更新）。\n\n### Step 8: 审计记录\n\n1. 记录本次编译操作的审计信息：\n   - 触发来源（manual / auto）\n   - 操作类型（CREATE / UPDATE）\n   - 命中的标签规则\n   - 标签变更（新增/保留/AI 补充）\n   - 归档路由决策\n   - 关系图变更摘要\n2. 此审计信息将由 Harness 层写入 `tool_runs` 记录。\n\n## 5. 失败分类汇总\n\n| 失败场景 | 错误分类 | 处理策略 |\n|----------|----------|----------|\n| 触发源不存在或不可读 | `invalid_input` | 终止，返回错误 |\n| 标签规则文件缺失 | `dependency_unavailable`（降级） | 继续执行，标注警告 |\n| Wiki 页面写入失败 | `tool_runtime_error` | 终止，保留源材料 |\n| index.md 更新失败 | `tool_runtime_error` | 页面已写入，允许重试索引 |\n| Agent 计划/提炼失败 | `tool_runtime_error` | 终止，保留源材料 |\n\n## 6. 页面模板示例\n\n```markdown\n---\ntags: [architecture, decision]\ncreated: 2026-04-12\nupdated: 2026-04-12\nslug: context-compression-strategy\n---\n\n# 上下文压缩策略\n\n## Compiled Truth\n\nF.R.I.D.A.Y 采用 Semantic Compactor 进行上下文压缩，替代硬比例截断方案。\n压缩器在 token 预算即将耗尽时触发，通过语义分析保留高价值信息，丢弃冗余内容。\n\n**Status:** 已确认（D4）\n**Owner:** Agent Runtime\n**Tags:** #context #compression #D4\n\n### Open Threads\n- 压缩比例的最优阈值尚未通过实测确定。\n\n### See Also\n- [[context-assembler]]\n- [[agent-loop-lifecycle]]\n\n---\n\n## Timeline\n\n- [2026-04-10] raw/meeting-notes-0410.md: 讨论确认采用 Semantic Compactor 替代硬截断。\n- [2026-04-09] raw/decision-log-d4.md: D4 维度决策初稿，提出三种压缩方案。\n```\n";
+
+const BUILTIN_LOOKUP_WIKI_MARKDOWN = "---\nname: lookup-wiki\ndescription: 执行 Brain-First Lookup 四步回退协议，为 Agent 提供项目背景知识。完全替代 semantic_search 作为首版检索主路径。\ncommand: lookup-wiki\naliases: [lookup, search-wiki, find-wiki]\ntags: [knowledge, search, retrieve]\ntrigger: Agent 在执行任务前评估需要补充背景知识时自动触发，或用户提问涉及项目知识时\nexecutionMode: agent_orchestrated\n---\n\n# Skill: lookup-wiki\n\n> **架构哲学**：Thin Harness, Fat Skills —— 判断力上移到 Skill（本文件），确定性执行下沉到 Harness（代码层）。\n\n## 1. 核心定位\n\n此技能是 F.R.I.D.A.Y 知识体系的**读取端**，实现了 Brain-First Lookup 四步回退协议。它的核心思想是：在不依赖 Embedding 或复杂向量检索的前提下，通过智能的层级降级策略，优先读取高密度的 Compiled Truth，从而提供高召回率和可解释的检索结果。\n\n此技能与 `compile-wiki`（写入端）共同构成知识的**存取闭环**。`semantic_search` 已降级为 P2 后置候选，首版检索完全由本技能接管。\n\n## 2. 强约束\n\n1. **严格四步回退**：必须按 Keyword Match → Direct Read → Relation Walk → Fallback 的顺序执行。**禁止在前三步已获得充足信息时调用 Fallback。**\n2. **相对路径引用**：所有文件操作必须使用 `<projectRoot>/...` 形式的相对路径。\n3. **优先 Compiled Truth**：检索结果必须优先返回 Wiki 页面的 Compiled Truth 部分（`---` 分隔线以上的内容）。\n4. **sourceMap 必须**：每次检索结果必须附带 sourceMap，记录来源路径和命中步骤。\n5. **关系路径可解释**：当通过 Relation Walk 获取信息时，必须给出关系路径摘要（如 `A → B(tag:xxx) → C`）。\n\n## 3. 依赖工具\n\n| 工具 | 用途 |\n|------|------|\n| `read` | 读取 Wiki 页面（尤其是 Compiled Truth 部分） |\n| `search_text` | 在 index.md 或全库执行关键字匹配 |\n\n## 4. 执行步骤\n\n### Step 1: Keyword Match (入口点)\n\n1. 从用户问题或当前任务需求中提取检索关键词。\n2. 使用 `search_text` 工具在 `<projectRoot>/wiki/index.md` 中进行关键字匹配。\n3. 若 `index.md` 中有命中，提取最相关的 Wiki 页面路径（如 `<projectRoot>/wiki/pages/xxx.md`）。\n4. 若 `index.md` 未命中，尝试在 `<projectRoot>/wiki/pages/` 目录结构中进行浅层关键字匹配（基于文件名和目录名）。\n5. 若仍未命中，跳转至 Step 4 (Fallback)。\n\n**失败分类**：若 `index.md` 不存在，标注 `dependency_unavailable` 警告，直接跳转 Step 4。\n\n### Step 2: Direct Read (高密度读取)\n\n1. 如果在 Step 1 成功定位了 Wiki 页面路径，使用 `read` 工具读取该页面。\n2. **关键动作**：优先提取该页面的 Compiled Truth 部分（即 `---` 分隔线以上的内容）。\n3. 评估读取到的信息是否足以回答用户问题或满足当前任务的背景需求。\n4. **终止条件**：若信息充足，**立即结束检索**，组装输出并返回。不得继续执行后续步骤。\n\n### Step 3: Relation Walk (关系扩散)\n\n> 仅当 Step 2 的信息不足时才进入此步骤。\n\n1. 提取当前 Wiki 页面中的 `[[双链]]`、`#标签` 和 `See Also` 引用。\n2. 如果项目维护了关系图谱（`raw_relation_graph`），读取当前节点的 1-hop 邻居列表。\n3. 从邻居中选择最相关的 1-2 个 Wiki 页面，使用 `read` 读取其 Compiled Truth。\n4. 综合多个页面的信息，评估是否充足。\n5. **终止条件**：若信息充足，**立即结束检索**，组装输出并返回。不得继续执行 Step 4。\n6. 记录关系路径摘要（如 `context-compression-strategy → [[context-assembler]](tag:D4) → [[agent-loop-lifecycle]]`）。\n\n### Step 4: Fallback (兜底搜索)\n\n> 仅当前三步均未命中，或信息严重不足时才进入此步骤。\n\n1. 使用 `search_text` 在全库范围执行关键字检索，搜索范围包括：\n   - `<projectRoot>/raw/`（原始笔记）\n   - `<projectRoot>/wiki/pages/`（Wiki 页面全文）\n   - `<projectRoot>/workspace/`（人机共享暂存区，含 AI 生成文件和用户草稿）\n   - 其他相关目录\n2. 收集零散的匹配片段作为补充证据。\n3. 若仍无结果，返回\"未找到相关知识\"的明确回复，不编造信息。\n\n**失败分类**：若 `search_text` 工具本身执行失败，返回 `tool_runtime_error`。\n\n## 5. 输出契约\n\n每次检索完成后，必须返回以下结构化信息：\n\n1. **核心事实与摘要**：从 Compiled Truth 或其他来源提取的关键信息。\n2. **sourceMap**（必须）：\n\n| 字段 | 说明 |\n|------|------|\n| `hitStep` | 命中步骤（`keyword_match` / `direct_read` / `relation_walk` / `fallback`） |\n| `sourcePath` | 信息来源的文件路径 |\n| `sourceSection` | 信息来源的页面区域（`compiled_truth` / `timeline` / `raw`） |\n| `relationPath` | 若通过 Relation Walk 获取，记录关系路径摘要 |\n\n3. **置信度评估**：基于命中步骤和信息密度，给出简要的置信度说明（如\"高置信：直接命中 Compiled Truth\"或\"低置信：仅 Fallback 片段匹配\"）。\n\n## 6. 检索示例\n\n**场景**：用户问\"F.R.I.D.A.Y 的上下文压缩策略是什么？\"\n\n**Step 1 (Keyword Match)**：\n- 在 `index.md` 中搜索\"上下文压缩\"。\n- 命中条目：`wiki/pages/context-compression-strategy.md — 上下文压缩策略`。\n\n**Step 2 (Direct Read)**：\n- 读取 `<projectRoot>/wiki/pages/context-compression-strategy.md` 的 Compiled Truth。\n- 获得完整的压缩策略描述。\n- 信息充足，**终止检索**。\n\n**输出**：\n```\n核心事实：F.R.I.D.A.Y 采用 Semantic Compactor 进行上下文压缩...\nsourceMap: { hitStep: \"direct_read\", sourcePath: \"<projectRoot>/wiki/pages/context-compression-strategy.md\", sourceSection: \"compiled_truth\" }\n置信度：高（直接命中 Compiled Truth）\n```\n";
+
+const BUILTIN_MAINTAIN_MEMORY_MARKDOWN = "---\nname: maintain-memory\ndescription: 将对话中散落的用户偏好、约束规则和纠错信息提炼到长期文件化记忆仓，支持主动触发和静默触发。\ncommand: maintain-memory\naliases: [remember, memory, save-pref]\ntags: [memory, preferences, constraints]\ntrigger: 用户主动 `/remember`，或 Semantic Compactor 在压缩上下文时静默触发\nexecutionMode: agent_orchestrated\n---\n\n# Skill: maintain-memory\n\n> **架构哲学**：Thin Harness, Fat Skills —— 判断力上移到 Skill（本文件），确定性执行下沉到 Harness（代码层）。\n\n## 1. 核心定位\n\n此技能是 F.R.I.D.A.Y 记忆系统（D6）的**写入端**。它将对话历史中散落的用户偏好、约束规则和纠错信息，提炼并持久化到长期文件化记忆仓中，确保 Agent 在后续会话中能够召回这些信息。\n\n记忆仓分为两层，与 §1.7 Vault 目录结构约束对齐：\n\n| 层级 | 存储路径 | 内容 |\n|------|----------|------|\n| 全局记忆 | `F.R.I.D.A.Y/memory/global_user_memory.md` | 跨项目通用的用户偏好和约束（如\"回复尽量简短\"） |\n| 项目记忆 | `<projectRoot>/memory/project_behavior_memory.md` | 当前项目特定的行文规范和行为约束（如\"本项目用 TypeScript\"） |\n\n## 2. 强约束\n\n1. **可读可改可审计**：记忆条目必须是人类可读的 Markdown 格式，带来源引用（turnId 或时间戳）。拒绝黑盒隐式 Prompt。\n2. **冲突保护**：不得无依据覆盖已有记忆条目。冲突时必须保留旧条目并标记冲突，或执行合并覆盖并保留变更原因。\n3. **静默执行**：当 Semantic Compactor 触发时，此过程应在后台静默执行，不弹窗、不阻断主流程。\n4. **纠错最高优先级**：如果用户纠正了 Agent 关于某个事实或偏好的错误认知，该纠正必须立即写入记忆，不得延迟或批量处理。\n\n## 3. 依赖工具\n\n| 工具 | 用途 |\n|------|------|\n| `read` | 读取上下文快照和现有的记忆文件 |\n| `write` | 更新或覆盖记忆文件 |\n| `append` | 向记忆文件追加新条目 |\n\n## 4. 执行步骤\n\n### Step 1: 记忆识别与提取\n\n1. 扫描当前的 `ContextAssembledSnapshot`（对话历史、用户指令等）。\n2. 识别并提取以下模式：\n   - **偏好表达**：\"以后不要用粗体\"、\"回复尽量简短\"\n   - **指令修改**：\"在这个项目中必须用 React\"、\"代码注释用英文\"\n   - **错误纠正**：\"不对，应该是 TypeScript 而不是 JavaScript\"\n   - **约束声明**：\"不要引入新的依赖\"、\"所有 API 必须有错误处理\"\n3. 为每个提取的记忆生成一段简明的规则描述。\n\n**失败分类**：若上下文快照为空或不可读，返回 `invalid_input` 并终止。\n\n### Step 2: 作用域判定\n\n1. 评估提取的记忆是否具有全局适用性。\n2. 判定规则：\n   - 若为通用偏好（如\"回复尽量简短\"、\"不要用 emoji\"），标记为 `global`。\n   - 若为项目特定规范（如\"本项目采用 React 框架\"、\"API 前缀用 /v2\"），标记为 `project`。\n   - 若无法判定，默认标记为 `project`（避免全局污染）。\n\n### Step 3: 冲突检测与合并\n\n1. 根据作用域，使用 `read` 读取目标记忆文件：\n   - `global` → `F.R.I.D.A.Y/memory/global_user_memory.md`\n   - `project` → `<projectRoot>/memory/project_behavior_memory.md`\n2. 检查文件中是否已存在语义相同或矛盾的旧记忆。\n3. 冲突处理策略：\n   - **无冲突**：直接追加新条目。\n   - **语义相同**：跳过，不重复写入。\n   - **矛盾冲突**：以最新提取的记忆为准，更新旧条目，并附加变更记录：\n     ```\n     [Updated: YYYY-MM-DD] 旧规则 → 新规则 (Reason: 用户纠正/新指令, Source: turnId)\n     ```\n\n**失败分类**：若记忆文件不存在，自动创建空文件后继续执行。\n\n### Step 4: 格式化写入\n\n1. 将提炼后的记忆按统一格式组织，按类别分组：\n\n```markdown\n# User Memory\n\n## Formatting\n- 回复尽量简短，避免冗长段落。 (Source: turn-20260412-001)\n- 不要使用 emoji。 (Source: turn-20260411-003)\n\n## Behavior\n- 修改文件前必须先确认。 (Source: turn-20260410-002)\n\n## Tech Stack\n- 本项目采用 TypeScript + React。 (Source: turn-20260412-005)\n  [Updated: 2026-04-12] JavaScript → TypeScript (Reason: 用户纠正)\n\n## Constraints\n- 不引入新的外部依赖。 (Source: turn-20260409-001)\n```\n\n2. 使用 `write`（全量更新）或 `append`（仅追加新条目）将格式化后的内容写入对应的记忆文件。\n3. 确保文件结构清晰，便于人类直接阅读和编辑。\n\n**失败分类**：若写入失败，返回 `tool_runtime_error`，但不阻断主对话流程。\n\n### Step 5: 审计记录\n\n1. 记录本次记忆操作的审计信息：\n   - 触发来源（manual: `/remember` / auto: Semantic Compactor）\n   - 提取的记忆条目数量\n   - 冲突处理情况（无冲突 / 合并 N 项 / 跳过 N 项）\n   - 写入目标（global / project）\n2. 此审计信息将由 Harness 层写入 `tool_runs` 记录。\n\n## 5. 失败分类汇总\n\n| 失败场景 | 错误分类 | 处理策略 |\n|----------|----------|----------|\n| 上下文快照为空或不可读 | `invalid_input` | 终止，不写入 |\n| 记忆文件不存在 | 自动创建 | 继续执行 |\n| 记忆文件写入失败 | `tool_runtime_error` | 不阻断主流程，记录错误 |\n| Agent 提炼/判定失败 | `tool_runtime_error` | 终止，不写入 |\n";
+
+const BUILTIN_RESOLVE_CONFLICT_MARKDOWN = "---\nname: resolve-conflict\ndescription: 在同步或文件修改发生冲突时，由 Agent 驱动生成修复建议（Fix Proposal），提交用户审批，替代传统报错阻断流程。\ncommand: resolve-conflict\naliases: [resolve, fix-conflict, merge]\ntags: [collaboration, git, merge, conflict]\ntrigger: SyncService 抛出合并冲突事件，或多文件 Apply 发生冲突时触发\nexecutionMode: agent_orchestrated\n---\n\n# Skill: resolve-conflict\n\n> **架构哲学**：Thin Harness, Fat Skills —— 判断力上移到 Skill（本文件），确定性执行下沉到 Harness（代码层）。\n\n## 1. 核心定位\n\n此技能是 F.R.I.D.A.Y 冲突处理机制（D10）的**仲裁端**。当系统检测到文件冲突时，它主动介入并基于项目上下文生成结构化的合并建议（Fix Proposal），提交给用户审批。这将传统的\"抛出报错等人工\"流程，升级为\"AI 主动提案等审批\"流程。\n\n## 2. 强约束\n\n1. **必须审批**：Fix Proposal 必须提交用户审批，**不得自动强行覆盖**任何文件。\n2. **洞察说明**：Proposal 必须包含\"本地意图 + 远端意图 + 合并策略\"的可解释摘要，让用户理解合并的后果。\n3. **回退机制**：用户拒绝 Proposal 后，必须能回退到手动解决流程，保持文件中的冲突标记不变。\n4. **non-modal 交互**：审批流程优先使用页面内嵌区块或侧边面板，不使用弹窗（Modal），遵循全局交互约束（§1.6）。\n\n## 3. 依赖工具\n\n| 工具 | 用途 |\n|------|------|\n| `read` | 读取冲突文件中的 Diff 标记和上下文 |\n| `shell` | 调用 Git 命令提取差异（如 `git diff`、`git log`） |\n| `write` | 将合并结果写回原文件 |\n\n可选调用：\n| 技能 | 用途 |\n|------|------|\n| `lookup-wiki` | 检索项目背景知识以辅助意图推断 |\n\n## 4. 执行步骤\n\n### Step 1: 冲突检测与 Diff 提取\n\n1. 接收冲突事件，获取冲突文件路径。\n2. 使用 `read` 读取冲突文件，定位包含冲突标记的区域：\n   - `<<<<<<< HEAD`（本地版本）\n   - `=======`（分隔符）\n   - `>>>>>>> [branch/commit]`（远端版本）\n3. 如果需要更详细的差异信息，使用 `shell` 调用 `git diff` 或 `git log` 获取变更历史。\n4. 提取本地版本、远端版本的代码/文本片段。\n\n**失败分类**：若冲突文件不存在或无法读取，返回 `invalid_input` 并终止。\n\n### Step 2: 语义分析与意图推断\n\n1. 分析冲突块的语义和上下文意图：\n   - 本地修改的目的是什么？（修 Bug？重构？新增功能？）\n   - 远端修改的目的是什么？\n   - 两者的修改是否可以共存？是否存在逻辑冲突？\n2. 如果冲突涉及核心逻辑或复杂概念，可调用 `lookup-wiki` 检索相关的项目背景知识（如架构决策、API 变更记录）。\n3. 结合检索到的上下文，验证和丰富意图推断。\n\n### Step 3: 生成 Fix Proposal\n\n1. 基于分析结果，生成一份结构化的 Fix Proposal，包含以下部分：\n\n```markdown\n# Fix Proposal\n\n## 冲突摘要\n- **文件**: <projectRoot>/path/to/file.ts\n- **冲突区域**: 第 42-58 行\n- **冲突类型**: 逻辑冲突 / 文本冲突 / 格式冲突\n\n## 意图分析\n\n### 本地修改意图\n[解释本地修改试图解决什么问题]\n\n### 远端修改意图\n[解释远端修改试图解决什么问题]\n\n## 合并策略\n[解释为什么选择保留某一方，或者如何将两者的修改融合]\n\n## 合并后的代码\n```[language]\n[解决冲突后的完整代码/文本块]\n```\n\n## 风险评估\n- [潜在的副作用或需要注意的事项]\n```\n\n2. 如果一个文件中有多个冲突块，为每个冲突块生成独立的分析和建议。\n\n**失败分类**：若 Agent 无法推断意图或生成合理的合并建议，返回 `tool_runtime_error`，并建议用户手动解决。\n\n### Step 4: 交付审批\n\n1. 将 Fix Proposal 格式化为可读的 Markdown 报告。\n2. 通过 non-modal 交互方式（页面内嵌区块或侧边面板）提交给用户。\n3. 等待用户响应。\n\n### Step 5: 应用或回退\n\n**用户确认（Approve）**：\n1. 使用 `write` 将合并后的代码写回原文件，移除所有冲突标记。\n2. 解除冲突状态，允许系统继续后续操作（如 Commit / Sync）。\n3. 记录审计信息：合并策略、用户确认时间。\n\n**用户拒绝（Reject）**：\n1. 保持文件中的冲突标记不变。\n2. 提示用户可以手动编辑文件解决冲突。\n3. 记录审计信息：拒绝原因（如果用户提供）。\n\n**失败分类**：若写入合并结果失败，返回 `tool_runtime_error`，保持文件原状。\n\n## 5. 失败分类汇总\n\n| 失败场景 | 错误分类 | 处理策略 |\n|----------|----------|----------|\n| 冲突文件不存在或不可读 | `invalid_input` | 终止，返回错误 |\n| Git 命令执行失败 | `tool_runtime_error` | 降级为仅基于文件内容分析 |\n| Agent 无法生成合理建议 | `tool_runtime_error` | 终止，建议用户手动解决 |\n| 合并结果写入失败 | `tool_runtime_error` | 保持文件原状，不丢失数据 |\n\n## 6. Fix Proposal 示例\n\n```markdown\n# Fix Proposal\n\n## 冲突摘要\n- **文件**: <projectRoot>/src/services/AgentRuntimeService.ts\n- **冲突区域**: 第 128-145 行\n- **冲突类型**: 逻辑冲突\n\n## 意图分析\n\n### 本地修改意图\n修复了 `runTurn` 方法中的空指针异常：在访问 `context.session` 前增加了 null check。\n\n### 远端修改意图\n重构了 `runTurn` 方法的参数签名：将 `context` 参数拆分为 `sessionContext` 和 `turnContext` 两个独立参数。\n\n## 合并策略\n两者的修改可以共存。采用远端的参数重构，同时在新的 `sessionContext` 参数上保留本地的 null check 逻辑。\n\n## 合并后的代码\n```typescript\nasync runTurn(sessionContext: SessionContext | null, turnContext: TurnContext): Promise<TurnResult> {\n  if (!sessionContext) {\n    throw new AgentError('SESSION_CONTEXT_NULL', 'sessionContext is required');\n  }\n  // ... rest of the method\n}\n```\n\n## 风险评估\n- 需要检查所有调用 `runTurn` 的地方是否已适配新的双参数签名。\n```\n";
+
+export const BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = [
+	{
+		name: "Compile Wiki",
+		description: "Compile active project raw files into wiki knowledge docs and index outputs.",
+		descriptionZh: "把当前项目的 raw 内容编译成 wiki 知识页、索引和输出产物。",
+		command: "compile-wiki",
+		aliases: ["compile-wiki","wiki-compile","compile","build-wiki","sync-wiki","compilewiki","wikicompile"],
+		tags: ["knowledge","wiki","ingest"],
+		globs: ["**/raw/**","**/wiki/**"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}compile-wiki/SKILL.md`,
+		markdown: BUILTIN_COMPILE_WIKI_MARKDOWN,
+	},
+	{
+		name: "Lookup Wiki",
+		description: "Run Brain-First four-step lookup fallback for project knowledge retrieval.",
+		descriptionZh: "执行 Brain-First 四步检索回退流程，为项目知识查询提供结果。",
+		command: "lookup-wiki",
+		aliases: ["lookup-wiki","lookup","search-wiki","find-wiki"],
+		tags: ["knowledge","search","retrieve"],
+		globs: ["**/wiki/**","**/raw/**"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}lookup-wiki/SKILL.md`,
+		markdown: BUILTIN_LOOKUP_WIKI_MARKDOWN,
+	},
+	{
+		name: "Maintain Memory",
+		description: "Extract user preferences, constraints, and corrections into long-term memory files.",
+		descriptionZh: "把用户偏好、约束和纠错信息提炼进长期记忆文件。",
+		command: "maintain-memory",
+		aliases: ["maintain-memory","remember","memory","save-pref"],
+		tags: ["memory","preferences","constraints"],
+		globs: ["**/memory/**","**/raw/**","**/workspace/**"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}maintain-memory/SKILL.md`,
+		markdown: BUILTIN_MAINTAIN_MEMORY_MARKDOWN,
+	},
+	{
+		name: "Resolve Conflict",
+		description: "Generate fix proposals for sync/edit conflicts and submit to user approval.",
+		descriptionZh: "为同步或编辑冲突生成修复提案，并提交给用户审批。",
+		command: "resolve-conflict",
+		aliases: ["resolve-conflict","resolve","fix-conflict","merge"],
+		tags: ["collaboration","git","merge","conflict"],
+		globs: ["**/*"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}resolve-conflict/SKILL.md`,
+		markdown: BUILTIN_RESOLVE_CONFLICT_MARKDOWN,
+	},
+	{
+		name: "Obsidian CLI",
+		description: "Operate a live Obsidian vault and debug plugins/themes via the Obsidian CLI.",
+		descriptionZh: "操作正在运行的 Obsidian Vault，并通过 Obsidian CLI 调试插件与主题。",
+		command: "obsidian-cli",
+		aliases: ["obsidian-cli", "obsidian", "vault-cli", "plugin-dev", "obsidian-dev"],
+		tags: ["obsidian", "vault", "cli", "plugin", "debug"],
+		globs: ["**/.obsidian/**", "**/manifest.json", "**/main.js", "**/styles.css", "**/*.md"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}obsidian-cli/SKILL.md`,
+		markdown: BUILTIN_OBSIDIAN_CLI_MARKDOWN,
+	},
+	{
+		name: "Obsidian Markdown",
+		description: "Create and edit Obsidian Flavored Markdown with wikilinks, callouts, embeds, and frontmatter.",
+		descriptionZh: "创建和编辑 Obsidian 风格 Markdown，支持双链、callout、嵌入和 frontmatter。",
+		command: "obsidian-markdown",
+		aliases: ["obsidian-markdown", "markdown", "wikilink", "callout", "frontmatter"],
+		tags: ["obsidian", "markdown", "notes", "wikilink", "frontmatter"],
+		globs: ["**/*.md"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}obsidian-markdown/SKILL.md`,
+		markdown: BUILTIN_OBSIDIAN_MARKDOWN_MARKDOWN,
+	},
+	{
+		name: "JSON Canvas",
+		description: "Create and edit Obsidian .canvas files with nodes, edges, groups, and layout validation.",
+		descriptionZh: "创建和编辑 Obsidian .canvas 文件，支持节点、连线、分组和布局校验。",
+		command: "json-canvas",
+		aliases: ["json-canvas", "canvas", "obsidian-canvas"],
+		tags: ["obsidian", "canvas", "graph", "layout"],
+		globs: ["**/*.canvas"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}json-canvas/SKILL.md`,
+		markdown: BUILTIN_JSON_CANVAS_MARKDOWN,
+	},
+	{
+		name: "Obsidian Bases",
+		description: "Create and edit Obsidian .base files with YAML schema, filters, formulas, and views.",
+		descriptionZh: "创建和编辑 Obsidian .base 文件，支持 YAML schema、筛选、公式和视图。",
+		command: "obsidian-bases",
+		aliases: ["obsidian-bases", "bases", "obsidian-base", "database-view"],
+		tags: ["obsidian", "bases", "yaml", "database", "views"],
+		globs: ["**/*.base"],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}obsidian-bases/SKILL.md`,
+		markdown: BUILTIN_OBSIDIAN_BASES_MARKDOWN,
+	},
+];
+
+function normalizeToken(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/^[$/]+/, "")
+		.replace(/\.md$/i, "")
+		.replace(/\s+/g, "-")
+		.replace(/_/g, "-")
+		.replace(/[^a-z0-9\u4e00-\u9fa5-]/g, "")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "");
+}
+
+export function resolveBuiltinSkill(raw: string): BuiltinSkillDefinition | null {
+	const token = normalizeToken(raw);
+	if (!token) {
+		return null;
+	}
+
+	for (const skill of BUILTIN_SKILL_DEFINITIONS) {
+		if (normalizeToken(skill.command) === token) {
+			return skill;
+		}
+		if (normalizeToken(skill.filePath) === token) {
+			return skill;
+		}
+		if (skill.aliases.some((alias) => normalizeToken(alias) === token)) {
+			return skill;
+		}
+	}
+
+	return null;
+}
+
+export function getBuiltinSkillMarkdown(raw: string): string | null {
+	return resolveBuiltinSkill(raw)?.markdown ?? null;
+}

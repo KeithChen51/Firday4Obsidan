@@ -32,7 +32,7 @@ export class SlashCommandService {
 		}
 
 		// 内置命令由其他逻辑处理
-		if (["skill", "skills", "todo", "project", "projects", "friday", "f.r.i.d.a.y"].includes(commandName)) {
+		if (["skill", "skills"].includes(commandName)) {
 			return { type: "none" };
 		}
 

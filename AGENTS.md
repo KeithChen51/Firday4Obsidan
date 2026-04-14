@@ -1,3 +1,14 @@
+# Friday-Specific Mandatory Context
+
+Before coding in this repository, read these files in order:
+
+1. `C:\Own Docm\Coding\Friday - Ob\PROJECT.md`
+2. `C:\Own Docm\Coding\Friday - Ob\Friday-beta-evm\FRIDAY开发灵感\friday-全维度决策台账-2026-04-09.md`
+3. `C:\Own Docm\Coding\Friday - Ob\Friday-beta-evm\FRIDAY开发灵感\friday-全局术语与接口字典.md`
+4. `C:\Own Docm\Coding\Friday - Ob\Friday-beta-evm\FRIDAY开发灵感\plan\00-开发总索引-2026-04-11.md`
+
+Do not start implementation before these reads are complete.
+
 # Obsidian community plugin
 
 ## Project overview

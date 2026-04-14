@@ -1,5 +1,5 @@
 export type AgentActionType = "create" | "update" | "delete";
-export type AgentActionTargetType = "markdown" | "canvas";
+export type AgentActionTargetType = "markdown" | "canvas" | "folder";
 
 export interface AgentAction {
 	type: AgentActionType;
@@ -14,4 +14,3 @@ export interface AgentActionPreview {
 	targetType: AgentActionTargetType;
 	summary: string;
 }
-

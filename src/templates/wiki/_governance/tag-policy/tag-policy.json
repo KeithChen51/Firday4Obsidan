@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "policyId": "default-tag-policy",
+  "description": "Default tag policy for deterministic tagging and archive routing.",
+  "autoArchiveFromTagRules": false,
+  "sourcePriority": [
+    "manual",
+    "rule",
+    "ai"
+  ],
+  "policyStoragePath": "wiki/_governance/tag-policy/",
+  "rules": [
+    {
+      "id": "meeting-note-to-archive",
+      "enabled": true,
+      "deterministic": true,
+      "confidenceMin": 1,
+      "when": {
+        "zoneIn": [
+          "workspace_draft"
+        ],
+        "pathPrefixAny": [
+          "workspace/meetings/"
+        ],
+        "frontmatterEquals": [
+          {
+            "key": "docType",
+            "value": "meeting_note"
+          }
+        ]
+      },
+      "then": {
+        "addTags": [
+          "doc/meeting-note",
+          "archive/candidate"
+        ],
+        "targetZone": "archive_source",
+        "moveTo": "raw/archive/meetings/",
+        "renameTo": "{{date}}-{{slug}}.md",
+        "emitSuggestionOnly": false
+      }
+    },
+    {
+      "id": "wiki-artifact-guard",
+      "enabled": true,
+      "deterministic": true,
+      "confidenceMin": 1,
+      "when": {
+        "zoneIn": [
+          "wiki_artifact"
+        ]
+      },
+      "then": {
+        "addTags": [
+          "wiki/artifact"
+        ],
+        "targetZone": "wiki_artifact",
+        "emitSuggestionOnly": true
+      }
+    }
+  ]
+}
+

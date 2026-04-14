@@ -35,11 +35,11 @@ export type ApprovalDecision = "allow_once" | "allow_session" | "allow_always" |
 export type ApprovalPromptFn = (request: ToolApprovalRequest) => Promise<ApprovalDecision>;
 
 const STORE_VERSION = 1;
-const READ_ONLY_TOOLS = new Set(["ls", "read", "grep", "glob"]);
+const READ_ONLY_TOOLS = new Set(["ls", "read", "grep", "search_text", "glob"]);
 
 export class ToolApprovalService {
 	private promptFn: ApprovalPromptFn | null = null;
-	private sessionRules = new Map<string, true>();
+	private readonly sessionRules = new Map<string, true>();
 
 	constructor(
 		private readonly vault: Vault,
@@ -62,27 +62,24 @@ export class ToolApprovalService {
 	async requestApproval(input: ToolApprovalRequest): Promise<ToolApprovalResult> {
 		const mode = this.getSettings().agentRuntime.toolPermissionMode;
 
-		// 1. 全自动模式：所有工具自动通过
 		if (mode === "auto") {
 			return {
 				allowed: true,
 				persisted: false,
 				viaRule: false,
-				reason: "全自动模式",
+				reason: "Auto permission mode.",
 			};
 		}
 
-		// 2. 标准模式：只读工具自动通过
 		if (mode === "standard" && READ_ONLY_TOOLS.has(input.tool)) {
 			return {
 				allowed: true,
 				persisted: false,
 				viaRule: false,
-				reason: "只读工具自动通过",
+				reason: "Read-only tool allowed in standard mode.",
 			};
 		}
 
-		// 3. 检查持久化规则
 		const normalizedTarget = this.normalizeTargetPath(input.targetPath);
 		const store = await this.readStore(input.agentId);
 		const matchedRule = this.findMatchedRule(store.rules, input.tool, input.scope, normalizedTarget);
@@ -91,29 +88,26 @@ export class ToolApprovalService {
 				allowed: true,
 				persisted: true,
 				viaRule: true,
-				reason: `命中持久化规则：${matchedRule.tool} ${matchedRule.pathPrefix || "(全部路径)"}`,
+				reason: `Matched stored rule: ${matchedRule.tool} ${matchedRule.pathPrefix || "(all paths)"}`,
 			};
 		}
 
-		// 4. 检查会话级规则
 		const sessionKey = this.buildSessionKey(input.tool, normalizedTarget);
 		if (this.sessionRules.has(sessionKey)) {
 			return {
 				allowed: true,
 				persisted: false,
 				viaRule: false,
-				reason: "本次会话已授权",
+				reason: "Matched current session rule.",
 			};
 		}
 
-		// 5. 通过 UI 回调显示审批卡片
 		if (this.promptFn) {
 			const decision = await this.promptFn(input);
 			return this.handleDecision(decision, input, normalizedTarget, sessionKey);
 		}
 
-		// 6. 降级 fallback：无 UI 回调时使用 window.confirm
-		return this.fallbackConfirm(input, normalizedTarget, sessionKey);
+		return this.fallbackDeny();
 	}
 
 	private async handleDecision(
@@ -123,11 +117,11 @@ export class ToolApprovalService {
 		sessionKey: string,
 	): Promise<ToolApprovalResult> {
 		if (decision === "deny") {
-			return { allowed: false, persisted: false, viaRule: false, reason: "用户拒绝工具调用" };
+			return { allowed: false, persisted: false, viaRule: false, reason: "User denied tool call." };
 		}
 		if (decision === "allow_session") {
 			this.sessionRules.set(sessionKey, true);
-			return { allowed: true, persisted: false, viaRule: false, reason: "本次会话允许" };
+			return { allowed: true, persisted: false, viaRule: false, reason: "Allowed for current session." };
 		}
 		if (decision === "allow_always") {
 			const rule = await this.persistAllowAlwaysRule({
@@ -140,34 +134,25 @@ export class ToolApprovalService {
 				allowed: true,
 				persisted: true,
 				viaRule: false,
-				reason: `已保存规则：${rule.tool} ${rule.pathPrefix || "(全部路径)"}`,
+				reason: `Saved allow rule: ${rule.tool} ${rule.pathPrefix || "(all paths)"}`,
 			};
 		}
-		// allow_once
-		return { allowed: true, persisted: false, viaRule: false, reason: "允许一次" };
+		return { allowed: true, persisted: false, viaRule: false, reason: "Allowed once." };
 	}
 
-	private fallbackConfirm(
-		input: ToolApprovalRequest,
-		normalizedTarget: string,
-		sessionKey: string,
-	): ToolApprovalResult {
-		const detail = [
-			"F.R.I.D.A.Y 工具调用审批",
-			`工具: ${input.tool}`,
-			`目标: ${normalizedTarget || "(无路径参数)"}`,
-			`说明: ${input.description}`,
-		].join("\n");
-		const allowed = window.confirm(`${detail}\n\n点击"确定"=允许；点击"取消"=拒绝`);
-		if (!allowed) {
-			return { allowed: false, persisted: false, viaRule: false, reason: "用户拒绝工具调用" };
-		}
-		return { allowed: true, persisted: false, viaRule: false, reason: "允许一次（降级弹窗）" };
+	private fallbackDeny(): ToolApprovalResult {
+		return {
+			allowed: false,
+			persisted: false,
+			viaRule: false,
+			reason: "Approval UI unavailable; request denied by non-modal fallback.",
+		};
 	}
 
 	private buildSessionKey(tool: string, targetPath: string): string {
-		// Use tool + path directory as session key for prefix matching
-		if (!targetPath) return `${tool}:*`;
+		if (!targetPath) {
+			return `${tool}:*`;
+		}
 		const parts = targetPath.split("/");
 		parts.pop();
 		return `${tool}:${parts.join("/")}`;

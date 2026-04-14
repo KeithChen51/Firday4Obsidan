@@ -389,6 +389,13 @@
 	min-height: 0;
 }
 
+.friday-ai-session-nav.is-collapsed {
+	width: 58px;
+	min-width: 58px;
+	max-width: 58px;
+	padding: 10px 6px;
+}
+
 .friday-ai-session-nav-header {
 	display: flex;
 	align-items: center;
@@ -399,6 +406,19 @@
 .friday-ai-session-nav-header h4 {
 	margin: 0;
 	font-size: 0.88em;
+}
+
+.friday-ai-session-toggle {
+	min-width: 32px;
+	padding: 4px 8px;
+	border-radius: 8px;
+}
+
+.friday-ai-session-nav.is-collapsed .friday-ai-session-header-text,
+.friday-ai-session-nav.is-collapsed .friday-ai-session-new,
+.friday-ai-session-nav.is-collapsed .friday-ai-session-list,
+.friday-ai-session-nav.is-collapsed .friday-ai-session-empty {
+	display: none;
 }
 
 .friday-ai-session-list {
@@ -670,6 +690,178 @@
 	word-break: break-word;
 }
 
+.friday-ai-runtime-preview {
+	width: min(680px, 100%);
+}
+
+.friday-ai-runtime-card-content {
+	padding: 0;
+}
+
+.friday-runtime-card {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 14px 16px;
+	border-radius: 14px;
+	background: linear-gradient(
+		165deg,
+		color-mix(in srgb, var(--background-secondary) 88%, var(--interactive-accent) 6%) 0%,
+		color-mix(in srgb, var(--background-secondary-alt) 92%, var(--interactive-accent) 4%) 100%
+	);
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
+}
+
+.friday-runtime-card-brand {
+	font-size: 0.74em;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.friday-runtime-card-title {
+	margin: 0;
+	font-size: 1.02em;
+	line-height: 1.4;
+}
+
+.friday-runtime-card-summary {
+	margin: 0;
+	font-size: 0.88em;
+	line-height: 1.55;
+	color: var(--text-muted);
+}
+
+.friday-runtime-stage-rail {
+	display: grid;
+	grid-template-columns: repeat(4, minmax(0, 1fr));
+	gap: 8px;
+}
+
+.friday-runtime-stage {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 34px;
+	padding: 6px 8px;
+	border-radius: 999px;
+	border: 1px solid var(--background-modifier-border);
+	background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+	font-size: 0.78em;
+	font-weight: 600;
+	color: var(--text-muted);
+	text-align: center;
+}
+
+.friday-runtime-stage.is-running {
+	border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-runtime-stage.is-ok {
+	border-color: color-mix(in srgb, var(--color-green) 44%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-runtime-stage.is-failed {
+	border-color: color-mix(in srgb, var(--color-red) 42%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--color-red) 12%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-runtime-timeline {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 4px;
+}
+
+.friday-runtime-entry {
+	display: grid;
+	grid-template-columns: 18px minmax(0, 1fr);
+	gap: 10px;
+	align-items: flex-start;
+}
+
+.friday-runtime-entry-dot {
+	width: 10px;
+	height: 10px;
+	margin-top: 6px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--text-muted) 70%, transparent);
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--background-primary) 70%, transparent);
+}
+
+.friday-runtime-entry.is-running .friday-runtime-entry-dot {
+	background: color-mix(in srgb, var(--interactive-accent) 84%, var(--text-normal));
+}
+
+.friday-runtime-entry.is-ok .friday-runtime-entry-dot {
+	background: color-mix(in srgb, var(--color-green) 82%, var(--text-normal));
+}
+
+.friday-runtime-entry.is-failed .friday-runtime-entry-dot {
+	background: color-mix(in srgb, var(--color-orange) 82%, var(--text-normal));
+}
+
+.friday-runtime-entry-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	background: color-mix(in srgb, var(--background-primary) 78%, transparent);
+	min-width: 0;
+}
+
+.friday-runtime-entry.is-running .friday-runtime-entry-body {
+	border-color: color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+}
+
+.friday-runtime-entry.is-ok .friday-runtime-entry-body {
+	border-color: color-mix(in srgb, var(--color-green) 28%, var(--background-modifier-border));
+}
+
+.friday-runtime-entry.is-failed .friday-runtime-entry-body {
+	border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+}
+
+.friday-runtime-entry-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.friday-runtime-entry-label {
+	font-size: 0.84em;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.friday-runtime-entry-step {
+	font-size: 0.72em;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.friday-runtime-entry-detail {
+	font-size: 0.8em;
+	line-height: 1.5;
+	color: var(--text-muted);
+	word-break: break-word;
+}
+
+@media (max-width: 720px) {
+	.friday-runtime-stage-rail {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
 .friday-ai-error {
 	font-size: 0.85em;
 	color: var(--color-red);
@@ -694,6 +886,9 @@
 	display: flex;
 	flex-direction: column;
 	gap: 7px;
+	position: relative;
+	min-width: 0;
+	overflow: visible;
 }
 
 .friday-ai-attachment-list {
@@ -761,11 +956,8 @@
 }
 
 .friday-mention-dropdown {
-	position: absolute;
-	left: 0;
-	right: 0;
-	bottom: calc(100% + 6px);
-	z-index: 20;
+	position: static;
+	width: 100%;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 10px;
@@ -773,6 +965,7 @@
 	padding: 6px;
 	max-height: 240px;
 	overflow-y: auto;
+	margin-bottom: 6px;
 }
 
 .friday-mention-dropdown.is-hidden {
@@ -924,6 +1117,12 @@
 		max-height: 210px;
 	}
 
+	.friday-ai-session-nav.is-collapsed {
+		width: 100%;
+		max-width: none;
+		min-width: 0;
+	}
+
 	.friday-nav-button {
 		font-size: 0.86em;
 		padding: 7px 4px;
@@ -955,6 +1154,58 @@
 	border-radius: 12px;
 	padding: 12px 14px;
 	margin: 8px 0;
+}
+
+.friday-inline-approval-panel {
+	border-color: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+}
+
+.friday-ai-approval-message {
+	width: min(720px, 100%);
+}
+
+.friday-ai-approval-content {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 0;
+}
+
+.friday-ai-approval-title {
+	margin: 0;
+	font-size: 0.98em;
+	line-height: 1.4;
+}
+
+.friday-ai-approval-summary {
+	font-size: 0.84em;
+	font-weight: 600;
+	color: var(--text-normal);
+	word-break: break-word;
+}
+
+.friday-ai-approval-detail-text {
+	font-size: 0.8em;
+	line-height: 1.5;
+	color: var(--text-muted);
+	word-break: break-word;
+}
+
+.friday-ai-approval-actions {
+	margin-top: 2px;
+}
+
+.friday-tools-page-intro {
+	margin: 0 0 18px;
+	font-size: 0.82em;
+	line-height: 1.6;
+	color: var(--text-muted);
+}
+
+.friday-tools-page-body {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
 }
 
 .friday-approval-card.is-resolved {
@@ -1075,5 +1326,868 @@
 
 .friday-exec-exit-fail {
 	color: var(--color-red);
+}
+
+/* ========== 2026-04-13 Chat Shell Refresh ========== */
+.friday-shell {
+	position: relative;
+	gap: 10px;
+	overflow: hidden;
+}
+
+.friday-shell-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 8px 10px;
+	border-radius: 14px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 14%, var(--background-modifier-border));
+	background:
+		radial-gradient(circle at top left, color-mix(in srgb, var(--interactive-accent) 10%, transparent) 0, transparent 52%),
+		linear-gradient(
+			135deg,
+			color-mix(in srgb, var(--background-primary-alt) 92%, var(--interactive-accent) 4%) 0%,
+			color-mix(in srgb, var(--background-secondary) 92%, var(--interactive-accent) 6%) 100%
+		);
+}
+
+.friday-shell-bar-left,
+.friday-shell-bar-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-shell-bar-right {
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+
+.friday-shell-project {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-shell-project-brand {
+	font-size: 0.72em;
+	font-weight: 800;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.friday-shell-project-subtitle {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.friday-shell-project-inline {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-shell-project-inline-label {
+	font-size: 0.8em;
+	font-weight: 600;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.friday-shell-project-select-wrap {
+	position: relative;
+	min-width: 0;
+}
+
+.friday-shell-project-select {
+	min-width: 140px;
+	max-width: min(240px, 56vw);
+	padding: 5px 28px 5px 10px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 75%, var(--interactive-accent) 12%);
+	background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+	font-size: 0.82em;
+	font-weight: 700;
+}
+
+.friday-shell-project-empty {
+	font-size: 0.82em;
+	color: var(--text-muted);
+}
+
+.friday-shell-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 12%);
+	background: color-mix(in srgb, var(--background-primary) 90%, transparent);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition:
+		transform 120ms ease,
+		color 120ms ease,
+		border-color 120ms ease,
+		background-color 120ms ease;
+}
+
+.friday-shell-icon-button:hover {
+	transform: translateY(-1px);
+	color: var(--text-normal);
+	border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+
+.friday-shell-icon-button svg {
+	width: 16px;
+	height: 16px;
+}
+
+.friday-top-nav {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	padding: 6px;
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 4%);
+}
+
+.friday-nav-button {
+	min-height: 34px;
+	padding: 6px 8px;
+	border-radius: 10px;
+	background: transparent;
+}
+
+.friday-nav-button-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.friday-nav-button-icon svg {
+	width: 18px;
+	height: 18px;
+}
+
+.friday-nav-button.is-active {
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+}
+
+.friday-page-content {
+	overflow-y: auto;
+	overflow-x: hidden;
+}
+
+.friday-ai-workbench {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	min-height: 0;
+	height: 100%;
+}
+
+.friday-ai-focus-meta {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 4px 2px 2px;
+}
+
+.friday-ai-focus-copy {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.friday-ai-focus-copy h3 {
+	margin: 0;
+	font-size: 0.96em;
+	line-height: 1.35;
+}
+
+.friday-ai-focus-eyebrow {
+	font-size: 0.72em;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.friday-ai-focus-caption {
+	margin: 0;
+	font-size: 0.78em;
+	color: var(--text-muted);
+}
+
+.friday-ai-focus-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 6px;
+}
+
+.friday-ai-meta-button {
+	width: auto;
+	padding: 0 10px;
+}
+
+.friday-ai-chat-shell {
+	padding: 0;
+	border-radius: 16px;
+	overflow: hidden;
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 4%) 0%,
+			color-mix(in srgb, var(--background-secondary) 96%, var(--interactive-accent) 2%) 100%
+		);
+}
+
+.friday-ai-message-list {
+	padding: 14px 12px 10px;
+	gap: 12px;
+}
+
+.friday-ai-message-row {
+	display: flex;
+	width: 100%;
+}
+
+.friday-ai-message-row.is-user {
+	justify-content: flex-end;
+}
+
+.friday-ai-message-row.is-assistant {
+	justify-content: flex-start;
+}
+
+.friday-ai-message {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	max-width: min(94%, 560px);
+	padding: 10px 12px;
+	border-radius: 16px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
+	background: color-mix(in srgb, var(--background-primary) 90%, transparent);
+	box-shadow: 0 10px 18px color-mix(in srgb, var(--background-primary) 18%, transparent);
+}
+
+.friday-ai-message.is-user {
+	background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 36%, var(--background-modifier-border));
+}
+
+.friday-ai-message.is-assistant {
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+}
+
+.friday-ai-message-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.friday-ai-message-avatar {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	border-radius: 999px;
+	font-size: 0.72em;
+	font-weight: 800;
+	background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
+	color: var(--text-normal);
+}
+
+.friday-ai-message-role {
+	margin: 0;
+	font-size: 0.72em;
+	font-weight: 700;
+	letter-spacing: 0.03em;
+	color: var(--text-muted);
+}
+
+.friday-ai-message-content {
+	line-height: 1.58;
+}
+
+.friday-ai-approval-message {
+	border-left: 4px solid color-mix(in srgb, var(--color-orange) 72%, var(--interactive-accent));
+	background: color-mix(in srgb, var(--color-orange) 8%, var(--background-primary));
+}
+
+.friday-ai-approval-title {
+	margin: 0;
+	font-size: 0.92em;
+}
+
+.friday-ai-approval-summary {
+	font-weight: 600;
+	line-height: 1.5;
+}
+
+.friday-ai-approval-detail-text {
+	font-size: 0.82em;
+	color: var(--text-muted);
+	line-height: 1.55;
+}
+
+.friday-ai-runtime-preview {
+	width: min(100%, 620px);
+}
+
+.friday-runtime-card {
+	padding: 0;
+	gap: 0;
+	background: transparent;
+	border: 0;
+}
+
+.friday-runtime-card-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.friday-runtime-card-brand {
+	font-size: 0.72em;
+	letter-spacing: 0.12em;
+	color: var(--text-muted);
+}
+
+.friday-runtime-card-toggle,
+.friday-ai-override-clear,
+.friday-ai-mention-pill-remove {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.friday-runtime-card-title {
+	margin: 8px 0 4px;
+	font-size: 0.9em;
+}
+
+.friday-runtime-card-summary {
+	margin: 0;
+	font-size: 0.82em;
+	line-height: 1.5;
+	color: var(--text-muted);
+}
+
+.friday-runtime-card-collapsed {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.friday-runtime-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 3px 8px;
+	border-radius: 999px;
+	font-size: 0.74em;
+	font-weight: 600;
+	background: color-mix(in srgb, var(--background-secondary) 78%, transparent);
+	color: var(--text-muted);
+}
+
+.friday-runtime-pill.is-ok {
+	background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-runtime-pill.is-failed {
+	background: color-mix(in srgb, var(--color-orange) 14%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-ai-override-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 12px;
+	font-size: 0.78em;
+	color: var(--text-muted);
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
+}
+
+.friday-ai-composer-wrap {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px 12px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+}
+
+.friday-ai-mention-pill-bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.friday-ai-mention-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 8px;
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 22%, var(--background-modifier-border));
+	font-size: 0.75em;
+}
+
+.friday-ai-composer {
+	border-radius: 14px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	padding: 10px;
+}
+
+.friday-ai-input {
+	width: 100%;
+	min-height: 42px;
+	max-height: 140px;
+	resize: none;
+	border: 0;
+	background: transparent;
+	line-height: 1.55;
+	padding: 0;
+}
+
+.friday-ai-input:focus {
+	outline: none;
+	box-shadow: none;
+}
+
+.friday-ai-composer-toolbar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.friday-ai-toolbar-select,
+.friday-ai-toolbar-button,
+.friday-ai-send-button {
+	min-height: 30px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 12%);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	font-size: 0.78em;
+	font-weight: 600;
+}
+
+.friday-ai-toolbar-select {
+	padding: 0 10px;
+	max-width: 100%;
+}
+
+.friday-ai-toolbar-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0 10px;
+	cursor: pointer;
+}
+
+.friday-ai-toolbar-icon {
+	width: 32px;
+	padding: 0;
+}
+
+.friday-ai-toolbar-icon svg {
+	width: 15px;
+	height: 15px;
+}
+
+.friday-ai-send-button {
+	margin-left: auto;
+	padding: 0 12px;
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--interactive-accent) 36%, var(--background-modifier-border));
+}
+
+.friday-ai-session-drawer {
+	position: absolute;
+	inset: 0 auto 34px 0;
+	z-index: 25;
+	width: min(320px, calc(100% - 24px));
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding: 12px;
+	border-radius: 16px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
+	background:
+		linear-gradient(
+			180deg,
+			color-mix(in srgb, var(--background-primary) 94%, var(--interactive-accent) 3%) 0%,
+			color-mix(in srgb, var(--background-secondary) 96%, var(--interactive-accent) 5%) 100%
+		);
+	box-shadow: 0 18px 44px color-mix(in srgb, var(--background-primary) 32%, transparent);
+}
+
+.friday-ai-drawer-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	background: color-mix(in srgb, var(--background-primary) 42%, transparent);
+	backdrop-filter: blur(2px);
+}
+
+.friday-ai-session-drawer-header,
+.friday-ai-session-drawer-actions {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.friday-ai-session-drawer-header h4 {
+	margin: 0;
+	font-size: 0.9em;
+}
+
+.friday-ai-session-list {
+	padding: 0;
+}
+
+.friday-ai-session-item {
+	min-height: 58px;
+	padding: 9px 10px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 88%, transparent);
+}
+
+.friday-ai-session-item-meta {
+	font-size: 0.74em;
+}
+
+.friday-ai-session-note {
+	font-size: 0.76em;
+	line-height: 1.5;
+	color: var(--text-muted);
+	padding-top: 2px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+}
+
+.friday-policy-panel {
+	background: color-mix(in srgb, var(--background-primary-alt) 96%, transparent);
+}
+
+@media (max-width: 420px) {
+	.friday-shell-header {
+		padding-inline: 8px;
+	}
+
+	.friday-shell-project-select {
+		min-width: 110px;
+		max-width: 42vw;
+	}
+
+	.friday-ai-focus-meta {
+		flex-direction: column;
+	}
+
+	.friday-ai-focus-actions {
+		width: 100%;
+		justify-content: flex-start;
+	}
+
+	.friday-ai-send-button {
+		margin-left: 0;
+	}
+
+	.friday-ai-session-drawer {
+		width: calc(100% - 16px);
+	}
+}
+
+/* ========== 2026-04-13 Follow-up Controls ========== */
+.friday-runtime-card-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 30px;
+	padding: 0 12px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+	color: var(--text-normal);
+	font-size: 0.76em;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	cursor: pointer;
+}
+
+.friday-runtime-card-toggle.is-completed {
+	background:
+		linear-gradient(
+			135deg,
+			color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)) 0%,
+			color-mix(in srgb, var(--color-green) 10%, var(--background-primary)) 100%
+		);
+	box-shadow: 0 8px 18px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.friday-ai-runtime-preview.is-completed {
+	width: min(100%, 640px);
+}
+
+.friday-ai-session-manage,
+.friday-ai-session-bulkbutton,
+.friday-ai-session-mini-action {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 28px;
+	padding: 0 10px;
+	border-radius: 999px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	font-size: 0.75em;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.friday-ai-session-bulkbutton.is-danger,
+.friday-ai-session-mini-action.is-danger {
+	border-color: color-mix(in srgb, var(--color-red) 34%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--color-red) 10%, var(--background-primary));
+}
+
+.friday-ai-session-bulkbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 8px 10px;
+	border-radius: 12px;
+	background: color-mix(in srgb, var(--background-primary) 90%, transparent);
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+}
+
+.friday-ai-session-bulktext {
+	font-size: 0.78em;
+	color: var(--text-muted);
+}
+
+.friday-ai-session-bulkactions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.friday-ai-session-item {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.friday-ai-session-item.is-selected {
+	border-color: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+}
+
+.friday-ai-session-item-header {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+}
+
+.friday-ai-session-checkbox {
+	margin-top: 5px;
+}
+
+.friday-ai-session-item-body {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	text-align: left;
+	cursor: pointer;
+	min-width: 0;
+}
+
+.friday-ai-session-item-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.friday-ai-session-rename {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.friday-ai-session-rename-input {
+	width: 100%;
+	border-radius: 10px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
+	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+	padding: 8px 10px;
+	font-size: 0.82em;
+}
+
+.friday-ai-session-rename-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.friday-control-center-summary {
+	font-size: 0.8em;
+	color: var(--text-muted);
+}
+
+.friday-control-center-section {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.friday-control-center-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+
+.friday-control-center-header h5 {
+	margin: 0;
+	font-size: 0.9em;
+}
+
+.friday-control-center-hint {
+	font-size: 0.76em;
+	color: var(--text-muted);
+}
+
+.friday-control-center-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.friday-control-center-list.is-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+	gap: 10px;
+}
+
+.friday-control-center-group {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.friday-control-center-group-title {
+	margin: 0;
+	font-size: 0.78em;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.friday-control-center-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 10px 12px;
+	border-radius: 14px;
+	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+}
+
+.friday-control-center-item-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	min-width: 0;
+}
+
+.friday-control-center-item-title {
+	font-size: 0.84em;
+	font-weight: 700;
+	color: var(--text-normal);
+	word-break: break-word;
+}
+
+.friday-control-center-item-desc {
+	font-size: 0.76em;
+	color: var(--text-muted);
+	line-height: 1.5;
+	word-break: break-word;
+}
+
+.friday-control-center-item-relation {
+	font-size: 0.73em;
+	line-height: 1.45;
+	color: color-mix(in srgb, var(--text-muted) 88%, var(--interactive-accent) 18%);
+	word-break: break-word;
+}
+
+.friday-control-toggle-host {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	justify-content: center;
+}
+
+.friday-control-toggle-host .checkbox-container {
+	margin: 0;
+}
+
+.friday-project-status-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	padding-top: 4px;
+}
+
+.friday-project-status-group {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding-top: 8px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.friday-project-status-group h5 {
+	margin: 0;
+	font-size: 0.78em;
+	font-weight: 700;
+	color: var(--text-muted);
 }
 

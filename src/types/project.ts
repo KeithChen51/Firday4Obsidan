@@ -90,6 +90,13 @@ export interface WikiDocIndexEntry {
 	contentHash: string;
 	summary: string;
 	keywords: string[];
+	tags?: string[];
+	contextZone?: "archive_source" | "workspace_draft" | "wiki_artifact";
+	targetZone?: "archive_source" | "workspace_draft" | "wiki_artifact" | "";
+	governanceRuleIds?: string[];
+	moveTo?: string;
+	renameTo?: string;
+	suggestionOnly?: boolean;
 	evidenceCount: number;
 	updatedAt: string;
 }

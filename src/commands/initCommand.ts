@@ -18,7 +18,7 @@ export function registerInitCommand(plugin: FridayPluginApi): void {
 		callback: async () => {
 			try {
 				const result = await runInitCommand(plugin, {
-					confirmOverwrite: true,
+					confirmOverwrite: false,
 					openFile: true,
 				});
 				if (result.status === "created") {
@@ -69,10 +69,7 @@ export async function runInitCommand(
 		}
 
 		if (confirmOverwrite) {
-			const accepted = window.confirm(`FRIDAY.md 已存在，是否覆盖？\n${targetPath}`);
-			if (!accepted) {
-				return { status: "cancelled", path: targetPath };
-			}
+			await backupExistingFile(plugin.app.vault, existing);
 		}
 
 		await plugin.app.vault.modify(existing, markdown);
@@ -87,6 +84,11 @@ export async function runInitCommand(
 		await plugin.app.workspace.getLeaf(true).openFile(created);
 	}
 	return { status: "created", path: targetPath };
+}
+
+async function backupExistingFile(vault: Vault, file: TFile): Promise<void> {
+	const backupPath = normalizePath(`${file.path}.bak-${Date.now()}`);
+	await vault.copy(file, backupPath);
 }
 
 function buildFridayMarkdown(plugin: FridayPluginApi): string {

@@ -1,7 +1,13 @@
-import { promises as fs } from "fs";
+﻿import { promises as fs } from "fs";
 import os from "os";
 import path from "path";
 import { normalizePath } from "obsidian";
+import {
+	BUILTIN_SKILL_DEFINITIONS,
+	BuiltinSkillDefinition,
+	getBuiltinSkillMarkdown as getBuiltinSkillPackMarkdown,
+} from "../skills/packs/builtin";
+import type { LocaleCode } from "../i18n/types";
 import { FridaySettings } from "../types/settings";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
 
@@ -15,57 +21,67 @@ const MAX_ASSET_FILE_CHARS = 900;
 const MAX_ASSET_FILES_PER_BUCKET = 4;
 const MAX_CATALOG_ITEMS = 120;
 const INDEX_CACHE_TTL_MS = 60_000;
-const BUILTIN_SKILL_SCHEME = "builtin://";
 const BUILTIN_COMPILE_WIKI_COMMAND = "compile-wiki";
-const BUILTIN_COMPILE_WIKI_FILE_PATH = `${BUILTIN_SKILL_SCHEME}${BUILTIN_COMPILE_WIKI_COMMAND}/SKILL.md`;
-const BUILTIN_COMPILE_WIKI_COMMAND_ALIASES = [
-	BUILTIN_COMPILE_WIKI_COMMAND,
-	"wiki-compile",
-	"compilewiki",
-	"wikicompile",
-	"编译wiki",
-	"重建wiki",
-];
+const BUILTIN_COMPILE_WIKI_COMMAND_ALIASES = (() => {
+	const compileSkill = BUILTIN_SKILL_DEFINITIONS.find((item) => item.command === BUILTIN_COMPILE_WIKI_COMMAND);
+	const aliasSet = new Set<string>([normalizeBuiltinToken(BUILTIN_COMPILE_WIKI_COMMAND)]);
+	if (compileSkill) {
+		for (const alias of compileSkill.aliases) {
+			const normalized = normalizeBuiltinToken(alias);
+			if (normalized) {
+				aliasSet.add(normalized);
+			}
+		}
+	}
+	return [...aliasSet];
+})();
 const BUILTIN_COMPILE_WIKI_INTENT_PATTERNS: RegExp[] = [
 	/(^|\s)\/(?:compile-wiki|wiki-compile)\b/i,
 	/(?:^|\s)\/skill\s+(?:compile-wiki|wiki-compile|编译wiki|重建wiki)\b/i,
 	/(?:compile|rebuild|re-ingest|reingest|refresh|update)\s+wiki\b/i,
 	/\bwiki\s+(?:compile|rebuild|re-ingest|reingest|refresh|update)\b/i,
-	/(?:编译|重建|重编译|刷新|更新)\s*wiki/i,
-	/wiki\s*(?:编译|重建|重编译|刷新|更新)/i,
-	/(?:编译|重建|重编译|刷新|更新)\s*索引/i,
+	/(?:编译|重建|刷新|更新)\s*wiki/i,
+	/wiki\s*(?:编译|重建|刷新|更新)/i,
+	/(?:编译|重建|刷新|更新)\s*(?:索引|wiki索引)/i,
 	/(?:wiki\s*索引|知识库\s*索引)\s*(?:编译|重建|刷新|更新)/i,
 ];
-const BUILTIN_COMPILE_WIKI_CONTEXT = [
-	"---",
-	"name: compile-wiki",
-	"description: Compile active project raw files into wiki knowledge docs and index outputs.",
-	"command: compile-wiki",
-	"aliases: [compile-wiki, wiki-compile, compile wiki, rebuild wiki, 编译wiki, 编译 wiki, 重建wiki, 重建 wiki]",
-	"tags: [wiki, ingest, index, 编译, 索引]",
-	"trigger: auto",
-	"---",
-	"# Compile Wiki Builtin Skill",
-	"",
-	"## Goal",
-	"- Compile current active project raw sources into wiki outputs.",
-	"- Keep project boundary strict: only active project root is allowed.",
-	"",
-	"## Trigger",
-	"- User asks to compile/rebuild wiki or refresh wiki index.",
-	"- User asks to update wiki knowledge docs from raw content.",
-	"",
-	"## Execution Rule",
-	"- Prefer calling tool `compile_wiki` before other actions.",
-	"- If user specified target raw path(s), pass them to `compile_wiki` args.",
-	"- After compile, summarize processed/succeeded/failed and updated docs/index/log.",
-	"",
-	"## Safety",
-	"- Never compile outside active project boundary.",
-	"- On partial failures, keep user-visible summary explicit and actionable.",
-].join("\n");
+
+const OBSIDIAN_CLI_PRIORITY_PATTERNS: RegExp[] = [
+	/\bobsidian\b/i,
+	/\bplugin:reload\b/i,
+	/\bdev:errors\b/i,
+	/\bdev:screenshot\b/i,
+	/\bdev:dom\b/i,
+	/\bdev:css\b/i,
+	/\bdev:console\b/i,
+	/\bbacklinks?\b/i,
+	/\bdaily(?::read|:append)?\b/i,
+	/\bproperty:set\b/i,
+	/\btasks?\b/i,
+	/(?:重载|重新加载)\s*(?:插件|plugin)/i,
+	/(?:截图|screenshot)/i,
+	/(?:检查|查看)\s*(?:dom|控制台|console|错误|报错|界面)/i,
+];
+
+function normalizeBuiltinToken(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/^[$/]+/, "")
+		.replace(/\.md$/i, "")
+		.replace(/\s+/g, "-")
+		.replace(/_/g, "-")
+		.replace(/[^a-z0-9\u4e00-\u9fa5-]/g, "")
+		.replace(/-+/g, "-")
+		.replace(/^-|-$/g, "");
+}
+
+function normalizePortablePath(value: string): string {
+	return value.replace(/\\/g, "/");
+}
 
 export type SkillTriggerMode = "auto" | "manual";
+export type SkillInvocationMode = "manual" | "auto";
 
 export interface SkillDescriptor {
 	name: string;
@@ -86,6 +102,7 @@ interface SkillIndexEntry extends SkillDescriptor {
 interface ParsedSkillFrontmatter {
 	name: string;
 	description: string;
+	descriptionZh: string;
 	command: string;
 	aliases: string[];
 	tags: string[];
@@ -99,6 +116,11 @@ export interface SuggestedSkill {
 	reasons: string[];
 }
 
+interface BuildSkillSystemContextOptions {
+	invocationMode?: SkillInvocationMode;
+	selectionReason?: string;
+}
+
 export type ParsedSkillSlashCommand =
 	| { type: "none" }
 	| { type: "list" }
@@ -107,18 +129,25 @@ export type ParsedSkillSlashCommand =
 
 export class SkillCommandService {
 	private cachedIndex: SkillIndexEntry[] | null = null;
+	private cachedIndexWithDisabled: SkillIndexEntry[] | null = null;
 	private cacheTimestamp = 0;
+	private cacheLocale: LocaleCode | null = null;
 
 	constructor(
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly getSettings: () => FridaySettings,
 		private readonly getVaultBasePath: () => string,
+		private readonly getLocale: () => LocaleCode,
 	) {}
 
 	parseSlashCommand(rawPrompt: string): ParsedSkillSlashCommand {
 		const prompt = rawPrompt.trim();
 		if (!prompt.startsWith("/")) {
 			return { type: "none" };
+		}
+
+		if (prompt === "/") {
+			return { type: "list" };
 		}
 
 		if (/^\/skills?$/i.test(prompt)) {
@@ -182,8 +211,8 @@ export class SkillCommandService {
 		return false;
 	}
 
-	async listSkills(limit = MAX_CATALOG_ITEMS): Promise<SkillDescriptor[]> {
-		const index = await this.buildSkillIndex();
+	async listSkills(limit = MAX_CATALOG_ITEMS, options?: { includeDisabled?: boolean }): Promise<SkillDescriptor[]> {
+		const index = await this.buildSkillIndex(options?.includeDisabled === true);
 		return index.slice(0, Math.max(1, limit)).map((entry) => this.toDescriptor(entry));
 	}
 
@@ -223,7 +252,7 @@ export class SkillCommandService {
 
 		const promptLower = normalizedPrompt.toLowerCase();
 		const tokens = this.extractIntentTokens(normalizedPrompt);
-		const normalizedCurrentPath = normalizePath(currentFilePath ?? "").toLowerCase();
+		const normalizedCurrentPath = normalizePortablePath(currentFilePath ?? "").toLowerCase();
 		const fileName = normalizedCurrentPath ? path.basename(normalizedCurrentPath) : "";
 
 		const scored: SuggestedSkill[] = [];
@@ -233,19 +262,19 @@ export class SkillCommandService {
 
 			if (promptLower.includes(`/${entry.command.toLowerCase()}`)) {
 				score += 24;
-				reasons.push("命中命令别名");
+				reasons.push("鍛戒腑鍛戒护鍒悕");
 			}
 
 			for (const alias of entry.normalizedAliases) {
 				if (!alias) continue;
 				if (tokens.includes(alias)) {
 					score += 12;
-					reasons.push(`命中别名: ${alias}`);
+					reasons.push(`鍛戒腑鍒悕: ${alias}`);
 					continue;
 				}
 				if (promptLower.includes(alias) && alias.length >= 3) {
 					score += 5;
-					reasons.push(`语义包含别名: ${alias}`);
+					reasons.push(`璇箟鍖呭惈鍒悕: ${alias}`);
 				}
 			}
 
@@ -253,7 +282,7 @@ export class SkillCommandService {
 				if (!tag) continue;
 				if (tokens.includes(tag)) {
 					score += 8;
-					reasons.push(`命中标签: ${tag}`);
+					reasons.push(`鍛戒腑鏍囩: ${tag}`);
 				}
 			}
 
@@ -262,7 +291,7 @@ export class SkillCommandService {
 				if (token.length < 2) continue;
 				if (searchable.includes(token)) {
 					score += 3;
-					reasons.push(`命中描述关键词: ${token}`);
+					reasons.push(`鍛戒腑鎻忚堪鍏抽敭璇? ${token}`);
 				}
 			}
 
@@ -270,7 +299,7 @@ export class SkillCommandService {
 				const pathHit = entry.globs.some((glob) => this.matchGlob(glob, normalizedCurrentPath, fileName));
 				if (pathHit) {
 					score += 15;
-					reasons.push("命中文件路径规则");
+					reasons.push("鍛戒腑鏂囦欢璺緞瑙勫垯");
 				}
 			}
 
@@ -283,17 +312,23 @@ export class SkillCommandService {
 			}
 		}
 
+		const obsidianCli = scored.find((item) => item.skill.command === "obsidian-cli");
+		if (obsidianCli && this.isObsidianCliPriorityIntent(normalizedPrompt)) {
+			obsidianCli.score += 80;
+			obsidianCli.reasons = [...new Set(["命中 Obsidian CLI 高优先级运行态操作规则", ...obsidianCli.reasons])].slice(0, 4);
+		}
+
 		const compileEntry = autoEntries.find((entry) => this.isCompileWikiCommand(entry.command));
 		if (compileEntry && this.isCompileWikiSkillIntent(normalizedPrompt)) {
 			const existing = scored.find((item) => this.isCompileWikiCommand(item.skill.command));
 			if (existing) {
 				existing.score += 40;
-				existing.reasons = [...new Set(["命中内置编译 Wiki 技能触发规则", ...existing.reasons])].slice(0, 4);
+				existing.reasons = [...new Set(["命中内置 compile-wiki 技能触发规则", ...existing.reasons])].slice(0, 4);
 			} else {
 				scored.push({
 					skill: this.toDescriptor(compileEntry),
 					score: 60,
-					reasons: ["命中内置编译 Wiki 技能触发规则"],
+					reasons: ["命中内置 compile-wiki 技能触发规则"],
 				});
 			}
 		}
@@ -308,7 +343,10 @@ export class SkillCommandService {
 			.slice(0, 6);
 	}
 
-	async buildSkillSystemContext(skillName: string): Promise<{ skill: SkillDescriptor; systemContext: string }> {
+	async buildSkillSystemContext(
+		skillName: string,
+		options: BuildSkillSystemContextOptions = {},
+	): Promise<{ skill: SkillDescriptor; systemContext: string }> {
 		const skill = await this.resolveSkill(skillName);
 		if (!skill) {
 			throw new Error(`未找到技能：${skillName}。可先输入 /skills 查看可用技能。`);
@@ -317,8 +355,23 @@ export class SkillCommandService {
 		const markdown = this.getBuiltinSkillMarkdown(skill) ?? await this.safeReadText(skill.filePath);
 		const content = this.truncateText(markdown.trim(), MAX_SKILL_CONTEXT_CHARS);
 		const assets = await this.loadSkillAssetContext(skill.filePath);
+		const invocationMode = options.invocationMode ?? "manual";
+		const selectionReason = options.selectionReason?.trim() ?? "";
+		const invocationRules = invocationMode === "auto"
+			? [
+				"- This skill was auto-matched to the current turn.",
+				"- Apply it only when the task clearly matches the skill domain.",
+				"- Prefer tool calls for evidence and file operations.",
+			]
+			: [
+				"- User explicitly selected this skill for current turn.",
+				"- Follow the skill instructions first, then complete the task.",
+				"- If user asks to create/update files, call write tool directly instead of only describing steps.",
+				"- Prefer tool calls for evidence and file operations.",
+			];
 		const systemContextLines = [
 			"[SkillInvocation]",
+			`mode: ${invocationMode}`,
 			`name: ${skill.name}`,
 			`command: ${skill.command}`,
 			`file: ${skill.filePath}`,
@@ -327,11 +380,9 @@ export class SkillCommandService {
 			`globs: ${skill.globs.join(", ") || "(none)"}`,
 			`aliases: ${skill.aliases.join(", ") || "(none)"}`,
 			`description: ${skill.description || "N/A"}`,
+			...(selectionReason ? [`selection_reason: ${selectionReason}`] : []),
 			"rules:",
-			"- User explicitly selected this skill for current turn.",
-			"- Follow the skill instructions first, then complete the task.",
-			"- If user asks to create/update files, call write tool directly instead of only describing steps.",
-			"- Prefer tool calls for evidence and file operations.",
+			...invocationRules,
 			"",
 			"skill_markdown:",
 			content || "(empty)",
@@ -349,18 +400,33 @@ export class SkillCommandService {
 
 	invalidateCache(): void {
 		this.cachedIndex = null;
+		this.cachedIndexWithDisabled = null;
 		this.cacheTimestamp = 0;
+		this.cacheLocale = null;
 	}
 
-	private async buildSkillIndex(): Promise<SkillIndexEntry[]> {
+	private async buildSkillIndex(includeDisabled = false): Promise<SkillIndexEntry[]> {
 		const now = Date.now();
-		if (this.cachedIndex && now - this.cacheTimestamp < INDEX_CACHE_TTL_MS) {
+		const currentLocale = this.getLocale();
+		const localeUnchanged = this.cacheLocale === currentLocale;
+		if (!includeDisabled && localeUnchanged && this.cachedIndex && now - this.cacheTimestamp < INDEX_CACHE_TTL_MS) {
 			return this.cachedIndex;
+		}
+		if (includeDisabled && localeUnchanged && this.cachedIndexWithDisabled && now - this.cacheTimestamp < INDEX_CACHE_TTL_MS) {
+			return this.cachedIndexWithDisabled;
 		}
 
 		const roots = this.getSkillRoots();
+		const disabledSkills = new Set(
+			(this.getSettings().agentRuntime.disabledSkills ?? [])
+				.map((item) => this.normalizeToken(item))
+				.filter((item) => item.length > 0),
+		);
 		const records = new Map<string, SkillIndexEntry>();
 		for (const builtin of this.getBuiltinSkillEntries()) {
+			if (!includeDisabled && disabledSkills.has(this.normalizeToken(builtin.command))) {
+				continue;
+			}
 			records.set(builtin.filePath.toLowerCase(), builtin);
 		}
 		for (const root of roots) {
@@ -368,6 +434,9 @@ export class SkillCommandService {
 			for (const filePath of files) {
 				const descriptor = await this.buildDescriptor(filePath);
 				if (!descriptor) continue;
+				if (!includeDisabled && disabledSkills.has(this.normalizeToken(descriptor.command))) {
+					continue;
+				}
 				records.set(descriptor.filePath.toLowerCase(), descriptor);
 			}
 		}
@@ -380,8 +449,13 @@ export class SkillCommandService {
 			return left.filePath.localeCompare(right.filePath);
 		});
 
-		this.cachedIndex = sorted;
+		if (includeDisabled) {
+			this.cachedIndexWithDisabled = sorted;
+		} else {
+			this.cachedIndex = sorted;
+		}
 		this.cacheTimestamp = now;
+		this.cacheLocale = currentLocale;
 		return sorted;
 	}
 
@@ -399,7 +473,11 @@ export class SkillCommandService {
 		const folderName = path.basename(path.dirname(filePath));
 		const fallbackName = folderName || "skill";
 		const name = (frontmatter.name || fallbackName).trim();
-		const description = (frontmatter.description || this.extractSummary(markdown)).trim();
+		const description = this.resolveLocalizedDescription(
+			frontmatter.description,
+			frontmatter.descriptionZh,
+			this.extractSummary(markdown),
+		).trim();
 		const command = this.buildDefaultCommand(frontmatter.command, name, folderName);
 		const aliases = this.buildAliases(name, folderName, command, frontmatter.aliases);
 		const tags = [...new Set(frontmatter.tags.map((item) => item.trim()).filter((item) => item.length > 0))];
@@ -580,13 +658,13 @@ export class SkillCommandService {
 	private getSkillRoots(): string[] {
 		const items: string[] = [];
 
-		// Vault 内 Skill 目录
+		// Vault 鍐?Skill 鐩綍
 		items.push(path.join(this.getVaultBasePath(), "F.R.I.D.A.Y", "Skills"));
 
-		// 全局 Skill 目录
+		// 鍏ㄥ眬 Skill 鐩綍
 		items.push(path.join(os.homedir(), "F.R.I.D.A.Y", "skills"));
 
-		// 外部配置路径
+		// 澶栭儴閰嶇疆璺緞
 		for (const ext of this.getSettings().agentRuntime.externalSkillPaths) {
 			items.push(ext);
 		}
@@ -598,44 +676,30 @@ export class SkillCommandService {
 	}
 
 	private getBuiltinSkillEntries(): SkillIndexEntry[] {
-		return [this.createBuiltinCompileWikiSkillEntry()];
+		return BUILTIN_SKILL_DEFINITIONS.map((skill) => this.toBuiltinSkillIndexEntry(skill));
 	}
 
-	private createBuiltinCompileWikiSkillEntry(): SkillIndexEntry {
-		const aliases = [
-			"compile-wiki",
-			"wiki-compile",
-			"compile wiki",
-			"rebuild wiki",
-			"re-ingest wiki",
-			"reingest wiki",
-			"编译wiki",
-			"编译 wiki",
-			"重建wiki",
-			"重建 wiki",
-			"刷新wiki",
-			"更新wiki索引",
-		];
-		const tags = ["wiki", "ingest", "index", "compile", "编译", "索引"];
+	private toBuiltinSkillIndexEntry(skill: BuiltinSkillDefinition): SkillIndexEntry {
 		return {
-			name: "Compile Wiki",
-			description: "Compile active project raw files into wiki knowledge docs and indexes.",
-			filePath: BUILTIN_COMPILE_WIKI_FILE_PATH,
-			command: BUILTIN_COMPILE_WIKI_COMMAND,
-			aliases,
-			tags,
-			globs: ["**/raw/**"],
-			trigger: "auto",
-			normalizedAliases: aliases.map((item) => this.normalizeToken(item)).filter((item) => item.length > 0),
-			normalizedTags: tags.map((item) => this.normalizeTag(item)).filter((item) => item.length > 0),
+			name: skill.name,
+			description: this.getLocale() === "zh-CN" ? skill.descriptionZh : skill.description,
+			filePath: skill.filePath,
+			command: skill.command,
+			aliases: [...skill.aliases],
+			tags: [...skill.tags],
+			globs: [...skill.globs],
+			trigger: skill.trigger,
+			normalizedAliases: skill.aliases
+				.map((item) => this.normalizeToken(item))
+				.filter((item) => item.length > 0),
+			normalizedTags: skill.tags
+				.map((item) => this.normalizeTag(item))
+				.filter((item) => item.length > 0),
 		};
 	}
 
 	private getBuiltinSkillMarkdown(skill: SkillDescriptor): string | null {
-		if (this.isCompileWikiCommand(skill.command) || skill.filePath === BUILTIN_COMPILE_WIKI_FILE_PATH) {
-			return BUILTIN_COMPILE_WIKI_CONTEXT;
-		}
-		return null;
+		return getBuiltinSkillPackMarkdown(skill.command) ?? getBuiltinSkillPackMarkdown(skill.filePath);
 	}
 
 	private isCompileWikiCommand(raw: string): boolean {
@@ -643,11 +707,20 @@ export class SkillCommandService {
 		return BUILTIN_COMPILE_WIKI_COMMAND_ALIASES.includes(normalized);
 	}
 
+	private isObsidianCliPriorityIntent(rawPrompt: string): boolean {
+		const prompt = rawPrompt.trim();
+		if (!prompt) {
+			return false;
+		}
+		return OBSIDIAN_CLI_PRIORITY_PATTERNS.some((pattern) => pattern.test(prompt));
+	}
+
 	private parseFrontmatter(markdown: string): ParsedSkillFrontmatter {
 		const block = markdown.match(/^---\s*\r?\n([\s\S]*?)\r?\n---\s*/);
 		const result: ParsedSkillFrontmatter = {
 			name: "",
 			description: "",
+			descriptionZh: "",
 			command: "",
 			aliases: [],
 			tags: [],
@@ -699,6 +772,8 @@ export class SkillCommandService {
 				result.name = value;
 			} else if (key === "description") {
 				result.description = value;
+			} else if (key === "descriptionzh" || key === "description_zh" || key === "description_cn" || key === "descriptionzhcn") {
+				result.descriptionZh = value;
 			} else if (key === "command") {
 				result.command = value;
 			} else if (key === "trigger") {
@@ -732,6 +807,13 @@ export class SkillCommandService {
 
 	private stripQuotes(value: string): string {
 		return value.replace(/^['"]+|['"]+$/g, "").trim();
+	}
+
+	private resolveLocalizedDescription(primary: string, zhOverride: string, fallback: string): string {
+		if (this.getLocale() === "zh-CN") {
+			return zhOverride || primary || fallback;
+		}
+		return primary || zhOverride || fallback;
 	}
 
 	private extractSummary(markdown: string): string {
@@ -777,7 +859,7 @@ export class SkillCommandService {
 		if (regex.test(normalizedPath)) {
 			return true;
 		}
-		// 支持仅文件名模式（例如 *.md）
+		// Support file-name-only patterns (for example *.md).
 		return regex.test(fileName);
 	}
 
@@ -807,13 +889,12 @@ export class SkillCommandService {
 			.replace(/^-|-$/g, "");
 	}
 
-	private isReservedSlashCommand(commandName: string): boolean {
-		const reserved = new Set(["todo", "project", "projects", "friday", "f.r.i.d.a.y"]);
-		return reserved.has(commandName.trim().toLowerCase());
+	private isReservedSlashCommand(_commandName: string): boolean {
+		return false;
 	}
 
 	private normalizeAbsolutePath(inputPath: string): string {
-		return normalizePath(path.resolve(inputPath));
+		return path.resolve(inputPath).replace(/\\/g, "/");
 	}
 
 	private async safeReadText(filePath: string): Promise<string> {
@@ -831,3 +912,5 @@ export class SkillCommandService {
 		return `${text.slice(0, maxChars)}...`;
 	}
 }
+
+

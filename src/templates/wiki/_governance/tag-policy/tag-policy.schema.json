@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://friday.local/schema/tag-policy.json",
+  "title": "Friday Tag Policy",
+  "type": "object",
+  "required": [
+    "version",
+    "policyId",
+    "autoArchiveFromTagRules",
+    "sourcePriority",
+    "rules"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "policyId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "autoArchiveFromTagRules": {
+      "type": "boolean"
+    },
+    "sourcePriority": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "rule",
+          "ai"
+        ]
+      }
+    },
+    "policyStoragePath": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "enabled",
+          "deterministic",
+          "when",
+          "then"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "deterministic": {
+            "type": "boolean"
+          },
+          "confidenceMin": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "when": {
+            "type": "object",
+            "properties": {
+              "zoneIn": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "archive_source",
+                    "workspace_draft",
+                    "wiki_artifact"
+                  ]
+                }
+              },
+              "pathPrefixAny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fileNameRegex": {
+                "type": "string"
+              },
+              "hasAnyTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "frontmatterEquals": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "key",
+                    "value"
+                  ],
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "value": {}
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          },
+          "then": {
+            "type": "object",
+            "properties": {
+              "addTags": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "targetZone": {
+                "type": "string",
+                "enum": [
+                  "archive_source",
+                  "workspace_draft",
+                  "wiki_artifact"
+                ]
+              },
+              "moveTo": {
+                "type": "string"
+              },
+              "renameTo": {
+                "type": "string"
+              },
+              "emitSuggestionOnly": {
+                "type": "boolean"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
+

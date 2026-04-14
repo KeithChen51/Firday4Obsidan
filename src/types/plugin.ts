@@ -13,6 +13,7 @@ import { InlineEditService } from "../services/InlineEditService";
 import { WorkspaceAccessService } from "../services/WorkspaceAccessService";
 import { SkillCommandService } from "../services/SkillCommandService";
 import { SlashCommandService } from "../services/SlashCommandService";
+import { WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import { AgentProfile } from "./agent";
 import { ProjectEntry, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
@@ -36,6 +37,7 @@ export interface FridayPluginApi {
 	workspaceAccessService: WorkspaceAccessService;
 	skillCommandService: SkillCommandService;
 	slashCommandService: SlashCommandService;
+	workbenchStateStore: WorkbenchStateStore;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];
 	addRibbonIcon: Plugin["addRibbonIcon"];
@@ -44,7 +46,7 @@ export interface FridayPluginApi {
 	upsertProject(project: ProjectEntry): Promise<void>;
 	removeProject(slug: string): Promise<void>;
 	setActiveProject(projectSlug: string): Promise<void>;
-	compileWikiForActiveProject(rawPaths?: string[]): Promise<RuntimeWikiCompileSummary>;
+	compileWikiForActiveProject(rawPaths?: string[], forceRebuild?: boolean): Promise<RuntimeWikiCompileSummary>;
 	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
 	removeProjectGroup(groupId: string): Promise<void>;
 	openSettingsTab(): void;

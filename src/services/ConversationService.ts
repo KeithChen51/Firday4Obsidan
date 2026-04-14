@@ -3,11 +3,20 @@ import { ChatMessage } from "./AIService";
 import { AgentService } from "./AgentService";
 
 interface SessionLine {
+	type?: "message";
 	sessionId: string;
 	agentId: string;
 	index: number;
 	role: ChatMessage["role"];
 	content: string;
+	ts: string;
+}
+
+interface SessionMetaLine {
+	type: "meta";
+	sessionId: string;
+	agentId: string;
+	title?: string;
 	ts: string;
 }
 
@@ -17,6 +26,7 @@ export interface ConversationSession {
 	updatedAt: string;
 	filePath: string;
 	messages: ChatMessage[];
+	title?: string;
 }
 
 export class ConversationService {
@@ -47,11 +57,28 @@ export class ConversationService {
 		agentId: string,
 		sessionId: string,
 		messages: ChatMessage[],
+		title?: string,
 	): Promise<ConversationSession> {
 		const targetPath = normalizePath(`${this.agentService.getAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
 		const now = new Date().toISOString();
-		const rows = messages.map((message, index) =>
+		const existingFile = await this.resolveFileConflict(targetPath);
+		let effectiveTitle = title;
+		if (effectiveTitle === undefined && existingFile instanceof TFile) {
+			const existingSession = await this.readSessionFromFile(existingFile, agentId);
+			effectiveTitle = existingSession?.title;
+		}
+		const metaRows = [
 			JSON.stringify({
+				type: "meta",
+				sessionId,
+				agentId,
+				title: effectiveTitle?.trim() || "",
+				ts: now,
+			} satisfies SessionMetaLine),
+		];
+		const messageRows = messages.map((message, index) =>
+			JSON.stringify({
+				type: "message",
 				sessionId,
 				agentId,
 				index,
@@ -60,8 +87,8 @@ export class ConversationService {
 				ts: now,
 			} satisfies SessionLine),
 		);
-		const payload = rows.join("\n");
-		const file = await this.resolveFileConflict(targetPath);
+		const payload = [...metaRows, ...messageRows].join("\n");
+		const file = existingFile;
 		if (file instanceof TFile) {
 			await this.vault.modify(file, payload);
 		} else {
@@ -85,6 +112,7 @@ export class ConversationService {
 			updatedAt: now,
 			filePath: targetPath,
 			messages,
+			title: effectiveTitle?.trim() || undefined,
 		};
 	}
 
@@ -104,6 +132,30 @@ export class ConversationService {
 			}
 		}
 		return sessions;
+	}
+
+	async renameSession(agentId: string, sessionId: string, title: string): Promise<ConversationSession> {
+		const session = await this.getSession(agentId, sessionId);
+		if (!session) {
+			throw new Error(`Session not found: ${sessionId}`);
+		}
+		return this.saveSession(agentId, sessionId, session.messages, title);
+	}
+
+	async deleteSession(agentId: string, sessionId: string): Promise<void> {
+		const file = await this.findSessionFile(agentId, sessionId);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+		await this.vault.delete(file);
+	}
+
+	async getSession(agentId: string, sessionId: string): Promise<ConversationSession | null> {
+		const file = await this.findSessionFile(agentId, sessionId);
+		if (!(file instanceof TFile)) {
+			return null;
+		}
+		return this.readSessionFromFile(file, agentId);
 	}
 
 	async collectRecentSessionsAcrossAgents(
@@ -152,6 +204,22 @@ export class ConversationService {
 			.find((item) => normalizePath(item.path).toLowerCase() === lower) ?? null;
 	}
 
+	private async findSessionFile(agentId: string, sessionId: string): Promise<TFile | null> {
+		const directPath = normalizePath(`${this.agentService.getAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
+		const direct = this.getFileByPathRelaxed(directPath);
+		if (direct instanceof TFile) {
+			return direct;
+		}
+		const folderPath = this.agentService.getAgentSessionsRoot(agentId);
+		return this.vault
+			.getFiles()
+			.find((file) =>
+				normalizePath(file.path).startsWith(`${folderPath}/`) &&
+				file.extension === "jsonl" &&
+				file.basename === sessionId,
+			) ?? null;
+	}
+
 	private isAlreadyExistsError(error: unknown): boolean {
 		const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
 		return message.includes("already exists") || message.includes("eexist");
@@ -188,23 +256,34 @@ export class ConversationService {
 		const messages: ChatMessage[] = [];
 		let sessionId = file.basename;
 		let updatedAt = file.stat.mtime ? new Date(file.stat.mtime).toISOString() : new Date().toISOString();
+		let title = "";
 
 		for (const line of lines) {
 			try {
-				const parsed = JSON.parse(line) as Partial<SessionLine>;
-				if (typeof parsed.sessionId === "string" && parsed.sessionId) {
-					sessionId = parsed.sessionId;
+				const parsed = JSON.parse(line) as Record<string, unknown>;
+				const parsedSessionId = typeof parsed.sessionId === "string" ? parsed.sessionId : "";
+				const parsedTs = typeof parsed.ts === "string" ? parsed.ts : "";
+				if (parsedSessionId) {
+					sessionId = parsedSessionId;
 				}
-				if (typeof parsed.ts === "string" && parsed.ts) {
-					updatedAt = parsed.ts;
+				if (parsedTs) {
+					updatedAt = parsedTs;
 				}
+				if (parsed.type === "meta") {
+					if (typeof parsed.title === "string") {
+						title = parsed.title.trim();
+					}
+					continue;
+				}
+				const role = typeof parsed.role === "string" ? parsed.role : "";
+				const content = typeof parsed.content === "string" ? parsed.content : "";
 				if (
-					(parsed.role === "system" || parsed.role === "user" || parsed.role === "assistant") &&
-					typeof parsed.content === "string"
+					(role === "system" || role === "user" || role === "assistant") &&
+					content
 				) {
 					messages.push({
-						role: parsed.role,
-						content: parsed.content,
+						role,
+						content,
 					});
 				}
 			} catch {
@@ -236,6 +315,7 @@ export class ConversationService {
 			updatedAt,
 			filePath: file.path,
 			messages,
+			title: title || undefined,
 		};
 	}
 }

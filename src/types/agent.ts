@@ -11,10 +11,18 @@ export interface AgentProfile {
 }
 
 export type ToolPermissionMode = "auto" | "standard" | "strict";
+export type RuntimePolicyEffect = "allow" | "ask" | "deny";
+
+export interface RuntimeToolPolicyRule {
+	action: string;
+	effect: RuntimePolicyEffect;
+}
 
 export interface AgentRuntimeSettings {
 	requireWriteConfirmation: boolean;
 	toolPermissionMode: ToolPermissionMode;
+	disabledTools: string[];
+	disabledSkills: string[];
 	enableExecTool: boolean;
 	execTimeout: number;
 	execWorkingDir: "vault" | "custom";
@@ -29,4 +37,5 @@ export interface AgentRuntimeSettings {
 	maxSubagentDepth: number;
 	blockedCommands: string[];
 	toolCallingMode: ToolCallingMode;
+	projectToolPolicyRules: Record<string, RuntimeToolPolicyRule[]>;
 }

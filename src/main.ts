@@ -26,6 +26,8 @@ import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
 import { IngestEventStore } from "./services/IngestEventStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
+import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
+import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
 import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGroupEntry, SourceType } from "./types/project";
@@ -62,6 +64,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	agentRuntimeService!: AgentRuntimeService;
 	skillCommandService!: SkillCommandService;
 	slashCommandService!: SlashCommandService;
+	workbenchStateStore!: WorkbenchStateStore;
 	projectBoundaryService!: ProjectBoundaryService;
 	projectContentService!: ProjectContentService;
 	ingestEventStore!: IngestEventStore;
@@ -72,6 +75,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async onload(): Promise<void> {
 		try {
+			const runtimeProfile = detectRuntimeProfile();
+			if (!runtimeProfile.supported) {
+				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
+			}
 			this.dataService = new DataService(this.app.vault, PRIMARY_PATHS.root);
 			this.syncService = new SyncService(this.app, this.dataService.getFridayRoot());
 			await this.dataService.ensureDirectoryStructure();
@@ -115,8 +122,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.workspaceAccessService,
 				() => this.settings,
 				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+				() => this.getLocale(),
 			);
 			this.slashCommandService = new SlashCommandService(() => this.settings);
+			this.workbenchStateStore = new WorkbenchStateStore();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
 				this.agentRuntimeService = new AgentRuntimeService(
 					this.app.vault,
@@ -129,6 +138,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.inlineEditService,
 				this.skillCommandService,
 					this.projectBoundaryService,
+					this.workbenchStateStore,
 					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
 					() => this.settings,
 				);
@@ -192,6 +202,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			...DEFAULT_SETTINGS,
 			...migrated,
 			locale: resolveLocale(migrated.locale),
+			localeFollowSystem: typeof migrated.localeFollowSystem === "boolean"
+				? migrated.localeFollowSystem
+				: DEFAULT_SETTINGS.localeFollowSystem,
 			user: {
 				...DEFAULT_SETTINGS.user,
 				...(migrated.user ?? {}),
@@ -344,6 +357,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	getLocale(): LocaleCode {
+		if (this.settings.localeFollowSystem) {
+			return resolveLocale(window.navigator.language);
+		}
 		return resolveLocale(this.settings.locale);
 	}
 
@@ -579,6 +595,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		sourceCommit: string,
 		showFailureNotice: boolean,
 		rethrowError = false,
+		forceRebuild = false,
 	): Promise<IngestSummary> {
 		const projectRoot = this.projectBoundaryService.getProjectRoot(project);
 		const scopedRawPaths = [...new Set(rawPaths.map((item) => normalizePath(item)))].filter(
@@ -603,6 +620,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				project,
 				scopedRawPaths,
 				this.buildRawSourceContext(sourceType, project, sourceCommit),
+				{ forceRebuild },
 			);
 			if (showFailureNotice && summary.failed > 0) {
 				new Notice(
@@ -632,12 +650,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 	}
 
-	async compileWikiForActiveProject(rawPaths?: string[]): Promise<WikiCompileResult> {
+	async compileWikiForActiveProject(rawPaths?: string[], forceRebuild = true): Promise<WikiCompileResult> {
 		if (this.compileWikiInFlight) {
 			return this.compileWikiInFlight;
 		}
 
-		const task = this.compileWikiForActiveProjectInternal(rawPaths);
+		const task = this.compileWikiForActiveProjectInternal(rawPaths, forceRebuild);
 		this.compileWikiInFlight = task.finally(() => {
 			if (this.compileWikiInFlight === task) {
 				this.compileWikiInFlight = null;
@@ -646,7 +664,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return this.compileWikiInFlight;
 	}
 
-	private async compileWikiForActiveProjectInternal(rawPaths?: string[]): Promise<WikiCompileResult> {
+	private async compileWikiForActiveProjectInternal(rawPaths?: string[], forceRebuild = true): Promise<WikiCompileResult> {
 		const activeProject = this.projectBoundaryService.getActiveProject();
 		if (!activeProject) {
 			throw new Error("No active project selected.");
@@ -689,6 +707,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			"",
 			true,
 			true,
+			forceRebuild,
 		);
 		return {
 			projectSlug: activeProject.slug,
