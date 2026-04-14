@@ -12,6 +12,16 @@ export interface AgentProfile {
 
 export type ToolPermissionMode = "auto" | "standard" | "strict";
 export type RuntimePolicyEffect = "allow" | "ask" | "deny";
+export type RuntimeExecutionGateCode =
+	| "allowed"
+	| "runtime_disabled"
+	| "skill_disabled"
+	| "tool_disabled"
+	| "capability_disabled"
+	| "exec_disabled"
+	| "exec_unsupported"
+	| "subagent_disabled"
+	| "subagent_unsupported";
 
 export interface RuntimeToolPolicyRule {
 	action: string;

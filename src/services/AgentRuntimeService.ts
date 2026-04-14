@@ -38,6 +38,9 @@ import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopePa
 import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
+import { ExecutionGate } from "../core/execution/ExecutionGate";
+import type { InvocationRequest } from "../core/execution/InvocationRequest";
+import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
 import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 import { StepTraceStore } from "../platform/tools/StepTraceStore";
 import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
@@ -195,6 +198,7 @@ export class AgentRuntimeService {
 	private readonly contextAssembler: ContextAssembler;
 	private readonly fileMemoryStore: FileMemoryStore;
 	private readonly wikiKnowledgeProvider: WikiKnowledgeProvider;
+	private readonly executionGate: ExecutionGate;
 	private activeTurnId = "";
 	private activeTurnStateMachine: TurnStateMachine | null = null;
 	private activeRuntimeProfile: RuntimeProfile = detectRuntimeProfile();
@@ -226,6 +230,7 @@ export class AgentRuntimeService {
 		this.contextAssembler = new ContextAssembler();
 		this.fileMemoryStore = new FileMemoryStore(this.vault);
 		this.wikiKnowledgeProvider = new WikiKnowledgeProvider();
+		this.executionGate = new ExecutionGate(this.getSettings);
 	}
 
 	async runTurn(input: RuntimeTurnInput): Promise<RuntimeTurnResult> {
@@ -241,6 +246,24 @@ export class AgentRuntimeService {
 			depth,
 			message: `Runtime started (mode=${mode}, depth=${depth}, profile=${this.activeRuntimeProfile.id})`,
 		});
+		const gateDecision = this.executionGate.evaluate(this.buildRuntimeTurnInvocation(input), this.activeRuntimeProfile);
+		if (!gateDecision.allow) {
+			this.reportProgress(input, {
+				phase: "error",
+				depth,
+				message: `Runtime blocked: ${gateDecision.reason}`,
+			});
+			return this.finalizeTurnResult(
+				turnId,
+				{
+					assistantText: gateDecision.reason,
+					traces: [],
+					rawFinalReply: gateDecision.reason,
+					parseError: gateDecision.reason,
+				},
+				input.userPrompt,
+			);
+		}
 
 		try {
 			if (mode === "prompt") {
@@ -337,6 +360,37 @@ export class AgentRuntimeService {
 			tool: `skill:${input.skillName}`,
 			message: `Running builtin skill ${input.skillName}`,
 		});
+		const gateDecision = this.executionGate.evaluate(this.buildBuiltinSkillInvocation(input), this.activeRuntimeProfile);
+		if (!gateDecision.allow) {
+			const trace: RuntimeToolTrace = {
+				...traceBase,
+				approved: false,
+				approvalReason: gateDecision.reason,
+				status: "denied",
+				failureClass: "dependency_unavailable",
+				ok: false,
+				summary: `Builtin skill blocked: ${input.skillName}`,
+				error: gateDecision.reason,
+			};
+			await this.persistToolRun(trace, startedAt, new Date().toISOString());
+			this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, {
+				phase: "error",
+				depth: 0,
+				step: 1,
+				tool: `skill:${input.skillName}`,
+				message: gateDecision.reason,
+			});
+			return this.finalizeTurnResult(
+				turnId,
+				{
+					assistantText: gateDecision.reason,
+					traces: [trace],
+					rawFinalReply: gateDecision.reason,
+					parseError: gateDecision.reason,
+				},
+				input.taskPrompt,
+			);
+		}
 
 		try {
 			let assistantText = "";
@@ -421,6 +475,45 @@ export class AgentRuntimeService {
 		} catch {
 			// Ignore observer errors to avoid blocking runtime execution.
 		}
+	}
+
+	private buildRuntimeTurnInvocation(input: RuntimeTurnInput): ResolvedInvocation {
+		const request: InvocationRequest = {
+			source: input.depth && input.depth > 0 ? "service_call" : "chat_prompt",
+			intentType: "runtime",
+			prompt: input.userPrompt,
+			projectSlug: this.projectBoundaryService.getActiveProject()?.slug,
+			sessionId: this.activeTurnId,
+		};
+		return {
+			request,
+			resolvedType: "runtime",
+			resolvedId: "agent-runtime-turn",
+			requiresRuntime: true,
+			requiredCapabilities: [],
+		};
+	}
+
+	private buildBuiltinSkillInvocation(input: BuiltinSkillRunInput): ResolvedInvocation {
+		const skillName = input.skillName.trim().toLowerCase();
+		const request: InvocationRequest = {
+			source: "service_call",
+			intentType: "skill",
+			targetId: skillName,
+			prompt: input.taskPrompt,
+			projectSlug: this.projectBoundaryService.getActiveProject()?.slug,
+			sessionId: this.activeTurnId,
+		};
+		const requiredCapabilities: Record<string, string[]> = {
+			"compile-wiki": ["compile_wiki"],
+		};
+		return {
+			request,
+			resolvedType: "skill",
+			resolvedId: skillName,
+			requiresRuntime: true,
+			requiredCapabilities: requiredCapabilities[skillName] ?? [],
+		};
 	}
 
 	private reportContextProgress(
