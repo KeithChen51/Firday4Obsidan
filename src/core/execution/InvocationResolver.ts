@@ -2,13 +2,10 @@ import type { ParsedSkillSlashCommand } from "../../services/SkillCommandService
 import type { SlashCommandExpandResult } from "../../services/SlashCommandService";
 import type { InvocationRequest } from "./InvocationRequest";
 import type { ResolvedInvocation } from "./ResolvedInvocation";
-import type { RuntimeEvent } from "./RuntimeEvent";
 
 interface InvocationResolverDeps {
 	parseSkillSlashCommand: (rawPrompt: string) => ParsedSkillSlashCommand;
 	expandSlashCommand: (rawPrompt: string) => SlashCommandExpandResult;
-	isCompileIntent: (rawPrompt: string) => boolean;
-	routeRuntimeEvent: (event: RuntimeEvent) => Extract<InvocationResolution, { type: "runtime" }>;
 }
 
 export type InvocationResolution =
@@ -50,14 +47,6 @@ export class InvocationResolver {
 				allowedTools: slashExpansion.allowedTools,
 				allowedModels: slashExpansion.allowedModels,
 			};
-		}
-
-		if (this.deps.isCompileIntent(rawPrompt)) {
-			return this.deps.routeRuntimeEvent({
-				type: "knowledge.compile_requested",
-				source: "auto_skill_match",
-				prompt: rawPrompt.trim(),
-			});
 		}
 
 		return {

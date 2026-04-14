@@ -44,7 +44,10 @@ export class ExecutionOrchestrator {
 	async buildSystemContext(decision: ExecutionDecision, baseSystemContext = ""): Promise<string> {
 		let extraSystemContext = baseSystemContext.trim();
 		if (decision.mode === "runtime_with_skill_context" && decision.requestedSkillName) {
-			const skillContext = await this.skillCommandService.buildSkillSystemContext(decision.requestedSkillName);
+			const skillContext = await this.skillCommandService.buildSkillSystemContext(decision.requestedSkillName, {
+				invocationMode: decision.skillInvocationMode ?? "manual",
+				selectionReason: decision.selectionReason,
+			});
 			extraSystemContext = extraSystemContext
 				? `${skillContext.systemContext}\n\n${extraSystemContext}`
 				: skillContext.systemContext;

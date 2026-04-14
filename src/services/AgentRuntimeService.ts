@@ -17,7 +17,7 @@ import { ToolApprovalScope, ToolApprovalService } from "./ToolApprovalService";
 import { CommandExecService } from "./CommandExecService";
 import { InlineEditService, EditOperation } from "./InlineEditService";
 import { ToolDefinition } from "../types/tools";
-import { SkillCommandService, SuggestedSkill } from "./SkillCommandService";
+import { SkillCommandService } from "./SkillCommandService";
 import { ProjectBoundaryService } from "./ProjectBoundaryService";
 import { EditPlanRecord, WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import { TurnOrchestrator } from "../core/orchestrator/TurnOrchestrator";
@@ -1079,6 +1079,7 @@ export class AgentRuntimeService {
 
 		this.reportContextProgress(input, depth, "skills", "匹配相关技能与命令约束");
 		const autoSkillContext = await this.buildAutoSkillContext(userPrompt, currentFilePath, trimmedExtra);
+		const runtimeExtraContext = autoSkillContext && autoSkillContext === trimmedExtra ? "" : trimmedExtra;
 
 		this.reportContextProgress(input, depth, "wiki", "检索项目知识与候选文档");
 		const wikiKnowledgeContext = await this.wikiLookupCapability.execute(userPrompt ?? "");
@@ -1101,7 +1102,7 @@ export class AgentRuntimeService {
 			userPrompt: userPrompt ?? "",
 			fridayMd,
 			agentProfile,
-			extraSystemContext: trimmedExtra,
+			extraSystemContext: runtimeExtraContext,
 			autoSkillContext,
 			wikiKnowledgeContext,
 			memoryContext,
@@ -1117,38 +1118,12 @@ export class AgentRuntimeService {
 		currentFilePath: string | undefined,
 		extraSystemContext: string | undefined,
 	): Promise<string> {
-		const prompt = userPrompt?.trim() ?? "";
-		if (!prompt) {
-			return "";
-		}
 		if (extraSystemContext?.includes("[SkillInvocation]")) {
-			return "";
+			return extraSystemContext;
 		}
-
-		let suggestions: SuggestedSkill[] = [];
-		try {
-			suggestions = await this.skillCommandService.suggestSkillsForPrompt(prompt, currentFilePath);
-		} catch {
-			return "";
-		}
-		if (suggestions.length === 0) {
-			return "";
-		}
-
-		const primarySkill = suggestions[0];
-		if (!primarySkill) {
-			return "";
-		}
-		const selectionReason = primarySkill.reasons.join("; ") || `score=${primarySkill.score}`;
-		try {
-			const skillContext = await this.skillCommandService.buildSkillSystemContext(primarySkill.skill.command, {
-				invocationMode: "auto",
-				selectionReason,
-			});
-			return skillContext.systemContext;
-		} catch {
-			return "";
-		}
+		void userPrompt;
+		void currentFilePath;
+		return "";
 	}
 
 	private async loadMemoryContext(): Promise<string> {

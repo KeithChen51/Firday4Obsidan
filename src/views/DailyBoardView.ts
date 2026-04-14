@@ -549,7 +549,7 @@ export class DailyBoardView extends ItemView {
 		if (resolution.type !== "runtime" || !resolution.requestedSkillName) {
 			throw new Error("Project conflict proposal could not be resolved to a runtime skill invocation.");
 		}
-		const decision = this.plugin.executionPlanner.plan(resolution);
+		const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath: filePath });
 		const result = await this.plugin.executionOrchestrator.execute(decision, {
 			agentId: activeAgent.id,
 			conversation: [],
@@ -1886,7 +1886,7 @@ export class DailyBoardView extends ItemView {
 				assistantText = this.buildSkillCatalogReply(skills);
 				shouldStreamFinalText = true;
 			} else {
-				const decision = this.plugin.executionPlanner.plan(resolution);
+				const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath });
 				runtimePrompt = decision.runtimePrompt;
 				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
@@ -2029,7 +2029,9 @@ export class DailyBoardView extends ItemView {
 			if (resolution.type !== "runtime") {
 				throw new Error("Compile button could not be resolved to a runtime invocation.");
 			}
-			const decision = this.plugin.executionPlanner.plan(resolution);
+			const decision = await this.plugin.executionPlanner.plan(resolution, {
+				currentFilePath: this.app.workspace.getActiveFile()?.path,
+			});
 			const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 				agentId: activeAgent.id,
 				conversation: [],
@@ -2137,16 +2139,10 @@ export class DailyBoardView extends ItemView {
 		return parts.join("\n");
 	}
 
-	private isCompileWikiIntent(prompt: string): boolean {
-		return this.plugin.skillCommandService.isCompileWikiSkillIntent(prompt);
-	}
-
 	private buildInvocationResolver(): InvocationResolver {
 		return new InvocationResolver({
 			parseSkillSlashCommand: (rawPrompt) => this.plugin.skillCommandService.parseSlashCommand(rawPrompt),
 			expandSlashCommand: (rawPrompt) => this.plugin.slashCommandService.expand(rawPrompt),
-			isCompileIntent: (rawPrompt) => this.isCompileWikiIntent(rawPrompt),
-			routeRuntimeEvent: (event) => this.plugin.executionEventRouter.routeToRuntime(event),
 		});
 	}
 

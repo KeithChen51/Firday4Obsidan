@@ -133,7 +133,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
 			this.executionEventRouter = new EventRouter();
-			this.executionPlanner = new ExecutionPlanner();
+			this.executionPlanner = new ExecutionPlanner({
+				suggestSkillsForPrompt: (prompt: string, currentFilePath?: string) =>
+					this.skillCommandService.suggestSkillsForPrompt(prompt, currentFilePath),
+			});
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
 				this.agentRuntimeService = new AgentRuntimeService(
 					this.app.vault,

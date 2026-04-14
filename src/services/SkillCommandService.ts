@@ -21,60 +21,6 @@ const MAX_ASSET_FILE_CHARS = 900;
 const MAX_ASSET_FILES_PER_BUCKET = 4;
 const MAX_CATALOG_ITEMS = 120;
 const INDEX_CACHE_TTL_MS = 60_000;
-const BUILTIN_COMPILE_WIKI_COMMAND = "compile-wiki";
-const BUILTIN_COMPILE_WIKI_COMMAND_ALIASES = (() => {
-	const compileSkill = BUILTIN_SKILL_DEFINITIONS.find((item) => item.command === BUILTIN_COMPILE_WIKI_COMMAND);
-	const aliasSet = new Set<string>([normalizeBuiltinToken(BUILTIN_COMPILE_WIKI_COMMAND)]);
-	if (compileSkill) {
-		for (const alias of compileSkill.aliases) {
-			const normalized = normalizeBuiltinToken(alias);
-			if (normalized) {
-				aliasSet.add(normalized);
-			}
-		}
-	}
-	return [...aliasSet];
-})();
-const BUILTIN_COMPILE_WIKI_INTENT_PATTERNS: RegExp[] = [
-	/(^|\s)\/(?:compile-wiki|wiki-compile)\b/i,
-	/(?:^|\s)\/skill\s+(?:compile-wiki|wiki-compile|编译wiki|重建wiki)\b/i,
-	/(?:compile|rebuild|re-ingest|reingest|refresh|update)\s+wiki\b/i,
-	/\bwiki\s+(?:compile|rebuild|re-ingest|reingest|refresh|update)\b/i,
-	/(?:编译|重建|刷新|更新)\s*wiki/i,
-	/wiki\s*(?:编译|重建|刷新|更新)/i,
-	/(?:编译|重建|刷新|更新)\s*(?:索引|wiki索引)/i,
-	/(?:wiki\s*索引|知识库\s*索引)\s*(?:编译|重建|刷新|更新)/i,
-];
-
-const OBSIDIAN_CLI_PRIORITY_PATTERNS: RegExp[] = [
-	/\bobsidian\b/i,
-	/\bplugin:reload\b/i,
-	/\bdev:errors\b/i,
-	/\bdev:screenshot\b/i,
-	/\bdev:dom\b/i,
-	/\bdev:css\b/i,
-	/\bdev:console\b/i,
-	/\bbacklinks?\b/i,
-	/\bdaily(?::read|:append)?\b/i,
-	/\bproperty:set\b/i,
-	/\btasks?\b/i,
-	/(?:重载|重新加载)\s*(?:插件|plugin)/i,
-	/(?:截图|screenshot)/i,
-	/(?:检查|查看)\s*(?:dom|控制台|console|错误|报错|界面)/i,
-];
-
-function normalizeBuiltinToken(value: string): string {
-	return value
-		.trim()
-		.toLowerCase()
-		.replace(/^[$/]+/, "")
-		.replace(/\.md$/i, "")
-		.replace(/\s+/g, "-")
-		.replace(/_/g, "-")
-		.replace(/[^a-z0-9\u4e00-\u9fa5-]/g, "")
-		.replace(/-+/g, "-")
-		.replace(/^-|-$/g, "");
-}
 
 function normalizePortablePath(value: string): string {
 	return value.replace(/\\/g, "/");
@@ -186,31 +132,6 @@ export class SkillCommandService {
 		return { type: "use", skillName: commandName, taskPrompt };
 	}
 
-	isCompileWikiSkillIntent(rawPrompt: string): boolean {
-		const prompt = rawPrompt.trim();
-		if (!prompt) {
-			return false;
-		}
-
-		for (const pattern of BUILTIN_COMPILE_WIKI_INTENT_PATTERNS) {
-			if (pattern.test(prompt)) {
-				return true;
-			}
-		}
-
-		const slashSkill = prompt.match(/^\/skill\s+([^\s]+)/i)?.[1] ?? "";
-		if (slashSkill && this.isCompileWikiCommand(slashSkill)) {
-			return true;
-		}
-
-		const shortCommand = prompt.match(/^\/([^\s/]+)/)?.[1] ?? "";
-		if (shortCommand && this.isCompileWikiCommand(shortCommand)) {
-			return true;
-		}
-
-		return false;
-	}
-
 	async listSkills(limit = MAX_CATALOG_ITEMS, options?: { includeDisabled?: boolean }): Promise<SkillDescriptor[]> {
 		const index = await this.buildSkillIndex(options?.includeDisabled === true);
 		return index.slice(0, Math.max(1, limit)).map((entry) => this.toDescriptor(entry));
@@ -272,7 +193,7 @@ export class SkillCommandService {
 					reasons.push(`鍛戒腑鍒悕: ${alias}`);
 					continue;
 				}
-				if (promptLower.includes(alias) && alias.length >= 3) {
+				if (promptLower.includes(alias) && this.isSemanticAliasMatch(alias)) {
 					score += 5;
 					reasons.push(`璇箟鍖呭惈鍒悕: ${alias}`);
 				}
@@ -308,27 +229,6 @@ export class SkillCommandService {
 					skill: this.toDescriptor(entry),
 					score,
 					reasons: [...new Set(reasons)].slice(0, 4),
-				});
-			}
-		}
-
-		const obsidianCli = scored.find((item) => item.skill.command === "obsidian-cli");
-		if (obsidianCli && this.isObsidianCliPriorityIntent(normalizedPrompt)) {
-			obsidianCli.score += 80;
-			obsidianCli.reasons = [...new Set(["命中 Obsidian CLI 高优先级运行态操作规则", ...obsidianCli.reasons])].slice(0, 4);
-		}
-
-		const compileEntry = autoEntries.find((entry) => this.isCompileWikiCommand(entry.command));
-		if (compileEntry && this.isCompileWikiSkillIntent(normalizedPrompt)) {
-			const existing = scored.find((item) => this.isCompileWikiCommand(item.skill.command));
-			if (existing) {
-				existing.score += 40;
-				existing.reasons = [...new Set(["命中内置 compile-wiki 技能触发规则", ...existing.reasons])].slice(0, 4);
-			} else {
-				scored.push({
-					skill: this.toDescriptor(compileEntry),
-					score: 60,
-					reasons: ["命中内置 compile-wiki 技能触发规则"],
 				});
 			}
 		}
@@ -702,17 +602,8 @@ export class SkillCommandService {
 		return getBuiltinSkillPackMarkdown(skill.command) ?? getBuiltinSkillPackMarkdown(skill.filePath);
 	}
 
-	private isCompileWikiCommand(raw: string): boolean {
-		const normalized = this.normalizeToken(raw);
-		return BUILTIN_COMPILE_WIKI_COMMAND_ALIASES.includes(normalized);
-	}
-
-	private isObsidianCliPriorityIntent(rawPrompt: string): boolean {
-		const prompt = rawPrompt.trim();
-		if (!prompt) {
-			return false;
-		}
-		return OBSIDIAN_CLI_PRIORITY_PATTERNS.some((pattern) => pattern.test(prompt));
+	private isSemanticAliasMatch(alias: string): boolean {
+		return alias.length >= 3 || /[\u4e00-\u9fa5]{2,}/.test(alias);
 	}
 
 	private parseFrontmatter(markdown: string): ParsedSkillFrontmatter {

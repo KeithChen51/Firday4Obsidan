@@ -71,11 +71,19 @@ test("compile intent stays on runtime path instead of calling compile helper dir
 	assert.doesNotMatch(block, /compileWikiWithStatus\(/);
 });
 
-test("auto skill matching injects full skill context instead of summary list only", async () => {
+test("runtime no longer performs its own auto-skill selection inside buildSystemPrompt", async () => {
 	const source = readRuntimeSource();
-	const match = source.match(/private async buildAutoSkillContext\([\s\S]*?\n\t\}\n\n\tprivate async loadMemoryContext/);
-	assert.ok(match, "buildAutoSkillContext block should exist");
-	assert.match(match[0], /buildSkillSystemContext\(/);
+	assert.doesNotMatch(source, /suggestSkillsForPrompt\(/);
+	assert.doesNotMatch(source, /buildSkillSystemContext\([\s\S]*invocationMode: "auto"/);
+	assert.match(source, /extraSystemContext\?\.includes\("\[SkillInvocation\]"\)/);
+});
+
+test("invocation resolver no longer relies on compile intent hardcoding", async () => {
+	const source = readViewSource();
+	const match = source.match(/private buildInvocationResolver\(\): InvocationResolver \{([\s\S]*?)\n\t\}/);
+	assert.ok(match, "buildInvocationResolver block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /isCompileIntent/);
 });
 
 test("tools and skills page is no longer nested in a collapsible panel", async () => {
