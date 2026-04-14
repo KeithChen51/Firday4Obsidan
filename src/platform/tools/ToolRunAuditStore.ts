@@ -9,6 +9,10 @@ export interface ToolRunAuditRecord {
 	runId: string;
 	step: number;
 	tool: string;
+	approved: boolean;
+	approvalReason: string;
+	persistedRule: boolean;
+	viaRule: boolean;
 	status: "ok" | "failed" | "denied";
 	failureClass?: ToolFailureClass;
 	scope: string;

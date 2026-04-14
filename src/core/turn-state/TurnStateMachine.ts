@@ -20,6 +20,10 @@ export interface StepTraceEvent {
 	depth: number;
 	step?: number;
 	tool?: string;
+	contextKey?: "instructions" | "skills" | "wiki" | "memory" | "compact";
+	targetPath?: string;
+	status?: "ok" | "failed" | "denied";
+	summary?: string;
 	message: string;
 }
 

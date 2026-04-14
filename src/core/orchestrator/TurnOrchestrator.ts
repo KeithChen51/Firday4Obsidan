@@ -23,6 +23,10 @@ export class TurnOrchestrator {
 			depth: event.depth,
 			step: event.step,
 			tool: event.tool,
+			contextKey: event.contextKey,
+			targetPath: event.targetPath,
+			status: event.status,
+			summary: event.summary,
 			message: event.message,
 		});
 	}
