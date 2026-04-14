@@ -20,6 +20,25 @@ function createResolver(overrides = {}) {
 		parseSkillSlashCommand: overrides.parseSkillSlashCommand ?? ((rawPrompt) => ({ type: "none", rawPrompt })),
 		expandSlashCommand: overrides.expandSlashCommand ?? (() => ({ type: "none" })),
 		isCompileIntent: overrides.isCompileIntent ?? (() => false),
+		routeRuntimeEvent: overrides.routeRuntimeEvent ?? ((event) => ({
+			type: "runtime",
+			invocation: {
+				request: {
+					source: event.source,
+					intentType: "event",
+					targetId: event.type,
+					prompt: event.prompt,
+					projectSlug: event.projectSlug,
+					payload: event.payload,
+				},
+				resolvedType: "runtime",
+				resolvedId: "agent-runtime-turn",
+				requiresRuntime: true,
+				requiredCapabilities: [],
+			},
+			runtimePrompt: event.prompt ?? "",
+			requestedSkillName: "compile-wiki",
+		})),
 	});
 }
 
@@ -69,16 +88,43 @@ test("invocation resolver resolves custom slash command to runtime invocation", 
 	assert.equal(result.invocation.request.source, "slash_command");
 });
 
-test("invocation resolver upgrades compile intent to compile-wiki skill context request", async () => {
+test("invocation resolver upgrades compile intent into a routed runtime event", async () => {
 	const mod = await loadResolverModule();
+	let receivedEvent = null;
 	const resolver = createResolver({
 		mod,
 		isCompileIntent: () => true,
+		routeRuntimeEvent: (event) => {
+			receivedEvent = event;
+			return {
+				type: "runtime",
+				invocation: {
+					request: {
+						source: event.source,
+						intentType: "event",
+						targetId: event.type,
+						prompt: event.prompt,
+					},
+					resolvedType: "runtime",
+					resolvedId: "agent-runtime-turn",
+					requiresRuntime: true,
+					requiredCapabilities: [],
+				},
+				runtimePrompt: event.prompt ?? "",
+				requestedSkillName: "compile-wiki",
+			};
+		},
 	});
-	const result = resolver.resolveChatPrompt("请编译当前项目 wiki");
+	const prompt = "Compile the current project wiki";
+	const result = resolver.resolveChatPrompt(prompt);
 	assert.equal(result.type, "runtime");
 	assert.equal(result.requestedSkillName, "compile-wiki");
 	assert.equal(result.invocation.request.source, "auto_skill_match");
+	assert.deepEqual(receivedEvent, {
+		type: "knowledge.compile_requested",
+		source: "auto_skill_match",
+		prompt,
+	});
 });
 
 test("invocation resolver keeps plain prompts on generic runtime path", async () => {
@@ -89,15 +135,4 @@ test("invocation resolver keeps plain prompts on generic runtime path", async ()
 	assert.equal(result.requestedSkillName, undefined);
 	assert.equal(result.runtimePrompt, "summarize current project");
 	assert.equal(result.invocation.request.source, "chat_prompt");
-});
-
-test("invocation resolver maps project conflict proposal to resolve-conflict skill context request", async () => {
-	const mod = await loadResolverModule();
-	const resolver = createResolver({ mod });
-	const result = resolver.resolveProjectConflictProposal("demo", "src/main.ts");
-	assert.equal(result.type, "runtime");
-	assert.equal(result.requestedSkillName, "resolve-conflict");
-	assert.equal(result.runtimePrompt, "src/main.ts");
-	assert.equal(result.invocation.request.source, "project_action");
-	assert.equal(result.invocation.request.projectSlug, "demo");
 });

@@ -27,6 +27,7 @@ import { ProjectContentService, RawSourceContext } from "./services/ProjectConte
 import { IngestEventStore } from "./services/IngestEventStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
+import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
@@ -67,6 +68,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	skillCommandService!: SkillCommandService;
 	slashCommandService!: SlashCommandService;
 	workbenchStateStore!: WorkbenchStateStore;
+	executionEventRouter!: EventRouter;
 	executionPlanner!: ExecutionPlanner;
 	executionOrchestrator!: ExecutionOrchestrator;
 	projectBoundaryService!: ProjectBoundaryService;
@@ -130,6 +132,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			);
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
+			this.executionEventRouter = new EventRouter();
 			this.executionPlanner = new ExecutionPlanner();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
 				this.agentRuntimeService = new AgentRuntimeService(
@@ -145,6 +148,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					this.projectBoundaryService,
 					this.workbenchStateStore,
 					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
+					this.executionEventRouter,
 					() => this.settings,
 				);
 				this.executionOrchestrator = new ExecutionOrchestrator(

@@ -2,11 +2,13 @@ import type { ParsedSkillSlashCommand } from "../../services/SkillCommandService
 import type { SlashCommandExpandResult } from "../../services/SlashCommandService";
 import type { InvocationRequest } from "./InvocationRequest";
 import type { ResolvedInvocation } from "./ResolvedInvocation";
+import type { RuntimeEvent } from "./RuntimeEvent";
 
 interface InvocationResolverDeps {
 	parseSkillSlashCommand: (rawPrompt: string) => ParsedSkillSlashCommand;
 	expandSlashCommand: (rawPrompt: string) => SlashCommandExpandResult;
 	isCompileIntent: (rawPrompt: string) => boolean;
+	routeRuntimeEvent: (event: RuntimeEvent) => Extract<InvocationResolution, { type: "runtime" }>;
 }
 
 export type InvocationResolution =
@@ -51,56 +53,17 @@ export class InvocationResolver {
 		}
 
 		if (this.deps.isCompileIntent(rawPrompt)) {
-			return this.buildRuntimeResolution("auto_skill_match", rawPrompt, "compile-wiki");
+			return this.deps.routeRuntimeEvent({
+				type: "knowledge.compile_requested",
+				source: "auto_skill_match",
+				prompt: rawPrompt.trim(),
+			});
 		}
 
 		return {
 			type: "runtime",
 			invocation: this.buildInvocationRequest("chat_prompt", "runtime", rawPrompt),
 			runtimePrompt: rawPrompt.trim(),
-		};
-	}
-
-	resolveProjectConflictProposal(projectSlug: string, filePath: string): InvocationResolution {
-		return {
-			type: "runtime",
-			invocation: {
-				request: {
-					source: "project_action",
-					intentType: "skill",
-					targetId: "resolve-conflict",
-					projectSlug,
-					prompt: filePath,
-				},
-				resolvedType: "runtime",
-				resolvedId: "agent-runtime-turn",
-				requiresRuntime: true,
-				requiredCapabilities: [],
-			},
-			runtimePrompt: filePath,
-			requestedSkillName: "resolve-conflict",
-		};
-	}
-
-	resolveProjectCompile(projectSlug?: string): InvocationResolution {
-		const prompt = "Compile the active project wiki now.";
-		return {
-			type: "runtime",
-			invocation: {
-				request: {
-					source: "project_action",
-					intentType: "skill",
-					targetId: "compile-wiki",
-					projectSlug,
-					prompt,
-				},
-				resolvedType: "runtime",
-				resolvedId: "agent-runtime-turn",
-				requiresRuntime: true,
-				requiredCapabilities: [],
-			},
-			runtimePrompt: prompt,
-			requestedSkillName: "compile-wiki",
 		};
 	}
 

@@ -130,6 +130,7 @@ test("project conflict proposal no longer calls builtin skill shortcut directly"
 	assert.ok(match, "generateConflictProposal block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
+	assert.match(block, /executionEventRouter\.routeToRuntime\(/);
 	assert.match(block, /executionPlanner\.plan\(/);
 	assert.match(block, /executionOrchestrator\.execute\(/);
 });
@@ -140,8 +141,16 @@ test("compile button routes through planner and orchestrator", async () => {
 	assert.ok(match, "compileWikiByButton block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /compileWikiWithStatus\(/);
+	assert.match(block, /executionEventRouter\.routeToRuntime\(/);
 	assert.match(block, /executionPlanner\.plan\(/);
 	assert.match(block, /executionOrchestrator\.execute\(/);
+});
+
+test("runtime memory extraction now routes through standardized runtime events", async () => {
+	const source = readRuntimeSource();
+	assert.match(source, /memory\.extraction_requested/);
+	assert.match(source, /dispatchRuntimeEvent\(/);
+	assert.match(source, /eventRouter\.route\(/);
 });
 
 test("policy page groups builtin tools and separates builtin and personal skills", async () => {

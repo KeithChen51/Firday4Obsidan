@@ -14,6 +14,7 @@ import { WorkspaceAccessService } from "../services/WorkspaceAccessService";
 import { SkillCommandService } from "../services/SkillCommandService";
 import { SlashCommandService } from "../services/SlashCommandService";
 import { WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
+import { EventRouter } from "../core/execution/EventRouter";
 import { ExecutionPlanner } from "../core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "../core/execution/ExecutionOrchestrator";
 import { AgentProfile } from "./agent";
@@ -40,6 +41,7 @@ export interface FridayPluginApi {
 	skillCommandService: SkillCommandService;
 	slashCommandService: SlashCommandService;
 	workbenchStateStore: WorkbenchStateStore;
+	executionEventRouter: EventRouter;
 	executionPlanner: ExecutionPlanner;
 	executionOrchestrator: ExecutionOrchestrator;
 	addCommand: Plugin["addCommand"];

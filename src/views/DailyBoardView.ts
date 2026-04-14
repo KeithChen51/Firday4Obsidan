@@ -538,7 +538,14 @@ export class DailyBoardView extends ItemView {
 		if (!activeAgent) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
-		const resolution = this.buildInvocationResolver().resolveProjectConflictProposal(projectSlug, filePath);
+		const resolution = this.plugin.executionEventRouter.routeToRuntime({
+			type: "sync.conflict_proposal_requested",
+			source: "project_action",
+			projectSlug,
+			prompt: filePath,
+			currentFilePath: filePath,
+			payload: { filePath },
+		});
 		if (resolution.type !== "runtime" || !resolution.requestedSkillName) {
 			throw new Error("Project conflict proposal could not be resolved to a runtime skill invocation.");
 		}
@@ -2012,7 +2019,13 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 
 		try {
-			const resolution = this.buildInvocationResolver().resolveProjectCompile(this.getActiveProjectEntry()?.slug);
+			const resolution = this.plugin.executionEventRouter.routeToRuntime({
+				type: "knowledge.compile_requested",
+				source: "project_action",
+				projectSlug: this.getActiveProjectEntry()?.slug,
+				prompt: "Compile the active project wiki now.",
+				currentFilePath: this.app.workspace.getActiveFile()?.path,
+			});
 			if (resolution.type !== "runtime") {
 				throw new Error("Compile button could not be resolved to a runtime invocation.");
 			}
@@ -2133,6 +2146,7 @@ export class DailyBoardView extends ItemView {
 			parseSkillSlashCommand: (rawPrompt) => this.plugin.skillCommandService.parseSlashCommand(rawPrompt),
 			expandSlashCommand: (rawPrompt) => this.plugin.slashCommandService.expand(rawPrompt),
 			isCompileIntent: (rawPrompt) => this.isCompileWikiIntent(rawPrompt),
+			routeRuntimeEvent: (event) => this.plugin.executionEventRouter.routeToRuntime(event),
 		});
 	}
 

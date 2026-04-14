@@ -33,8 +33,10 @@ import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
 import { ExecutionGate } from "../core/execution/ExecutionGate";
+import { EventRouter } from "../core/execution/EventRouter";
 import type { InvocationRequest } from "../core/execution/InvocationRequest";
 import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
+import type { RuntimeEvent } from "../core/execution/RuntimeEvent";
 import { GitConflictCapability } from "../platform/capability/GitConflictCapability";
 import { MemoryPersistCapability } from "../platform/capability/MemoryPersistCapability";
 import { WikiCompileCapability } from "../platform/capability/WikiCompileCapability";
@@ -222,6 +224,7 @@ export class AgentRuntimeService {
 			rawPaths?: string[],
 			forceRebuild?: boolean,
 		) => Promise<RuntimeWikiCompileSummary>,
+		private readonly eventRouter: EventRouter,
 		private readonly getSettings: () => FridaySettings,
 	) {
 		this.turnOrchestrator = new TurnOrchestrator();
@@ -564,7 +567,12 @@ export class AgentRuntimeService {
 			// Keep runtime response available even if trace persistence fails.
 		}
 		try {
-			await this.memoryPersistCapability.persistSignals(userPrompt, turnId);
+			await this.dispatchRuntimeEvent({
+				type: "memory.extraction_requested",
+				source: "system_event",
+				prompt: userPrompt,
+				payload: { turnId },
+			});
 		} catch {
 			// Memory persistence is best-effort and must not break the turn.
 		}
@@ -575,6 +583,19 @@ export class AgentRuntimeService {
 			runtimeProfile: this.activeRuntimeProfile,
 			contextSummary: this.lastContextSummary ?? undefined,
 		};
+	}
+
+	private async dispatchRuntimeEvent(event: RuntimeEvent): Promise<void> {
+		const route = this.eventRouter.route(event);
+		if (route.kind !== "capability") {
+			return;
+		}
+		if (route.capabilityId === "memory.persist") {
+			await this.memoryPersistCapability.persistSignals(
+				String(route.payload["userPrompt"] ?? event.prompt ?? ""),
+				String(route.payload["turnId"] ?? ""),
+			);
+		}
 	}
 
 	setSessionToolPolicyOverride(action: string, effect: PolicyEffect): void {
