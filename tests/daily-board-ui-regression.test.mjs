@@ -54,11 +54,19 @@ test("daily board view supports collapsible session nav", async () => {
 
 test("explicit skill invocation stays on runtime path instead of builtin shortcut", async () => {
 	const source = readViewSource();
-	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiWithStatus/);
+	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
 	assert.ok(match, "submitAiPrompt block should exist");
 	const block = match[1] ?? "";
 	assert.match(block, /extraSystemContext\s*=\s*skillContext\.systemContext/);
 	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
+});
+
+test("compile intent stays on runtime path instead of calling compile helper directly from submitAiPrompt", async () => {
+	const source = readViewSource();
+	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
+	assert.ok(match, "submitAiPrompt block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /compileWikiWithStatus\(/);
 });
 
 test("auto skill matching injects full skill context instead of summary list only", async () => {
@@ -112,6 +120,16 @@ test("project actions stay on projects page instead of jumping to checks", async
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
+});
+
+test("project conflict proposal no longer calls builtin skill shortcut directly", async () => {
+	const source = readViewSource();
+	const match = source.match(/private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
+	assert.ok(match, "generateConflictProposal block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
+	assert.match(block, /buildSkillSystemContext\("resolve-conflict"\)/);
+	assert.match(block, /agentRuntimeService\.runTurn\(/);
 });
 
 test("policy page groups builtin tools and separates builtin and personal skills", async () => {

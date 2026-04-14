@@ -27,6 +27,7 @@ import type { SkillDescriptor } from "../services/SkillCommandService";
 import type { ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
+import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { MentionDropdown, type MentionSuggestion } from "./components/MentionDropdown";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
@@ -535,10 +536,17 @@ export class DailyBoardView extends ItemView {
 		if (!activeAgent) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
-		const result = await this.plugin.agentRuntimeService.runBuiltinSkillCommand({
+		const resolution = this.buildInvocationResolver().resolveProjectConflictProposal(projectSlug, filePath);
+		if (resolution.type !== "runtime" || !resolution.requestedSkillName) {
+			throw new Error("Project conflict proposal could not be resolved to a runtime skill invocation.");
+		}
+		const skillContext = await this.plugin.skillCommandService.buildSkillSystemContext("resolve-conflict");
+		const result = await this.plugin.agentRuntimeService.runTurn({
 			agentId: activeAgent.id,
-			skillName: "resolve-conflict",
-			taskPrompt: filePath,
+			conversation: [],
+			userPrompt: resolution.runtimePrompt,
+			currentFilePath: filePath,
+			extraSystemContext: skillContext.systemContext,
 		});
 		const traceSummary = result.traces[0]?.summary ?? "manual";
 		const match = traceSummary.match(/\((ours|theirs|manual)\)/i);
@@ -1859,34 +1867,31 @@ export class DailyBoardView extends ItemView {
 			let runtimePrompt = this.stripMentionedFilePaths(rawPrompt);
 			let extraSystemContext = "";
 			let allowedTools: string[] | undefined;
+			let allowedModels: string[] | undefined;
 			let assistantText = "";
 			let shouldStreamFinalText = false;
 			const mentionContext = await this.buildMentionContext(rawPrompt);
-
-			const skillCommand = this.plugin.skillCommandService.parseSlashCommand(rawPrompt);
-			if (skillCommand.type === "invalid") {
-				throw new Error(skillCommand.error);
+			const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
+			if (resolution.type === "invalid") {
+				throw new Error(resolution.error);
 			}
-			if (skillCommand.type === "list") {
+			if (resolution.type === "catalog") {
 				const skills = await this.plugin.skillCommandService.listSkills();
 				assistantText = this.buildSkillCatalogReply(skills);
 				shouldStreamFinalText = true;
-			} else if (skillCommand.type === "use") {
-				const skillContext = await this.plugin.skillCommandService.buildSkillSystemContext(skillCommand.skillName);
-				runtimePrompt = skillCommand.taskPrompt;
-				extraSystemContext = skillContext.systemContext;
+			} else {
+				runtimePrompt = resolution.runtimePrompt;
+				allowedTools = resolution.allowedTools?.length ? resolution.allowedTools : undefined;
+				allowedModels = resolution.allowedModels?.length ? resolution.allowedModels : undefined;
+				if (resolution.requestedSkillName) {
+					const skillContext = await this.plugin.skillCommandService.buildSkillSystemContext(resolution.requestedSkillName);
+					runtimePrompt = resolution.runtimePrompt;
+					extraSystemContext = skillContext.systemContext;
+				}
 			}
 
-			const slashExpansion = this.plugin.slashCommandService.expand(rawPrompt);
-			if (slashExpansion.type === "invalid") {
-				throw new Error(slashExpansion.error);
-			}
-			if (slashExpansion.type === "expanded") {
-				if (modelOverride && !this.plugin.slashCommandService.isModelAllowed(slashExpansion.command, modelOverride)) {
-					throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
-				}
-				runtimePrompt = slashExpansion.prompt;
-				allowedTools = slashExpansion.allowedTools.length > 0 ? slashExpansion.allowedTools : undefined;
+			if (modelOverride && allowedModels && allowedModels.length > 0 && !allowedModels.includes(modelOverride.trim())) {
+				throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
 			}
 
 			if (mentionContext) {
@@ -1902,11 +1907,7 @@ export class DailyBoardView extends ItemView {
 				this.plugin.settings.agentRuntime.toolPermissionMode = this.aiSessionPermissionOverride;
 			}
 			try {
-				if (!assistantText && this.isCompileWikiIntent(runtimePrompt)) {
-					const compileSummary = await this.compileWikiWithStatus();
-					assistantText = this.formatWikiCompileResult(compileSummary, true);
-					shouldStreamFinalText = true;
-				} else if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
+				if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
 					const runtimeResult = await this.plugin.agentRuntimeService.runTurn({
 						agentId: activeAgent.id,
 						conversation: history,
@@ -2104,6 +2105,14 @@ export class DailyBoardView extends ItemView {
 
 	private isCompileWikiIntent(prompt: string): boolean {
 		return this.plugin.skillCommandService.isCompileWikiSkillIntent(prompt);
+	}
+
+	private buildInvocationResolver(): InvocationResolver {
+		return new InvocationResolver({
+			parseSkillSlashCommand: (rawPrompt) => this.plugin.skillCommandService.parseSlashCommand(rawPrompt),
+			expandSlashCommand: (rawPrompt) => this.plugin.slashCommandService.expand(rawPrompt),
+			isCompileIntent: (rawPrompt) => this.isCompileWikiIntent(rawPrompt),
+		});
 	}
 
 	private async streamAssistantText(text: string): Promise<void> {
