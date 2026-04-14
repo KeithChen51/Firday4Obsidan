@@ -8,6 +8,7 @@ export interface ChatMessage {
 	parts?: ChatMessagePart[];
 	toolCallId?: string;
 	name?: string;
+	toolCalls?: ToolCall[];
 }
 
 export type ChatMessagePart =
@@ -343,6 +344,20 @@ export class AIService {
 					content: item.content,
 					...(item.toolCallId ? { tool_call_id: item.toolCallId } : {}),
 					...(item.name ? { name: item.name } : {}),
+				};
+			}
+			if (item.role === "assistant" && Array.isArray(item.toolCalls) && item.toolCalls.length > 0) {
+				return {
+					role: "assistant",
+					content: item.parts && item.parts.length > 0 ? item.parts : item.content,
+					tool_calls: item.toolCalls.map((call) => ({
+						id: call.id,
+						type: "function",
+						function: {
+							name: call.name,
+							arguments: JSON.stringify(call.args ?? {}),
+						},
+					})),
 				};
 			}
 			return {

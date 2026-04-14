@@ -1022,7 +1022,8 @@ export class AgentRuntimeService {
 
 			modelMessages.push({
 				role: "assistant",
-				content: response.assistantText?.trim() || `Calling tool: ${response.toolCall.name}`,
+				content: response.assistantText?.trim() || "",
+				toolCalls: [response.toolCall],
 			});
 			modelMessages.push({
 				role: "tool",
