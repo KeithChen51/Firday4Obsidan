@@ -57,7 +57,9 @@ test("explicit skill invocation stays on runtime path instead of builtin shortcu
 	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
 	assert.ok(match, "submitAiPrompt block should exist");
 	const block = match[1] ?? "";
-	assert.match(block, /extraSystemContext\s*=\s*skillContext\.systemContext/);
+	assert.match(block, /executionPlanner\.plan\(/);
+	assert.match(block, /executionOrchestrator\.execute\(/);
+	assert.doesNotMatch(block, /buildSkillSystemContext\(/);
 	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
 });
 
@@ -128,8 +130,18 @@ test("project conflict proposal no longer calls builtin skill shortcut directly"
 	assert.ok(match, "generateConflictProposal block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
-	assert.match(block, /buildSkillSystemContext\("resolve-conflict"\)/);
-	assert.match(block, /agentRuntimeService\.runTurn\(/);
+	assert.match(block, /executionPlanner\.plan\(/);
+	assert.match(block, /executionOrchestrator\.execute\(/);
+});
+
+test("compile button routes through planner and orchestrator", async () => {
+	const source = readViewSource();
+	const match = source.match(/private async compileWikiByButton\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
+	assert.ok(match, "compileWikiByButton block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /compileWikiWithStatus\(/);
+	assert.match(block, /executionPlanner\.plan\(/);
+	assert.match(block, /executionOrchestrator\.execute\(/);
 });
 
 test("policy page groups builtin tools and separates builtin and personal skills", async () => {

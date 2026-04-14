@@ -82,6 +82,28 @@ export class InvocationResolver {
 		};
 	}
 
+	resolveProjectCompile(projectSlug?: string): InvocationResolution {
+		const prompt = "Compile the active project wiki now.";
+		return {
+			type: "runtime",
+			invocation: {
+				request: {
+					source: "project_action",
+					intentType: "skill",
+					targetId: "compile-wiki",
+					projectSlug,
+					prompt,
+				},
+				resolvedType: "runtime",
+				resolvedId: "agent-runtime-turn",
+				requiresRuntime: true,
+				requiredCapabilities: [],
+			},
+			runtimePrompt: prompt,
+			requestedSkillName: "compile-wiki",
+		};
+	}
+
 	private buildRuntimeResolution(
 		source: InvocationRequest["source"],
 		runtimePrompt: string,

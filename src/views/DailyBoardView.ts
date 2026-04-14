@@ -542,13 +542,11 @@ export class DailyBoardView extends ItemView {
 		if (resolution.type !== "runtime" || !resolution.requestedSkillName) {
 			throw new Error("Project conflict proposal could not be resolved to a runtime skill invocation.");
 		}
-		const skillContext = await this.plugin.skillCommandService.buildSkillSystemContext("resolve-conflict");
-		const result = await this.plugin.agentRuntimeService.runTurn({
+		const decision = this.plugin.executionPlanner.plan(resolution);
+		const result = await this.plugin.executionOrchestrator.execute(decision, {
 			agentId: activeAgent.id,
 			conversation: [],
-			userPrompt: resolution.runtimePrompt,
 			currentFilePath: filePath,
-			extraSystemContext: skillContext.systemContext,
 		});
 		const traceSummary = result.traces[0]?.summary ?? "manual";
 		const match = traceSummary.match(/\((ours|theirs|manual)\)/i);
@@ -1881,41 +1879,18 @@ export class DailyBoardView extends ItemView {
 				assistantText = this.buildSkillCatalogReply(skills);
 				shouldStreamFinalText = true;
 			} else {
-				runtimePrompt = resolution.runtimePrompt;
-				allowedTools = resolution.allowedTools?.length ? resolution.allowedTools : undefined;
-				allowedModels = resolution.allowedModels?.length ? resolution.allowedModels : undefined;
-				if (resolution.requestedSkillName) {
-					const skillContext = await this.plugin.skillCommandService.buildSkillSystemContext(resolution.requestedSkillName);
-					runtimePrompt = resolution.runtimePrompt;
-					extraSystemContext = skillContext.systemContext;
-				}
-			}
-
-			if (modelOverride && allowedModels && allowedModels.length > 0 && !allowedModels.includes(modelOverride.trim())) {
-				throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
-			}
-
-			if (mentionContext) {
-				extraSystemContext = extraSystemContext
-					? `${extraSystemContext}\n\n${mentionContext}`
-					: mentionContext;
-			}
-			runtimePrompt = this.stripMentionedFilePaths(runtimePrompt);
-			runtimePrompt = runtimePrompt.trim() || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
-
-			const previousPermissionMode = this.plugin.settings.agentRuntime.toolPermissionMode;
-			if (this.aiSessionPermissionOverride) {
-				this.plugin.settings.agentRuntime.toolPermissionMode = this.aiSessionPermissionOverride;
-			}
-			try {
+				const decision = this.plugin.executionPlanner.plan(resolution);
+				runtimePrompt = decision.runtimePrompt;
+				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
+				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
+				const mergedExtraContext = mentionContext ? mentionContext : undefined;
 				if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
-					const runtimeResult = await this.plugin.agentRuntimeService.runTurn({
+					const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeAgent.id,
 						conversation: history,
-						userPrompt: runtimePrompt,
 						modelOverride,
 						currentFilePath,
-						extraSystemContext,
+						extraSystemContext: mergedExtraContext,
 						allowedTools,
 						onProgress: (event) => {
 							this.handleRuntimeProgress(event);
@@ -1924,6 +1899,26 @@ export class DailyBoardView extends ItemView {
 					assistantText = this.buildRuntimeReply(runtimeResult);
 					shouldStreamFinalText = true;
 				} else if (!assistantText) {
+					extraSystemContext = await this.plugin.executionOrchestrator.buildSystemContext(
+						decision,
+						mergedExtraContext ?? "",
+					);
+				}
+			}
+
+			if (modelOverride && allowedModels && allowedModels.length > 0 && !allowedModels.includes(modelOverride.trim())) {
+				throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
+			}
+
+			runtimePrompt = this.stripMentionedFilePaths(runtimePrompt);
+			runtimePrompt = runtimePrompt.trim() || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
+
+			const previousPermissionMode = this.plugin.settings.agentRuntime.toolPermissionMode;
+			if (this.aiSessionPermissionOverride) {
+				this.plugin.settings.agentRuntime.toolPermissionMode = this.aiSessionPermissionOverride;
+			}
+			try {
+				if (!assistantText) {
 					const modelMessages: ChatMessage[] = [
 						...history,
 						...(extraSystemContext
@@ -1995,6 +1990,19 @@ export class DailyBoardView extends ItemView {
 		if (this.aiBusy) {
 			return;
 		}
+		const activeAgent = this.plugin.getActiveAgent();
+		if (!activeAgent) {
+			new Notice(this.plugin.t("ai.error.noAgent"), 4000);
+			return;
+		}
+		if (!this.plugin.aiService.isConfigured()) {
+			const message = this.plugin.t("ai.error.notConfigured");
+			this.aiLastError = message;
+			new Notice(message, 5000);
+			this.plugin.openSettingsTab();
+			this.renderBoard();
+			return;
+		}
 		this.aiBusy = true;
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
@@ -2004,8 +2012,20 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 
 		try {
-			const summary = await this.compileWikiWithStatus();
-			const reply = this.formatWikiCompileResult(summary, false);
+			const resolution = this.buildInvocationResolver().resolveProjectCompile(this.getActiveProjectEntry()?.slug);
+			if (resolution.type !== "runtime") {
+				throw new Error("Compile button could not be resolved to a runtime invocation.");
+			}
+			const decision = this.plugin.executionPlanner.plan(resolution);
+			const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
+				agentId: activeAgent.id,
+				conversation: [],
+				currentFilePath: this.app.workspace.getActiveFile()?.path,
+				onProgress: (event) => {
+					this.handleRuntimeProgress(event);
+				},
+			});
+			const reply = this.buildRuntimeReply(runtimeResult);
 			if (this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(reply);
 			}

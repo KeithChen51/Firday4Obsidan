@@ -27,6 +27,8 @@ import { ProjectContentService, RawSourceContext } from "./services/ProjectConte
 import { IngestEventStore } from "./services/IngestEventStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
+import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
+import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
 import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
@@ -65,6 +67,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	skillCommandService!: SkillCommandService;
 	slashCommandService!: SlashCommandService;
 	workbenchStateStore!: WorkbenchStateStore;
+	executionPlanner!: ExecutionPlanner;
+	executionOrchestrator!: ExecutionOrchestrator;
 	projectBoundaryService!: ProjectBoundaryService;
 	projectContentService!: ProjectContentService;
 	ingestEventStore!: IngestEventStore;
@@ -126,6 +130,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			);
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
+			this.executionPlanner = new ExecutionPlanner();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
 				this.agentRuntimeService = new AgentRuntimeService(
 					this.app.vault,
@@ -141,6 +146,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					this.workbenchStateStore,
 					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
 					() => this.settings,
+				);
+				this.executionOrchestrator = new ExecutionOrchestrator(
+					this.skillCommandService,
+					this.agentRuntimeService,
 				);
 				this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
 					await this.handlePulledRawChanges(project, pulledFiles, headRevision);
