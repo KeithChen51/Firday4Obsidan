@@ -17,8 +17,10 @@ import { WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import { EventRouter } from "../core/execution/EventRouter";
 import { ExecutionPlanner } from "../core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "../core/execution/ExecutionOrchestrator";
+import { SyncEventBus } from "../features/sync/SyncEventBus";
+import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
 import { AgentProfile } from "./agent";
-import { ProjectEntry, ProjectGroupEntry } from "./project";
+import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { I18nParams, LocaleCode } from "../i18n/types";
 
@@ -44,6 +46,8 @@ export interface FridayPluginApi {
 	executionEventRouter: EventRouter;
 	executionPlanner: ExecutionPlanner;
 	executionOrchestrator: ExecutionOrchestrator;
+	syncEventBus: SyncEventBus;
+	syncRuntimeStore: SyncRuntimeStore;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];
 	addRibbonIcon: Plugin["addRibbonIcon"];
@@ -52,6 +56,8 @@ export interface FridayPluginApi {
 	upsertProject(project: ProjectEntry): Promise<void>;
 	removeProject(slug: string): Promise<void>;
 	setActiveProject(projectSlug: string): Promise<void>;
+	getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null>;
+	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
 	compileWikiForActiveProject(rawPaths?: string[], forceRebuild?: boolean): Promise<RuntimeWikiCompileSummary>;
 	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
 	removeProjectGroup(groupId: string): Promise<void>;
@@ -63,5 +69,5 @@ export interface FridayPluginApi {
 	getDetectedUserId(): string;
 	getActiveAgent(): AgentProfile | null;
 	setActiveAgent(agentId: string): Promise<void>;
-	createAgent(input: { name: string; description: string; model?: string }): Promise<AgentProfile>;
+	createAgent(input: { name: string; description: string; model?: string; modelMode?: "openai" | "group" }): Promise<AgentProfile>;
 }

@@ -2,7 +2,7 @@ import { App, FileSystemAdapter } from "obsidian";
 
 export function getVaultBasePath(app: App): string {
 	const adapter = app.vault.adapter;
-	if (adapter instanceof FileSystemAdapter) {
+	if (typeof FileSystemAdapter === "function" && adapter instanceof FileSystemAdapter) {
 		return adapter.getBasePath();
 	}
 

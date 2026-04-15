@@ -27,14 +27,19 @@ import { ProjectContentService, RawSourceContext } from "./services/ProjectConte
 import { IngestEventStore } from "./services/IngestEventStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
+import { AutoSyncManager } from "./features/sync/AutoSyncManager";
+import { SyncEventBus } from "./features/sync/SyncEventBus";
+import { SyncRuntimeStore } from "./features/sync/SyncRuntimeStore";
+import { SyncStatusBar } from "./features/sync/SyncStatusBar";
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
-import { normalizeLlmSettings } from "./core/llm/LlmSettingsResolver";
+import { normalizeLlmSettings, switchLlmMode } from "./core/llm/LlmSettingsResolver";
+import { SecureStorage } from "./platform/obsidian/SecureStorage";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
 import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
-import { ProjectEntry, ProjectGroupEntry, SourceType } from "./types/project";
+import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 
@@ -76,9 +81,15 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	projectContentService!: ProjectContentService;
 	ingestEventStore!: IngestEventStore;
 	wikiIngestService!: WikiIngestService;
+	secureStorage!: SecureStorage;
+	autoSyncManager!: AutoSyncManager;
+	syncEventBus!: SyncEventBus;
+	syncRuntimeStore!: SyncRuntimeStore;
+	syncStatusBar!: SyncStatusBar;
 	private readonly rawIngestTimers = new Map<string, number>();
 	private compileWikiInFlight: Promise<WikiCompileResult> | null = null;
 	private detectedUserId = "";
+	private pendingLegacyGitCredentials: ProjectGitCredential | null = null;
 
 	async onload(): Promise<void> {
 		try {
@@ -87,15 +98,45 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
 			}
 			this.dataService = new DataService(this.app.vault, PRIMARY_PATHS.root);
-			this.syncService = new SyncService(this.app, this.dataService.getFridayRoot(), () => this.settings);
 			await this.dataService.ensureDirectoryStructure();
 			await this.loadSettings();
+			this.projectBoundaryService = new ProjectBoundaryService(
+				() => this.settings,
+				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+			);
+			this.secureStorage = new SecureStorage(this.manifest.id);
+			this.syncEventBus = new SyncEventBus();
+			this.syncRuntimeStore = new SyncRuntimeStore(this.syncEventBus);
+			const migratedLegacyCredentials = await this.migrateLegacyGitCredentials();
+			this.syncService = new SyncService(
+				this.app,
+				this.dataService.getFridayRoot(),
+				() => this.settings,
+				this.secureStorage,
+				this.projectBoundaryService,
+				this.syncEventBus,
+			);
+			this.autoSyncManager = new AutoSyncManager({
+				getSettings: () => ({
+					sync: this.settings.sync,
+					projects: this.settings.projects,
+				}),
+				syncService: this.syncService,
+				eventBus: this.syncEventBus,
+				hasBlockingConflicts: (project) =>
+					this.workbenchStateStore
+						.getSyncConflicts(project.slug)
+						.some((item) => item.status === "pending" || item.status === "deferred"),
+				persistLastSyncAt: async (project, recordedAt) => {
+					project.lastSyncAt = recordedAt;
+					await this.saveSettings();
+				},
+			});
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
 
 				this.conversationService = new ConversationService(this.app.vault, this.agentService);
-				this.projectBoundaryService = new ProjectBoundaryService(() => this.settings);
 				this.projectContentService = new ProjectContentService(this.app.vault);
 				this.ingestEventStore = new IngestEventStore(this.app.vault);
 				this.wikiIngestService = new WikiIngestService(
@@ -133,6 +174,19 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			);
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
+			this.syncEventBus.subscribe((event) => {
+				if (!("projectSlug" in event)) {
+					return;
+				}
+				if (event.type === "sync_stage_changed" || event.type === "sync_completed") {
+					this.workbenchStateStore.recordSyncStatusSnapshot({
+						projectSlug: event.projectSlug,
+						stage: event.type === "sync_completed" ? (event.success ? "succeeded" : "failed") : event.stage,
+						message: event.type === "sync_completed" ? event.error ?? "" : event.message ?? "",
+						recordedAt: event.recordedAt,
+					});
+				}
+			});
 			this.executionEventRouter = new EventRouter();
 			this.executionPlanner = new ExecutionPlanner();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
@@ -170,7 +224,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					}),
 				);
 
-				if (changedByBootstrap) {
+				if (changedByBootstrap || migratedLegacyCredentials) {
 					await this.saveSettings();
 				}
 
@@ -183,16 +237,19 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				void this.openWorkspaceView();
 			});
 
-			this.addStatusBarItem().setText(this.t("status.ready"));
+			const statusBarItem = this.addStatusBarItem() as HTMLElement & { setText(text: string): void };
+			statusBarItem.setText(this.t("status.ready"));
+			this.syncStatusBar = new SyncStatusBar(
+				this.syncRuntimeStore,
+				statusBarItem,
+				() => this.settings.activeProjectId,
+			);
 
 			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
 				void this.runStartupSync();
 			}
 
-			this.startSyncInterval();
-			if (this.settings.sync.autoPush) {
-				this.startAutoPush();
-			}
+			this.startAutoSync();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error("[Friday] Plugin onload failed:", error);
@@ -205,6 +262,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			window.clearTimeout(timer);
 		}
 		this.rawIngestTimers.clear();
+		this.syncStatusBar?.destroy();
+		this.syncRuntimeStore?.destroy();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_BOARD);
 	}
 
@@ -284,7 +343,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		await this.saveSettings();
 	}
 
-	async createAgent(input: { name: string; description: string; model?: string }): Promise<AgentProfile> {
+	async createAgent(input: { name: string; description: string; model?: string; modelMode?: "openai" | "group" }): Promise<AgentProfile> {
 		const created = await this.agentService.createAgent(input);
 		this.settings.agents.push(created);
 		this.settings.activeAgentId = created.id;
@@ -294,7 +353,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async upsertProject(project: ProjectEntry): Promise<void> {
 		const normalizedProject = this.normalizeProjectEntry(project);
-		const existingIndex = this.settings.projects.findIndex((item) => item.slug === normalizedProject.slug);
+		const existingIndex = this.settings.projects.findIndex((item) => item.projectId === normalizedProject.projectId);
 		if (existingIndex >= 0) {
 			this.settings.projects[existingIndex] = normalizedProject;
 		} else {
@@ -303,38 +362,50 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 		this.ensureProjectGroupInSettings(normalizedProject.groupId);
 		for (const group of this.settings.projectGroups) {
-			const nextSlugs = group.projectSlugs.filter((slug) => slug !== normalizedProject.slug);
+			const nextSlugs = group.projectSlugs.filter((projectId) => projectId !== normalizedProject.projectId);
 			if (group.id === normalizedProject.groupId) {
-				nextSlugs.push(normalizedProject.slug);
+				nextSlugs.push(normalizedProject.projectId);
 			}
 			group.projectSlugs = nextSlugs;
 			group.updatedAt = new Date().toISOString();
 		}
 
 		if (!this.settings.activeProjectId) {
-			this.settings.activeProjectId = normalizedProject.slug;
+			this.settings.activeProjectId = normalizedProject.projectId;
 		}
 		await this.saveSettings();
 	}
 
 	async removeProject(slug: string): Promise<void> {
-		this.settings.projects = this.settings.projects.filter((project) => project.slug !== slug);
+		this.settings.projects = this.settings.projects.filter((project) => project.projectId !== slug);
 		for (const group of this.settings.projectGroups) {
 			group.projectSlugs = group.projectSlugs.filter((projectSlug) => projectSlug !== slug);
 		}
 		if (this.settings.activeProjectId === slug) {
-			this.settings.activeProjectId = this.settings.projects[0]?.slug ?? "";
+			this.settings.activeProjectId = this.settings.projects[0]?.projectId ?? "";
+		}
+		if (this.secureStorage) {
+			await this.setProjectGitCredential(slug, null);
 		}
 		await this.saveSettings();
 	}
 
 	async setActiveProject(projectSlug: string): Promise<void> {
-		const target = this.settings.projects.find((item) => item.slug === projectSlug);
+		const target = this.settings.projects.find((item) => item.projectId === projectSlug || item.slug === projectSlug);
 		if (!target) {
 			throw new Error(`未找到项目: ${projectSlug}`);
 		}
-		this.settings.activeProjectId = target.slug;
+		this.settings.activeProjectId = target.projectId;
+		this.syncStatusBar?.refresh();
 		await this.saveSettings();
+	}
+
+	async getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null> {
+		return this.secureStorage.getProjectGitCredential(projectId);
+	}
+
+	async setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void> {
+		await this.secureStorage.setProjectGitCredential(projectId, credential);
 	}
 
 	async upsertProjectGroup(group: ProjectGroupEntry): Promise<void> {
@@ -356,8 +427,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const movedProjects = this.settings.projects.filter((item) => item.groupId === groupId);
 		for (const project of movedProjects) {
 			project.groupId = defaultGroup.id;
-			if (!defaultGroup.projectSlugs.includes(project.slug)) {
-				defaultGroup.projectSlugs.push(project.slug);
+			if (!defaultGroup.projectSlugs.includes(project.projectId)) {
+				defaultGroup.projectSlugs.push(project.projectId);
 			}
 		}
 		this.settings.projectGroups = this.settings.projectGroups.filter((group) => group.id !== groupId);
@@ -398,9 +469,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	private getEffectiveLlmSettings(): FridaySettings["llm"] {
 		const activeAgent = this.getActiveAgent();
+		const baseSettings = activeAgent?.modelMode
+			? switchLlmMode(this.settings.llm, activeAgent.modelMode)
+			: this.settings.llm;
 		return {
-			...this.settings.llm,
-			model: activeAgent?.model?.trim() || this.settings.llm.model,
+			...baseSettings,
+			model: activeAgent?.model?.trim() || baseSettings.model,
 		};
 	}
 
@@ -416,6 +490,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 
 		const rawProjects = Array.isArray(raw.projects) ? raw.projects : [];
+		const rawUser = (raw.user ?? {}) as Partial<FridaySettings["user"]> & {
+			gitUsername?: string;
+			gitToken?: string;
+		};
 		const legacyCredentialSource = rawProjects.find((item) => {
 			const candidate = item as ProjectEntry & {
 				gitUsername?: string;
@@ -428,12 +506,20 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			gitUserEmail?: string;
 			gitToken?: string;
 		}) | undefined;
+		const legacyUsername = rawUser.gitUsername?.trim() || legacyCredentialSource?.gitUsername?.trim() || "";
+		const legacyToken = rawUser.gitToken?.trim() || legacyCredentialSource?.gitToken?.trim() || "";
+		this.pendingLegacyGitCredentials =
+			legacyUsername && legacyToken
+				? {
+					username: legacyUsername,
+					token: legacyToken,
+				}
+				: null;
 		const migratedUser = {
-			...DEFAULT_SETTINGS.user,
-			...(raw.user ?? {}),
-			gitUsername: raw.user?.gitUsername?.trim() || legacyCredentialSource?.gitUsername?.trim() || "",
-			gitUserEmail: raw.user?.gitUserEmail?.trim() || legacyCredentialSource?.gitUserEmail?.trim() || "",
-			gitToken: raw.user?.gitToken?.trim() || legacyCredentialSource?.gitToken?.trim() || "",
+			userId: rawUser.userId?.trim() || DEFAULT_SETTINGS.user.userId,
+			displayName: rawUser.displayName?.trim() || DEFAULT_SETTINGS.user.displayName,
+			autoDetect: typeof rawUser.autoDetect === "boolean" ? rawUser.autoDetect : DEFAULT_SETTINGS.user.autoDetect,
+			gitUserEmail: rawUser.gitUserEmail?.trim() || legacyCredentialSource?.gitUserEmail?.trim() || "",
 		};
 		const normalizedProjects = rawProjects.map((item) => this.normalizeProjectEntry(item as ProjectEntry));
 		const migratedGroups = this.migrateProjectGroups(
@@ -441,11 +527,25 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			normalizedProjects,
 		);
 		const activeProjectId = this.resolveInitialActiveProjectId(raw.activeProjectId, normalizedProjects);
+		const rawSync = (raw.sync ?? {}) as Partial<FridaySettings["sync"]> & {
+			autoPush?: boolean;
+			syncInterval?: number;
+		};
+		const migratedSyncMode =
+			rawSync.mode ??
+			(rawSync.autoPush ? "continuous_auto" : (rawSync.syncInterval ?? 0) > 0 ? "idle_auto" : "manual");
+		const migratedSync = {
+			mode: migratedSyncMode,
+			idleMinutes: typeof rawSync.idleMinutes === "number" ? rawSync.idleMinutes : rawSync.syncInterval ?? 0,
+			syncOnStartup:
+				typeof rawSync.syncOnStartup === "boolean" ? rawSync.syncOnStartup : DEFAULT_SETTINGS.sync.syncOnStartup,
+		};
 
 		return {
 			...raw,
 			version: SETTINGS_VERSION,
 			user: migratedUser,
+			sync: migratedSync,
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
 			activeProjectId,
@@ -483,12 +583,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				);
 			}
 			const group = groupMap.get(groupId)!;
-			if (!group.projectSlugs.includes(project.slug)) {
-				group.projectSlugs.push(project.slug);
+			if (!group.projectSlugs.includes(project.projectId)) {
+				group.projectSlugs.push(project.projectId);
 			}
 		}
 
-		const validSlugs = new Set(projects.map((item) => item.slug));
+		const validSlugs = new Set(projects.map((item) => item.projectId));
 		for (const group of groupMap.values()) {
 			group.projectSlugs = [...new Set(group.projectSlugs.filter((slug) => validSlugs.has(slug)))];
 			group.updatedAt = now;
@@ -502,10 +602,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		projects: ProjectEntry[],
 	): string {
 		const requestedId = (activeProjectId ?? "").trim();
-		if (requestedId && projects.some((item) => item.slug === requestedId)) {
+		if (requestedId && projects.some((item) => item.projectId === requestedId || item.slug === requestedId)) {
 			return requestedId;
 		}
-		return projects[0]?.slug ?? "";
+		return projects[0]?.projectId ?? "";
 	}
 
 	private normalizeProjectEntry(project: ProjectEntry): ProjectEntry {
@@ -523,20 +623,30 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		void _legacyGitUsername;
 		void _legacyGitUserEmail;
 		void _legacyGitToken;
-		const normalizedSlug = (project.slug ?? "").trim();
+		const normalizedProjectId = (project.projectId ?? project.slug ?? "").trim();
 		const normalizedGroupId = (project.groupId ?? "").trim() || DEFAULT_PROJECT_GROUP_ID;
-		const normalizedRootPath = this.resolveProjectRootPath(project);
+		const normalizedRootPath = this.resolveProjectRootPath({ ...project, projectId: normalizedProjectId });
+		const normalizedRemote = project.gitRemote?.trim() || "";
+		const normalizedName = (project.projectName ?? normalizedProjectId).trim() || normalizedProjectId;
+		const normalizedGitState = project.gitState ?? (normalizedRemote ? "git_remote_bound" : "none");
 		return {
 			...rest,
-			slug: normalizedSlug,
+			projectId: normalizedProjectId,
+			projectName: normalizedName,
+			boundaryPath: normalizedRootPath,
+			gitState: normalizedGitState,
+			slug: normalizedProjectId,
 			groupId: normalizedGroupId,
 			projectRootPath: normalizedRootPath,
 			localPath: project.localPath?.trim() || "",
+			gitRemote: normalizedRemote,
+			autoSync: normalizedRemote ? Boolean(project.autoSync) : false,
+			lastSyncAt: project.lastSyncAt ?? "",
 		};
 	}
 
 	private resolveProjectRootPath(project: ProjectEntry): string {
-		const candidateRoot = project.projectRootPath?.trim();
+		const candidateRoot = project.boundaryPath?.trim() || project.projectRootPath?.trim();
 		if (candidateRoot && !candidateRoot.match(/^[a-zA-Z]:\\/)) {
 			return normalizeVaultPath(candidateRoot);
 		}
@@ -544,7 +654,28 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		if (localPath && !localPath.match(/^[a-zA-Z]:\\/)) {
 			return normalizeVaultPath(localPath);
 		}
-		return normalizeVaultPath(`${PRIMARY_PATHS.root}/${PRIMARY_PATHS.projects}/${project.slug}`);
+		return normalizeVaultPath(`${PRIMARY_PATHS.root}/${PRIMARY_PATHS.projects}/${project.projectId ?? project.slug}`);
+	}
+
+	private async migrateLegacyGitCredentials(): Promise<boolean> {
+		if (!this.pendingLegacyGitCredentials || !this.secureStorage) {
+			return false;
+		}
+		let wroteAny = false;
+		for (const project of this.settings.projects) {
+			const projectId = project.projectId || project.slug;
+			if (!projectId) {
+				continue;
+			}
+			const existing = await this.secureStorage.getProjectGitCredential(projectId);
+			if (existing) {
+				continue;
+			}
+			await this.secureStorage.setProjectGitCredential(projectId, this.pendingLegacyGitCredentials);
+			wroteAny = true;
+		}
+		this.pendingLegacyGitCredentials = null;
+		return wroteAny;
 	}
 
 	private normalizeProjectGroupEntry(group: ProjectGroupEntry): ProjectGroupEntry {
@@ -812,76 +943,53 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	private async runStartupSync(): Promise<void> {
 		try {
-			const results = await this.syncService.syncAll(this.settings.projects);
-			for (const project of this.settings.projects) {
-				const result = results.get(project.slug);
-				if (result?.success) {
-					project.lastSyncAt = new Date().toISOString();
-				}
-			}
-			await this.saveSettings();
+			await this.autoSyncManager.runStartupSync();
 		} catch (error) {
 			console.error("[Friday] Startup sync failed:", error);
 		}
 	}
 
-	private startSyncInterval(): void {
-		const minutes = this.settings.sync.syncInterval;
-		if (!minutes || minutes <= 0 || this.settings.projects.length === 0) {
+	private startAutoSync(): void {
+		this.startIdleAutoSync();
+		this.startContinuousAutoSync();
+	}
+
+	private startIdleAutoSync(): void {
+		const { mode, idleMinutes } = this.settings.sync;
+		if (mode !== "idle_auto" || !idleMinutes || idleMinutes <= 0 || this.settings.projects.length === 0) {
 			return;
 		}
 
-		const ms = minutes * 60 * 1000;
+		const ms = idleMinutes * 60 * 1000;
 		this.registerInterval(
 			window.setInterval(() => {
-				const autoSyncProjects = this.settings.projects.filter((item) => item.autoSync);
-				if (autoSyncProjects.length === 0) {
+				if (!this.settings.projects.some((item) => item.autoSync)) {
 					return;
 				}
-				void this.syncService
-					.syncAll(this.settings.projects)
-					.then(async (results) => {
-						for (const project of this.settings.projects) {
-							const result = results.get(project.slug);
-							if (result?.success) {
-								project.lastSyncAt = new Date().toISOString();
-							}
-						}
-						await this.saveSettings();
-					})
+				void this.autoSyncManager
+					.runIdleCycle()
 					.catch((error) => {
-						console.error("[Friday] Periodic sync failed:", error);
+						console.error("[Friday] Idle auto sync failed:", error);
 					});
 			}, ms),
 		);
 	}
 
-	private startAutoPush(): void {
-		let pushTimer: number | null = null;
-		const debounceMs = 10_000;
-
+	private startContinuousAutoSync(): void {
+		if (this.settings.sync.mode !== "continuous_auto") {
+			return;
+		}
 		this.registerEvent(
-			this.app.vault.on("modify", () => {
-				if (pushTimer !== null) {
-					window.clearTimeout(pushTimer);
+			this.app.vault.on("modify", (file) => {
+				const projectSlug = this.dataService.getProjectSlugFromPath(file.path);
+				if (!projectSlug) {
+					return;
 				}
-				pushTimer = window.setTimeout(() => {
-					pushTimer = null;
-					const autoSyncProjects = this.settings.projects.filter((item) => item.autoSync && item.gitRemote);
-					for (const project of autoSyncProjects) {
-						void this.syncService
-							.push(project)
-							.then(async (result) => {
-								if (result.success) {
-									project.lastSyncAt = new Date().toISOString();
-									await this.saveSettings();
-								}
-							})
-							.catch((error) => {
-								console.error(`[Friday] Auto-push failed for ${project.slug}:`, error);
-							});
-					}
-				}, debounceMs);
+				const project = this.settings.projects.find((item) => (item.projectId || item.slug) === projectSlug || item.slug === projectSlug);
+				if (!project) {
+					return;
+				}
+				this.autoSyncManager.notifyProjectMutation(project);
 			}),
 		);
 	}

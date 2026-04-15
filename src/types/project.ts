@@ -1,8 +1,16 @@
+import type { SyncConflictRecord } from "./sync";
+
 export type ProjectStatus = "active" | "completed" | "archived" | "on_hold";
 export type ProjectPriority = "low" | "medium" | "high" | "urgent";
 export type ProjectRole = "admin" | "editor" | "viewer";
 export type SourceType = "local_create" | "git_sync" | "import";
 export type IngestStatus = "pending" | "running" | "success" | "failed";
+export type ProjectGitState = "none" | "git_local" | "git_remote_bound";
+
+export interface ProjectGitCredential {
+	username: string;
+	token: string;
+}
 
 export interface ProjectMember {
 	userId: string;
@@ -36,6 +44,10 @@ export interface ProjectGroupEntry {
 }
 
 export interface ProjectEntry {
+	projectId: string;
+	projectName: string;
+	boundaryPath: string;
+	gitState: ProjectGitState;
 	slug: string;
 	groupId: string;
 	projectRootPath: string;
@@ -107,17 +119,21 @@ export interface WikiIndexFile {
 }
 
 export interface SyncResult {
+	projectId?: string;
 	success: boolean;
 	projectSlug: string;
 	pulledFiles: string[];
 	pushedFiles: string[];
 	conflicts: string[];
 	conflictSnapshots?: Record<string, string>;
+	conflictRecords?: SyncConflictRecord[];
 	error?: string;
 }
 
 export interface SyncStatus {
+	projectId?: string;
 	projectSlug: string;
+	branch: string;
 	connected: boolean;
 	ahead: number;
 	behind: number;

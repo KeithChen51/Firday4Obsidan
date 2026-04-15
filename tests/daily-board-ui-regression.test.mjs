@@ -109,6 +109,15 @@ test("checks navigation and title are renamed to tools and skills", async () => 
 	assert.match(en, /"checks\.title": "Tools & Skills"/);
 });
 
+test("project navigation and page copy now present sync-first wording", async () => {
+	const zh = readLocaleSource(zhLocalePath);
+	const en = readLocaleSource(enLocalePath);
+	assert.match(zh, /"nav\.projects": "同步"/);
+	assert.match(zh, /"projects\.header": "同步"/);
+	assert.match(en, /"nav\.projects": "Sync"/);
+	assert.match(en, /"projects\.header": "Sync"/);
+});
+
 test("checks page is dedicated to tool and skill management only", async () => {
 	const source = readViewSource();
 	const match = source.match(/private renderChecksPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderApprovalCard/);
@@ -124,10 +133,8 @@ test("checks page is dedicated to tool and skill management only", async () => {
 	assert.doesNotMatch(block, /friday-ai-chat-panel/);
 });
 
-test("project actions stay on projects page instead of jumping to checks", async () => {
+test("sync actions stay on sync page instead of jumping to tools page", async () => {
 	const source = readViewSource();
-	assert.match(source, /private async openMemberEditor\(projectSlug: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
-	assert.match(source, /projects\.button\.remove[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
@@ -145,6 +152,68 @@ test("empty projects page renders project editor before empty-state early return
 	assert.ok(editorIndex < emptyIndex, "project editor should render before empty-state early return");
 });
 
+test("sync page empty-state routes users to settings instead of inline project creation", async () => {
+	const source = readViewSource();
+	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
+	assert.ok(match, "renderProjectsPage block should exist");
+	const block = match[1] ?? "";
+	const emptyMatch = block.match(/if \(projects.length === 0\) \{([\s\S]*?)return;/);
+	assert.ok(emptyMatch, "empty-state branch should exist");
+	const emptyBlock = emptyMatch[1] ?? "";
+	assert.match(emptyBlock, /openSettingsTab\(/);
+	assert.doesNotMatch(emptyBlock, /openProjectEditor\(/);
+});
+
+test("sync page no longer renders member editor or member actions", async () => {
+	const source = readViewSource();
+	const projectsPageMatch = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
+	assert.ok(projectsPageMatch, "renderProjectsPage block should exist");
+	const projectsBlock = projectsPageMatch[1] ?? "";
+	assert.doesNotMatch(projectsBlock, /memberEditorProjectSlug/);
+	assert.doesNotMatch(projectsBlock, /renderMemberEditorCard\(/);
+
+	const cardMatch = source.match(/private renderProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectStatusPanel/);
+	assert.ok(cardMatch, "renderProjectCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+	assert.doesNotMatch(cardBlock, /projects\.button\.members/);
+	assert.doesNotMatch(cardBlock, /openMemberEditor\(/);
+	assert.doesNotMatch(cardBlock, /projects\.button\.manage/);
+	assert.doesNotMatch(cardBlock, /projects\.button\.remove/);
+});
+
+test("sync page branches on none, git_local, and git_remote_bound project states", async () => {
+	const source = readViewSource();
+	const cardMatch = source.match(/private renderProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectStatusPanel/);
+	assert.ok(cardMatch, "renderProjectCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+	assert.match(cardBlock, /project\.gitState === "none"/);
+	assert.match(cardBlock, /project\.gitState === "git_local"/);
+	assert.match(cardBlock, /project\.gitState === "git_remote_bound"/);
+	assert.match(cardBlock, /openSettingsTab\(/);
+	assert.match(cardBlock, /projects\.sync\.none/);
+	assert.match(cardBlock, /projects\.sync\.gitLocal/);
+	assert.match(cardBlock, /projects\.button\.sync/);
+});
+
+test("sync page renders only the active project context instead of a multi-project grid", async () => {
+	const source = readViewSource();
+	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
+	assert.ok(match, "renderProjectsPage block should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /const activeProject = this\.getActiveProjectEntry\(\)/);
+	assert.doesNotMatch(block, /friday-project-grid/);
+	assert.doesNotMatch(block, /for \(const project of projects\)/);
+	assert.match(block, /this\.renderProjectCard\(containerEl, activeProject\)/);
+});
+
+test("sync page exposes ignore management through dedicated integration points", async () => {
+	const source = readViewSource();
+	assert.match(source, /GitIgnoreService/);
+	assert.match(source, /projects\.ignore\.title/);
+	assert.match(source, /projects\.ignore\.apply/);
+	assert.match(source, /applyIgnoreRule/);
+});
+
 test("project conflict proposal no longer calls builtin skill shortcut directly", async () => {
 	const source = readViewSource();
 	const match = source.match(/private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
@@ -154,6 +223,18 @@ test("project conflict proposal no longer calls builtin skill shortcut directly"
 	assert.match(block, /executionEventRouter\.routeToRuntime\(/);
 	assert.match(block, /executionPlanner\.plan\(/);
 	assert.match(block, /executionOrchestrator\.execute\(/);
+});
+
+test("sync page renders typed conflict records with accept-local accept-remote and defer actions", async () => {
+	const source = readViewSource();
+	assert.match(source, /getSyncConflicts\(/);
+	assert.match(source, /replaceProjectSyncConflicts\(/);
+	assert.match(source, /projects\.conflicts\.useOurs/);
+	assert.match(source, /projects\.conflicts\.useTheirs/);
+	assert.match(source, /projects\.conflicts\.defer/);
+	assert.match(source, /expandedConflictKey/);
+	assert.doesNotMatch(source, /private async finalizeConflictAction/);
+	assert.doesNotMatch(source, /checks\.sync\.finalize/);
 });
 
 test("compile button routes through planner and orchestrator", async () => {

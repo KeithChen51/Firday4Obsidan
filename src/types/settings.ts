@@ -30,9 +30,7 @@ export interface FridaySettings {
 		userId: string;
 		displayName: string;
 		autoDetect: boolean;
-		gitUsername: string;
 		gitUserEmail: string;
-		gitToken: string;
 	};
 	llm: {
 		mode: "openai" | "group";
@@ -48,8 +46,8 @@ export interface FridaySettings {
 		groupConfig: LlmModeConfig;
 	};
 	sync: {
-		autoPush: boolean;
-		syncInterval: number;
+		mode: "manual" | "idle_auto" | "continuous_auto";
+		idleMinutes: number;
 		syncOnStartup: boolean;
 	};
 	projectGroups: ProjectGroupEntry[];
@@ -71,9 +69,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		userId: "",
 		displayName: "",
 		autoDetect: true,
-		gitUsername: "",
 		gitUserEmail: "",
-		gitToken: "",
 	},
 	llm: {
 		mode: "openai",
@@ -107,8 +103,8 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		},
 	},
 	sync: {
-		autoPush: false,
-		syncInterval: 0,
+		mode: "manual",
+		idleMinutes: 0,
 		syncOnStartup: true,
 	},
 	projectGroups: [],

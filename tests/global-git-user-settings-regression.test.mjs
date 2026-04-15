@@ -19,11 +19,11 @@ function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
 }
 
-test("global settings model owns git username, email and token", async () => {
+test("synced settings model keeps git email only and no longer stores git username or token", async () => {
 	const source = read(settingsPath);
-	assert.match(source, /user:\s*\{[\s\S]*gitUsername:\s*string;/);
 	assert.match(source, /user:\s*\{[\s\S]*gitUserEmail:\s*string;/);
-	assert.match(source, /user:\s*\{[\s\S]*gitToken:\s*string;/);
+	assert.doesNotMatch(source, /user:\s*\{[\s\S]*gitUsername:\s*string;/);
+	assert.doesNotMatch(source, /user:\s*\{[\s\S]*gitToken:\s*string;/);
 });
 
 test("project entry no longer stores git credential fields", async () => {
@@ -36,14 +36,14 @@ test("project entry no longer stores git credential fields", async () => {
 	assert.doesNotMatch(block, /gitToken:/);
 });
 
-test("settings tab renders git identity fields in user section", async () => {
+test("settings tab keeps git email in user section but removes global username and token fields", async () => {
 	const source = read(settingTabPath);
 	const userSectionMatch = source.match(/private renderUserSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
 	assert.ok(userSectionMatch, "renderUserSection block should exist");
 	const block = userSectionMatch[1] ?? "";
-	assert.match(block, /settings\.user\.gitUsername/);
 	assert.match(block, /settings\.user\.gitUserEmail/);
-	assert.match(block, /settings\.user\.gitToken/);
+	assert.doesNotMatch(block, /settings\.user\.gitUsername/);
+	assert.doesNotMatch(block, /settings\.user\.gitToken/);
 });
 
 test("settings nav places project immediately after user", async () => {
@@ -71,19 +71,21 @@ test("project editor no longer renders git credential inputs", async () => {
 	assert.doesNotMatch(source, /draft\.gitToken/);
 });
 
-test("sync service no longer reads git credentials from project entry", async () => {
+test("sync service reads git credentials from secure storage instead of synced settings or project entry", async () => {
 	const source = read(syncServicePath);
+	assert.match(source, /getProjectGitCredential/);
 	assert.doesNotMatch(source, /project\.gitUsername/);
 	assert.doesNotMatch(source, /project\.gitUserEmail/);
 	assert.doesNotMatch(source, /project\.gitToken/);
-	assert.match(source, /getSettings\(\)\.user|getGitUserSettings\(\)/);
+	assert.doesNotMatch(source, /user\.gitUsername/);
+	assert.doesNotMatch(source, /user\.gitToken/);
 });
 
-test("settings migration promotes legacy project git credentials into global user settings", async () => {
+test("settings migration still detects legacy git credentials for secure-storage migration", async () => {
 	const source = read(mainPath);
 	assert.match(source, /migrateSettings\(/);
 	assert.match(source, /gitUsername/);
 	assert.match(source, /gitUserEmail/);
 	assert.match(source, /gitToken/);
-	assert.match(source, /user:\s*\{/);
+	assert.match(source, /pendingLegacyGitCredentials|migrateLegacyGitCredentials/);
 });

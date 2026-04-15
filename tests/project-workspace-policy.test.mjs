@@ -9,9 +9,14 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const modulePath = path.join(projectRoot, "src/utils/projectWorkspacePolicy.ts");
+const boundaryServiceModulePath = path.join(projectRoot, "src/services/ProjectBoundaryService.ts");
 
 async function loadModule() {
 	return jiti.import(modulePath);
+}
+
+async function loadBoundaryServiceModule() {
+	return jiti.import(boundaryServiceModulePath);
 }
 
 test("agent draft writes default to project workspace", async () => {
@@ -38,4 +43,34 @@ test("raw paths are detected as user-curated and blocked for agent writes", asyn
 	assert.equal(rawPath, "F.R.I.D.A.Y/项目/alpha/raw/facts.md");
 	assert.equal(mod.isProjectRawPath("F.R.I.D.A.Y/项目/alpha", rawPath), true);
 	assert.equal(mod.isAgentWritableProjectPath("F.R.I.D.A.Y/项目/alpha", rawPath), false);
+});
+
+test("project boundary service resolves vault and absolute paths from boundaryPath", async () => {
+	const mod = await loadBoundaryServiceModule();
+	const settings = {
+		activeProjectId: "alpha",
+		projects: [
+			{
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "Projects/alpha",
+				gitState: "none",
+				slug: "alpha",
+				groupId: "default-group",
+				projectRootPath: "Projects/alpha",
+				localPath: "",
+				gitRemote: "",
+				autoSync: false,
+				lastSyncAt: "",
+			},
+		],
+	};
+	const service = new mod.ProjectBoundaryService(() => settings, () => path.join("C:\\Vault"));
+	const project = service.getActiveProject();
+
+	assert.equal(project?.projectId, "alpha");
+	assert.equal(service.getProjectBySlug("alpha")?.projectId, "alpha");
+	assert.equal(service.getProjectVaultPath(project), "Projects/alpha");
+	assert.equal(service.getProjectAbsolutePath(project), path.join("C:\\Vault", "Projects", "alpha"));
+	assert.equal(service.getActiveProjectRoot(), "Projects/alpha");
 });

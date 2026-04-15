@@ -3,10 +3,20 @@ import { homedir } from "os";
 import path from "path";
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
 import {
+	buildDefaultProjectRootPath,
+	type ProjectEditorDraft,
+	submitProjectDraft,
+} from "../features/workbench/ProjectEditorService";
+import {
 	parseOpencodeConfig,
 	selectOpencodeProvider,
 	type OpencodeProviderOption,
 } from "../core/llm/OpencodeConfigResolver";
+import {
+	buildAgentModelCatalogFromSettings,
+	parseAgentModelChoice,
+	resolveSelectedAgentModelValue,
+} from "../core/llm/AgentModelCatalog";
 import {
 	patchActiveLlmConfig,
 	patchLlmModeConfig,
@@ -23,8 +33,7 @@ import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 type SettingsHost = FridayPluginApi & Plugin;
 type LlmMode = "openai" | "group";
 type LlmStatus = "unconfigured" | "idle" | "checking" | "connected" | "failed";
-
-const MANUAL_MODEL_OPTION = "__manual__";
+type VisionProbeStatus = "idle" | "checking";
 const BUILTIN_GROUP_MODELS = [
 	"glm-4.7",
 	"kimi-k2.5",
@@ -52,12 +61,18 @@ export class FridaySettingTab extends PluginSettingTab {
 	private readonly host: SettingsHost;
 	private llmStatus: LlmStatus = "idle";
 	private llmStatusDetail = "";
+	private visionProbeStatus: VisionProbeStatus = "idle";
+	private testedVisionCapability: ModelCapabilityInfo | null = null;
+	private testedVisionModel = "";
 	private modelPresetResult: ModelPresetResult | null = null;
 	private activeSection: SettingsSection = "user";
 	private newAgentDraft = "";
 	private newProjectGroupDraft = "";
 	private pendingDeleteGroupId = "";
 	private policyEditorProjectSlug = "";
+	private projectEditorDraft: ProjectEditorDraft | null = null;
+	private projectEditorInitialProjectId = "";
+	private projectEditorError = "";
 
 	constructor(app: App, plugin: SettingsHost) {
 		super(app, plugin);
@@ -181,19 +196,6 @@ export class FridaySettingTab extends PluginSettingTab {
 		);
 
 		new Setting(containerEl)
-			.setName(this.t("settings.user.gitUsername.name", "Git 用户名"))
-			.setDesc(this.t("settings.user.gitUsername.desc", "作为所有项目同步认证的统一用户名。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("git-user")
-					.setValue(this.host.settings.user.gitUsername)
-					.onChange(async (value) => {
-						this.host.settings.user.gitUsername = value.trim();
-						await this.host.saveSettings();
-					}),
-			);
-
-		new Setting(containerEl)
 			.setName(this.t("settings.user.gitUserEmail.name", "Git 邮箱"))
 			.setDesc(this.t("settings.user.gitUserEmail.desc", "用于所有项目的 Git 提交身份。"))
 			.addText((text) =>
@@ -206,28 +208,16 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
-			.setName(this.t("settings.user.gitToken.name", "Git 令牌"))
-			.setDesc(this.t("settings.user.gitToken.desc", "作为所有项目同步认证的统一令牌。"))
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text
-					.setPlaceholder("token")
-					.setValue(this.host.settings.user.gitToken)
-					.onChange(async (value) => {
-						this.host.settings.user.gitToken = value.trim();
-						await this.host.saveSettings();
-					});
-			});
 	}
 
 	private renderSyncSection(containerEl: HTMLElement): void {
 		containerEl.createEl("h3", { text: this.host.t("settings.section.sync") });
 
 		new Setting(containerEl).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
-			toggle.setValue(this.host.settings.sync.autoPush).onChange(async (value) => {
-				this.host.settings.sync.autoPush = value;
+			toggle.setValue(this.host.settings.sync.mode === "continuous_auto").onChange(async (value) => {
+				this.host.settings.sync.mode = value ? "continuous_auto" : "manual";
 				await this.host.saveSettings();
+				this.display();
 			}),
 		);
 
@@ -244,11 +234,16 @@ export class FridaySettingTab extends PluginSettingTab {
 			.addText((text) =>
 				text
 					.setPlaceholder("0")
-					.setValue(String(this.host.settings.sync.syncInterval))
+					.setValue(String(this.host.settings.sync.idleMinutes))
 					.onChange(async (value) => {
 						const parsed = Number.parseInt(value, 10);
-						this.host.settings.sync.syncInterval = Number.isFinite(parsed) ? parsed : 0;
+						const nextValue = Number.isFinite(parsed) ? parsed : 0;
+						this.host.settings.sync.idleMinutes = nextValue;
+						if (this.host.settings.sync.mode !== "continuous_auto") {
+							this.host.settings.sync.mode = nextValue > 0 ? "idle_auto" : "manual";
+						}
 						await this.host.saveSettings();
+						this.display();
 					}),
 			);
 	}
@@ -417,18 +412,16 @@ export class FridaySettingTab extends PluginSettingTab {
 			const currentModel = this.host.settings.llm.model.trim();
 			const selected = modelPresets.models.includes(currentModel)
 				? currentModel
-				: MANUAL_MODEL_OPTION;
+				: modelPresets.models[0] ?? "";
 			new Setting(containerEl)
-				.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
+				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
 				.setDesc(this.t("settings.llm.presetModel.source", "来源: {source}", { source: modelPresets.source }))
 				.addDropdown((dropdown) => {
-					dropdown.addOption(MANUAL_MODEL_OPTION, this.t("settings.llm.presetModel.manual", "手动输入"));
 					for (const model of modelPresets.models) {
 						dropdown.addOption(model, modelPresets.modelLabels[model] ?? model);
 					}
 					dropdown.setValue(selected);
 					dropdown.onChange(async (value) => {
-						if (value === MANUAL_MODEL_OPTION) return;
 						this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
 							model: value,
 						});
@@ -450,7 +443,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		if (mode !== "group") {
 			new Setting(containerEl)
-				.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
+				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
 				.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
 				.addText((text) =>
 					text
@@ -466,23 +459,40 @@ export class FridaySettingTab extends PluginSettingTab {
 				);
 		}
 
-		const activeAgentModel = this.host.getActiveAgent()?.model?.trim() ?? "";
-		const effectiveModel = activeAgentModel || this.host.settings.llm.model.trim();
-		const capability = this.host.aiService.getModelCapability(effectiveModel || undefined);
-		const confidenceLabel =
-			capability.confidence === "high"
+		const currentVisionModelKey = this.getCurrentVisionModelKey();
+		const capability =
+			this.testedVisionCapability && this.testedVisionModel === currentVisionModelKey
+				? this.testedVisionCapability
+				: null;
+		const confidenceLabel = capability
+			? capability.confidence === "high"
 				? this.t("settings.llm.vision.confidence.high", "高")
 				: capability.confidence === "medium"
 					? this.t("settings.llm.vision.confidence.medium", "中")
-					: this.t("settings.llm.vision.confidence.low", "低");
+					: this.t("settings.llm.vision.confidence.low", "低")
+			: this.t("settings.llm.vision.confidence.unknown", "未测试");
 		new Setting(containerEl)
-			.setName(this.t("settings.llm.vision.name", "视觉能力（推断）"))
+			.setName(this.t("settings.llm.vision.name", "视觉能力"))
 			.setDesc(
 				this.t("settings.llm.vision.desc", "结果：{result} | 置信度：{confidence} | {reason}", {
-					result: this.formatVisionCapability(capability),
+					result: capability
+						? this.formatVisionCapability(capability)
+						: this.t("settings.llm.vision.notTested", "未测试"),
 					confidence: confidenceLabel,
-					reason: capability.reason,
+					reason: capability?.reason ?? this.t("settings.llm.vision.pending", "点击右侧“能力测试”后会更新结果。"),
 				}),
+			)
+			.addButton((button) =>
+				button
+					.setButtonText(
+						this.visionProbeStatus === "checking"
+							? this.t("settings.llm.vision.checking", "能力测试中...")
+							: this.t("settings.llm.vision.test", "能力测试"),
+					)
+					.setDisabled(this.visionProbeStatus === "checking")
+					.onClick(async () => {
+						await this.runVisionCapabilityTest();
+					}),
 			);
 
 		new Setting(containerEl)
@@ -592,20 +602,26 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		if (activeAgent) {
+			const agentModelOptions = this.getAvailableAgentModelOptions();
+			const selectedModelValue = resolveSelectedAgentModelValue(activeAgent, agentModelOptions);
 			new Setting(containerEl)
 				.setName(this.t("settings.agent.model.name", "当前 Agent 模型"))
 				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
-				.addText((text) =>
-					text
-						.setPlaceholder(this.t("settings.agent.model.placeholder", "例如 glm-5"))
-						.setValue(activeAgent.model)
-						.onChange(async (value) => {
-							activeAgent.model = value.trim();
-							activeAgent.updatedAt = new Date().toISOString();
-							await this.host.agentService.writeAgentProfile(activeAgent);
-							await this.host.saveSettings();
-						}),
-				);
+				.addDropdown((dropdown) => {
+					dropdown.addOption("", this.t("settings.agent.model.followGlobal", "跟随全局默认"));
+					for (const option of agentModelOptions) {
+						dropdown.addOption(option.value, option.label);
+					}
+					dropdown.setValue(selectedModelValue);
+					dropdown.onChange(async (value) => {
+						const parsed = parseAgentModelChoice(value);
+						activeAgent.model = parsed?.model ?? "";
+						activeAgent.modelMode = parsed?.mode;
+						activeAgent.updatedAt = new Date().toISOString();
+						await this.host.agentService.writeAgentProfile(activeAgent);
+						await this.host.saveSettings();
+					});
+				});
 		}
 
 		new Setting(containerEl)
@@ -769,8 +785,8 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (projects.length === 0) {
 			return;
 		}
-		if (!this.policyEditorProjectSlug || !projects.some((item) => item.slug === this.policyEditorProjectSlug)) {
-			this.policyEditorProjectSlug = this.host.settings.activeProjectId || projects[0]!.slug;
+		if (!this.policyEditorProjectSlug || !projects.some((item) => this.getProjectKey(item) === this.policyEditorProjectSlug)) {
+			this.policyEditorProjectSlug = this.host.settings.activeProjectId || this.getProjectKey(projects[0]!);
 		}
 
 		containerEl.createEl("h4", {
@@ -788,7 +804,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			.setDesc(this.t("settings.agent.policy.projectDesc", "编辑当前项目的工具策略覆盖。"))
 			.addDropdown((dropdown) => {
 				for (const project of projects) {
-					dropdown.addOption(project.slug, project.slug);
+				dropdown.addOption(this.getProjectKey(project), this.getProjectLabel(project));
 				}
 				dropdown.setValue(this.policyEditorProjectSlug);
 				dropdown.onChange((value) => {
@@ -986,9 +1002,13 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).addButton((button) =>
 			button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
-				this.openRegisterProjectModal();
+				void this.openRegisterProjectModal();
 			}),
 		);
+
+		if (this.projectEditorDraft) {
+			this.renderProjectEditorCard(containerEl);
+		}
 
 		if (this.host.settings.projects.length === 0) {
 			containerEl.createEl("p", { text: this.t("settings.project.empty", "尚未注册项目。") });
@@ -1008,9 +1028,14 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 			for (const project of projectsInGroup) {
-				const active = project.slug === this.host.settings.activeProjectId;
+				const projectKey = this.getProjectKey(project);
+				const active = projectKey === this.host.settings.activeProjectId;
 				new Setting(containerEl)
-					.setName(active ? `${project.slug} · ${this.t("settings.project.active.badge", "当前")}` : project.slug)
+					.setName(
+						active
+							? `${this.getProjectLabel(project)} · ${this.t("settings.project.active.badge", "当前")}`
+							: this.getProjectLabel(project),
+					)
 					.setDesc(this.buildProjectDescription(project))
 					.addButton((button) =>
 						button
@@ -1021,30 +1046,24 @@ export class FridaySettingTab extends PluginSettingTab {
 							)
 							.setDisabled(active)
 							.onClick(async () => {
-								await this.host.setActiveProject(project.slug);
+								await this.host.setActiveProject(projectKey);
 								this.display();
 							}),
 					)
 					.addButton((button) =>
 						button.setButtonText(this.t("settings.project.edit", "编辑")).onClick(() => {
-							this.openRegisterProjectModal(project);
+							void this.openRegisterProjectModal(project);
 						}),
 					)
 					.addButton((button) =>
-						button.setButtonText(this.t("settings.project.sync", "同步")).onClick(async () => {
-							const result = await this.host.syncService.sync(project);
-							if (result.success) {
-								project.lastSyncAt = new Date().toISOString();
-								await this.host.saveSettings();
-								new Notice(this.host.t("notice.syncSuccess", { slug: project.slug }), 3000);
-							} else {
-								new Notice(this.host.t("notice.syncFailed", { error: result.error ?? project.slug }), 6000);
-							}
+						button.setButtonText(this.t("settings.project.ignore", "忽略规则")).onClick(async () => {
+							await this.host.setActiveProject(projectKey);
+							await this.host.openWorkspaceView();
 						}),
 					)
 					.addButton((button) =>
 						button.setButtonText(this.t("settings.project.remove", "移除")).onClick(async () => {
-							await this.host.removeProject(project.slug);
+							await this.host.removeProject(projectKey);
 							this.display();
 						}),
 					);
@@ -1058,9 +1077,9 @@ export class FridaySettingTab extends PluginSettingTab {
 			.setDesc(this.t("settings.project.active.desc", "Agent 与工具读写将严格限制在该项目根目录下。"))
 			.addDropdown((dropdown) => {
 				for (const project of this.host.settings.projects) {
-					dropdown.addOption(project.slug, project.slug);
+					dropdown.addOption(this.getProjectKey(project), this.getProjectLabel(project));
 				}
-				const fallback = this.host.settings.projects[0]?.slug ?? "";
+				const fallback = this.host.settings.projects[0] ? this.getProjectKey(this.host.settings.projects[0]) : "";
 				const current = this.host.settings.activeProjectId || fallback;
 				if (current) {
 					dropdown.setValue(current);
@@ -1337,6 +1356,13 @@ export class FridaySettingTab extends PluginSettingTab {
 		return this.modelPresetResult;
 	}
 
+	private getAvailableAgentModelOptions() {
+		const snapshot = this.readOpencodeSnapshot();
+		const groupConfig = readModeConfig(this.host.settings.llm, "group");
+		const groupProvider = selectOpencodeProvider(snapshot, groupConfig.opencodeProviderId);
+		return buildAgentModelCatalogFromSettings(this.host.settings.llm, groupProvider?.models ?? []);
+	}
+
 	private loadModelPresetsFromOpencodeConfig(): ModelPresetResult | null {
 		const snapshot = this.readOpencodeSnapshot();
 		if (!snapshot || snapshot.providers.length === 0) {
@@ -1409,6 +1435,9 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private markLlmStatusDirty(): void {
+		this.visionProbeStatus = "idle";
+		this.testedVisionCapability = null;
+		this.testedVisionModel = "";
 		if (!this.host.aiService.isConfigured()) {
 			this.llmStatus = "unconfigured";
 			this.llmStatusDetail = this.t("settings.llm.status.needApiUrl", "请先填写 API 地址。");
@@ -1507,19 +1536,240 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.display();
 	}
 
-	private openRegisterProjectModal(initial?: ProjectEntry): void {
-		this.host.workbenchStateStore.setProjectEditorRequest(
-			initial
-				? { mode: "edit", projectSlug: initial.slug }
-				: { mode: "create" },
+	private async runVisionCapabilityTest(): Promise<void> {
+		if (!this.host.aiService.isConfigured()) {
+			this.testedVisionCapability = null;
+			this.testedVisionModel = "";
+			this.display();
+			return;
+		}
+
+		this.visionProbeStatus = "checking";
+		this.testedVisionCapability = null;
+		this.testedVisionModel = "";
+		this.display();
+
+		try {
+			const capability = await this.host.aiService.probeVisionCapability();
+			this.testedVisionCapability = capability;
+			this.testedVisionModel = this.getCurrentVisionModelKey();
+		} finally {
+			this.visionProbeStatus = "idle";
+			this.display();
+		}
+	}
+
+	private getCurrentVisionModelKey(): string {
+		const activeAgent = this.host.getActiveAgent();
+		const mode = activeAgent?.modelMode || this.host.settings.llm.mode;
+		const model = activeAgent?.model?.trim() || this.host.settings.llm.model.trim();
+		return `${mode}::${model}`;
+	}
+
+	private async openRegisterProjectModal(initial?: ProjectEntry): Promise<void> {
+		const draft = this.createProjectEditorDraft(initial);
+		if (initial) {
+			const credential = await this.host.getProjectGitCredential(this.getProjectKey(initial));
+			draft.gitUsername = credential?.username ?? "";
+			draft.gitToken = credential?.token ?? "";
+		}
+		this.projectEditorDraft = draft;
+		this.projectEditorInitialProjectId = initial ? this.getProjectKey(initial) : "";
+		this.projectEditorError = "";
+		this.activeSection = "project";
+		this.display();
+	}
+
+	private createProjectEditorDraft(initial?: ProjectEntry): ProjectEditorDraft {
+		if (initial) {
+			const projectId = this.getProjectKey(initial);
+			const boundaryPath =
+				initial.boundaryPath ||
+				initial.projectRootPath ||
+				buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), projectId);
+			return {
+				groupId: initial.groupId || "default-group",
+				mode: initial.gitRemote ? "remote_bootstrap" : initial.localPath ? "register_existing_dir" : "local_only",
+				projectId,
+				projectName: this.getProjectLabel(initial),
+				boundaryPath,
+				localPath: initial.localPath ?? "",
+				gitRemote: initial.gitRemote,
+				autoSync: initial.autoSync,
+				slug: projectId,
+				projectRootPath: boundaryPath,
+			};
+		}
+		const defaultBoundaryPath = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), "");
+		return {
+			groupId: this.host.settings.projectGroups[0]?.id ?? "default-group",
+			mode: "local_only",
+			projectId: "",
+			projectName: "",
+			boundaryPath: defaultBoundaryPath,
+			localPath: "",
+			gitRemote: "",
+			autoSync: true,
+			slug: "",
+			projectRootPath: defaultBoundaryPath,
+		};
+	}
+
+	private renderProjectEditorCard(containerEl: HTMLElement): void {
+		if (!this.projectEditorDraft) {
+			return;
+		}
+		const draft = this.projectEditorDraft;
+		const card = containerEl.createDiv({ cls: "friday-card" });
+		card.createEl("h4", {
+			text: this.projectEditorInitialProjectId
+				? this.t("projects.editor.edit", "Edit project")
+				: this.t("projects.editor.create", "Register project"),
+		});
+		if (this.projectEditorError) {
+			card.createDiv({ cls: "friday-ai-error", text: this.projectEditorError });
+		}
+
+		const fields = card.createDiv({ cls: "friday-project-editor-grid" });
+		this.renderProjectEditorInput(
+			fields,
+			this.t("projects.editor.group", "Group"),
+			draft.groupId,
+			(value) => {
+				draft.groupId = value;
+			},
+			this.host.settings.projectGroups.map((group) => group.id),
 		);
-		void this.host.openWorkspaceView();
-		new Notice(
-			initial
-				? this.t("settings.project.openEditor.edit", "已在工作台打开项目编辑器：{slug}", { slug: initial.slug })
-				: this.t("settings.project.openEditor.create", "已在工作台打开项目注册器"),
-			3000,
-		);
+		this.renderProjectEditorText(fields, this.t("projects.editor.projectName", "Project name"), draft.projectName, (value) => {
+			draft.projectName = value.trim();
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.projectId", "Project ID"), draft.projectId, (value) => {
+			const previousDefault = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId);
+			draft.projectId = value.trim().toLowerCase();
+			draft.slug = draft.projectId;
+			const nextDefault = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId);
+			if (!draft.boundaryPath || draft.boundaryPath === previousDefault) {
+				draft.boundaryPath = nextDefault;
+				draft.projectRootPath = nextDefault;
+			}
+			this.display();
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.root", "Project root"), draft.boundaryPath, (value) => {
+			draft.boundaryPath = value.trim();
+			draft.projectRootPath = draft.boundaryPath;
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.local", "Local path"), draft.localPath, (value) => {
+			draft.localPath = value.trim();
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.remote", "Git remote"), draft.gitRemote, (value) => {
+			draft.gitRemote = value.trim();
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.gitUsername", "Git username"), draft.gitUsername ?? "", (value) => {
+			draft.gitUsername = value.trim();
+		});
+		this.renderProjectEditorText(fields, this.t("projects.editor.gitToken", "Git token"), draft.gitToken ?? "", (value) => {
+			draft.gitToken = value.trim();
+		}, "password");
+
+		const toggleRow = fields.createDiv({ cls: "friday-project-editor-field" });
+		toggleRow.createEl("label", { text: this.t("projects.editor.autoSync", "Auto sync") });
+		const toggle = toggleRow.createEl("input", { attr: { type: "checkbox" } });
+		toggle.checked = draft.autoSync;
+		toggle.onchange = () => {
+			draft.autoSync = toggle.checked;
+		};
+
+		const actions = card.createDiv({ cls: "friday-approval-actions" });
+		const saveButton = actions.createEl("button", { text: this.t("projects.editor.save", "Save project") });
+		saveButton.onclick = () => {
+			void this.submitProjectEditor();
+		};
+		const cancelButton = actions.createEl("button", { text: this.t("projects.editor.cancel", "Cancel") });
+		cancelButton.onclick = () => {
+			this.projectEditorDraft = null;
+			this.projectEditorInitialProjectId = "";
+			this.projectEditorError = "";
+			this.display();
+		};
+	}
+
+	private renderProjectEditorText(
+		containerEl: HTMLElement,
+		label: string,
+		value: string,
+		onChange: (value: string) => void,
+		type = "text",
+	): void {
+		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
+		row.createEl("label", { text: label });
+		const input = row.createEl("input", { attr: { type, value } });
+		input.oninput = () => {
+			onChange(input.value);
+		};
+	}
+
+	private renderProjectEditorInput(
+		containerEl: HTMLElement,
+		label: string,
+		value: string,
+		onChange: (value: string) => void,
+		options: string[],
+	): void {
+		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
+		row.createEl("label", { text: label });
+		const select = row.createEl("select");
+		for (const optionValue of [...new Set(options.length > 0 ? options : ["default-group"])]) {
+			const option = select.createEl("option", { text: optionValue });
+			option.value = optionValue;
+			option.selected = optionValue === value;
+		}
+		select.onchange = () => {
+			onChange(select.value);
+		};
+	}
+
+	private async submitProjectEditor(): Promise<void> {
+		if (!this.projectEditorDraft) {
+			return;
+		}
+		const draft = this.projectEditorDraft;
+		try {
+			const isEditing = Boolean(this.projectEditorInitialProjectId);
+			const entry = await submitProjectDraft({
+				app: this.app,
+				syncService: this.host.syncService,
+				draft,
+				initial: this.projectEditorInitialProjectId
+					? this.host.settings.projects.find((project) => this.getProjectKey(project) === this.projectEditorInitialProjectId)
+					: undefined,
+				existingProjectIds: new Set(this.host.settings.projects.map((project) => this.getProjectKey(project))),
+				fridayRoot: this.host.dataService.getFridayRoot(),
+				currentUserId: this.host.getPrimaryUserId(),
+			});
+			await this.host.upsertProject(entry);
+			await this.host.setActiveProject(this.getProjectKey(entry));
+			await this.host.setProjectGitCredential(this.getProjectKey(entry), draft.gitUsername && draft.gitToken
+				? {
+					username: draft.gitUsername,
+					token: draft.gitToken,
+				}
+				: null);
+			this.projectEditorDraft = null;
+			this.projectEditorInitialProjectId = "";
+			this.projectEditorError = "";
+			new Notice(
+				this.t(
+					isEditing ? "settings.project.notice.updated" : "settings.project.notice.registered",
+					isEditing ? "项目已更新：{slug}" : "项目已注册：{slug}",
+					{ slug: this.getProjectLabel(entry) },
+				),
+				3000,
+			);
+			this.display();
+		} catch (error) {
+			this.projectEditorError = error instanceof Error ? error.message : String(error ?? "");
+			this.display();
+		}
 	}
 
 	private buildProjectDescription(project: ProjectEntry): string {
@@ -1533,6 +1783,14 @@ export class FridaySettingTab extends PluginSettingTab {
 			? this.t("settings.project.desc.autoSyncOn", "自动同步：开")
 			: this.t("settings.project.desc.autoSyncOff", "自动同步：关");
 		return `${remoteText} | ${modeText} | ${syncText}`;
+	}
+
+	private getProjectKey(project: ProjectEntry): string {
+		return project.projectId || project.slug;
+	}
+
+	private getProjectLabel(project: ProjectEntry): string {
+		return project.projectName || project.projectId || project.slug;
 	}
 }
 

@@ -1,4 +1,5 @@
 import { SyncResult } from "../../types/project";
+import type { SyncConflictRecord } from "../../types/sync";
 
 export interface SyncReportRecord {
 	projectSlug: string;
@@ -8,6 +9,7 @@ export interface SyncReportRecord {
 
 export interface ProjectEditorRequest {
 	mode: "create" | "edit";
+	projectId?: string;
 	projectSlug?: string;
 }
 
@@ -35,11 +37,21 @@ export interface EditPlanRecord {
 	}>;
 }
 
+export interface SyncStatusSnapshotRecord {
+	projectSlug: string;
+	stage: string;
+	message: string;
+	recordedAt: string;
+}
+
 export class WorkbenchStateStore {
 	private syncReports: SyncReportRecord[] = [];
+	private syncStatusSnapshots: SyncStatusSnapshotRecord[] = [];
 	private projectEditorRequest: ProjectEditorRequest | null = null;
+	private syncConflicts: SyncConflictRecord[] = [];
 	private conflictProposals: ConflictProposalRecord[] = [];
 	private editPlans: EditPlanRecord[] = [];
+	private qualityReport = "";
 
 	getSyncReports(): SyncReportRecord[] {
 		return [...this.syncReports];
@@ -55,6 +67,47 @@ export class WorkbenchStateStore {
 
 	clearSyncReports(): void {
 		this.syncReports = [];
+	}
+
+	recordSyncStatusSnapshot(record: SyncStatusSnapshotRecord): void {
+		this.syncStatusSnapshots = [
+			record,
+			...this.syncStatusSnapshots.filter((item) => item.projectSlug !== record.projectSlug),
+		].slice(0, 20);
+	}
+
+	getSyncStatusSnapshots(): SyncStatusSnapshotRecord[] {
+		return [...this.syncStatusSnapshots];
+	}
+
+	replaceProjectSyncConflicts(projectSlug: string, records: SyncConflictRecord[]): void {
+		this.syncConflicts = [
+			...this.syncConflicts.filter((item) => item.projectSlug !== projectSlug),
+			...records.map((item) => ({ ...item })),
+		];
+	}
+
+	getSyncConflicts(projectSlug?: string): SyncConflictRecord[] {
+		return this.syncConflicts
+			.filter((item) => !projectSlug || item.projectSlug === projectSlug)
+			.map((item) => ({ ...item }));
+	}
+
+	replaceSyncConflict(record: SyncConflictRecord): void {
+		this.syncConflicts = [
+			record,
+			...this.syncConflicts.filter(
+				(item) => !(item.projectSlug === record.projectSlug && item.filePath === record.filePath),
+			),
+		];
+	}
+
+	clearSyncConflicts(projectSlug?: string): void {
+		if (!projectSlug) {
+			this.syncConflicts = [];
+			return;
+		}
+		this.syncConflicts = this.syncConflicts.filter((item) => item.projectSlug !== projectSlug);
 	}
 
 	setProjectEditorRequest(request: ProjectEditorRequest): void {
@@ -105,5 +158,13 @@ export class WorkbenchStateStore {
 
 	clearEditPlans(): void {
 		this.editPlans = [];
+	}
+
+	getQualityReport(): string {
+		return this.qualityReport;
+	}
+
+	setQualityReport(markdown: string): void {
+		this.qualityReport = markdown;
 	}
 }
