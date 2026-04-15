@@ -46,7 +46,6 @@ interface NormalizedProjectDraft {
 	projectId: string;
 	projectName: string;
 	boundaryPath: string;
-	localPath: string;
 	gitRemote: string;
 	autoSync: boolean;
 	gitUsername: string;
@@ -58,12 +57,29 @@ export function buildDefaultProjectRootPath(fridayRoot: string, slug: string): s
 	return normalizeVaultPath(`${fridayRoot}/${PRIMARY_PATHS.projects}/${safeSlug}`);
 }
 
+export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: string): {
+	projectId: string;
+	projectName: string;
+	boundaryPath: string;
+} {
+	const repoName = extractRepositoryName(gitRemote);
+	const projectId = repoName.trim().toLowerCase();
+	return {
+		projectId,
+		projectName: repoName,
+		boundaryPath: buildDefaultProjectRootPath(fridayRoot, projectId),
+	};
+}
+
 export function validateProjectDraft(
-	draft: ProjectEditorDraft,
+	draft: ProjectEditorDraft | NormalizedProjectDraft,
 	existingProjectIds: Set<string>,
 	initialProjectId = "",
 ): void {
-	const normalizedDraft = normalizeProjectDraft(draft);
+	const normalizedDraft =
+		"localPath" in draft || "projectRootPath" in draft || "slug" in draft
+			? normalizeProjectDraft(draft as ProjectEditorDraft)
+			: draft;
 	if (!normalizedDraft.projectId || !/^[a-z0-9-]+$/.test(normalizedDraft.projectId)) {
 		throw new Error("Project ID must use lowercase letters, numbers, or hyphens only.");
 	}
@@ -79,7 +95,11 @@ export function validateProjectDraft(
 	if (Boolean(normalizedDraft.gitUsername) !== Boolean(normalizedDraft.gitToken)) {
 		throw new Error("Git username and token must both be provided, or both left empty.");
 	}
-	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
+	const rawRoot = String(draft.boundaryPath || ("projectRootPath" in draft ? draft.projectRootPath : "") || "").trim();
+	if (!isVaultRelativePath(rawRoot)) {
+		throw new Error("Project root must be a Vault-relative path.");
+	}
+	const normalizedRoot = normalizeVaultPath(rawRoot);
 	if (!normalizedRoot || normalizedRoot === "." || normalizedRoot.startsWith("/")) {
 		throw new Error("Project root must be a Vault-relative path.");
 	}
@@ -87,17 +107,12 @@ export function validateProjectDraft(
 
 export async function submitProjectDraft(options: SubmitOptions): Promise<ProjectEntry> {
 	const { app, syncService, draft, initial } = options;
-	const normalizedDraft = normalizeProjectDraft(draft);
+	const normalizedDraft = normalizeProjectDraft(applyRemoteBootstrapDraftDefaults(draft, options.fridayRoot));
 	validateProjectDraft(normalizedDraft, options.existingProjectIds, initial?.projectId ?? initial?.slug ?? "");
 
 	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
-	const resolvedPath = await resolveProjectPath(
-		app,
-		normalizedDraft.mode,
-		normalizedRoot,
-		normalizedDraft.localPath.trim(),
-	);
-	await prepareProjectDirectory(app, normalizedDraft, resolvedPath, normalizedRoot);
+	const resolvedPath = await resolveProjectPath(app, normalizedDraft.mode, normalizedRoot);
+	await prepareProjectDirectory(normalizedDraft, resolvedPath);
 	await persistProjectGitCredential(syncService, normalizedDraft.projectId, normalizeProjectGitCredential(normalizedDraft));
 
 	const detectedState =
@@ -112,8 +127,6 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		gitState: detectedState?.gitState ?? (hasRemote ? "git_remote_bound" : "none"),
 		groupId: normalizedDraft.groupId.trim() || "default-group",
 		slug: normalizedDraft.projectId,
-		projectRootPath: normalizedRoot,
-		localPath: normalizedDraft.localPath.trim(),
 		gitRemote: normalizedDraft.gitRemote.trim(),
 		autoSync: hasRemote ? normalizedDraft.autoSync : false,
 		lastSyncAt: initial?.lastSyncAt ?? "",
@@ -154,34 +167,23 @@ async function resolveProjectPath(
 	app: App,
 	mode: ProjectRegistrationMode,
 	projectRootPath: string,
-	localPath: string,
 ): Promise<string> {
 	const expectedPath = getVaultProjectAbsolutePath(app, projectRootPath);
-	if (!localPath) {
-		if (mode === "register_existing_dir") {
-			const expectedStat = await fs.stat(expectedPath).catch(() => null);
-			if (!expectedStat?.isDirectory()) {
-				throw new Error(`Local path does not exist: ${expectedPath}`);
-			}
-			return expectedPath;
+	if (mode === "register_existing_dir") {
+		const expectedStat = await fs.stat(expectedPath).catch(() => null);
+		if (!expectedStat?.isDirectory()) {
+			throw new Error(`Local path does not exist: ${expectedPath}`);
 		}
-		await fs.mkdir(expectedPath, { recursive: true });
 		return expectedPath;
 	}
 
-	const target = path.normalize(localPath);
-	const stat = await fs.stat(target).catch(() => null);
-	if (!stat?.isDirectory()) {
-		throw new Error(`Local path does not exist: ${target}`);
-	}
-	return target;
+	await fs.mkdir(expectedPath, { recursive: true });
+	return expectedPath;
 }
 
 async function prepareProjectDirectory(
-	app: App,
 	draft: NormalizedProjectDraft,
 	resolvedPath: string,
-	projectRootPath: string,
 ): Promise<void> {
 	if (draft.mode === "register_existing_dir") {
 		return;
@@ -197,7 +199,6 @@ async function prepareProjectDirectory(
 		}
 		return;
 	}
-	await ensureVaultLinkIfNeeded(app, resolvedPath, projectRootPath);
 }
 
 async function persistProjectGitCredential(
@@ -215,33 +216,6 @@ function getVaultProjectAbsolutePath(app: App, projectRootPath: string): string 
 	return path.join(vaultBasePath, ...projectRootPath.split("/"));
 }
 
-async function ensureVaultLinkIfNeeded(app: App, localProjectPath: string, projectRootPath: string): Promise<void> {
-	const expectedPath = getVaultProjectAbsolutePath(app, projectRootPath);
-	const localNormalized = path.normalize(localProjectPath);
-	const expectedNormalized = path.normalize(expectedPath);
-
-	if (localNormalized === expectedNormalized) {
-		return;
-	}
-
-	await fs.mkdir(path.dirname(expectedNormalized), { recursive: true });
-	const stat = await fs.lstat(expectedNormalized).catch(() => null);
-	if (stat) {
-		const linkedTarget = await fs.readlink(expectedNormalized).catch(() => "");
-		if (linkedTarget && path.normalize(linkedTarget) === localNormalized) {
-			return;
-		}
-		throw new Error(`Vault path already exists: ${expectedNormalized}`);
-	}
-
-	if (process.platform === "win32") {
-		const targetForLink = localNormalized.endsWith("\\") ? localNormalized : `${localNormalized}\\`;
-		await fs.symlink(targetForLink, expectedNormalized, "junction");
-		return;
-	}
-	await fs.symlink(localNormalized, expectedNormalized, "dir");
-}
-
 function normalizeProjectDraft(draft: ProjectEditorDraft): NormalizedProjectDraft {
 	const projectId = (draft.projectId || draft.slug || "").trim().toLowerCase();
 	const projectName = (draft.projectName || draft.projectId || draft.slug || "").trim();
@@ -252,11 +226,24 @@ function normalizeProjectDraft(draft: ProjectEditorDraft): NormalizedProjectDraf
 		projectId,
 		projectName,
 		boundaryPath,
-		localPath: draft.localPath?.trim() || "",
 		gitRemote: draft.gitRemote?.trim() || "",
 		autoSync: Boolean(draft.autoSync),
 		gitUsername: draft.gitUsername?.trim() || "",
 		gitToken: draft.gitToken?.trim() || "",
+	};
+}
+
+function applyRemoteBootstrapDraftDefaults(draft: ProjectEditorDraft, fridayRoot: string): ProjectEditorDraft {
+	if (draft.mode !== "remote_bootstrap" || !draft.gitRemote?.trim()) {
+		return draft;
+	}
+	const defaults = buildRemoteBootstrapDefaults(fridayRoot, draft.gitRemote);
+	return {
+		...draft,
+		projectId: draft.projectId?.trim() || defaults.projectId,
+		projectName: draft.projectName?.trim() || defaults.projectName,
+		boundaryPath: draft.boundaryPath?.trim() || defaults.boundaryPath,
+		projectRootPath: draft.projectRootPath?.trim() || defaults.boundaryPath,
 	};
 }
 
@@ -276,4 +263,24 @@ function normalizeVaultPath(value: string): string {
 		.replace(/\/+/g, "/")
 		.replace(/^\.\//, "")
 		.replace(/\/$/, "");
+}
+
+function isVaultRelativePath(value: string): boolean {
+	const trimmed = value.trim();
+	if (!trimmed) {
+		return false;
+	}
+	return !path.isAbsolute(trimmed) && !/^[a-zA-Z]:[\\/]/.test(trimmed);
+}
+
+function extractRepositoryName(gitRemote: string): string {
+	const trimmed = gitRemote.trim().replace(/\.git$/i, "");
+	if (!trimmed) {
+		return "new-project";
+	}
+	const segments = trimmed
+		.split(/[/:]/)
+		.map((item) => item.trim())
+		.filter(Boolean);
+	return segments[segments.length - 1] ?? "new-project";
 }

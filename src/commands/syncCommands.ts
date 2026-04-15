@@ -18,10 +18,11 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 			const recordedAt = new Date().toISOString();
 			plugin.workbenchStateStore.setSyncReports(
 				plugin.settings.projects.map((project) => ({
-					projectSlug: project.slug,
-					result: results.get(project.slug) ?? {
+					projectId: project.projectId,
+					result: results.get(project.projectId) ?? {
 						success: false,
 						projectSlug: project.slug,
+						projectId: project.projectId,
 						pulledFiles: [],
 						pushedFiles: [],
 						conflicts: [],
@@ -54,7 +55,7 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 			}
 
 			plugin.workbenchStateStore.recordSyncReport({
-				projectSlug: currentProject.slug,
+				projectId: currentProject.projectId,
 				result,
 				recordedAt: new Date().toISOString(),
 			});
@@ -86,7 +87,7 @@ function getCurrentProject(plugin: FridayPluginApi) {
 		return null;
 	}
 
-	return plugin.settings.projects.find((project) => project.slug === slug) ?? null;
+	return plugin.settings.projects.find((project) => project.projectId === slug || project.slug === slug) ?? null;
 }
 
 function updateProjectSyncTimestamps(
@@ -94,7 +95,7 @@ function updateProjectSyncTimestamps(
 	results: Map<string, { success: boolean }>,
 ): void {
 	for (const project of plugin.settings.projects) {
-		const result = results.get(project.slug);
+		const result = results.get(project.projectId);
 		if (result?.success) {
 			project.lastSyncAt = new Date().toISOString();
 		}

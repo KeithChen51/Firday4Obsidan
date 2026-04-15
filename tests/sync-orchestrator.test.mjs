@@ -1,5 +1,6 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,13 +11,15 @@ const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const orchestratorModulePath = path.join(projectRoot, "src/features/sync/SyncOrchestrator.ts");
 const queueModulePath = path.join(projectRoot, "src/platform/git/PromiseQueue.ts");
+const eventBusModulePath = path.join(projectRoot, "src/features/sync/SyncEventBus.ts");
 
 async function loadModules() {
-	const [orchestratorModule, queueModule] = await Promise.all([
+	const [orchestratorModule, queueModule, eventBusModule] = await Promise.all([
 		jiti.import(orchestratorModulePath),
 		jiti.import(queueModulePath),
+		jiti.import(eventBusModulePath),
 	]);
-	return { orchestratorModule, queueModule };
+	return { orchestratorModule, queueModule, eventBusModule };
 }
 
 function createProject() {
@@ -33,6 +36,10 @@ function createProject() {
 		autoSync: true,
 		lastSyncAt: "",
 	};
+}
+
+function readSyncServiceSource() {
+	return fs.readFileSync(path.join(projectRoot, "src/services/SyncService.ts"), "utf8");
 }
 
 test("sync orchestrator runs commit, pull, conflict detection, then push in order", async () => {
@@ -102,4 +109,78 @@ test("sync orchestrator stops before push when conflicts are detected", async ()
 	assert.equal(result.success, false);
 	assert.deepEqual(result.conflicts, ["conflict.md"]);
 	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+});
+
+test("sync orchestrator syncAll includes manual-only projects instead of filtering by autoSync", async () => {
+	const { orchestratorModule, queueModule } = await loadModules();
+	const calls = [];
+	const operator = {
+		async prepareRepository() {},
+		async commitWorkingTree() {
+			return [];
+		},
+		async pull() {
+			return { success: true, pulledFiles: [] };
+		},
+		async detectConflicts() {
+			return { conflicts: [], conflictSnapshots: {} };
+		},
+		async push() {
+			return { success: true, pushedFiles: [] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
+	const alpha = createProject();
+	const beta = { ...createProject(), projectId: "beta", slug: "beta", autoSync: false };
+	const originalSync = orchestrator.sync.bind(orchestrator);
+	orchestrator.sync = async (project) => {
+		calls.push(project.projectId);
+		return originalSync(project);
+	};
+
+	const results = await orchestrator.syncAll([alpha, beta]);
+
+	assert.deepEqual(calls, ["alpha", "beta"]);
+	assert.equal(results.has("alpha"), true);
+	assert.equal(results.has("beta"), true);
+});
+
+test("sync service syncAll source no longer filters projects by autoSync", async () => {
+	const source = readSyncServiceSource();
+	assert.doesNotMatch(source, /projects\.filter\(\(item\) => item\.autoSync\)/);
+	assert.match(source, /for \(const project of projects\)/);
+});
+
+test("sync orchestrator emits recovery-failed event when stash pop restoration fails", async () => {
+	const { orchestratorModule, queueModule, eventBusModule } = await loadModules();
+	const bus = new eventBusModule.SyncEventBus();
+	const events = [];
+	bus.subscribe((event) => events.push(event.type));
+	const operator = {
+		async prepareRepository() {},
+		async commitWorkingTree() {
+			return [];
+		},
+		async pull() {
+			return { success: false, pulledFiles: [], error: "Stash pop recovery failed: conflict after restore." };
+		},
+		async detectConflicts() {
+			return { conflicts: [], conflictSnapshots: {} };
+		},
+		async push() {
+			return { success: true, pushedFiles: [] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue(), bus);
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.equal(result.success, false);
+	assert.ok(events.includes("sync_recovery_failed"));
 });

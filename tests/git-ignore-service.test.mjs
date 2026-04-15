@@ -17,7 +17,7 @@ async function loadModule() {
 	return jiti.import(modulePath);
 }
 
-function createProject(repoRoot) {
+function createProject() {
 	return {
 		projectId: "alpha",
 		projectName: "Alpha",
@@ -25,8 +25,6 @@ function createProject(repoRoot) {
 		gitState: "git_local",
 		slug: "alpha",
 		groupId: "default-group",
-		projectRootPath: "Projects/alpha",
-		localPath: repoRoot,
 		gitRemote: "",
 		autoSync: false,
 		lastSyncAt: "",
@@ -42,8 +40,8 @@ test("git ignore service lists untracked file and directory candidates", async (
 		await fs.writeFile(path.join(repoRoot, "cache", "tmp.txt"), "x", "utf8");
 		await fs.writeFile(path.join(repoRoot, "draft.md"), "y", "utf8");
 
-		const service = new mod.GitIgnoreService();
-		const candidates = await service.listCandidates(createProject(repoRoot));
+		const service = new mod.GitIgnoreService(() => repoRoot);
+		const candidates = await service.listCandidates(createProject());
 
 		assert.ok(candidates.some((item) => item.path === "draft.md" && item.kind === "file"));
 		assert.ok(candidates.some((item) => item.path === "cache/" && item.kind === "directory"));
@@ -58,10 +56,10 @@ test("git ignore service appends unique rules into shared gitignore", async () =
 	try {
 		execFileSync("git", ["init"], { cwd: repoRoot, stdio: "ignore" });
 		await fs.writeFile(path.join(repoRoot, ".gitignore"), "node_modules/\n", "utf8");
-		const service = new mod.GitIgnoreService();
+		const service = new mod.GitIgnoreService(() => repoRoot);
 
-		await service.applyRule(createProject(repoRoot), "cache/");
-		await service.applyRule(createProject(repoRoot), "cache/");
+		await service.applyRule(createProject(), "cache/");
+		await service.applyRule(createProject(), "cache/");
 
 		const content = await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8");
 		assert.match(content, /node_modules\//);

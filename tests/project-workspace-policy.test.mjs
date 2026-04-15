@@ -1,5 +1,6 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,7 @@ const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const modulePath = path.join(projectRoot, "src/utils/projectWorkspacePolicy.ts");
 const boundaryServiceModulePath = path.join(projectRoot, "src/services/ProjectBoundaryService.ts");
+const projectTypesPath = path.join(projectRoot, "src/types/project.ts");
 
 async function loadModule() {
 	return jiti.import(modulePath);
@@ -17,6 +19,10 @@ async function loadModule() {
 
 async function loadBoundaryServiceModule() {
 	return jiti.import(boundaryServiceModulePath);
+}
+
+function readProjectTypesSource() {
+	return fs.readFileSync(projectTypesPath, "utf8");
 }
 
 test("agent draft writes default to project workspace", async () => {
@@ -57,8 +63,6 @@ test("project boundary service resolves vault and absolute paths from boundaryPa
 				gitState: "none",
 				slug: "alpha",
 				groupId: "default-group",
-				projectRootPath: "Projects/alpha",
-				localPath: "",
 				gitRemote: "",
 				autoSync: false,
 				lastSyncAt: "",
@@ -73,4 +77,46 @@ test("project boundary service resolves vault and absolute paths from boundaryPa
 	assert.equal(service.getProjectVaultPath(project), "Projects/alpha");
 	assert.equal(service.getProjectAbsolutePath(project), path.join("C:\\Vault", "Projects", "alpha"));
 	assert.equal(service.getActiveProjectRoot(), "Projects/alpha");
+});
+
+test("project boundary service ignores legacy root fields when boundaryPath is present", async () => {
+	const mod = await loadBoundaryServiceModule();
+	const project = {
+		projectId: "alpha",
+		projectName: "Alpha",
+		boundaryPath: "Projects/alpha",
+		gitState: "none",
+		slug: "alpha",
+		groupId: "default-group",
+		projectRootPath: "Legacy/root",
+		localPath: "D:\\outside\\alpha",
+		gitRemote: "",
+		autoSync: false,
+		lastSyncAt: "",
+	};
+	const service = new mod.ProjectBoundaryService(
+		() => ({ activeProjectId: "alpha", projects: [project] }),
+		() => "C:\\Vault",
+	);
+
+	assert.equal(service.getProjectVaultPath(project), "Projects/alpha");
+	assert.equal(service.getProjectAbsolutePath(project), path.join("C:\\Vault", "Projects", "alpha"));
+});
+
+test("project entry runtime model no longer carries legacy path fields", async () => {
+	const source = readProjectTypesSource();
+	const match = source.match(/export interface ProjectEntry \{([\s\S]*?)\n\}/);
+	assert.ok(match, "ProjectEntry interface should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /\bprojectRootPath\b/);
+	assert.doesNotMatch(block, /\blocalPath\b/);
+});
+
+test("project groups use projectIds naming instead of legacy projectSlugs", async () => {
+	const source = readProjectTypesSource();
+	const match = source.match(/export interface ProjectGroupEntry \{([\s\S]*?)\n\}/);
+	assert.ok(match, "ProjectGroupEntry interface should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /\bprojectIds\b/);
+	assert.doesNotMatch(block, /\bprojectSlugs\b/);
 });

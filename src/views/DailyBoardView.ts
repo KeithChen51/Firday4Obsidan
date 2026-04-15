@@ -10,11 +10,6 @@
 } from "obsidian";
 import { ApprovalQueue, type PendingApproval } from "../features/workbench/ApprovalQueue";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
-import {
-	buildDefaultProjectRootPath,
-	type ProjectEditorDraft,
-	submitProjectDraft,
-} from "../features/workbench/ProjectEditorService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
@@ -89,9 +84,6 @@ export class DailyBoardView extends ItemView {
 	private memberEditorMembers: ProjectMember[] = [];
 	private memberEditorNewUserId = "";
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
-	private projectEditorDraft: ProjectEditorDraft | null = null;
-	private projectEditorInitialSlug = "";
-	private projectEditorError = "";
 	private expandedConflictKey = "";
 
 	private aiConversation: ChatMessage[] = [];
@@ -119,10 +111,13 @@ export class DailyBoardView extends ItemView {
 	private aiSessionRenameDraft = "";
 	private composer: MentionComposer | null = null;
 	private readonly mentionResolver = new MentionResolver();
-	private readonly gitIgnoreService = new GitIgnoreService();
+	private readonly gitIgnoreService: GitIgnoreService;
 
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: FridayPluginApi) {
 		super(leaf);
+		this.gitIgnoreService = new GitIgnoreService((project) =>
+			this.plugin.projectBoundaryService.getProjectAbsolutePath(project),
+		);
 	}
 
 	getViewType(): string {
@@ -472,11 +467,11 @@ export class DailyBoardView extends ItemView {
 
 	private renderSyncReport(
 		containerEl: HTMLElement,
-		item: { projectSlug: string; result: SyncResult; recordedAt: string },
+		item: { projectId: string; result: SyncResult; recordedAt: string },
 	): void {
 		const row = containerEl.createDiv({ cls: "friday-sync-project" });
 		row.createDiv({
-			text: `${item.projectSlug} · ${item.recordedAt}`,
+			text: `${item.projectId} · ${item.recordedAt}`,
 		});
 		row.createDiv({
 			text: item.result.success
@@ -500,11 +495,11 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async resolveConflictAction(
-		projectSlug: string,
+		projectId: string,
 		filePath: string,
 		strategy: "ours" | "theirs",
 	): Promise<void> {
-		const project = this.plugin.settings.projects.find((item) => item.slug === projectSlug);
+		const project = this.plugin.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
 		if (!project) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
@@ -513,33 +508,34 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async refreshSyncReport(project: ProjectEntry): Promise<void> {
-		const existingRecords = this.plugin.workbenchStateStore.getSyncConflicts(project.slug);
+		const existingRecords = this.plugin.workbenchStateStore.getSyncConflicts(project.projectId);
 		const conflictRecords = await this.plugin.syncService.getConflictRecords(project, existingRecords);
 		const recordedAt = new Date().toISOString();
 		this.plugin.workbenchStateStore.recordSyncReport({
-			projectSlug: project.slug,
+			projectId: project.projectId,
 			recordedAt,
 			result: {
 				success: conflictRecords.length === 0,
 				projectSlug: project.slug,
+				projectId: project.projectId,
 				pulledFiles: [],
 				pushedFiles: [],
 				conflicts: conflictRecords.map((item) => item.filePath),
 				conflictRecords,
 			},
 		});
-		this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.slug, conflictRecords);
+		this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.projectId, conflictRecords);
 		const firstConflictRecord = conflictRecords[0];
 		if (firstConflictRecord && !this.expandedConflictKey) {
-			this.expandedConflictKey = this.getSyncConflictKey(project.slug, firstConflictRecord.filePath);
+			this.expandedConflictKey = this.getSyncConflictKey(project.projectId, firstConflictRecord.filePath);
 		}
-		if (conflictRecords.length === 0 && this.expandedConflictKey.startsWith(`${project.slug}::`)) {
+		if (conflictRecords.length === 0 && this.expandedConflictKey.startsWith(`${project.projectId}::`)) {
 			this.expandedConflictKey = "";
 		}
 		this.renderBoard();
 	}
 
-	private async generateConflictProposal(projectSlug: string, filePath: string): Promise<void> {
+	private async generateConflictProposal(projectId: string, filePath: string): Promise<void> {
 		const activeAgent = this.plugin.getActiveAgent();
 		if (!activeAgent) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
@@ -547,7 +543,7 @@ export class DailyBoardView extends ItemView {
 		const resolution = this.plugin.executionEventRouter.routeToRuntime({
 			type: "sync.conflict_proposal_requested",
 			source: "project_action",
-			projectSlug,
+			projectSlug: projectId,
 			prompt: filePath,
 			currentFilePath: filePath,
 			payload: { filePath },
@@ -564,7 +560,7 @@ export class DailyBoardView extends ItemView {
 		const traceSummary = result.traces[0]?.summary ?? "manual";
 		const match = traceSummary.match(/\((ours|theirs|manual)\)/i);
 		const strategy = (match?.[1]?.toLowerCase() ?? "manual") as "ours" | "theirs" | "manual";
-		const current = this.getSyncConflictRecord(projectSlug, filePath);
+		const current = this.getSyncConflictRecord(projectId, filePath);
 		if (current) {
 			this.plugin.workbenchStateStore.replaceSyncConflict({
 				...current,
@@ -572,13 +568,13 @@ export class DailyBoardView extends ItemView {
 				recommendedStrategy: strategy,
 			});
 		}
-		this.expandedConflictKey = this.getSyncConflictKey(projectSlug, filePath);
+		this.expandedConflictKey = this.getSyncConflictKey(projectId, filePath);
 		this.activePage = "projects";
 		this.renderBoard();
 	}
 
-	private deferConflictAction(projectSlug: string, filePath: string): void {
-		const current = this.getSyncConflictRecord(projectSlug, filePath);
+	private deferConflictAction(projectId: string, filePath: string): void {
+		const current = this.getSyncConflictRecord(projectId, filePath);
 		if (!current) {
 			return;
 		}
@@ -586,7 +582,7 @@ export class DailyBoardView extends ItemView {
 			...current,
 			status: "deferred",
 		});
-		this.expandedConflictKey = this.getSyncConflictKey(projectSlug, filePath);
+		this.expandedConflictKey = this.getSyncConflictKey(projectId, filePath);
 		this.renderBoard();
 	}
 
@@ -630,7 +626,6 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private renderProjectsPage(containerEl: HTMLElement): void {
-		this.consumeProjectEditorRequest();
 		const projects = this.plugin.settings.projects;
 		const activeProject = this.getActiveProjectEntry();
 		const header = containerEl.createDiv({ cls: "friday-page-header" });
@@ -646,10 +641,6 @@ export class DailyBoardView extends ItemView {
 			this.addPageButton(actionBar, this.plugin.t("button.refresh"), async () => {
 				await this.safeRenderBoard();
 			});
-		}
-
-		if (this.projectEditorDraft) {
-			this.renderProjectEditorCard(containerEl);
 		}
 
 		if (projects.length === 0) {
@@ -700,7 +691,7 @@ export class DailyBoardView extends ItemView {
 		const metaEl = card.createDiv({ cls: "friday-project-meta" });
 		metaEl.createEl("p", {
 			text: this.t("projects.meta.localPath", "Local Path: {value}", {
-				value: project.projectRootPath || project.localPath || this.t("common.notSet", "Not set"),
+				value: project.boundaryPath || this.t("common.notSet", "Not set"),
 			}),
 		});
 		metaEl.createEl("p", {
@@ -804,9 +795,6 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async populateIgnoreCandidates(containerEl: HTMLElement, project: ProjectEntry): Promise<void> {
-		if (!project.localPath) {
-			return;
-		}
 		try {
 			const candidates = await this.gitIgnoreService.listCandidates(project);
 			if (candidates.length === 0) {
@@ -843,8 +831,8 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private renderProjectStatusPanel(containerEl: HTMLElement, project: ProjectEntry): void {
-		const syncReport = this.plugin.workbenchStateStore.getSyncReports().find((item) => item.projectSlug === project.slug) ?? null;
-		const syncConflicts = this.plugin.workbenchStateStore.getSyncConflicts(project.slug);
+		const syncReport = this.plugin.workbenchStateStore.getSyncReports().find((item) => item.projectId === project.projectId) ?? null;
+		const syncConflicts = this.plugin.workbenchStateStore.getSyncConflicts(project.projectId);
 		if (!syncReport && syncConflicts.length === 0) {
 			return;
 		}
@@ -878,19 +866,23 @@ export class DailyBoardView extends ItemView {
 				strategy: conflict.recommendedStrategy,
 			}),
 		});
+		card.createDiv({
+			cls: "friday-approval-detail",
+			text: this.t("projects.conflicts.type", "Type: {type}", { type: conflict.conflictType }),
+		});
 		const toggleActions = header.createDiv({ cls: "friday-approval-actions" });
 		this.addPageButton(
 			toggleActions,
 			this.t(
 				"projects.conflicts.toggle",
-				this.isConflictExpanded(conflict.projectSlug, conflict.filePath) ? "Hide details" : "Show details",
+				this.isConflictExpanded(conflict.projectId, conflict.filePath) ? "Hide details" : "Show details",
 			),
 			async () => {
-				this.toggleExpandedConflict(conflict.projectSlug, conflict.filePath);
+				this.toggleExpandedConflict(conflict.projectId, conflict.filePath);
 			},
 		);
 
-		if (!this.isConflictExpanded(conflict.projectSlug, conflict.filePath)) {
+		if (!this.isConflictExpanded(conflict.projectId, conflict.filePath)) {
 			return;
 		}
 
@@ -922,35 +914,35 @@ export class DailyBoardView extends ItemView {
 
 		const actions = card.createDiv({ cls: "friday-approval-actions" });
 		this.addPageButton(actions, this.t("projects.conflicts.generateProposal", "Generate proposal"), async () => {
-			await this.generateConflictProposal(conflict.projectSlug, conflict.filePath);
+			await this.generateConflictProposal(conflict.projectId, conflict.filePath);
 		});
 		this.addPageButton(actions, this.t("projects.conflicts.useOurs", "Accept local"), async () => {
-			await this.resolveConflictAction(conflict.projectSlug, conflict.filePath, "ours");
+			await this.resolveConflictAction(conflict.projectId, conflict.filePath, "ours");
 		});
 		this.addPageButton(actions, this.t("projects.conflicts.useTheirs", "Accept remote"), async () => {
-			await this.resolveConflictAction(conflict.projectSlug, conflict.filePath, "theirs");
+			await this.resolveConflictAction(conflict.projectId, conflict.filePath, "theirs");
 		});
 		this.addPageButton(actions, this.t("projects.conflicts.defer", "Not now"), async () => {
-			this.deferConflictAction(conflict.projectSlug, conflict.filePath);
+			this.deferConflictAction(conflict.projectId, conflict.filePath);
 		});
 	}
 
-	private getSyncConflictKey(projectSlug: string, filePath: string): string {
-		return `${projectSlug}::${filePath}`;
+	private getSyncConflictKey(projectId: string, filePath: string): string {
+		return `${projectId}::${filePath}`;
 	}
 
-	private getSyncConflictRecord(projectSlug: string, filePath: string): SyncConflictRecord | null {
+	private getSyncConflictRecord(projectId: string, filePath: string): SyncConflictRecord | null {
 		return this.plugin.workbenchStateStore
-			.getSyncConflicts(projectSlug)
+			.getSyncConflicts(projectId)
 			.find((item) => item.filePath === filePath) ?? null;
 	}
 
-	private isConflictExpanded(projectSlug: string, filePath: string): boolean {
-		return this.expandedConflictKey === this.getSyncConflictKey(projectSlug, filePath);
+	private isConflictExpanded(projectId: string, filePath: string): boolean {
+		return this.expandedConflictKey === this.getSyncConflictKey(projectId, filePath);
 	}
 
-	private toggleExpandedConflict(projectSlug: string, filePath: string): void {
-		const key = this.getSyncConflictKey(projectSlug, filePath);
+	private toggleExpandedConflict(projectId: string, filePath: string): void {
+		const key = this.getSyncConflictKey(projectId, filePath);
 		this.expandedConflictKey = this.expandedConflictKey === key ? "" : key;
 		this.renderBoard();
 	}
@@ -1980,7 +1972,7 @@ export class DailyBoardView extends ItemView {
 		const mentionResolution = await this.mentionResolver.resolve({
 			document: draftDocument,
 			currentFilePath,
-			activeProjectRoot: this.getActiveProjectEntry()?.projectRootPath ?? "",
+			activeProjectRoot: this.getActiveProjectEntry()?.boundaryPath ?? "",
 			readFile: async (pathValue) => {
 				const file = this.app.vault.getAbstractFileByPath(pathValue);
 				if (!(file instanceof TFile)) {
@@ -3143,156 +3135,6 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private consumeProjectEditorRequest(): void {
-		const request = this.plugin.workbenchStateStore.consumeProjectEditorRequest();
-		if (!request) {
-			return;
-		}
-		const requestedProjectId = request.projectId || request.projectSlug || "";
-		if (request.mode === "edit" && requestedProjectId) {
-			const project = this.plugin.settings.projects.find((item) => this.getProjectKey(item) === requestedProjectId) ?? null;
-			this.projectEditorDraft = this.createProjectEditorDraft(project ?? undefined);
-			this.projectEditorInitialSlug = this.getProjectKey(project);
-			this.projectEditorError = "";
-			this.activePage = "projects";
-			return;
-		}
-		this.projectEditorDraft = this.createProjectEditorDraft();
-		this.projectEditorInitialSlug = "";
-		this.projectEditorError = "";
-		this.activePage = "projects";
-	}
-
-	private createProjectEditorDraft(initial?: ProjectEntry): ProjectEditorDraft {
-		if (initial) {
-			const projectId = this.getProjectKey(initial);
-			const boundaryPath = initial.boundaryPath || initial.projectRootPath || buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), projectId);
-			return {
-				groupId: initial.groupId || "default-group",
-				mode: initial.gitRemote ? "remote_bootstrap" : initial.localPath ? "register_existing_dir" : "local_only",
-				projectId,
-				projectName: this.getProjectLabel(initial),
-				boundaryPath,
-				localPath: initial.localPath ?? "",
-				gitRemote: initial.gitRemote,
-				autoSync: initial.autoSync,
-				slug: projectId,
-				projectRootPath: boundaryPath,
-			};
-		}
-		const defaultBoundaryPath = buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), "");
-		return {
-			groupId: this.plugin.settings.projectGroups[0]?.id ?? "default-group",
-			mode: "local_only",
-			projectId: "",
-			projectName: "",
-			boundaryPath: defaultBoundaryPath,
-			localPath: "",
-			gitRemote: "",
-			autoSync: true,
-			slug: "",
-			projectRootPath: defaultBoundaryPath,
-		};
-	}
-
-	private renderProjectEditorCard(containerEl: HTMLElement): void {
-		if (!this.projectEditorDraft) {
-			return;
-		}
-		const draft = this.projectEditorDraft;
-		const card = containerEl.createDiv({ cls: "friday-ai-chat-panel" });
-		card.createEl("h4", {
-			text: this.projectEditorInitialSlug
-				? this.t("projects.editor.edit", "Edit project")
-				: this.t("projects.editor.create", "Register project"),
-		});
-		if (this.projectEditorError) {
-			card.createDiv({ cls: "friday-ai-error", text: this.projectEditorError });
-		}
-
-		const fields = card.createDiv({ cls: "friday-project-editor-grid" });
-		this.renderProjectEditorInput(fields, this.t("projects.editor.group", "Group"), draft.groupId, (value) => {
-			draft.groupId = value;
-		}, this.plugin.settings.projectGroups.map((group) => group.id));
-		this.renderProjectEditorText(fields, this.t("projects.editor.projectName", "Project name"), draft.projectName, (value) => {
-			draft.projectName = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.projectId", "Project ID"), draft.projectId, (value) => {
-			const previousDefault = buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), draft.projectId);
-			draft.projectId = value.trim().toLowerCase();
-			draft.slug = draft.projectId;
-			const nextDefault = buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), draft.projectId);
-			if (!draft.boundaryPath || draft.boundaryPath === previousDefault) {
-				draft.boundaryPath = nextDefault;
-				draft.projectRootPath = nextDefault;
-			}
-			this.renderBoard();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.root", "Project root"), draft.boundaryPath, (value) => {
-			draft.boundaryPath = value.trim();
-			draft.projectRootPath = draft.boundaryPath;
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.local", "Local path"), draft.localPath, (value) => {
-			draft.localPath = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.remote", "Git remote"), draft.gitRemote, (value) => {
-			draft.gitRemote = value.trim();
-		});
-		const toggleRow = fields.createDiv({ cls: "friday-project-editor-field" });
-		toggleRow.createEl("label", { text: this.t("projects.editor.autoSync", "Auto sync") });
-		const toggle = toggleRow.createEl("input", { attr: { type: "checkbox" } });
-		toggle.checked = draft.autoSync;
-		toggle.onchange = () => {
-			draft.autoSync = toggle.checked;
-		};
-
-		const actions = card.createDiv({ cls: "friday-approval-actions" });
-		this.addPageButton(actions, this.t("projects.editor.save", "Save project"), async () => {
-			await this.submitProjectEditor();
-		});
-		this.addPageButton(actions, this.t("projects.editor.cancel", "Cancel"), async () => {
-			this.projectEditorDraft = null;
-			this.projectEditorInitialSlug = "";
-			this.projectEditorError = "";
-			this.renderBoard();
-		});
-	}
-
-	private renderProjectEditorText(
-		containerEl: HTMLElement,
-		label: string,
-		value: string,
-		onChange: (value: string) => void,
-		type = "text",
-	): void {
-		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
-		row.createEl("label", { text: label });
-		const input = row.createEl("input", { attr: { type, value } });
-		input.oninput = () => {
-			onChange(input.value);
-		};
-	}
-
-	private renderProjectEditorInput(
-		containerEl: HTMLElement,
-		label: string,
-		value: string,
-		onChange: (value: string) => void,
-		options: string[],
-	): void {
-		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
-		row.createEl("label", { text: label });
-		const select = row.createEl("select");
-		for (const optionValue of [...new Set(options.length > 0 ? options : ["default-group"])]) {
-			const option = select.createEl("option", { text: optionValue });
-			option.value = optionValue;
-			option.selected = optionValue === value;
-		}
-		select.onchange = () => {
-			onChange(select.value);
-		};
-	}
-
 	private async ensureAiSessionLoaded(): Promise<void> {
 		const activeAgent = this.plugin.getActiveAgent();
 		if (!activeAgent) {
@@ -3337,78 +3179,27 @@ export class DailyBoardView extends ItemView {
 			.slice(0, 80);
 	}
 
-	private openProjectEditor(initial?: ProjectEntry): void {
-		this.projectEditorDraft = this.createProjectEditorDraft(initial);
-		this.projectEditorInitialSlug = initial?.slug ?? "";
-		this.projectEditorError = "";
-		this.activePage = "projects";
-		this.renderBoard();
-	}
-
-	private async submitProjectEditor(): Promise<void> {
-		if (!this.projectEditorDraft) {
-			return;
-		}
-		try {
-			const isEditing = Boolean(this.projectEditorInitialSlug);
-			const entry = await submitProjectDraft({
-				app: this.app,
-				syncService: this.plugin.syncService,
-				draft: this.projectEditorDraft,
-				initial: this.projectEditorInitialSlug
-					? this.plugin.settings.projects.find((project) => this.getProjectKey(project) === this.projectEditorInitialSlug)
-					: undefined,
-				existingProjectIds: new Set(this.plugin.settings.projects.map((project) => this.getProjectKey(project))),
-				fridayRoot: this.plugin.dataService.getFridayRoot(),
-				currentUserId: this.plugin.getPrimaryUserId(),
-			});
-			await this.plugin.upsertProject(entry);
-			await this.plugin.setActiveProject(this.getProjectKey(entry));
-			await this.ensureAiSessionLoaded();
-			this.projectEditorDraft = null;
-			this.projectEditorInitialSlug = "";
-			this.projectEditorError = "";
-			new Notice(
-				this.t(
-					isEditing
-						? "projects.notice.updated"
-						: "projects.notice.created",
-					isEditing
-						? "Project updated: {slug}"
-						: "Project created: {slug}",
-					{ slug: this.getProjectLabel(entry) },
-				),
-				3000,
-			);
-			await this.safeRenderBoard();
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error ?? "");
-			this.projectEditorError = message;
-			this.renderBoard();
-		}
-	}
-
 	private async syncSingleProject(project: ProjectEntry): Promise<void> {
 		const result = await this.plugin.syncService.sync(project);
 		const recordedAt = new Date().toISOString();
 		if (result.success) {
 			project.lastSyncAt = recordedAt;
 			await this.plugin.saveSettings();
-			new Notice(this.plugin.t("notice.syncSuccess", { slug: project.slug }), 3000);
+			new Notice(this.plugin.t("notice.syncSuccess", { slug: this.getProjectLabel(project) }), 3000);
 		} else {
-			new Notice(this.plugin.t("notice.syncFailed", { error: result.error ?? project.slug }), 6000);
+			new Notice(this.plugin.t("notice.syncFailed", { error: result.error ?? this.getProjectLabel(project) }), 6000);
 		}
 
 		this.plugin.workbenchStateStore.recordSyncReport({
-			projectSlug: project.slug,
+			projectId: project.projectId,
 			result,
 			recordedAt,
 		});
-		this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.slug, result.conflictRecords ?? []);
+		this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.projectId, result.conflictRecords ?? []);
 		const firstConflictRecord = result.conflictRecords?.[0];
 		if (firstConflictRecord) {
-			this.expandedConflictKey = this.getSyncConflictKey(project.slug, firstConflictRecord.filePath);
-		} else if (this.expandedConflictKey.startsWith(`${project.slug}::`)) {
+			this.expandedConflictKey = this.getSyncConflictKey(project.projectId, firstConflictRecord.filePath);
+		} else if (this.expandedConflictKey.startsWith(`${project.projectId}::`)) {
 			this.expandedConflictKey = "";
 		}
 		this.activePage = "projects";
@@ -3424,22 +3215,23 @@ export class DailyBoardView extends ItemView {
 
 		const results = await this.plugin.syncService.syncAll(projects);
 		for (const project of projects) {
-			const result = results.get(project.slug);
+			const result = results.get(project.projectId);
 			if (result?.success) {
 				project.lastSyncAt = new Date().toISOString();
 			}
 			if (result) {
-				this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.slug, result.conflictRecords ?? []);
+				this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.projectId, result.conflictRecords ?? []);
 			}
 		}
 		await this.plugin.saveSettings();
 		const recordedAt = new Date().toISOString();
 		this.plugin.workbenchStateStore.setSyncReports(projects
 			.map((project) => ({
-				projectSlug: project.slug,
-				result: results.get(project.slug) ?? {
+				projectId: project.projectId,
+				result: results.get(project.projectId) ?? {
 					success: false,
 					projectSlug: project.slug,
+					projectId: project.projectId,
 					pulledFiles: [],
 					pushedFiles: [],
 					conflicts: [],

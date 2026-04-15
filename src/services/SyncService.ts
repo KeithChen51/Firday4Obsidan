@@ -92,8 +92,8 @@ export class SyncService {
 
 	async syncAll(projects: ProjectEntry[]): Promise<Map<string, SyncResult>> {
 		const results = new Map<string, SyncResult>();
-		for (const project of projects.filter((item) => item.autoSync)) {
-			results.set(project.slug, await this.sync(project));
+		for (const project of projects) {
+			results.set(project.projectId, await this.sync(project));
 		}
 		return results;
 	}
@@ -127,6 +127,14 @@ export class SyncService {
 
 	async resolveConflict(project: ProjectEntry, filePath: string, strategy: "ours" | "theirs"): Promise<void> {
 		await this.operator.resolveConflict(project, filePath, strategy);
+		this.eventBus?.emit({
+			type: "sync_conflict_resolved_written_back",
+			projectId: project.projectId,
+			projectSlug: project.slug,
+			filePath,
+			strategy,
+			recordedAt: new Date().toISOString(),
+		});
 	}
 
 	async finalizeConflictResolution(project: ProjectEntry): Promise<void> {

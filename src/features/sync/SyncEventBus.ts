@@ -26,6 +26,13 @@ export type SyncRuntimeEvent =
 			recordedAt: string;
 	  }
 	| {
+			type: "sync_pull_completed";
+			projectId: string;
+			projectSlug: string;
+			pulledFiles: string[];
+			recordedAt: string;
+	  }
+	| {
 			type: "sync_status_observed";
 			projectId: string;
 			projectSlug: string;
@@ -39,6 +46,21 @@ export type SyncRuntimeEvent =
 			projectId: string;
 			projectSlug: string;
 			conflicts: string[];
+			recordedAt: string;
+	  }
+	| {
+			type: "sync_recovery_failed";
+			projectId: string;
+			projectSlug: string;
+			message: string;
+			recordedAt: string;
+	  }
+	| {
+			type: "sync_conflict_resolved_written_back";
+			projectId: string;
+			projectSlug: string;
+			filePath: string;
+			strategy: "ours" | "theirs";
 			recordedAt: string;
 	  }
 	| {

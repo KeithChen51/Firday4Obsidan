@@ -94,7 +94,7 @@ export class WikiIngestService {
 		source: RawSourceContext,
 		options: { forceRebuild?: boolean } = {},
 	): Promise<IngestSummary> {
-		const projectRoot = normalizePath(project.projectRootPath);
+		const projectRoot = normalizePath(project.boundaryPath);
 		const governance = await this.loadGovernanceContext(projectRoot);
 		const normalizedRawPaths = [...new Set(rawPaths.map((item) => normalizePath(item)))];
 		const events: IngestEvent[] = [];

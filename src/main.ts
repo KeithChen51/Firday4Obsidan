@@ -105,6 +105,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
 			);
 			this.secureStorage = new SecureStorage(this.manifest.id);
+			if (this.secureStorage.getMode() !== "secure") {
+				console.warn("[Friday] System secure credential storage unavailable. Falling back to local plugin storage.");
+				new Notice("Friday 未检测到系统安全存储，Git 凭据将仅保存在当前设备的本地插件存储中。", 8000);
+			}
 			this.syncEventBus = new SyncEventBus();
 			this.syncRuntimeStore = new SyncRuntimeStore(this.syncEventBus);
 			const migratedLegacyCredentials = await this.migrateLegacyGitCredentials();
@@ -125,7 +129,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				eventBus: this.syncEventBus,
 				hasBlockingConflicts: (project) =>
 					this.workbenchStateStore
-						.getSyncConflicts(project.slug)
+						.getSyncConflicts(project.projectId)
 						.some((item) => item.status === "pending" || item.status === "deferred"),
 				persistLastSyncAt: async (project, recordedAt) => {
 					project.lastSyncAt = recordedAt;
@@ -180,7 +184,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				}
 				if (event.type === "sync_stage_changed" || event.type === "sync_completed") {
 					this.workbenchStateStore.recordSyncStatusSnapshot({
-						projectSlug: event.projectSlug,
+						projectId: event.projectId,
 						stage: event.type === "sync_completed" ? (event.success ? "succeeded" : "failed") : event.stage,
 						message: event.type === "sync_completed" ? event.error ?? "" : event.message ?? "",
 						recordedAt: event.recordedAt,
@@ -362,11 +366,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 		this.ensureProjectGroupInSettings(normalizedProject.groupId);
 		for (const group of this.settings.projectGroups) {
-			const nextSlugs = group.projectSlugs.filter((projectId) => projectId !== normalizedProject.projectId);
+			const nextProjectIds = group.projectIds.filter((projectId) => projectId !== normalizedProject.projectId);
 			if (group.id === normalizedProject.groupId) {
-				nextSlugs.push(normalizedProject.projectId);
+				nextProjectIds.push(normalizedProject.projectId);
 			}
-			group.projectSlugs = nextSlugs;
+			group.projectIds = nextProjectIds;
 			group.updatedAt = new Date().toISOString();
 		}
 
@@ -376,24 +380,24 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		await this.saveSettings();
 	}
 
-	async removeProject(slug: string): Promise<void> {
-		this.settings.projects = this.settings.projects.filter((project) => project.projectId !== slug);
+	async removeProject(projectId: string): Promise<void> {
+		this.settings.projects = this.settings.projects.filter((project) => project.projectId !== projectId);
 		for (const group of this.settings.projectGroups) {
-			group.projectSlugs = group.projectSlugs.filter((projectSlug) => projectSlug !== slug);
+			group.projectIds = group.projectIds.filter((item) => item !== projectId);
 		}
-		if (this.settings.activeProjectId === slug) {
+		if (this.settings.activeProjectId === projectId) {
 			this.settings.activeProjectId = this.settings.projects[0]?.projectId ?? "";
 		}
 		if (this.secureStorage) {
-			await this.setProjectGitCredential(slug, null);
+			await this.setProjectGitCredential(projectId, null);
 		}
 		await this.saveSettings();
 	}
 
-	async setActiveProject(projectSlug: string): Promise<void> {
-		const target = this.settings.projects.find((item) => item.projectId === projectSlug || item.slug === projectSlug);
+	async setActiveProject(projectId: string): Promise<void> {
+		const target = this.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
 		if (!target) {
-			throw new Error(`未找到项目: ${projectSlug}`);
+			throw new Error(`未找到项目: ${projectId}`);
 		}
 		this.settings.activeProjectId = target.projectId;
 		this.syncStatusBar?.refresh();
@@ -427,8 +431,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const movedProjects = this.settings.projects.filter((item) => item.groupId === groupId);
 		for (const project of movedProjects) {
 			project.groupId = defaultGroup.id;
-			if (!defaultGroup.projectSlugs.includes(project.projectId)) {
-				defaultGroup.projectSlugs.push(project.projectId);
+			if (!defaultGroup.projectIds.includes(project.projectId)) {
+				defaultGroup.projectIds.push(project.projectId);
 			}
 		}
 		this.settings.projectGroups = this.settings.projectGroups.filter((group) => group.id !== groupId);
@@ -576,21 +580,21 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 						id: groupId,
 						name: groupId === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : groupId,
 						description: "",
-						projectSlugs: [],
+						projectIds: [],
 						createdAt: now,
 						updatedAt: now,
 					}),
 				);
 			}
 			const group = groupMap.get(groupId)!;
-			if (!group.projectSlugs.includes(project.projectId)) {
-				group.projectSlugs.push(project.projectId);
+			if (!group.projectIds.includes(project.projectId)) {
+				group.projectIds.push(project.projectId);
 			}
 		}
 
 		const validSlugs = new Set(projects.map((item) => item.projectId));
 		for (const group of groupMap.values()) {
-			group.projectSlugs = [...new Set(group.projectSlugs.filter((slug) => validSlugs.has(slug)))];
+			group.projectIds = [...new Set(group.projectIds.filter((projectId) => validSlugs.has(projectId)))];
 			group.updatedAt = now;
 		}
 
@@ -608,18 +612,26 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return projects[0]?.projectId ?? "";
 	}
 
-	private normalizeProjectEntry(project: ProjectEntry): ProjectEntry {
-		const legacyProject = project as ProjectEntry & {
+	private normalizeProjectEntry(
+		project: ProjectEntry & {
+			projectRootPath?: string;
+			localPath?: string;
 			gitUsername?: string;
 			gitUserEmail?: string;
 			gitToken?: string;
-		};
+		},
+	): ProjectEntry {
+		const legacyProject = project;
 		const {
+			projectRootPath: legacyProjectRootPath,
+			localPath: legacyLocalPath,
 			gitUsername: _legacyGitUsername,
 			gitUserEmail: _legacyGitUserEmail,
 			gitToken: _legacyGitToken,
 			...rest
 		} = legacyProject;
+		void legacyProjectRootPath;
+		void legacyLocalPath;
 		void _legacyGitUsername;
 		void _legacyGitUserEmail;
 		void _legacyGitToken;
@@ -637,15 +649,18 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			gitState: normalizedGitState,
 			slug: normalizedProjectId,
 			groupId: normalizedGroupId,
-			projectRootPath: normalizedRootPath,
-			localPath: project.localPath?.trim() || "",
 			gitRemote: normalizedRemote,
 			autoSync: normalizedRemote ? Boolean(project.autoSync) : false,
 			lastSyncAt: project.lastSyncAt ?? "",
 		};
 	}
 
-	private resolveProjectRootPath(project: ProjectEntry): string {
+	private resolveProjectRootPath(
+		project: Pick<ProjectEntry, "boundaryPath" | "projectId" | "slug"> & {
+			projectRootPath?: string;
+			localPath?: string;
+		},
+	): string {
 		const candidateRoot = project.boundaryPath?.trim() || project.projectRootPath?.trim();
 		if (candidateRoot && !candidateRoot.match(/^[a-zA-Z]:\\/)) {
 			return normalizeVaultPath(candidateRoot);
@@ -685,7 +700,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			id,
 			name: (group.name ?? "").trim() || (id === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : id),
 			description: (group.description ?? "").trim(),
-			projectSlugs: [...new Set((group.projectSlugs ?? []).map((item) => item.trim()).filter(Boolean))],
+			projectIds: [
+				...new Set(((group as ProjectGroupEntry & { projectSlugs?: string[] }).projectIds ?? (group as ProjectGroupEntry & { projectSlugs?: string[] }).projectSlugs ?? [])
+					.map((item) => item.trim())
+					.filter(Boolean)),
+			],
 			createdAt: group.createdAt || now,
 			updatedAt: now,
 		};
@@ -696,7 +715,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			id: DEFAULT_PROJECT_GROUP_ID,
 			name: "默认项目组",
 			description: "",
-			projectSlugs: [],
+			projectIds: [],
 			createdAt: now,
 			updatedAt: now,
 		};
@@ -712,7 +731,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			id: normalizedId,
 			name: normalizedId === DEFAULT_PROJECT_GROUP_ID ? "默认项目组" : normalizedId,
 			description: "",
-			projectSlugs: [],
+			projectIds: [],
 			createdAt: new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
 		});
@@ -753,7 +772,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		pulledFiles: string[],
 		headRevision: string,
 	): Promise<void> {
-		if (this.settings.activeProjectId && project.slug !== this.settings.activeProjectId) {
+		if (this.settings.activeProjectId && project.projectId !== this.settings.activeProjectId) {
 			return;
 		}
 		const projectRoot = this.projectBoundaryService.getProjectRoot(project);

@@ -38,7 +38,7 @@ export interface ProjectGroupEntry {
 	id: string;
 	name: string;
 	description: string;
-	projectSlugs: string[];
+	projectIds: string[];
 	createdAt: string;
 	updatedAt: string;
 }
@@ -50,8 +50,6 @@ export interface ProjectEntry {
 	gitState: ProjectGitState;
 	slug: string;
 	groupId: string;
-	projectRootPath: string;
-	localPath?: string;
 	gitRemote: string;
 	autoSync: boolean;
 	lastSyncAt: string;

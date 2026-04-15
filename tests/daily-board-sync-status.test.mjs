@@ -27,8 +27,10 @@ test("main wires sync event bus, runtime store, and status bar together", async 
 test("sync orchestrator emits runtime stage and completion events", async () => {
 	const source = read(orchestratorPath);
 	assert.match(source, /sync_stage_changed/);
+	assert.match(source, /sync_pull_completed/);
 	assert.match(source, /sync_completed/);
 	assert.match(source, /sync_conflict_detected/);
+	assert.match(source, /sync_recovery_failed/);
 });
 
 test("sync runtime store classifies failures and tracks per-project stage", async () => {
@@ -37,6 +39,8 @@ test("sync runtime store classifies failures and tracks per-project stage", asyn
 	assert.match(source, /getProjectState/);
 	assert.match(source, /setProjectState/);
 	assert.match(source, /offline|blocked|failed/);
+	assert.match(source, /sync_conflict_resolved_written_back/);
+	assert.match(source, /sync_recovery_failed/);
 });
 
 test("daily board view reads sync runtime store for the active project", async () => {

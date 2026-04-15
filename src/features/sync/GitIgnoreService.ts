@@ -9,6 +9,8 @@ export interface GitIgnoreCandidate {
 }
 
 export class GitIgnoreService {
+	constructor(private readonly resolveProjectAbsolutePath: (project: ProjectEntry) => string) {}
+
 	async listCandidates(project: ProjectEntry): Promise<GitIgnoreCandidate[]> {
 		const repoRoot = this.resolveProjectPath(project);
 		const git = simpleGit({ baseDir: repoRoot, maxConcurrentProcesses: 1 });
@@ -53,9 +55,9 @@ export class GitIgnoreService {
 	}
 
 	private resolveProjectPath(project: ProjectEntry): string {
-		const candidate = project.localPath?.trim() || "";
+		const candidate = this.resolveProjectAbsolutePath(project)?.trim() || "";
 		if (!candidate) {
-			throw new Error("Project local path is required for ignore management.");
+			throw new Error("Project absolute path is required for ignore management.");
 		}
 		return path.normalize(candidate);
 	}

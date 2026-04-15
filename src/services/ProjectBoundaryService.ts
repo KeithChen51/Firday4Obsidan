@@ -38,7 +38,7 @@ export class ProjectBoundaryService {
 		if (!project) {
 			return "";
 		}
-		const projectRootPath = project.boundaryPath?.trim() || project.projectRootPath?.trim();
+		const projectRootPath = project.boundaryPath?.trim();
 		if (projectRootPath && !path.isAbsolute(projectRootPath)) {
 			return normalizeVaultPath(projectRootPath);
 		}
@@ -48,10 +48,6 @@ export class ProjectBoundaryService {
 	getProjectAbsolutePath(project: ProjectEntry | null | undefined): string {
 		if (!project) {
 			return "";
-		}
-		const localPath = project.localPath?.trim();
-		if (localPath && path.isAbsolute(localPath)) {
-			return path.normalize(localPath);
 		}
 		return path.join(this.getVaultBasePath(), ...this.getProjectVaultPath(project).split("/"));
 	}
@@ -100,6 +96,6 @@ export class ProjectBoundaryService {
 	}
 
 	private getProjectKey(project: ProjectEntry): string {
-		return project.projectId || project.slug;
+		return project.projectId;
 	}
 }

@@ -23,6 +23,7 @@ import { AgentProfile } from "./agent";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { I18nParams, LocaleCode } from "../i18n/types";
+import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
 
 export interface FridayPluginApi {
 	app: App;
@@ -48,6 +49,7 @@ export interface FridayPluginApi {
 	executionOrchestrator: ExecutionOrchestrator;
 	syncEventBus: SyncEventBus;
 	syncRuntimeStore: SyncRuntimeStore;
+	projectBoundaryService: ProjectBoundaryService;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];
 	addRibbonIcon: Plugin["addRibbonIcon"];

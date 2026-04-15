@@ -81,6 +81,20 @@ export class SyncRuntimeStore {
 				});
 				return;
 			}
+			case "sync_pull_completed": {
+				const current = this.getProjectState(event.projectId);
+				this.setProjectState({
+					projectId: event.projectId,
+					projectSlug: event.projectSlug,
+					stage: current?.stage ?? "pulling",
+					message: event.pulledFiles.length > 0 ? `Pulled ${event.pulledFiles.length} file(s).` : "",
+					branch: current?.branch ?? "",
+					connected: current?.connected ?? null,
+					conflicts: current?.conflicts ?? 0,
+					recordedAt: event.recordedAt,
+				});
+				return;
+			}
 			case "sync_status_observed": {
 				const current = this.getProjectState(event.projectId);
 				const nextStage =
@@ -107,6 +121,34 @@ export class SyncRuntimeStore {
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: event.conflicts.length,
+					recordedAt: event.recordedAt,
+				});
+				return;
+			}
+			case "sync_recovery_failed": {
+				const current = this.getProjectState(event.projectId);
+				this.setProjectState({
+					projectId: event.projectId,
+					projectSlug: event.projectSlug,
+					stage: "blocked",
+					message: event.message,
+					branch: current?.branch ?? "",
+					connected: current?.connected ?? null,
+					conflicts: current?.conflicts ?? 0,
+					recordedAt: event.recordedAt,
+				});
+				return;
+			}
+			case "sync_conflict_resolved_written_back": {
+				const current = this.getProjectState(event.projectId);
+				this.setProjectState({
+					projectId: event.projectId,
+					projectSlug: event.projectSlug,
+					stage: "resolving",
+					message: `Wrote ${event.strategy} resolution for ${event.filePath}.`,
+					branch: current?.branch ?? "",
+					connected: current?.connected ?? null,
+					conflicts: current?.conflicts ?? 0,
 					recordedAt: event.recordedAt,
 				});
 				return;

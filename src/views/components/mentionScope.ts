@@ -1,4 +1,5 @@
 export interface MentionScopeProjectInput {
+	boundaryPath?: string;
 	projectRootPath?: string;
 	localPath?: string;
 }
@@ -8,6 +9,7 @@ export function resolveMentionScopePrefixes(
 	vaultPaths: string[],
 ): string[] {
 	const candidates = [
+		normalizeScopePath(project?.boundaryPath),
 		normalizeScopePath(project?.projectRootPath),
 		normalizeScopePath(extractVaultRelativeFromLocalPath(project?.localPath)),
 	].filter(Boolean);

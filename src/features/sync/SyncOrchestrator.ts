@@ -27,9 +27,17 @@ export class SyncOrchestrator {
 				this.emitStage(project, "pulling");
 				const pulled = await this.pull(project);
 				if (!pulled.success) {
+					this.emitRecoveryFailedIfNeeded(project, pulled.error);
 					this.emitCompleted(project, false, pulled.error);
 					return this.operator.makeErrorResult(project.slug, pulled.error ?? "Pull failed");
 				}
+				this.eventBus?.emit({
+					type: "sync_pull_completed",
+					projectId: project.projectId,
+					projectSlug: project.slug,
+					pulledFiles: pulled.pulledFiles,
+					recordedAt: new Date().toISOString(),
+				});
 
 				const conflictState = await this.detectConflicts(project);
 				if (conflictState.conflicts.length > 0) {
@@ -76,8 +84,8 @@ export class SyncOrchestrator {
 
 	async syncAll(projects: ProjectEntry[]): Promise<Map<string, SyncResult>> {
 		const result = new Map<string, SyncResult>();
-		for (const project of projects.filter((item) => item.autoSync)) {
-			result.set(project.slug, await this.sync(project));
+		for (const project of projects) {
+			result.set(project.projectId, await this.sync(project));
 		}
 		return result;
 	}
@@ -115,6 +123,20 @@ export class SyncOrchestrator {
 			projectSlug: project.slug,
 			success,
 			error,
+			recordedAt: new Date().toISOString(),
+		});
+	}
+
+	private emitRecoveryFailedIfNeeded(project: ProjectEntry, error?: string): void {
+		const message = String(error ?? "");
+		if (!message.toLowerCase().includes("stash pop recovery failed")) {
+			return;
+		}
+		this.eventBus?.emit({
+			type: "sync_recovery_failed",
+			projectId: project.projectId,
+			projectSlug: project.slug,
+			message,
 			recordedAt: new Date().toISOString(),
 		});
 	}

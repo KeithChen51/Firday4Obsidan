@@ -1,12 +1,15 @@
 ﻿import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import path from "path";
-import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import { App, Notice, Plugin, PluginSettingTab, Setting, TFolder } from "obsidian";
 import {
 	buildDefaultProjectRootPath,
+	buildRemoteBootstrapDefaults,
+	detectProjectGitState,
 	type ProjectEditorDraft,
 	submitProjectDraft,
 } from "../features/workbench/ProjectEditorService";
+import { GitIgnoreService, type GitIgnoreCandidate } from "../features/sync/GitIgnoreService";
 import {
 	parseOpencodeConfig,
 	selectOpencodeProvider,
@@ -73,10 +76,18 @@ export class FridaySettingTab extends PluginSettingTab {
 	private projectEditorDraft: ProjectEditorDraft | null = null;
 	private projectEditorInitialProjectId = "";
 	private projectEditorError = "";
+	private projectGitDetection: Awaited<ReturnType<typeof detectProjectGitState>> | null = null;
+	private ignoreManagerProjectId = "";
+	private ignoreManagerCandidates: GitIgnoreCandidate[] = [];
+	private ignoreManagerError = "";
+	private readonly gitIgnoreService: GitIgnoreService;
 
 	constructor(app: App, plugin: SettingsHost) {
 		super(app, plugin);
 		this.host = plugin;
+		this.gitIgnoreService = new GitIgnoreService((project) =>
+			this.host.projectBoundaryService.getProjectAbsolutePath(project),
+		);
 	}
 
 	display(): void {
@@ -1057,8 +1068,15 @@ export class FridaySettingTab extends PluginSettingTab {
 					)
 					.addButton((button) =>
 						button.setButtonText(this.t("settings.project.ignore", "忽略规则")).onClick(async () => {
-							await this.host.setActiveProject(projectKey);
-							await this.host.openWorkspaceView();
+							if (this.ignoreManagerProjectId === projectKey) {
+								this.ignoreManagerProjectId = "";
+								this.ignoreManagerCandidates = [];
+								this.ignoreManagerError = "";
+								this.display();
+								return;
+							}
+							await this.loadProjectIgnoreCandidates(project);
+							this.display();
 						}),
 					)
 					.addButton((button) =>
@@ -1067,6 +1085,9 @@ export class FridaySettingTab extends PluginSettingTab {
 							this.display();
 						}),
 					);
+				if (this.ignoreManagerProjectId === projectKey) {
+					this.renderProjectIgnoreManager(containerEl, project);
+				}
 			}
 		}
 	}
@@ -1127,7 +1148,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						id,
 						name,
 						description: "",
-						projectSlugs: [],
+						projectIds: [],
 						createdAt: now,
 						updatedAt: now,
 					});
@@ -1190,7 +1211,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				id: "default-group",
 				name: "Default Group",
 				description: "",
-				projectSlugs: [],
+				projectIds: [],
 				createdAt: now,
 				updatedAt: now,
 			});
@@ -1202,7 +1223,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					id: groupId,
 					name: groupId,
 					description: "",
-					projectSlugs: [],
+					projectIds: [],
 					createdAt: now,
 					updatedAt: now,
 				});
@@ -1576,6 +1597,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.projectEditorDraft = draft;
 		this.projectEditorInitialProjectId = initial ? this.getProjectKey(initial) : "";
 		this.projectEditorError = "";
+		await this.refreshProjectGitDetection(draft);
 		this.activeSection = "project";
 		this.display();
 	}
@@ -1585,15 +1607,14 @@ export class FridaySettingTab extends PluginSettingTab {
 			const projectId = this.getProjectKey(initial);
 			const boundaryPath =
 				initial.boundaryPath ||
-				initial.projectRootPath ||
 				buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), projectId);
 			return {
 				groupId: initial.groupId || "default-group",
-				mode: initial.gitRemote ? "remote_bootstrap" : initial.localPath ? "register_existing_dir" : "local_only",
+				mode: initial.gitState === "none" ? "local_only" : "register_existing_dir",
 				projectId,
 				projectName: this.getProjectLabel(initial),
 				boundaryPath,
-				localPath: initial.localPath ?? "",
+				localPath: "",
 				gitRemote: initial.gitRemote,
 				autoSync: initial.autoSync,
 				slug: projectId,
@@ -1633,6 +1654,20 @@ export class FridaySettingTab extends PluginSettingTab {
 		const fields = card.createDiv({ cls: "friday-project-editor-grid" });
 		this.renderProjectEditorInput(
 			fields,
+			this.t("projects.editor.mode", "Registration mode"),
+			draft.mode,
+			(value) => {
+				draft.mode = value as ProjectEditorDraft["mode"];
+				if (draft.mode === "remote_bootstrap") {
+					this.applyRemoteBootstrapDefaults(draft);
+				}
+				void this.refreshProjectGitDetection(draft);
+				this.display();
+			},
+			["local_only", "register_existing_dir", "remote_bootstrap"],
+		);
+		this.renderProjectEditorInput(
+			fields,
 			this.t("projects.editor.group", "Group"),
 			draft.groupId,
 			(value) => {
@@ -1648,22 +1683,50 @@ export class FridaySettingTab extends PluginSettingTab {
 			draft.projectId = value.trim().toLowerCase();
 			draft.slug = draft.projectId;
 			const nextDefault = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId);
-			if (!draft.boundaryPath || draft.boundaryPath === previousDefault) {
+			if (draft.mode !== "remote_bootstrap" && (!draft.boundaryPath || draft.boundaryPath === previousDefault)) {
 				draft.boundaryPath = nextDefault;
 				draft.projectRootPath = nextDefault;
 			}
+			void this.refreshProjectGitDetection(draft);
 			this.display();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.root", "Project root"), draft.boundaryPath, (value) => {
-			draft.boundaryPath = value.trim();
-			draft.projectRootPath = draft.boundaryPath;
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.local", "Local path"), draft.localPath, (value) => {
-			draft.localPath = value.trim();
 		});
 		this.renderProjectEditorText(fields, this.t("projects.editor.remote", "Git remote"), draft.gitRemote, (value) => {
 			draft.gitRemote = value.trim();
+			if (draft.mode === "remote_bootstrap") {
+				this.applyRemoteBootstrapDefaults(draft);
+			}
+			void this.refreshProjectGitDetection(draft);
+			this.display();
 		});
+		if (draft.mode === "register_existing_dir") {
+			this.renderProjectEditorInput(
+				fields,
+				this.t("projects.editor.vaultDir", "Vault directory"),
+				draft.boundaryPath,
+				(value) => {
+					draft.boundaryPath = value.trim();
+					draft.projectRootPath = draft.boundaryPath;
+					void this.refreshProjectGitDetection(draft);
+				},
+				this.listVaultDirectoryOptions(),
+			);
+		} else {
+			this.renderProjectEditorText(fields, this.t("projects.editor.root", "Project root"), draft.boundaryPath, (value) => {
+				draft.boundaryPath = value.trim();
+				draft.projectRootPath = draft.boundaryPath;
+				void this.refreshProjectGitDetection(draft);
+			});
+		}
+		if (this.projectGitDetection?.detectedParentRepository) {
+			card.createDiv({
+				cls: "friday-ai-error",
+				text: this.t(
+					"projects.editor.parentRepoDetected",
+					"当前目录位于上层 Git 仓库内，因此不会被视为独立项目仓库。仓库根：{root}",
+					{ root: this.projectGitDetection.repositoryRoot },
+				),
+			});
+		}
 		this.renderProjectEditorText(fields, this.t("projects.editor.gitUsername", "Git username"), draft.gitUsername ?? "", (value) => {
 			draft.gitUsername = value.trim();
 		});
@@ -1689,6 +1752,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.projectEditorDraft = null;
 			this.projectEditorInitialProjectId = "";
 			this.projectEditorError = "";
+			this.projectGitDetection = null;
 			this.display();
 		};
 	}
@@ -1726,6 +1790,97 @@ export class FridaySettingTab extends PluginSettingTab {
 		select.onchange = () => {
 			onChange(select.value);
 		};
+	}
+
+	private listVaultDirectoryOptions(): string[] {
+		const folders = this.app.vault
+			.getAllLoadedFiles()
+			.filter((item): item is TFolder => item instanceof TFolder)
+			.map((folder) => folder.path.trim())
+			.filter(Boolean)
+			.sort((left, right) => left.localeCompare(right, "en"));
+		return [...new Set(folders)];
+	}
+
+	private applyRemoteBootstrapDefaults(draft: ProjectEditorDraft): void {
+		if (!draft.gitRemote?.trim()) {
+			return;
+		}
+		const defaults = buildRemoteBootstrapDefaults(this.host.dataService.getFridayRoot(), draft.gitRemote);
+		if (!draft.projectId.trim()) {
+			draft.projectId = defaults.projectId;
+			draft.slug = defaults.projectId;
+		}
+		if (!draft.projectName.trim()) {
+			draft.projectName = defaults.projectName;
+		}
+		if (!draft.boundaryPath.trim() || draft.boundaryPath === buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId)) {
+			draft.boundaryPath = defaults.boundaryPath;
+			draft.projectRootPath = defaults.boundaryPath;
+		}
+	}
+
+	private async loadProjectIgnoreCandidates(project: ProjectEntry): Promise<void> {
+		this.ignoreManagerProjectId = this.getProjectKey(project);
+		try {
+			this.ignoreManagerCandidates = await this.gitIgnoreService.listCandidates(project);
+			this.ignoreManagerError = "";
+		} catch (error) {
+			this.ignoreManagerCandidates = [];
+			this.ignoreManagerError = error instanceof Error ? error.message : String(error ?? "");
+		}
+	}
+
+	private renderProjectIgnoreManager(containerEl: HTMLElement, project: ProjectEntry): void {
+		const wrap = containerEl.createDiv({ cls: "friday-card" });
+		wrap.createEl("h5", {
+			text: this.t("settings.project.ignoreTitle", "忽略候选：{project}", {
+				project: this.getProjectLabel(project),
+			}),
+		});
+		if (this.ignoreManagerError) {
+			wrap.createDiv({ cls: "friday-ai-error", text: this.ignoreManagerError });
+			return;
+		}
+		if (this.ignoreManagerCandidates.length === 0) {
+			wrap.createEl("p", {
+				text: this.t("settings.project.ignoreEmpty", "当前没有可忽略的未跟踪候选。"),
+			});
+			return;
+		}
+		for (const candidate of this.ignoreManagerCandidates) {
+			const row = wrap.createDiv({ cls: "friday-sync-conflict-row" });
+			row.createDiv({
+				text: this.t("projects.ignore.item", "{path} ({kind})", {
+					path: candidate.path,
+					kind: candidate.kind,
+				}),
+			});
+			const actions = row.createDiv({ cls: "friday-approval-actions" });
+			const button = actions.createEl("button", {
+				text: this.t("projects.ignore.apply", "Ignore"),
+			});
+			button.onclick = () => {
+				void this.applyProjectIgnoreRule(project, candidate.path);
+			};
+		}
+	}
+
+	private async applyProjectIgnoreRule(project: ProjectEntry, rulePath: string): Promise<void> {
+		await this.gitIgnoreService.applyRule(project, rulePath);
+		new Notice(this.t("projects.ignore.applied", "已写入忽略规则：{path}", { path: rulePath }), 3000);
+		await this.loadProjectIgnoreCandidates(project);
+		this.display();
+	}
+
+	private async refreshProjectGitDetection(draft: ProjectEditorDraft): Promise<void> {
+		if (draft.mode !== "register_existing_dir" || !draft.boundaryPath.trim()) {
+			this.projectGitDetection = null;
+			return;
+		}
+		const basePath = (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".";
+		const absolutePath = path.join(basePath, ...draft.boundaryPath.trim().replace(/\\/g, "/").split("/"));
+		this.projectGitDetection = await detectProjectGitState(absolutePath);
 	}
 
 	private async submitProjectEditor(): Promise<void> {

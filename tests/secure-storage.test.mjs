@@ -17,6 +17,7 @@ async function loadModule() {
 function createMemoryStorage() {
 	const values = new Map();
 	return {
+		values,
 		getItem(key) {
 			return values.has(key) ? values.get(key) : null;
 		},
@@ -42,4 +43,36 @@ test("secure storage saves, reads, and clears per-project git credentials", asyn
 
 	await storage.setProjectGitCredential("alpha", null);
 	assert.equal(await storage.getProjectGitCredential("alpha"), null);
+});
+
+test("secure storage encrypts payloads when electron safeStorage is available", async () => {
+	const mod = await loadModule();
+	const backing = createMemoryStorage();
+	const storage = new mod.SecureStorage("friday-test", backing, {
+		isEncryptionAvailable() {
+			return true;
+		},
+		encryptString(value) {
+			return Buffer.from(`enc:${value}`, "utf8");
+		},
+		decryptString(value) {
+			return value.toString("utf8").replace(/^enc:/, "");
+		},
+	});
+
+	await storage.setProjectGitCredential("alpha", { username: "alice", token: "token-1" });
+
+	const persisted = backing.values.get("friday-test:project-git-credential:alpha");
+	assert.ok(typeof persisted === "string" && persisted.includes("\"mode\":\"secure\""));
+	assert.deepEqual(await storage.getProjectGitCredential("alpha"), {
+		username: "alice",
+		token: "token-1",
+	});
+	assert.equal(storage.getMode(), "secure");
+});
+
+test("secure storage exposes plaintext-local fallback mode when secure backend is unavailable", async () => {
+	const mod = await loadModule();
+	const storage = new mod.SecureStorage("friday-test", createMemoryStorage(), null);
+	assert.equal(storage.getMode(), "plaintext_local");
 });

@@ -137,19 +137,16 @@ test("sync actions stay on sync page instead of jumping to tools page", async ()
 	const source = readViewSource();
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
-	assert.match(source, /private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
+	assert.match(source, /private async generateConflictProposal\(projectId: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 });
 
-test("empty projects page renders project editor before empty-state early return", async () => {
+test("sync page no longer renders a duplicate project editor before empty-state handling", async () => {
 	const source = readViewSource();
 	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
 	assert.ok(match, "renderProjectsPage block should exist");
 	const block = match[1] ?? "";
-	const editorIndex = block.indexOf('if (this.projectEditorDraft) {');
-	const emptyIndex = block.indexOf('if (projects.length === 0) {');
-	assert.ok(editorIndex >= 0, "project editor branch should exist");
-	assert.ok(emptyIndex >= 0, "empty-state branch should exist");
-	assert.ok(editorIndex < emptyIndex, "project editor should render before empty-state early return");
+	assert.doesNotMatch(block, /projectEditorDraft/);
+	assert.doesNotMatch(block, /renderProjectEditorCard\(/);
 });
 
 test("sync page empty-state routes users to settings instead of inline project creation", async () => {
@@ -162,6 +159,17 @@ test("sync page empty-state routes users to settings instead of inline project c
 	const emptyBlock = emptyMatch[1] ?? "";
 	assert.match(emptyBlock, /openSettingsTab\(/);
 	assert.doesNotMatch(emptyBlock, /openProjectEditor\(/);
+});
+
+test("daily board view no longer owns project editor state or handoff consumption", async () => {
+	const source = readViewSource();
+	assert.doesNotMatch(source, /private projectEditorDraft:/);
+	assert.doesNotMatch(source, /private projectEditorInitialSlug/);
+	assert.doesNotMatch(source, /private projectEditorError/);
+	assert.doesNotMatch(source, /private consumeProjectEditorRequest\(/);
+	assert.doesNotMatch(source, /private renderProjectEditorCard\(/);
+	assert.doesNotMatch(source, /private submitProjectEditor\(/);
+	assert.doesNotMatch(source, /private openProjectEditor\(/);
 });
 
 test("sync page no longer renders member editor or member actions", async () => {
@@ -216,7 +224,7 @@ test("sync page exposes ignore management through dedicated integration points",
 
 test("project conflict proposal no longer calls builtin skill shortcut directly", async () => {
 	const source = readViewSource();
-	const match = source.match(/private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
+	const match = source.match(/private async generateConflictProposal\(projectId: string, filePath: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
 	assert.ok(match, "generateConflictProposal block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /runBuiltinSkillCommand\(\{/);
@@ -229,12 +237,21 @@ test("sync page renders typed conflict records with accept-local accept-remote a
 	const source = readViewSource();
 	assert.match(source, /getSyncConflicts\(/);
 	assert.match(source, /replaceProjectSyncConflicts\(/);
+	assert.match(source, /projects\.conflicts\.type/);
 	assert.match(source, /projects\.conflicts\.useOurs/);
 	assert.match(source, /projects\.conflicts\.useTheirs/);
 	assert.match(source, /projects\.conflicts\.defer/);
 	assert.match(source, /expandedConflictKey/);
 	assert.doesNotMatch(source, /private async finalizeConflictAction/);
 	assert.doesNotMatch(source, /checks\.sync\.finalize/);
+});
+
+test("sync page and sync commands key runtime records by projectId instead of slug", async () => {
+	const source = readViewSource();
+	assert.match(source, /getSyncConflicts\(project\.projectId\)/);
+	assert.match(source, /item\.projectId === project\.projectId/);
+	assert.doesNotMatch(source, /getSyncConflicts\(project\.slug\)/);
+	assert.doesNotMatch(source, /item\.projectSlug === project\.slug/);
 });
 
 test("compile button routes through planner and orchestrator", async () => {

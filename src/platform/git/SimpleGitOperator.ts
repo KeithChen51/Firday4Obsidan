@@ -102,7 +102,11 @@ export class SimpleGitOperator implements GitOperator {
 				try {
 					await git.stash(["pop"]);
 				} catch (error) {
-					console.warn("[Friday] Stash pop produced conflict:", error);
+					return {
+						success: false,
+						pulledFiles,
+						error: `Stash pop recovery failed: ${String(error)}`,
+					};
 				}
 			}
 

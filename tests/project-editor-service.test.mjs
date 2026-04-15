@@ -33,7 +33,6 @@ test("project editor service rejects invalid project id", async () => {
 				projectId: "Bad Slug",
 				projectName: "坏项目",
 				boundaryPath: "F.R.I.D.A.Y/项目/bad",
-				localPath: "",
 				gitRemote: "",
 				autoSync: false,
 			},
@@ -52,7 +51,6 @@ test("project editor service allows Chinese project name without git credential 
 				projectId: "alpha",
 				projectName: "胖东来白板",
 				boundaryPath: "F.R.I.D.A.Y/项目/alpha",
-				localPath: "",
 				gitRemote: "https://example.com/repo.git",
 				autoSync: false,
 			},
@@ -86,7 +84,6 @@ test("project editor service returns unified project model without pre-generatin
 				projectId: "alpha-project",
 				projectName: "胖东来白板",
 				boundaryPath: "projects/alpha-project",
-				localPath: "",
 				gitRemote: "",
 				autoSync: true,
 			},
@@ -100,7 +97,8 @@ test("project editor service returns unified project model without pre-generatin
 		assert.equal(entry.boundaryPath, "projects/alpha-project");
 		assert.equal(entry.gitState, "none");
 		assert.equal(entry.slug, "alpha-project");
-		assert.equal(entry.projectRootPath, "projects/alpha-project");
+		assert.equal("projectRootPath" in entry, false);
+		assert.equal("localPath" in entry, false);
 		assert.equal(entry.autoSync, false);
 		assert.equal(syncCalls.length, 1);
 
@@ -149,4 +147,32 @@ test("project editor service detects git state for repo root, remote-bound repo,
 	} finally {
 		await fs.rm(tempRoot, { recursive: true, force: true });
 	}
+});
+
+test("project editor service rejects Vault-external absolute paths for register and bootstrap modes", async () => {
+	const mod = await loadModule();
+	for (const mode of ["register_existing_dir", "remote_bootstrap"]) {
+		assert.throws(() => {
+			mod.validateProjectDraft(
+				{
+					groupId: "default-group",
+					mode,
+					projectId: "alpha",
+					projectName: "Alpha",
+					boundaryPath: "C:\\outside\\alpha",
+					gitRemote: mode === "remote_bootstrap" ? "https://example.com/demo.git" : "",
+					autoSync: false,
+				},
+				new Set(),
+			);
+		}, /Vault-relative path/);
+	}
+});
+
+test("remote bootstrap defaults derive project identity from repository name", async () => {
+	const mod = await loadModule();
+	const defaults = mod.buildRemoteBootstrapDefaults("F.R.I.D.A.Y", "https://example.com/team/demo-repo.git");
+	assert.equal(defaults.projectId, "demo-repo");
+	assert.equal(defaults.projectName, "demo-repo");
+	assert.equal(defaults.boundaryPath, mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "demo-repo"));
 });

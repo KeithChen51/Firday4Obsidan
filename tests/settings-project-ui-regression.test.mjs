@@ -54,3 +54,22 @@ test("settings project editor reads and writes project credentials through secur
 	assert.doesNotMatch(source, /settings\.user\.gitUsername/);
 	assert.doesNotMatch(source, /settings\.user\.gitToken/);
 });
+
+test("settings project editor no longer renders a local path field and now exposes vault directory options", async () => {
+	const source = readSettingsSource();
+	assert.doesNotMatch(source, /projects\.editor\.local/);
+	assert.match(source, /listVaultDirectoryOptions\(/);
+});
+
+test("settings project editor surfaces detected parent repository hints for nested git folders", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /detectedParentRepository/);
+	assert.match(source, /repositoryRoot/);
+});
+
+test("settings project section manages ignore candidates inline instead of redirecting to workspace view", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /loadProjectIgnoreCandidates\(/);
+	assert.match(source, /renderProjectIgnoreManager\(/);
+	assert.doesNotMatch(source, /openWorkspaceView\(\)/);
+});

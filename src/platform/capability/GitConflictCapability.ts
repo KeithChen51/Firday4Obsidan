@@ -44,18 +44,14 @@ export class GitConflictCapability {
 	}
 
 	private createProjectGit(project: ProjectEntry) {
-		const baseDir = project.localPath?.trim() || this.resolveProjectAbsolutePath(project);
+		const baseDir = this.resolveProjectAbsolutePath(project);
 		return simpleGit({ baseDir, maxConcurrentProcesses: 1 }) as SimpleGit;
 	}
 
 	private resolveProjectAbsolutePath(project: ProjectEntry): string {
-		const activePath = project.localPath?.trim();
-		if (activePath) {
-			return activePath;
-		}
 		const adapter = this.vault.adapter as { getBasePath?: () => string };
 		const basePath = adapter.getBasePath?.() ?? ".";
-		return path.join(basePath, ...normalizePath(project.projectRootPath).split("/"));
+		return path.join(basePath, ...normalizePath(project.boundaryPath).split("/"));
 	}
 
 	private extractConflictPathFromPrompt(prompt: string): string {

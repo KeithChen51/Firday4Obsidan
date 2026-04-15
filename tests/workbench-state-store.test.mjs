@@ -18,7 +18,7 @@ test("workbench state store records and replaces sync reports", async () => {
 	const mod = await loadModule();
 	const store = new mod.WorkbenchStateStore();
 	store.recordSyncReport({
-		projectSlug: "alpha",
+		projectId: "alpha",
 		recordedAt: "2026-01-01T00:00:00.000Z",
 		result: {
 			success: true,
@@ -33,14 +33,11 @@ test("workbench state store records and replaces sync reports", async () => {
 	assert.equal(store.getSyncReports().length, 0);
 });
 
-test("workbench state store stores one-shot project editor request", async () => {
+test("workbench state store no longer exposes project editor request handoff state", async () => {
 	const mod = await loadModule();
 	const store = new mod.WorkbenchStateStore();
-	store.setProjectEditorRequest({ mode: "edit", projectId: "project-alpha" });
-	const request = store.consumeProjectEditorRequest();
-	assert.equal(request?.mode, "edit");
-	assert.equal(request?.projectId, "project-alpha");
-	assert.equal(store.consumeProjectEditorRequest(), null);
+	assert.equal("setProjectEditorRequest" in store, false);
+	assert.equal("consumeProjectEditorRequest" in store, false);
 });
 
 test("workbench state store keeps conflict proposals and quality report", async () => {

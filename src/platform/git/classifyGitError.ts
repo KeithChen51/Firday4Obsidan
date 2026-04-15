@@ -28,5 +28,13 @@ export function classifyGitError(error: unknown): ClassifiedGitError {
 		return { kind: "blocked", message };
 	}
 
+	if (
+		normalized.includes("stash pop recovery failed") ||
+		normalized.includes("restore failed") ||
+		normalized.includes("unmerged")
+	) {
+		return { kind: "blocked", message };
+	}
+
 	return { kind: "failed", message };
 }
