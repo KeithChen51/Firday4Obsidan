@@ -4,6 +4,7 @@ export interface ContextInputEnvelope {
 	policy?: string;
 	history?: string;
 	attachments?: string;
+	mentions?: string;
 	secondaryContext?: string;
 	hardLimit?: number;
 }

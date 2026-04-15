@@ -1,0 +1,9 @@
+{
+	"id": "friday-obsidian-plugin",
+	"name": "F.R.I.D.A.Y",
+	"version": "0.1.0",
+	"minAppVersion": "1.0.0",
+	"description": "AI-native project management assistant - Make Every Day F.R.I.D.A.Y",
+	"author": "F.R.I.D.A.Y Team",
+	"isDesktopOnly": true
+}

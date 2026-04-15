@@ -26,7 +26,7 @@ import { PolicyResolverCore } from "../core/security/policy-resolver/PolicyResol
 import { buildPolicyMatrix, PolicyMatrixRow } from "../core/security/policy-resolver/PolicyMatrix";
 import { PolicyEffect, PolicyRule } from "../core/security/policy-resolver/types";
 import { HistoryCompactor } from "../core/context/HistoryCompactor";
-import { PromptContextEngine } from "../core/context/PromptContextEngine";
+import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
 import { FileMemoryStore } from "../core/memory/FileMemoryStore";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
@@ -124,6 +124,17 @@ export interface RuntimeContextSummary {
 	hasWikiContext: boolean;
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
+	hasMentionContext: boolean;
+	mentionResolvedCount: number;
+	mentionTokenTypes: string[];
+	mentionSourceMap: Array<{
+		tokenId: string;
+		tokenType: string;
+		channel: string;
+		target: string;
+		zone?: string;
+		dynamic?: boolean;
+	}>;
 }
 
 export interface RuntimeProgressEvent {
@@ -171,6 +182,7 @@ interface RuntimeTurnInput {
 	depth?: number;
 	currentFilePath?: string;
 	extraSystemContext?: string;
+	mentionContext?: PromptMentionContext;
 	allowedTools?: string[];
 	onProgress?: (event: RuntimeProgressEvent) => void;
 }
@@ -691,6 +703,7 @@ export class AgentRuntimeService {
 		const resolveEffect = (tool: string, fallback: PolicyEffect): PolicyEffect =>
 			disabledTools.has(tool) ? "deny" : fallback;
 		return [
+			{ action: "tool:use_skill", effect: "allow", source: "global" },
 			{ action: "tool:ls", effect: resolveEffect("ls", readEffect), source: "global" },
 			{ action: "tool:read", effect: resolveEffect("read", readEffect), source: "global" },
 			{ action: "tool:grep", effect: resolveEffect("grep", readEffect), source: "global" },
@@ -833,6 +846,10 @@ export class AgentRuntimeService {
 					role: "user",
 					content: this.formatToolResultForModel(executedResult.payload),
 				});
+				const loadedSkillContext = this.extractLoadedSkillSystemContext(executedResult.payload);
+				if (loadedSkillContext) {
+					modelMessages.push({ role: "system", content: loadedSkillContext });
+				}
 				continue;
 			}
 
@@ -984,6 +1001,10 @@ export class AgentRuntimeService {
 							role: "user",
 							content: this.formatToolResultForModel(toolResult.payload),
 						});
+						const loadedSkillContext = this.extractLoadedSkillSystemContext(toolResult.payload);
+						if (loadedSkillContext) {
+							modelMessages.push({ role: "system", content: loadedSkillContext });
+						}
 						continue;
 					}
 				}
@@ -1031,6 +1052,10 @@ export class AgentRuntimeService {
 				toolCallId: response.toolCall.id,
 				name: response.toolCall.name,
 			});
+			const loadedSkillContext = this.extractLoadedSkillSystemContext(toolResult.payload);
+			if (loadedSkillContext) {
+				modelMessages.push({ role: "system", content: loadedSkillContext });
+			}
 		}
 
 		const overflowTip = "Maximum tool-iteration limit reached. Stopped further tool calls.";
@@ -1106,6 +1131,7 @@ export class AgentRuntimeService {
 			autoSkillContext,
 			wikiKnowledgeContext,
 			memoryContext,
+			mentionContext: input.mentionContext,
 			enableExecTool: settings.agentRuntime.enableExecTool,
 			hardLimit: 1600,
 		});
@@ -1309,7 +1335,7 @@ export class AgentRuntimeService {
 		const runId = this.toolGovernor.createRunId(name, step);
 		const targetPath = this.resolveToolTargetPath(name, args);
 		const scope = this.resolveScope(targetPath);
-		const shouldReportApproval = !["ls", "read", "grep", "search_text", "glob"].includes(name);
+		const shouldReportApproval = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
 		if (scope === "external" && !this.activeRuntimeProfile.capabilities.supportsExternalRead) {
 			const reason = `Runtime profile ${this.activeRuntimeProfile.id} does not allow external read operations.`;
 			const trace: RuntimeToolTrace = {
@@ -1525,6 +1551,9 @@ export class AgentRuntimeService {
 	}
 
 	private async runToolByName(name: string, args: Record<string, unknown>, agentId: string): Promise<unknown> {
+		if (name === "use_skill") {
+			return this.toolUseSkill(args);
+		}
 		const manifest = findToolManifest(name);
 		if (!manifest) {
 			throw new Error(`Unsupported tool: ${name}`);
@@ -1548,6 +1577,23 @@ export class AgentRuntimeService {
 			throw new Error(`No capability handler bound for tool: ${manifest.name}`);
 		}
 		return handler(args, agentId);
+	}
+
+	private async toolUseSkill(args: Record<string, unknown>): Promise<unknown> {
+		const command = this.getRequiredStringArg(args, "command");
+		const reason = this.getStringArg(args, "reason");
+		const skillContext = await this.skillCommandService.buildSkillSystemContext(command, {
+			invocationMode: "auto",
+			selectionReason: reason || "Model selected the skill during runtime routing.",
+		});
+		return {
+			command: skillContext.skill.command,
+			name: skillContext.skill.name,
+			description: skillContext.skill.description,
+			loaded: true,
+			summary: `Loaded skill ${skillContext.skill.command}`,
+			systemContext: skillContext.systemContext,
+		};
 	}
 
 	private async toolList(args: Record<string, unknown>): Promise<unknown> {
@@ -2171,6 +2217,7 @@ export class AgentRuntimeService {
 		}
 
 		const keysByTool: Record<string, string[]> = {
+			use_skill: ["command"],
 			ls: ["path"],
 			read: ["path"],
 			grep: ["path"],
@@ -2352,11 +2399,20 @@ export class AgentRuntimeService {
 	}
 
 	private formatToolResultForModel(payload: RuntimeToolResultPayload): string {
+		if (payload.tool === "use_skill" && payload.ok) {
+			const data = payload.data as { command?: string; summary?: string } | undefined;
+			const summary = data?.summary?.trim() || `Loaded skill ${data?.command ?? ""}`.trim();
+			return `TOOL_RESULT ${JSON.stringify({ ok: true, tool: "use_skill", data: { command: data?.command, summary } })}`;
+		}
 		const compact = this.safeStringify(payload, MAX_MODEL_RESULT_CHARS);
 		return `TOOL_RESULT ${compact}`;
 	}
 
 	private buildSummaryFromData(tool: string, data: unknown): string {
+		if (tool === "use_skill") {
+			const payload = data as { command?: string; summary?: string } | undefined;
+			return payload?.summary?.trim() || `Loaded skill ${payload?.command ?? ""}`.trim();
+		}
 		if (tool === "read") {
 			const payload = data as { path?: string; truncated?: boolean };
 			return `Read ${payload.path ?? ""}${payload.truncated ? " (truncated)" : ""}`.trim();
@@ -2416,6 +2472,14 @@ export class AgentRuntimeService {
 			return `Exec completed (${status})`;
 		}
 		return `${tool} completed`;
+	}
+
+	private extractLoadedSkillSystemContext(payload: RuntimeToolResultPayload): string {
+		if (!payload.ok || payload.tool !== "use_skill" || !payload.data || typeof payload.data !== "object") {
+			return "";
+		}
+		const systemContext = (payload.data as { systemContext?: unknown }).systemContext;
+		return typeof systemContext === "string" ? systemContext.trim() : "";
 	}
 
 	private isIntermediateAssistantText(text: string): boolean {
@@ -2596,6 +2660,19 @@ export class AgentRuntimeService {
 	private buildNativeToolDefinitions(settings: FridaySettings, allowedTools: Set<string> | null): ToolDefinition[] {
 		const disabledTools = this.buildDisabledToolSet();
 		const tools: ToolDefinition[] = [
+			{
+				name: "use_skill",
+				description: "Load the full instructions for a skill from SkillCatalog before continuing with the task.",
+				parameters: {
+					type: "object",
+					properties: {
+						command: { type: "string", description: "Skill command from SkillCatalog." },
+						reason: { type: "string", description: "Why this skill matches the current task." },
+					},
+					required: ["command"],
+					additionalProperties: false,
+				},
+			},
 			{
 				name: "ls",
 				description: "List files and folders in a path. Uses Vault-relative path by default.",

@@ -74,8 +74,9 @@ test("compile intent stays on runtime path instead of calling compile helper dir
 test("runtime no longer performs its own auto-skill selection inside buildSystemPrompt", async () => {
 	const source = readRuntimeSource();
 	assert.doesNotMatch(source, /suggestSkillsForPrompt\(/);
-	assert.doesNotMatch(source, /buildSkillSystemContext\([\s\S]*invocationMode: "auto"/);
 	assert.match(source, /extraSystemContext\?\.includes\("\[SkillInvocation\]"\)/);
+	assert.match(source, /toolUseSkill\(/);
+	assert.match(source, /invocationMode:\s*"auto"/);
 });
 
 test("invocation resolver no longer relies on compile intent hardcoding", async () => {
@@ -130,6 +131,18 @@ test("project actions stay on projects page instead of jumping to checks", async
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
 	assert.match(source, /private async generateConflictProposal\(projectSlug: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
+});
+
+test("empty projects page renders project editor before empty-state early return", async () => {
+	const source = readViewSource();
+	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
+	assert.ok(match, "renderProjectsPage block should exist");
+	const block = match[1] ?? "";
+	const editorIndex = block.indexOf('if (this.projectEditorDraft) {');
+	const emptyIndex = block.indexOf('if (projects.length === 0) {');
+	assert.ok(editorIndex >= 0, "project editor branch should exist");
+	assert.ok(emptyIndex >= 0, "empty-state branch should exist");
+	assert.ok(editorIndex < emptyIndex, "project editor should render before empty-state early return");
 });
 
 test("project conflict proposal no longer calls builtin skill shortcut directly", async () => {
@@ -217,4 +230,40 @@ test("slash dropdown is rendered in normal flow above composer", async () => {
 test("tools and skills page keeps vertical scrolling enabled", async () => {
 	const styles = readStylesSource();
 	assert.match(styles, /\.friday-page-content\s*\{[^}]*overflow-y:\s*auto;[^}]*overflow-x:\s*hidden;[^}]*\}/);
+});
+
+test("chat composer routes mentions through structured composer and resolver instead of legacy path markup", async () => {
+	const source = readViewSource();
+	assert.match(source, /new MentionComposer\(/);
+	assert.match(source, /mentionResolver\.resolve\(/);
+	assert.doesNotMatch(source, /private extractMentionedFilePaths\(/);
+	assert.doesNotMatch(source, /private stripMentionedFilePaths\(/);
+	assert.doesNotMatch(source, /private buildMentionContext\(/);
+	assert.doesNotMatch(source, /private attachCurrentFileToDraft\(/);
+});
+
+test("@ category labels are localized instead of hardcoded english", async () => {
+	const source = readViewSource();
+	assert.doesNotMatch(source, /label:\s*"Active Note"/);
+	assert.doesNotMatch(source, /label:\s*"Notes"/);
+	assert.doesNotMatch(source, /label:\s*"Folders"/);
+	assert.match(source, /ai\.mention\.option\.activeNote/);
+	assert.match(source, /ai\.mention\.option\.notes/);
+	assert.match(source, /ai\.mention\.option\.folders/);
+});
+
+test("chat composer styles include visible keyboard focus and inline mention remove affordance", async () => {
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-mention-composer-editor:focus-within\b/);
+	assert.match(styles, /\.friday-mention-item-button:focus-visible\b/);
+	assert.match(styles, /\.friday-ai-toolbar-button:focus-visible\b/);
+	assert.match(styles, /\.friday-inline-mention-token-remove\b/);
+});
+
+test("chat composer layout keeps the editable surface full-width and placeholder bounded inside it", async () => {
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-mention-composer-root\s*\{[\s\S]*width:\s*100%;/);
+	assert.match(styles, /\.friday-mention-composer-editor\s*\{[\s\S]*width:\s*100%;/);
+	assert.match(styles, /\.friday-mention-composer-editor \.ProseMirror\s*\{[\s\S]*width:\s*100%;/);
+	assert.match(styles, /\.friday-mention-composer-editor\.is-empty::before\s*\{[\s\S]*right:\s*0;/);
 });

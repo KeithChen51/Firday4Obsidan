@@ -4,6 +4,7 @@ import simpleGit, { SimpleGit } from "simple-git";
 import { App, normalizePath } from "obsidian";
 import { getPathPresets, getRootCandidates, PRIMARY_PATHS } from "../constants/paths";
 import { ProjectEntry, SyncResult, SyncStatus } from "../types/project";
+import type { FridaySettings } from "../types/settings";
 import { formatDate } from "../utils/dateUtils";
 import { getVaultBasePath } from "../utils/vaultPath";
 
@@ -17,7 +18,11 @@ export class SyncService {
 	private gitAvailable: boolean | null = null;
 	private postPullHandler: PostPullHandler | null = null;
 
-	constructor(private readonly app: App, private readonly fridayRoot = PRIMARY_PATHS.root) {}
+	constructor(
+		private readonly app: App,
+		private readonly fridayRoot = PRIMARY_PATHS.root,
+		private readonly getSettings: () => FridaySettings,
+	) {}
 
 	setPostPullHandler(handler: PostPullHandler | null): void {
 		this.postPullHandler = handler;
@@ -66,7 +71,7 @@ export class SyncService {
 					hasStash = true;
 				}
 
-				await git.raw([...this.authArgs(project), "pull", "--rebase"]);
+				await git.raw([...this.authArgs(), "pull", "--rebase"]);
 				const headAfterPull = await this.getHeadRevision(git);
 				const pulledFiles = await this.collectPulledFiles(git, headBeforePull, headAfterPull);
 
@@ -120,11 +125,11 @@ export class SyncService {
 			}
 
 			if (await this.hasTrackingBranch(git)) {
-				await git.raw([...this.authArgs(project), "push"]);
+				await git.raw([...this.authArgs(), "push"]);
 			} else {
 				const branchSummary = await git.branchLocal();
 				const branchName = branchSummary.current?.trim() || "HEAD";
-				await git.raw([...this.authArgs(project), "push", "-u", "origin", branchName]);
+				await git.raw([...this.authArgs(), "push", "-u", "origin", branchName]);
 			}
 
 			return {
@@ -356,12 +361,17 @@ export class SyncService {
 		);
 	}
 
-	private authArgs(project: ProjectEntry): string[] {
-		if (!project.gitUsername || !project.gitToken) {
+	private getGitUserSettings(): FridaySettings["user"] {
+		return this.getSettings().user;
+	}
+
+	private authArgs(): string[] {
+		const user = this.getGitUserSettings();
+		if (!user.gitUsername || !user.gitToken) {
 			return [];
 		}
 
-		const basic = Buffer.from(`${project.gitUsername}:${project.gitToken}`).toString("base64");
+		const basic = Buffer.from(`${user.gitUsername}:${user.gitToken}`).toString("base64");
 		return ["-c", `http.extraheader=Authorization: Basic ${basic}`];
 	}
 
@@ -392,13 +402,14 @@ export class SyncService {
 		const globalEmail = await this.readGitConfig(git, ["config", "--global", "--get", "user.email"]);
 
 		const owner = this.parseRemoteOwner(project.gitRemote);
-		const inferredName = project.gitUsername?.trim() || owner;
-		const inferredEmail = project.gitUserEmail?.trim() || (owner ? `${owner}@users.noreply.gitee.com` : "");
+		const user = this.getGitUserSettings();
+		const inferredName = user.gitUsername?.trim() || owner;
+		const inferredEmail = user.gitUserEmail?.trim() || (owner ? `${owner}@users.noreply.gitee.com` : "");
 
 		if (!localName && !globalName) {
 			if (!inferredName) {
 				throw new Error(
-					"Git 全局 user.name 缺失。请在项目中填写 Git 用户名，或手动执行 git config --global user.name \"Your Name\"。",
+					"Git 全局 user.name 缺失。请在设置 > 用户中填写 Git 用户名，或手动执行 git config --global user.name \"Your Name\"。",
 				);
 			}
 			// Write to local (repo-level) config to avoid affecting other repositories (#2)
@@ -408,7 +419,7 @@ export class SyncService {
 		if (!localEmail && !globalEmail) {
 			if (!inferredEmail) {
 				throw new Error(
-					"Git 全局 user.email 缺失。请在项目中填写 Git 提交邮箱，或手动执行 git config --global user.email \"you@example.com\"。",
+					"Git 全局 user.email 缺失。请在设置 > 用户中填写 Git 提交邮箱，或手动执行 git config --global user.email \"you@example.com\"。",
 				);
 			}
 			// Write to local (repo-level) config to avoid affecting other repositories (#2)
@@ -463,7 +474,7 @@ export class SyncService {
 		}
 
 		try {
-			await git.raw([...this.authArgs(project), "ls-remote", project.gitRemote]);
+			await git.raw([...this.authArgs(), "ls-remote", project.gitRemote]);
 			return true;
 		} catch {
 			return false;

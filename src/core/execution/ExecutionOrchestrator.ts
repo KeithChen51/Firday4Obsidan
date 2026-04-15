@@ -6,6 +6,7 @@ import type {
 } from "../../services/AgentRuntimeService";
 import type { SkillCommandService } from "../../services/SkillCommandService";
 import type { ExecutionDecision } from "./ExecutionDecision";
+import type { PromptMentionContext } from "../context/PromptContextEngine";
 
 export interface ExecutionOrchestratorRunOptions {
 	agentId: string;
@@ -13,6 +14,7 @@ export interface ExecutionOrchestratorRunOptions {
 	modelOverride?: string;
 	currentFilePath?: string;
 	extraSystemContext?: string;
+	mentionContext?: PromptMentionContext;
 	allowedTools?: string[];
 	onProgress?: (event: RuntimeProgressEvent) => void;
 }
@@ -27,7 +29,11 @@ export class ExecutionOrchestrator {
 		decision: ExecutionDecision,
 		options: ExecutionOrchestratorRunOptions,
 	): Promise<RuntimeTurnResult> {
-		const extraSystemContext = await this.buildSystemContext(decision, options.extraSystemContext);
+		const extraSystemContext = await this.buildSystemContext(
+			decision,
+			options.extraSystemContext,
+			options.currentFilePath,
+		);
 
 		return this.agentRuntimeService.runTurn({
 			agentId: options.agentId,
@@ -36,12 +42,17 @@ export class ExecutionOrchestrator {
 			modelOverride: options.modelOverride,
 			currentFilePath: options.currentFilePath,
 			extraSystemContext,
+			mentionContext: options.mentionContext,
 			allowedTools: decision.allowedTools?.length ? decision.allowedTools : options.allowedTools,
 			onProgress: options.onProgress,
 		});
 	}
 
-	async buildSystemContext(decision: ExecutionDecision, baseSystemContext = ""): Promise<string> {
+	async buildSystemContext(
+		decision: ExecutionDecision,
+		baseSystemContext = "",
+		currentFilePath?: string,
+	): Promise<string> {
 		let extraSystemContext = baseSystemContext.trim();
 		if (decision.mode === "runtime_with_skill_context" && decision.requestedSkillName) {
 			const skillContext = await this.skillCommandService.buildSkillSystemContext(decision.requestedSkillName, {
@@ -51,6 +62,11 @@ export class ExecutionOrchestrator {
 			extraSystemContext = extraSystemContext
 				? `${skillContext.systemContext}\n\n${extraSystemContext}`
 				: skillContext.systemContext;
+		} else {
+			const skillCatalogContext = await this.skillCommandService.buildSkillCatalogContext({ currentFilePath });
+			extraSystemContext = extraSystemContext
+				? `${skillCatalogContext}\n\n${extraSystemContext}`
+				: skillCatalogContext;
 		}
 		return extraSystemContext;
 	}

@@ -41,9 +41,6 @@ export interface ProjectEntry {
 	projectRootPath: string;
 	localPath?: string;
 	gitRemote: string;
-	gitUsername: string;
-	gitUserEmail?: string;
-	gitToken: string;
 	autoSync: boolean;
 	lastSyncAt: string;
 }

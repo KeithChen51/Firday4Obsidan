@@ -11,6 +11,17 @@ export interface SlashCommandTemplate {
 	enabled: boolean;
 }
 
+export interface LlmModeConfig {
+	apiUrl: string;
+	apiKey: string;
+	extraHeaders: Record<string, string>;
+	opencodeProviderId: string;
+	model: string;
+	temperature: number | null;
+	maxTokens: number | null;
+	enableStreaming: boolean;
+}
+
 export interface FridaySettings {
 	version: number;
 	locale: LocaleCode;
@@ -19,15 +30,22 @@ export interface FridaySettings {
 		userId: string;
 		displayName: string;
 		autoDetect: boolean;
+		gitUsername: string;
+		gitUserEmail: string;
+		gitToken: string;
 	};
 	llm: {
 		mode: "openai" | "group";
 		apiUrl: string;
 		apiKey: string;
+		extraHeaders: Record<string, string>;
+		opencodeProviderId: string;
 		model: string;
 		temperature: number | null;
 		maxTokens: number | null;
 		enableStreaming: boolean;
+		openaiConfig: LlmModeConfig;
+		groupConfig: LlmModeConfig;
 	};
 	sync: {
 		autoPush: boolean;
@@ -43,7 +61,7 @@ export interface FridaySettings {
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -53,15 +71,40 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		userId: "",
 		displayName: "",
 		autoDetect: true,
+		gitUsername: "",
+		gitUserEmail: "",
+		gitToken: "",
 	},
 	llm: {
 		mode: "openai",
 		apiUrl: "",
 		apiKey: "",
+		extraHeaders: {},
+		opencodeProviderId: "",
 		model: "",
 		temperature: null,
 		maxTokens: null,
 		enableStreaming: true,
+		openaiConfig: {
+			apiUrl: "",
+			apiKey: "",
+			extraHeaders: {},
+			opencodeProviderId: "",
+			model: "",
+			temperature: null,
+			maxTokens: null,
+			enableStreaming: true,
+		},
+		groupConfig: {
+			apiUrl: "",
+			apiKey: "",
+			extraHeaders: {},
+			opencodeProviderId: "",
+			model: "",
+			temperature: null,
+			maxTokens: null,
+			enableStreaming: true,
+		},
 	},
 	sync: {
 		autoPush: false,

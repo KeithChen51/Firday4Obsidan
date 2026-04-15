@@ -31,5 +31,7 @@ test("tool governor detects native fallback candidates", async () => {
 	const mod = await loadGovernor();
 	const governor = new mod.ToolGovernor();
 	assert.equal(governor.shouldFallbackToPrompt("400 unsupported tool schema"), true);
+	assert.equal(governor.shouldFallbackToPrompt("504 Gateway Timeout"), true);
+	assert.equal(governor.shouldFallbackToPrompt("ERR_CONNECTION_RESET"), true);
 	assert.equal(governor.shouldFallbackToPrompt("normal runtime error"), false);
 });

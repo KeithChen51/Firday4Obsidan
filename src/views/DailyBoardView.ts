@@ -3,6 +3,7 @@
 	MarkdownRenderer,
 	Notice,
 	TFile,
+	TFolder,
 	ToggleComponent,
 	setIcon,
 	WorkspaceLeaf,
@@ -30,7 +31,21 @@ import type { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { SkillRegistry } from "../core/execution/SkillRegistry";
-import { MentionDropdown, type MentionSuggestion } from "./components/MentionDropdown";
+import type { MentionSuggestion } from "./components/MentionDropdown";
+import {
+	MentionResolver,
+	parseLegacyMentionMarkup,
+	type MentionDocumentSnapshot,
+	type MentionResolutionResult,
+	type MentionToken,
+	type MentionTokenType,
+} from "../core/context/mention/MentionResolver";
+import {
+	createEmptyMentionComposerSnapshot,
+	type MentionComposerSnapshot,
+} from "../core/editor/mention/MentionComposerDocument";
+import { MentionComposer, type MentionComposerQuery } from "./components/MentionComposer";
+import { isPathWithinMentionScope, resolveMentionScopePrefixes } from "./components/mentionScope";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
@@ -81,6 +96,7 @@ export class DailyBoardView extends ItemView {
 	private aiSessionId = "";
 	private aiSessionNavCollapsed = true;
 	private aiDraft = "";
+	private aiComposerSnapshot: MentionComposerSnapshot = createEmptyMentionComposerSnapshot();
 	private aiBusy = false;
 	private aiLastError = "";
 	private aiStreamingPreview = "";
@@ -98,6 +114,8 @@ export class DailyBoardView extends ItemView {
 	private aiSessionSelection = new Set<string>();
 	private aiSessionRenameId = "";
 	private aiSessionRenameDraft = "";
+	private composer: MentionComposer | null = null;
+	private readonly mentionResolver = new MentionResolver();
 
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: FridayPluginApi) {
 		super(leaf);
@@ -140,6 +158,8 @@ export class DailyBoardView extends ItemView {
 			window.clearTimeout(this.refreshTimer);
 			this.refreshTimer = null;
 		}
+		this.composer?.destroy();
+		this.composer = null;
 		this.approvalQueue.clearWithDecision("deny");
 		this.plugin.toolApprovalService.clearPromptHandler();
 		this.aiSendAbortController?.abort();
@@ -171,6 +191,8 @@ export class DailyBoardView extends ItemView {
 
 	private renderBoard(): void {
 		this.captureAiMessageListScrollState();
+		this.composer?.destroy();
+		this.composer = null;
 		this.contentEl.empty();
 
 		const shell = this.contentEl.createDiv({ cls: "friday-shell" });
@@ -650,6 +672,10 @@ export class DailyBoardView extends ItemView {
 			});
 		}
 
+		if (this.projectEditorDraft) {
+			this.renderProjectEditorCard(containerEl);
+		}
+
 		if (projects.length === 0) {
 			const emptyEl = containerEl.createDiv({ cls: "friday-empty-state" });
 			emptyEl.createEl("h4", { text: this.t("projects.empty.title", "No projects yet") });
@@ -660,10 +686,6 @@ export class DailyBoardView extends ItemView {
 				this.openProjectEditor();
 			});
 			return;
-		}
-
-		if (this.projectEditorDraft) {
-			this.renderProjectEditorCard(containerEl);
 		}
 
 		if (this.pendingProjectRemoval) {
@@ -806,7 +828,6 @@ export class DailyBoardView extends ItemView {
 		const activeAgent = this.plugin.getActiveAgent();
 		const effectiveModel = this.resolveEffectiveModel(activeAgent);
 		const modelCapability = this.plugin.aiService.getModelCapability(effectiveModel || undefined);
-		const mentionPaths = this.extractMentionedFilePaths(this.aiDraft);
 		const currentSession = this.aiSessions.find((session) => session.sessionId === this.aiSessionId) ?? null;
 		const panelEl = containerEl.createDiv({ cls: "friday-ai-workbench" });
 		const metaEl = panelEl.createDiv({ cls: "friday-ai-focus-meta" });
@@ -898,62 +919,24 @@ export class DailyBoardView extends ItemView {
 		this.renderAiOverrideBar(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
-		if (mentionPaths.length > 0) {
-			const mentionBar = composerWrap.createDiv({ cls: "friday-ai-mention-pill-bar" });
-			for (const pathValue of mentionPaths) {
-				const pill = mentionBar.createDiv({ cls: "friday-ai-mention-pill" });
-				pill.createSpan({ text: pathValue.split("/").pop() ?? pathValue });
-				const remove = pill.createEl("button", { cls: "friday-ai-mention-pill-remove" });
-				remove.type = "button";
-				remove.setAttribute("aria-label", this.t("ai.mention.remove", "移除引用"));
-				remove.setText("×");
-				remove.onclick = () => {
-					this.aiDraft = this.removeMentionedFilePath(this.aiDraft, pathValue);
-					this.renderBoard();
-				};
-			}
-		}
-
 		const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });
-		const composerDropdown = new MentionDropdown(composerWrap);
-		const inputEl = composerEl.createEl("textarea", {
-			cls: "friday-ai-input",
-		});
-		inputEl.placeholder = this.t(
-			"ai.input.placeholder.rich",
-			"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
-		);
-		inputEl.value = this.aiDraft;
-		inputEl.disabled = this.aiBusy;
-		this.syncComposerHeight(inputEl);
-		composerDropdown.onSelect((item) => {
-			this.applyComposerSuggestion(inputEl, composerDropdown, item);
-		});
-		inputEl.oninput = () => {
-			this.aiDraft = inputEl.value;
-			this.syncComposerHeight(inputEl);
-			void this.updateComposerSuggestions(inputEl, composerDropdown);
-		};
-		inputEl.onfocus = () => {
-			void this.updateComposerSuggestions(inputEl, composerDropdown);
-		};
-		inputEl.onmouseup = () => {
-			void this.updateComposerSuggestions(inputEl, composerDropdown);
-		};
-		inputEl.onkeydown = (event) => {
-			if (composerDropdown.handleKeydown(event)) {
-				return;
-			}
-			if (event.key === "Enter" && !event.shiftKey) {
-				event.preventDefault();
+		this.composer = new MentionComposer({
+			parent: composerEl,
+			placeholder: this.t(
+				"ai.input.placeholder.rich",
+				"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
+			),
+			initialSnapshot: this.getComposerSnapshot(),
+			disabled: this.aiBusy,
+			onChange: (snapshot) => {
+				this.aiComposerSnapshot = snapshot;
+				this.aiDraft = snapshot.text;
+			},
+			onSubmit: () => {
 				void this.submitAiPrompt();
-			}
-		};
-		inputEl.onblur = () => {
-			window.setTimeout(() => {
-				composerDropdown.hide();
-			}, 120);
-		};
+			},
+			getSuggestions: async (query) => this.buildComposerSuggestions(query),
+		});
 
 		const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });
 		const modelSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
@@ -996,22 +979,23 @@ export class DailyBoardView extends ItemView {
 			event.preventDefault();
 		};
 		skillButton.onclick = () => {
-			void this.openSkillPicker(inputEl, composerDropdown);
+			this.composer?.insertText("/");
+			this.composer?.focus();
 		};
 
 		const attachButton = toolbarEl.createEl("button", {
-			cls: "friday-ai-toolbar-button friday-ai-toolbar-icon",
+			cls: "friday-ai-toolbar-button",
+			text: this.t("ai.attach.contextButton", "@ Add context"),
 		});
 		attachButton.type = "button";
-		attachButton.setAttribute("aria-label", this.t("ai.attach.currentFile", "引用当前文件"));
-		attachButton.title = this.t("ai.attach.currentFile", "引用当前文件");
-		setIcon(attachButton, "paperclip");
+		attachButton.setAttribute("aria-label", this.t("ai.attach.contextButton", "@ Add context"));
+		attachButton.title = this.t("ai.attach.contextButton", "@ Add context");
 		attachButton.disabled = this.aiBusy;
 		attachButton.onmousedown = (event) => {
 			event.preventDefault();
 		};
 		attachButton.onclick = () => {
-			this.attachCurrentFileToDraft();
+			this.composer?.openAtPicker();
 		};
 
 		const sendButton = toolbarEl.createEl("button", {
@@ -1459,6 +1443,7 @@ export class DailyBoardView extends ItemView {
 	private startNewAiSession(): void {
 		this.aiConversation = [];
 		this.aiDraft = "";
+		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
@@ -1493,6 +1478,8 @@ export class DailyBoardView extends ItemView {
 		}
 		this.aiSessionId = target.sessionId;
 		this.aiConversation = [...target.messages];
+		this.aiDraft = "";
+		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
@@ -1616,7 +1603,7 @@ export class DailyBoardView extends ItemView {
 		const firstUserMessage = session.messages.find(
 			(message) => message.role === "user" && message.content.trim().length > 0,
 		);
-		const raw = this.stripMentionedFilePaths(firstUserMessage?.content ?? "").replace(/\s+/g, " ").trim()
+		const raw = parseLegacyMentionMarkup(firstUserMessage?.content ?? "").text
 			|| this.t("ai.sessions.untitled", "未命名对话");
 		return this.truncateText(raw, 72);
 	}
@@ -1837,8 +1824,9 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async submitAiPrompt(): Promise<void> {
-		const rawPrompt = this.aiDraft.trim();
-		if (!rawPrompt || this.aiBusy) {
+		const draftDocument = this.getStructuredPromptDocument();
+		const rawPrompt = draftDocument.text.trim();
+		if ((!rawPrompt && draftDocument.tokens.length === 0) || this.aiBusy) {
 			return;
 		}
 
@@ -1856,9 +1844,40 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 
+		const currentFilePath = this.app.workspace.getActiveFile()?.path ?? "";
+		const mentionResolution = await this.mentionResolver.resolve({
+			document: draftDocument,
+			currentFilePath,
+			activeProjectRoot: this.getActiveProjectEntry()?.projectRootPath ?? "",
+			readFile: async (pathValue) => {
+				const file = this.app.vault.getAbstractFileByPath(pathValue);
+				if (!(file instanceof TFile)) {
+					return null;
+				}
+				return this.app.vault.cachedRead(file);
+			},
+			listFolderEntries: async (pathValue) => {
+				const folder = this.app.vault.getAbstractFileByPath(pathValue);
+				if (!(folder instanceof TFolder)) {
+					return [];
+				}
+				return folder.children
+					.filter((child): child is TFile => child instanceof TFile)
+					.map((child) => child.path);
+			},
+		});
+		if (mentionResolution.errors.length > 0) {
+			this.aiLastError = mentionResolution.errors.map((item) => item.message).join(" ");
+			this.renderBoard();
+			return;
+		}
+		const promptMentionContext = this.buildPromptMentionContext(mentionResolution);
+		const userFacingPrompt = rawPrompt || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
+
 		const history = [...this.aiConversation];
-		this.aiConversation.push({ role: "user", content: rawPrompt });
+		this.aiConversation.push({ role: "user", content: userFacingPrompt });
 		this.aiDraft = "";
+		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
@@ -1869,14 +1888,12 @@ export class DailyBoardView extends ItemView {
 
 		try {
 			let modelOverride = this.aiSessionModelOverride.trim() || activeAgent.model?.trim() || undefined;
-			const currentFilePath = this.app.workspace.getActiveFile()?.path;
-			let runtimePrompt = this.stripMentionedFilePaths(rawPrompt);
+			let runtimePrompt = rawPrompt;
 			let extraSystemContext = "";
 			let allowedTools: string[] | undefined;
 			let allowedModels: string[] | undefined;
 			let assistantText = "";
 			let shouldStreamFinalText = false;
-			const mentionContext = await this.buildMentionContext(rawPrompt);
 			const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
 			if (resolution.type === "invalid") {
 				throw new Error(resolution.error);
@@ -1890,14 +1907,13 @@ export class DailyBoardView extends ItemView {
 				runtimePrompt = decision.runtimePrompt;
 				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
-				const mergedExtraContext = mentionContext ? mentionContext : undefined;
 				if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
 					const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeAgent.id,
 						conversation: history,
 						modelOverride,
 						currentFilePath,
-						extraSystemContext: mergedExtraContext,
+						mentionContext: promptMentionContext,
 						allowedTools,
 						onProgress: (event) => {
 							this.handleRuntimeProgress(event);
@@ -1908,8 +1924,12 @@ export class DailyBoardView extends ItemView {
 				} else if (!assistantText) {
 					extraSystemContext = await this.plugin.executionOrchestrator.buildSystemContext(
 						decision,
-						mergedExtraContext ?? "",
+						"",
 					);
+					const mentionSystemContext = this.renderMentionSystemContext(promptMentionContext);
+					extraSystemContext = mentionSystemContext
+						? `${extraSystemContext}\n\n${mentionSystemContext}`.trim()
+						: extraSystemContext;
 				}
 			}
 
@@ -1917,7 +1937,6 @@ export class DailyBoardView extends ItemView {
 				throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
 			}
 
-			runtimePrompt = this.stripMentionedFilePaths(runtimePrompt);
 			runtimePrompt = runtimePrompt.trim() || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
 
 			const previousPermissionMode = this.plugin.settings.agentRuntime.toolPermissionMode;
@@ -2280,101 +2299,178 @@ export class DailyBoardView extends ItemView {
 		return lines.join("\n");
 	}
 
-	private async updateComposerSuggestions(
-		inputEl: HTMLTextAreaElement,
-		dropdown: MentionDropdown,
-	): Promise<void> {
-		const value = inputEl.value;
-		const cursor = inputEl.selectionStart ?? value.length;
-		const token = this.getComposerToken(value, cursor);
-		if (!token) {
-			dropdown.hide();
-			return;
+	private getComposerSnapshot(): MentionComposerSnapshot {
+		if (this.aiComposerSnapshot.doc || this.aiComposerSnapshot.text || this.aiComposerSnapshot.tokens.length > 0) {
+			return this.aiComposerSnapshot;
 		}
-		if (token.startsWith("/")) {
+		const legacy = parseLegacyMentionMarkup(this.aiDraft);
+		return {
+			doc: null,
+			text: legacy.text,
+			tokens: legacy.tokens,
+		};
+	}
+
+	private getStructuredPromptDocument(): MentionDocumentSnapshot {
+		const snapshot = this.getComposerSnapshot();
+		if (snapshot.tokens.length > 0 || snapshot.doc) {
+			return {
+				text: snapshot.text,
+				tokens: snapshot.tokens,
+			};
+		}
+		return parseLegacyMentionMarkup(this.aiDraft);
+	}
+
+	private buildPromptMentionContext(mentionResolution: MentionResolutionResult) {
+		if (mentionResolution.entries.length === 0) {
+			return undefined;
+		}
+		return {
+			...mentionResolution.summary,
+			entries: mentionResolution.entries,
+		};
+	}
+
+	private renderMentionSystemContext(
+		mentionContext: ReturnType<DailyBoardView["buildPromptMentionContext"]>,
+	): string {
+		if (!mentionContext || mentionContext.entries.length === 0) {
+			return "";
+		}
+		const lines: string[] = [this.t("ai.mention.contextLead", "以下是用户 @ 提及内容，请优先参考：")];
+		for (const entry of mentionContext.entries) {
+			lines.push(`[${entry.channel}] ${entry.title}`);
+			lines.push(entry.body);
+			lines.push("");
+		}
+		return lines.join("\n").trim();
+	}
+
+	private async buildComposerSuggestions(query: MentionComposerQuery): Promise<MentionSuggestion[]> {
+		if (query.trigger === "/") {
 			const skills = await this.plugin.skillCommandService.listSkills(20);
 			const slashCommands = this.plugin.settings.slashCommands
 				.filter((item) => item.enabled)
 				.map((item) => ({ name: item.name, template: item.template }));
-			const suggestions = buildSlashSuggestions(token, {
+			return buildSlashSuggestions(`/${query.query}`, {
 				skills: skills.map((item) => ({ command: item.command, description: item.description })),
 				slashCommands,
-			});
-			dropdown.show(
-				suggestions.map((item) => ({
-					value: this.replaceComposerToken(value, cursor, token, item.value),
-					label: item.label,
-					description: item.description,
-				})),
-			);
-			return;
+			}).map((item) => ({
+				label: item.label,
+				description: item.description,
+				kind: "slash" as const,
+				trigger: "/" as const,
+				replacementText: item.value,
+			}));
 		}
-		if (token.startsWith("@")) {
-			dropdown.show(this.buildMentionSuggestions(value, cursor, token));
-			return;
-		}
-		dropdown.hide();
+		return this.buildMentionSuggestionItems(query);
 	}
 
-	private applyComposerSuggestion(
-		inputEl: HTMLTextAreaElement,
-		dropdown: MentionDropdown,
-		item: MentionSuggestion,
-	): void {
-		inputEl.value = item.value;
-		this.aiDraft = item.value;
-		this.syncComposerHeight(inputEl);
-		dropdown.hide();
-		inputEl.focus();
-		inputEl.selectionStart = inputEl.value.length;
-		inputEl.selectionEnd = inputEl.value.length;
-	}
-
-	private async openSkillPicker(
-		inputEl: HTMLTextAreaElement,
-		dropdown: MentionDropdown,
-	): Promise<void> {
-		const skills = await this.plugin.skillCommandService.listSkills(30);
-		if (skills.length === 0) {
-			new Notice(this.t("ai.skill.empty", "当前没有可用 Skill。"), 3000);
-			return;
+	private buildMentionSuggestionItems(query: MentionComposerQuery): MentionSuggestion[] {
+		const normalizedQuery = query.query.trim().toLowerCase();
+		if (query.mode === "category" && !normalizedQuery) {
+			return [
+				this.buildActiveNoteSuggestion(),
+				{
+					label: this.t("ai.mention.option.notes", "笔记"),
+					description: this.t("ai.mention.category.notes", "Reference notes in the current project"),
+					kind: "mention_category",
+					trigger: "@",
+					category: "note",
+				},
+				{
+					label: this.t("ai.mention.option.folders", "文件夹"),
+					description: this.t("ai.mention.category.folders", "Reference folder structure in the current project"),
+					kind: "mention_category",
+					trigger: "@",
+					category: "folder",
+				},
+			];
 		}
-		const value = inputEl.value;
-		const insertBase = value.trim().length > 0 ? `${value.trimEnd()} ` : "";
-		dropdown.show(
-			skills.map((skill) => ({
-				value: `${insertBase}/${skill.command} `,
-				label: `/${skill.command}`,
-				description: skill.description,
-			})),
-		);
-		inputEl.focus();
-	}
+		if (query.mode === "search" && query.category === "folders") {
+			return this.getMentionableFolders(normalizedQuery).map((folder) => ({
+				label: folder.name,
+				description: folder.path,
+				kind: "mention_token" as const,
+				trigger: "@" as const,
+				category: "folder" as const,
+				token: this.createMentionToken("folder", folder.path),
+			}));
+		}
+		if (query.mode === "search" && query.category === "notes") {
+			return this.getMentionableFiles(normalizedQuery).map((file) => ({
+				label: file.basename,
+				description: file.path,
+				kind: "mention_token" as const,
+				trigger: "@" as const,
+				category: "note" as const,
+				token: this.createMentionToken("note", file.path),
+			}));
+		}
 
-	private buildMentionSuggestions(
-		value: string,
-		cursor: number,
-		token: string,
-	): MentionSuggestion[] {
-		const query = token.replace(/^@\[/, "").replace(/^@/, "").replace(/\]$/, "").toLowerCase();
-		return this.getMentionableFiles(query).map((file) => ({
-			value: this.replaceComposerToken(value, cursor, token, `@[${file.path}] `),
+		const items: MentionSuggestion[] = [];
+		const activeFile = this.app.workspace.getActiveFile();
+		if (
+			activeFile instanceof TFile
+			&& (!normalizedQuery
+				|| "active note".includes(normalizedQuery)
+				|| activeFile.basename.toLowerCase().includes(normalizedQuery))
+		) {
+			items.push(this.buildActiveNoteSuggestion());
+		}
+		items.push(...this.getMentionableFiles(normalizedQuery).map((file) => ({
 			label: file.basename,
 			description: file.path,
-		}));
+			kind: "mention_token" as const,
+			trigger: "@" as const,
+			category: "note" as const,
+			token: this.createMentionToken("note", file.path),
+		})));
+		items.push(...this.getMentionableFolders(normalizedQuery).map((folder) => ({
+			label: folder.name,
+			description: folder.path,
+			kind: "mention_token" as const,
+			trigger: "@" as const,
+			category: "folder" as const,
+			token: this.createMentionToken("folder", folder.path),
+		})));
+		return items.slice(0, 16);
+	}
+
+	private buildActiveNoteSuggestion(): MentionSuggestion {
+		return {
+			label: this.t("ai.mention.option.activeNote", "当前笔记"),
+			description: this.t("ai.mention.category.activeNote", "Use the active note at send time"),
+			kind: "mention_token",
+			trigger: "@",
+			category: "active_note",
+			token: this.createMentionToken("active_note"),
+		};
+	}
+
+	private createMentionToken(type: MentionTokenType, pathValue = ""): MentionToken {
+		const normalizedPath = pathValue.trim();
+		const key = normalizedPath || "active";
+		return {
+			id: `mention:${type}:${key}`,
+			type,
+			...(normalizedPath ? { path: normalizedPath } : {}),
+		};
 	}
 
 	private getMentionableFiles(query: string): TFile[] {
 		const activeProject = this.getActiveProjectEntry();
-		const projectRoot = activeProject?.projectRootPath?.replace(/[\\/]+$/, "") ?? "";
 		const currentPath = this.app.workspace.getActiveFile()?.path ?? "";
 		const normalizedQuery = query.trim().toLowerCase();
+		const files = this.app.vault.getMarkdownFiles();
+		const scopePrefixes = resolveMentionScopePrefixes(
+			activeProject ?? undefined,
+			files.map((file) => file.path),
+		);
 		return this.app.vault.getMarkdownFiles()
 			.filter((file) => {
-				if (!projectRoot) {
-					return true;
-				}
-				return file.path === projectRoot || file.path.startsWith(`${projectRoot}/`);
+				return isPathWithinMentionScope(file.path, scopePrefixes);
 			})
 			.filter((file) => {
 				if (!normalizedQuery) {
@@ -2395,24 +2491,27 @@ export class DailyBoardView extends ItemView {
 			.slice(0, 12);
 	}
 
-	private getComposerToken(value: string, cursor: number): string {
-		const prefix = value.slice(0, cursor);
-		const line = prefix.split("\n").pop() ?? "";
-		const token = line.split(/\s/).pop() ?? "";
-		if (!token) {
-			return "";
-		}
-		return token.startsWith("/") || token.startsWith("@") ? token : "";
-	}
-
-	private replaceComposerToken(
-		value: string,
-		cursor: number,
-		token: string,
-		replacement: string,
-	): string {
-		const start = Math.max(0, cursor - token.length);
-		return `${value.slice(0, start)}${replacement}${value.slice(cursor)}`;
+	private getMentionableFolders(query: string): TFolder[] {
+		const activeProject = this.getActiveProjectEntry();
+		const normalizedQuery = query.trim().toLowerCase();
+		const allEntries = this.app.vault.getAllLoadedFiles();
+		const scopePrefixes = resolveMentionScopePrefixes(
+			activeProject ?? undefined,
+			allEntries.map((entry) => entry.path),
+		);
+		return allEntries
+			.filter((entry): entry is TFolder => entry instanceof TFolder)
+			.filter((folder) => {
+				return isPathWithinMentionScope(folder.path, scopePrefixes);
+			})
+			.filter((folder) => {
+				if (!normalizedQuery) {
+					return true;
+				}
+				return folder.path.toLowerCase().includes(normalizedQuery) || folder.name.toLowerCase().includes(normalizedQuery);
+			})
+			.sort((left, right) => left.path.localeCompare(right.path))
+			.slice(0, 12);
 	}
 
 	private resolveEffectiveModel(activeAgent: { model: string } | null): string {
@@ -2500,71 +2599,6 @@ export class DailyBoardView extends ItemView {
 			this.plugin.toolApprovalService.clearSessionRules();
 			this.renderBoard();
 		};
-	}
-
-	private extractMentionedFilePaths(text: string): string[] {
-		const paths = new Set<string>();
-		const pattern = /@\[(.+?)\]/g;
-		let match = pattern.exec(text);
-		while (match) {
-			const raw = match[1]?.trim();
-			if (raw) {
-				paths.add(raw);
-			}
-			match = pattern.exec(text);
-		}
-		return [...paths];
-	}
-
-	private stripMentionedFilePaths(text: string): string {
-		return text.replace(/@\[[^\]]+\]/g, " ").replace(/\s{2,}/g, " ").trim();
-	}
-
-	private removeMentionedFilePath(text: string, pathValue: string): string {
-		const escaped = pathValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		return text.replace(new RegExp(`\\s*@\\[${escaped}\\]`, "g"), " ").replace(/\s{2,}/g, " ").trim();
-	}
-
-	private async buildMentionContext(text: string): Promise<string> {
-		const mentionedPaths = this.extractMentionedFilePaths(text);
-		if (mentionedPaths.length === 0) {
-			return "";
-		}
-		const blocks: string[] = [this.t("ai.mention.contextLead", "以下是用户 @ 提及文件的内容摘要，请优先参考：")];
-		for (const pathValue of mentionedPaths.slice(0, 4)) {
-			const file = this.app.vault.getAbstractFileByPath(pathValue);
-			if (!(file instanceof TFile)) {
-				continue;
-			}
-			const content = await this.app.vault.cachedRead(file);
-			const clipped = content.length > 1800
-				? `${content.slice(0, 1800)}\n${this.t("ai.mention.truncated", "...（已截断）")}`
-				: content;
-			blocks.push(`\n## ${pathValue}\n${clipped}`);
-		}
-		return blocks.length > 1 ? blocks.join("\n") : "";
-	}
-
-	private attachCurrentFileToDraft(): void {
-		const activeFile = this.app.workspace.getActiveFile();
-		if (!(activeFile instanceof TFile)) {
-			new Notice(this.t("ai.attach.noFile", "当前没有可引用的文件。"), 3000);
-			return;
-		}
-		const token = `@[${activeFile.path}]`;
-		if (this.aiDraft.includes(token)) {
-			return;
-		}
-		this.aiDraft = this.aiDraft.trim().length > 0
-			? `${this.aiDraft.trim()} ${token} `
-			: `${token} `;
-		this.renderBoard();
-	}
-
-	private syncComposerHeight(inputEl: HTMLTextAreaElement): void {
-		inputEl.style.height = "auto";
-		const maxHeight = 24 * 5 + 20;
-		inputEl.style.height = `${Math.min(inputEl.scrollHeight, maxHeight)}px`;
 	}
 
 	private resolveUserBadgeLabel(): string {
@@ -3004,9 +3038,6 @@ export class DailyBoardView extends ItemView {
 				projectRootPath: initial.projectRootPath || buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), initial.slug),
 				localPath: initial.localPath ?? "",
 				gitRemote: initial.gitRemote,
-				gitUsername: initial.gitUsername,
-				gitUserEmail: initial.gitUserEmail ?? "",
-				gitToken: initial.gitToken,
 				autoSync: initial.autoSync,
 			};
 		}
@@ -3016,9 +3047,6 @@ export class DailyBoardView extends ItemView {
 			projectRootPath: buildDefaultProjectRootPath(this.plugin.dataService.getFridayRoot(), ""),
 			localPath: "",
 			gitRemote: "",
-			gitUsername: "",
-			gitUserEmail: "",
-			gitToken: "",
 			autoSync: true,
 		};
 	}
@@ -3060,15 +3088,6 @@ export class DailyBoardView extends ItemView {
 		this.renderProjectEditorText(fields, this.t("projects.editor.remote", "Git remote"), draft.gitRemote, (value) => {
 			draft.gitRemote = value.trim();
 		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.user", "Git username"), draft.gitUsername, (value) => {
-			draft.gitUsername = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.email", "Git email"), draft.gitUserEmail, (value) => {
-			draft.gitUserEmail = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.token", "Git token"), draft.gitToken, (value) => {
-			draft.gitToken = value.trim();
-		}, "password");
 		const toggleRow = fields.createDiv({ cls: "friday-project-editor-field" });
 		toggleRow.createEl("label", { text: this.t("projects.editor.autoSync", "Auto sync") });
 		const toggle = toggleRow.createEl("input", { attr: { type: "checkbox" } });

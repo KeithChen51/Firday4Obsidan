@@ -60,3 +60,47 @@ test("prompt context engine reports trimmed channels when envelope exceeds hard 
 	assert.ok(result.summary.trimmedChannels.length > 0);
 	assert.ok(result.summary.used <= result.summary.hardLimit);
 });
+
+test("prompt context engine includes structured mention context in prompt and summary", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		userPrompt: "Compare these references",
+		agentProfile: "agent",
+		mentionContext: {
+			resolvedCount: 2,
+			tokenTypes: ["folder", "note"],
+			sourceMap: [
+				{ tokenId: "note-1", tokenType: "note", channel: "mentioned_notes", target: "Projects/demo/raw/spec.md" },
+				{ tokenId: "folder-1", tokenType: "folder", channel: "folder_structures", target: "Projects/demo/raw/specs" },
+			],
+			entries: [
+				{
+					tokenId: "note-1",
+					tokenType: "note",
+					channel: "mentioned_notes",
+					title: "spec.md",
+					body: "# Spec\nimportant details",
+				},
+				{
+					tokenId: "folder-1",
+					tokenType: "folder",
+					channel: "folder_structures",
+					title: "specs",
+					body: "overview.md\napi.md",
+				},
+			],
+		},
+	});
+
+	assert.equal(result.summary.hasMentionContext, true);
+	assert.equal(result.summary.mentionResolvedCount, 2);
+	assert.deepEqual(result.summary.mentionTokenTypes, ["folder", "note"]);
+	assert.match(result.prompt, /Mention context/);
+	assert.match(result.prompt, /spec\.md/);
+	assert.match(result.prompt, /folder_structures/);
+});

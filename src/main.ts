@@ -30,6 +30,7 @@ import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
+import { normalizeLlmSettings } from "./core/llm/LlmSettingsResolver";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
 import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
@@ -86,7 +87,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
 			}
 			this.dataService = new DataService(this.app.vault, PRIMARY_PATHS.root);
-			this.syncService = new SyncService(this.app, this.dataService.getFridayRoot());
+			this.syncService = new SyncService(this.app, this.dataService.getFridayRoot(), () => this.settings);
 			await this.dataService.ensureDirectoryStructure();
 			await this.loadSettings();
 
@@ -133,10 +134,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
 			this.executionEventRouter = new EventRouter();
-			this.executionPlanner = new ExecutionPlanner({
-				suggestSkillsForPrompt: (prompt: string, currentFilePath?: string) =>
-					this.skillCommandService.suggestSkillsForPrompt(prompt, currentFilePath),
-			});
+			this.executionPlanner = new ExecutionPlanner();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
 				this.agentRuntimeService = new AgentRuntimeService(
 					this.app.vault,
@@ -226,8 +224,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				...(migrated.user ?? {}),
 			},
 			llm: {
-				...DEFAULT_SETTINGS.llm,
-				...(migrated.llm ?? {}),
+				...normalizeLlmSettings({
+					...DEFAULT_SETTINGS.llm,
+					...(migrated.llm ?? {}),
+				}),
 			},
 			sync: {
 				...DEFAULT_SETTINGS.sync,
@@ -408,6 +408,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		if (!raw) {
 			return {
 				version: SETTINGS_VERSION,
+				user: { ...DEFAULT_SETTINGS.user },
 				projectGroups: [this.createDefaultProjectGroup()],
 				projects: [],
 				activeProjectId: "",
@@ -415,6 +416,25 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 
 		const rawProjects = Array.isArray(raw.projects) ? raw.projects : [];
+		const legacyCredentialSource = rawProjects.find((item) => {
+			const candidate = item as ProjectEntry & {
+				gitUsername?: string;
+				gitUserEmail?: string;
+				gitToken?: string;
+			};
+			return Boolean(candidate.gitUsername?.trim() || candidate.gitUserEmail?.trim() || candidate.gitToken?.trim());
+		}) as (ProjectEntry & {
+			gitUsername?: string;
+			gitUserEmail?: string;
+			gitToken?: string;
+		}) | undefined;
+		const migratedUser = {
+			...DEFAULT_SETTINGS.user,
+			...(raw.user ?? {}),
+			gitUsername: raw.user?.gitUsername?.trim() || legacyCredentialSource?.gitUsername?.trim() || "",
+			gitUserEmail: raw.user?.gitUserEmail?.trim() || legacyCredentialSource?.gitUserEmail?.trim() || "",
+			gitToken: raw.user?.gitToken?.trim() || legacyCredentialSource?.gitToken?.trim() || "",
+		};
 		const normalizedProjects = rawProjects.map((item) => this.normalizeProjectEntry(item as ProjectEntry));
 		const migratedGroups = this.migrateProjectGroups(
 			(raw as { projectGroups?: ProjectGroupEntry[] }).projectGroups,
@@ -425,6 +445,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return {
 			...raw,
 			version: SETTINGS_VERSION,
+			user: migratedUser,
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
 			activeProjectId,
@@ -488,11 +509,25 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	private normalizeProjectEntry(project: ProjectEntry): ProjectEntry {
+		const legacyProject = project as ProjectEntry & {
+			gitUsername?: string;
+			gitUserEmail?: string;
+			gitToken?: string;
+		};
+		const {
+			gitUsername: _legacyGitUsername,
+			gitUserEmail: _legacyGitUserEmail,
+			gitToken: _legacyGitToken,
+			...rest
+		} = legacyProject;
+		void _legacyGitUsername;
+		void _legacyGitUserEmail;
+		void _legacyGitToken;
 		const normalizedSlug = (project.slug ?? "").trim();
 		const normalizedGroupId = (project.groupId ?? "").trim() || DEFAULT_PROJECT_GROUP_ID;
 		const normalizedRootPath = this.resolveProjectRootPath(project);
 		return {
-			...project,
+			...rest,
 			slug: normalizedSlug,
 			groupId: normalizedGroupId,
 			projectRootPath: normalizedRootPath,

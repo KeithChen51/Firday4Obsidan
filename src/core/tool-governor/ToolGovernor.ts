@@ -4,10 +4,22 @@ const FALLBACK_PATTERNS: RegExp[] = [
 	/400/i,
 	/404/i,
 	/405/i,
+	/429/i,
+	/500/i,
+	/502/i,
+	/503/i,
+	/504/i,
 	/tool/i,
 	/function/i,
 	/responses/i,
 	/unsupported/i,
+	/timeout/i,
+	/timed out/i,
+	/gateway/i,
+	/econnreset/i,
+	/err_connection_reset/i,
+	/fetch failed/i,
+	/network/i,
 ];
 
 const INVALID_INPUT_PATTERNS: RegExp[] = [

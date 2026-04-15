@@ -2,6 +2,17 @@
 import { homedir } from "os";
 import path from "path";
 import { App, Notice, Plugin, PluginSettingTab, Setting } from "obsidian";
+import {
+	parseOpencodeConfig,
+	selectOpencodeProvider,
+	type OpencodeProviderOption,
+} from "../core/llm/OpencodeConfigResolver";
+import {
+	patchActiveLlmConfig,
+	patchLlmModeConfig,
+	readModeConfig,
+	switchLlmMode,
+} from "../core/llm/LlmSettingsResolver";
 import type { ModelCapabilityInfo } from "../services/AIService";
 import { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
@@ -30,8 +41,11 @@ const BUILTIN_GROUP_MODELS = [
 
 interface ModelPresetResult {
 	models: string[];
+	modelLabels: Record<string, string>;
 	source: string;
 	editablePaths: string[];
+	providers: OpencodeProviderOption[];
+	activeProvider: OpencodeProviderOption | null;
 }
 
 export class FridaySettingTab extends PluginSettingTab {
@@ -83,11 +97,11 @@ export class FridaySettingTab extends PluginSettingTab {
 		const nav = containerEl.createDiv({ cls: "friday-top-nav" });
 		const items: Array<{ id: SettingsSection; label: string }> = [
 			{ id: "user", label: this.host.t("settings.section.user") },
+			{ id: "project", label: this.host.t("settings.section.project") },
 			{ id: "sync", label: this.host.t("settings.section.sync") },
 			{ id: "llm", label: this.host.t("settings.section.llm") },
 			{ id: "agent", label: this.host.t("settings.section.agent") },
 			{ id: "slash", label: this.host.t("settings.section.slash") },
-			{ id: "project", label: this.host.t("settings.section.project") },
 		];
 		for (const item of items) {
 			const button = nav.createEl("button", {
@@ -165,6 +179,46 @@ export class FridaySettingTab extends PluginSettingTab {
 					await this.host.saveSettings();
 				}),
 		);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.user.gitUsername.name", "Git 用户名"))
+			.setDesc(this.t("settings.user.gitUsername.desc", "作为所有项目同步认证的统一用户名。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("git-user")
+					.setValue(this.host.settings.user.gitUsername)
+					.onChange(async (value) => {
+						this.host.settings.user.gitUsername = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.user.gitUserEmail.name", "Git 邮箱"))
+			.setDesc(this.t("settings.user.gitUserEmail.desc", "用于所有项目的 Git 提交身份。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("you@example.com")
+					.setValue(this.host.settings.user.gitUserEmail)
+					.onChange(async (value) => {
+						this.host.settings.user.gitUserEmail = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.user.gitToken.name", "Git 令牌"))
+			.setDesc(this.t("settings.user.gitToken.desc", "作为所有项目同步认证的统一令牌。"))
+			.addText((text) => {
+				text.inputEl.type = "password";
+				text
+					.setPlaceholder("token")
+					.setValue(this.host.settings.user.gitToken)
+					.onChange(async (value) => {
+						this.host.settings.user.gitToken = value.trim();
+						await this.host.saveSettings();
+					});
+			});
 	}
 
 	private renderSyncSection(containerEl: HTMLElement): void {
@@ -237,16 +291,93 @@ export class FridaySettingTab extends PluginSettingTab {
 				dropdown.addOption("group", this.t("settings.llm.mode.group", "集团集采模式"));
 				dropdown.setValue(mode);
 				dropdown.onChange(async (value: LlmMode) => {
-					this.host.settings.llm.mode = value;
-					if (value === "group" && !this.host.settings.llm.model.trim()) {
+					this.host.settings.llm = switchLlmMode(this.host.settings.llm, value);
+					if (value === "group") {
 						const presets = this.getModelPresetResult();
-						this.host.settings.llm.model = presets.models[0] ?? "";
+						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+							opencodeProviderId: this.host.settings.llm.opencodeProviderId || presets.activeProvider?.id || "",
+						});
+						if (!this.host.settings.llm.model.trim()) {
+							this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+								model: presets.models[0] ?? "",
+							});
+						}
 					}
 					await this.host.saveSettings();
 					this.markLlmStatusDirty();
 					this.display();
 				});
 			});
+
+		if (mode === "group") {
+			const modelPresets = this.getModelPresetResult();
+			const activeProvider = modelPresets.activeProvider;
+			if (modelPresets.providers.length > 0) {
+				new Setting(containerEl)
+					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
+					.setDesc(
+						activeProvider
+							? this.t("settings.llm.opencodeProvider.desc", "来源: {source} | 当前: {provider}", {
+									source: modelPresets.source,
+									provider: activeProvider.name,
+								})
+							: this.t(
+									"settings.llm.opencodeProvider.empty",
+									"已读取 OpenCode 配置，但未发现可用 provider。",
+								),
+					)
+					.addDropdown((dropdown) => {
+						for (const provider of modelPresets.providers) {
+							dropdown.addOption(provider.id, provider.name || provider.id);
+						}
+						dropdown.setValue(activeProvider?.id ?? modelPresets.providers[0]?.id ?? "");
+						dropdown.onChange(async (value) => {
+							this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
+								opencodeProviderId: value,
+							});
+							const selectedProvider = selectOpencodeProvider(this.readOpencodeSnapshot(), value);
+							if (
+								selectedProvider &&
+								selectedProvider.models.length > 0 &&
+								!selectedProvider.models.some((item) => item.id === this.host.settings.llm.model.trim())
+							) {
+								this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
+									model: selectedProvider.models[0]!.id,
+								});
+							}
+							await this.host.saveSettings();
+							this.markLlmStatusDirty();
+							this.display();
+						});
+					})
+					.addButton((button) =>
+						button
+							.setButtonText(this.t("settings.llm.opencodeProvider.sync", "一键同步 OpenCode 配置"))
+							.setCta()
+							.onClick(async () => {
+								await this.syncSelectedOpencodeProvider();
+							}),
+					)
+					.addExtraButton((button) =>
+						button
+							.setIcon("refresh-cw")
+							.setTooltip(this.t("settings.llm.presetModel.reload", "重新读取模型预置"))
+							.onClick(() => {
+								this.modelPresetResult = null;
+								this.display();
+							}),
+					);
+			} else {
+				new Setting(containerEl)
+					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
+					.setDesc(
+						this.t(
+							"settings.llm.opencodeProvider.missing",
+							"未在 OpenCode 配置中读取到 provider。请检查 opencode.json。",
+						),
+					);
+			}
+		}
 
 		new Setting(containerEl)
 			.setName(this.t("settings.llm.apiUrl.name", "API 地址（必填）"))
@@ -256,7 +387,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					.setPlaceholder(this.t("settings.llm.apiUrl.placeholder", "例如: https://api.openai.com/v1"))
 					.setValue(this.host.settings.llm.apiUrl)
 					.onChange(async (value) => {
-						this.host.settings.llm.apiUrl = value.trim();
+						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+							apiUrl: value.trim(),
+						});
 						await this.host.saveSettings();
 						this.markLlmStatusDirty();
 					}),
@@ -271,7 +404,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					.setPlaceholder(this.t("settings.llm.apiKey.placeholder", "可留空"))
 					.setValue(this.host.settings.llm.apiKey)
 					.onChange(async (value) => {
-						this.host.settings.llm.apiKey = value.trim();
+						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+							apiKey: value.trim(),
+						});
 						await this.host.saveSettings();
 						this.markLlmStatusDirty();
 					});
@@ -284,17 +419,19 @@ export class FridaySettingTab extends PluginSettingTab {
 				? currentModel
 				: MANUAL_MODEL_OPTION;
 			new Setting(containerEl)
-				.setName(this.t("settings.llm.presetModel.name", "预置模型"))
+				.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
 				.setDesc(this.t("settings.llm.presetModel.source", "来源: {source}", { source: modelPresets.source }))
 				.addDropdown((dropdown) => {
 					dropdown.addOption(MANUAL_MODEL_OPTION, this.t("settings.llm.presetModel.manual", "手动输入"));
 					for (const model of modelPresets.models) {
-						dropdown.addOption(model, model);
+						dropdown.addOption(model, modelPresets.modelLabels[model] ?? model);
 					}
 					dropdown.setValue(selected);
 					dropdown.onChange(async (value) => {
 						if (value === MANUAL_MODEL_OPTION) return;
-						this.host.settings.llm.model = value;
+						this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
+							model: value,
+						});
 						await this.host.saveSettings();
 						this.markLlmStatusDirty();
 						this.display();
@@ -311,19 +448,23 @@ export class FridaySettingTab extends PluginSettingTab {
 				);
 		}
 
-		new Setting(containerEl)
-			.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
-			.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.llm.defaultModel.placeholder", "例如: glm-5 或 gpt-4o-mini"))
-					.setValue(this.host.settings.llm.model)
-					.onChange(async (value) => {
-						this.host.settings.llm.model = value.trim();
-						await this.host.saveSettings();
-						this.markLlmStatusDirty();
-					}),
-			);
+		if (mode !== "group") {
+			new Setting(containerEl)
+				.setName(this.t("settings.llm.defaultModel.name", "默认模型（选填）"))
+				.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.llm.defaultModel.placeholder", "例如: glm-5 或 gpt-4o-mini"))
+						.setValue(this.host.settings.llm.model)
+						.onChange(async (value) => {
+							this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+								model: value.trim(),
+							});
+							await this.host.saveSettings();
+							this.markLlmStatusDirty();
+						}),
+				);
+		}
 
 		const activeAgentModel = this.host.getActiveAgent()?.model?.trim() ?? "";
 		const effectiveModel = activeAgentModel || this.host.settings.llm.model.trim();
@@ -352,7 +493,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					.setPlaceholder(this.t("settings.llm.temperature.placeholder", "例如 0.7"))
 					.setValue(this.host.settings.llm.temperature == null ? "" : String(this.host.settings.llm.temperature))
 					.onChange(async (value) => {
-						this.host.settings.llm.temperature = this.parseOptionalFloat(value);
+						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+							temperature: this.parseOptionalFloat(value),
+						});
 						await this.host.saveSettings();
 					}),
 			);
@@ -365,7 +508,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					.setPlaceholder(this.t("settings.llm.maxTokens.placeholder", "例如 4096"))
 					.setValue(this.host.settings.llm.maxTokens == null ? "" : String(this.host.settings.llm.maxTokens))
 					.onChange(async (value) => {
-						this.host.settings.llm.maxTokens = this.parseOptionalPositiveInt(value);
+						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+							maxTokens: this.parseOptionalPositiveInt(value),
+						});
 						await this.host.saveSettings();
 					}),
 			);
@@ -375,7 +520,9 @@ export class FridaySettingTab extends PluginSettingTab {
 			.setDesc(this.t("settings.llm.streaming.desc", "开启后，聊天回复将实时逐字显示。"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.host.settings.llm.enableStreaming ?? true).onChange(async (value) => {
-					this.host.settings.llm.enableStreaming = value;
+					this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+						enableStreaming: value,
+					});
 					await this.host.saveSettings();
 				}),
 			);
@@ -1166,14 +1313,13 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private getOpencodeConfigPaths(): string[] {
 		return [
+			path.join(homedir(), ".config", "opencode", "opencode.json"),
 			path.join(homedir(), ".config", "opencode", "config.json"),
 			path.join(homedir(), ".config", "opencode", "config.local.json"),
 		];
 	}
 
 	private getModelPresetResult(): ModelPresetResult {
-		if (this.modelPresetResult) return this.modelPresetResult;
-
 		const loaded = this.loadModelPresetsFromOpencodeConfig();
 		if (loaded) {
 			this.modelPresetResult = loaded;
@@ -1182,60 +1328,84 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		this.modelPresetResult = {
 			models: [...BUILTIN_GROUP_MODELS],
+			modelLabels: Object.fromEntries(BUILTIN_GROUP_MODELS.map((item) => [item, item])),
 			source: this.t("settings.llm.presetModel.builtinSource", "内置集团模型预设"),
 			editablePaths: this.getOpencodeConfigPaths(),
+			providers: [],
+			activeProvider: null,
 		};
 		return this.modelPresetResult;
 	}
 
 	private loadModelPresetsFromOpencodeConfig(): ModelPresetResult | null {
-		const configPaths = this.getOpencodeConfigPaths();
-		const discoveredModels: string[] = [];
-		const loadedPaths: string[] = [];
-
-		for (const configPath of configPaths) {
-			try {
-				if (!existsSync(configPath)) continue;
-				const raw = readFileSync(configPath, "utf8");
-				const models = this.extractModelPresetsFromConfig(raw);
-				if (models.length > 0) {
-					discoveredModels.push(...models);
-					loadedPaths.push(configPath);
-				}
-			} catch (error) {
-				console.warn("[Friday] Failed to read opencode model presets:", configPath, error);
-			}
+		const snapshot = this.readOpencodeSnapshot();
+		if (!snapshot || snapshot.providers.length === 0) {
+			return null;
 		}
-
-		if (discoveredModels.length === 0) return null;
-
+		const groupConfig = readModeConfig(this.host.settings.llm, "group");
+		const activeProvider = selectOpencodeProvider(snapshot, groupConfig.opencodeProviderId);
+		const models = activeProvider?.models ?? [];
 		return {
-			models: Array.from(new Set([...discoveredModels, ...BUILTIN_GROUP_MODELS])),
-			source: loadedPaths.join(" | "),
-			editablePaths: loadedPaths,
+			models: models.map((item) => item.id),
+			modelLabels: Object.fromEntries(models.map((item) => [item.id, item.label])),
+			source: snapshot.sourcePath,
+			editablePaths: [snapshot.sourcePath],
+			providers: snapshot.providers,
+			activeProvider,
 		};
 	}
 
-	private extractModelPresetsFromConfig(raw: string): string[] {
-		try {
-			const parsed = JSON.parse(raw) as {
-				provider?: Record<string, { models?: Record<string, unknown> }>;
-			};
-			if (!parsed.provider || typeof parsed.provider !== "object") return [];
-
-			const names: string[] = [];
-			for (const provider of Object.values(parsed.provider)) {
-				const models = provider?.models;
-				if (!models || typeof models !== "object") continue;
-				for (const modelName of Object.keys(models)) {
-					const normalized = modelName.trim();
-					if (normalized) names.push(normalized);
+	private readOpencodeSnapshot() {
+		for (const configPath of this.getOpencodeConfigPaths()) {
+			try {
+				if (!existsSync(configPath)) continue;
+				const raw = readFileSync(configPath, "utf8");
+				const snapshot = parseOpencodeConfig(raw, configPath);
+				if (snapshot.providers.length > 0) {
+					return snapshot;
 				}
+			} catch (error) {
+				console.warn("[Friday] Failed to read opencode config:", configPath, error);
 			}
-			return Array.from(new Set(names));
-		} catch {
-			return [];
 		}
+		return null;
+	}
+
+	private async syncSelectedOpencodeProvider(): Promise<void> {
+		const snapshot = this.readOpencodeSnapshot();
+		const groupConfig = readModeConfig(this.host.settings.llm, "group");
+		const provider = selectOpencodeProvider(snapshot, groupConfig.opencodeProviderId);
+		if (!provider) {
+			new Notice(
+				this.t("settings.llm.opencodeProvider.syncFailed", "未读取到可同步的 OpenCode provider 配置。"),
+				4000,
+			);
+			return;
+		}
+
+		this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
+			opencodeProviderId: provider.id,
+			apiUrl: provider.baseURL,
+			apiKey: provider.apiKey,
+			extraHeaders: { ...provider.headers },
+		});
+		if (
+			provider.models.length > 0 &&
+			!provider.models.some((item) => item.id === this.host.settings.llm.model.trim())
+		) {
+			this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
+				model: provider.models[0]!.id,
+			});
+		}
+		await this.host.saveSettings();
+		this.markLlmStatusDirty();
+		new Notice(
+			this.t("settings.llm.opencodeProvider.syncSuccess", "已同步 OpenCode 配置：{provider}", {
+				provider: provider.name,
+			}),
+			3000,
+		);
+		this.display();
 	}
 
 	private markLlmStatusDirty(): void {

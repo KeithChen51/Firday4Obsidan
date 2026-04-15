@@ -30,9 +30,6 @@ test("project editor service rejects invalid slug", async () => {
 				projectRootPath: "F.R.I.D.A.Y/项目/bad",
 				localPath: "",
 				gitRemote: "",
-				gitUsername: "",
-				gitUserEmail: "",
-				gitToken: "",
 				autoSync: false,
 			},
 			new Set(),
@@ -40,19 +37,16 @@ test("project editor service rejects invalid slug", async () => {
 	});
 });
 
-test("project editor service rejects half-filled git credentials", async () => {
+test("project editor service no longer requires git credential fields in project draft", async () => {
 	const mod = await loadModule();
-	assert.throws(() => {
+	assert.doesNotThrow(() => {
 		mod.validateProjectDraft(
 			{
 				groupId: "default-group",
 				slug: "alpha",
 				projectRootPath: "F.R.I.D.A.Y/项目/alpha",
 				localPath: "",
-				gitRemote: "",
-				gitUsername: "user",
-				gitUserEmail: "",
-				gitToken: "",
+				gitRemote: "https://example.com/repo.git",
 				autoSync: false,
 			},
 			new Set(),

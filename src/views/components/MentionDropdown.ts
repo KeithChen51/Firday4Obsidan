@@ -1,7 +1,14 @@
+import type { MentionToken } from "../../core/context/mention/MentionResolver";
+
 export interface MentionSuggestion {
-	value: string;
 	label: string;
 	description?: string;
+	value?: string;
+	kind?: "slash" | "mention_category" | "mention_token";
+	trigger?: "@" | "/";
+	category?: "active_note" | "note" | "folder";
+	replacementText?: string;
+	token?: MentionToken;
 }
 
 export class MentionDropdown {
@@ -99,6 +106,10 @@ export class MentionDropdown {
 				this.render();
 			};
 			button.onmousedown = (event) => {
+				event.preventDefault();
+				this.selectHandler?.(item);
+			};
+			button.onclick = (event) => {
 				event.preventDefault();
 				this.selectHandler?.(item);
 			};

@@ -12,9 +12,6 @@ export interface ProjectEditorDraft {
 	projectRootPath: string;
 	localPath: string;
 	gitRemote: string;
-	gitUsername: string;
-	gitUserEmail: string;
-	gitToken: string;
 	autoSync: boolean;
 }
 
@@ -44,11 +41,6 @@ export function validateProjectDraft(
 	if (existingSlugs.has(draft.slug) && initialSlug !== draft.slug) {
 		throw new Error(`Project already exists: ${draft.slug}`);
 	}
-	const username = draft.gitUsername.trim();
-	const token = draft.gitToken.trim();
-	if ((username && !token) || (!username && token)) {
-		throw new Error("Git username and token must both be filled or both be empty.");
-	}
 	const normalizedRoot = normalizeVaultPath(draft.projectRootPath.trim());
 	if (!normalizedRoot || normalizedRoot === "." || normalizedRoot.startsWith("/")) {
 		throw new Error("Project root must be a Vault-relative path.");
@@ -71,9 +63,6 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		projectRootPath: normalizedRoot,
 		localPath: draft.localPath.trim(),
 		gitRemote: draft.gitRemote.trim(),
-		gitUsername: draft.gitUsername.trim(),
-		gitUserEmail: draft.gitUserEmail.trim(),
-		gitToken: draft.gitToken.trim(),
 		autoSync: hasRemote ? draft.autoSync : false,
 		lastSyncAt: initial?.lastSyncAt ?? "",
 	};

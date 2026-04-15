@@ -1,4 +1,16 @@
 import { ContextAssembler } from "./ContextAssembler";
+import type {
+	MentionResolvedEntry,
+	MentionSourceMapEntry,
+	MentionTokenType,
+} from "./mention/MentionResolver";
+
+export interface PromptMentionContext {
+	resolvedCount: number;
+	tokenTypes: MentionTokenType[];
+	sourceMap: MentionSourceMapEntry[];
+	entries: MentionResolvedEntry[];
+}
 
 export interface PromptContextBuildInput {
 	mode: string;
@@ -22,6 +34,7 @@ export interface PromptContextBuildInput {
 	autoSkillContext?: string;
 	wikiKnowledgeContext?: string;
 	memoryContext?: string;
+	mentionContext?: PromptMentionContext;
 	enableExecTool?: boolean;
 	hardLimit?: number;
 }
@@ -34,6 +47,10 @@ export interface PromptContextSummary {
 	hasWikiContext: boolean;
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
+	hasMentionContext: boolean;
+	mentionResolvedCount: number;
+	mentionTokenTypes: MentionTokenType[];
+	mentionSourceMap: MentionSourceMapEntry[];
 }
 
 export interface PromptContextBuildResult {
@@ -49,18 +66,21 @@ export class PromptContextEngine {
 		const autoSkillContext = input.autoSkillContext?.trim() ?? "";
 		const wikiKnowledgeContext = input.wikiKnowledgeContext?.trim() ?? "";
 		const memoryContext = input.memoryContext?.trim() ?? "";
+		const mentionContextText = this.formatMentionContext(input.mentionContext);
 		const lines = [
 			"You are F.R.I.D.A.Y Agent Runtime.",
 			"You must output strict JSON only. Do not output Markdown.",
 			"",
 			"Allowed response schema (choose one):",
 			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"ls|read|grep|search_text|glob|compile_wiki|write|edit|delete","args":{...}}}',
+			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|compile_wiki|write|edit|delete","args":{...}}}',
 			'{"type":"subagent","assistant":"optional note","subagent":{"goal":"task goal","model":"optional"}}',
 			"",
 			"Rules:",
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
 			"- Call at most one tool each step, then reason with TOOL_RESULT.",
+			"- SkillCatalog is summary-only metadata. If a skill clearly helps, call use_skill first to load its full instructions.",
+			"- use_skill only loads skill instructions; after TOOL_RESULT from use_skill, continue execution with the loaded skill context.",
 			"- When an active project root is available, prefer scoping ls/grep/search_text/glob to that root.",
 			"- For ls/grep/search_text/glob, an empty path auto-scopes to the active project root when one is selected.",
 			"- Never use '/' or '\\' as the path for Vault discovery tools; use the active project root instead.",
@@ -76,6 +96,7 @@ export class PromptContextEngine {
 			"- Before final response, ensure conclusions are based on tool results.",
 			"",
 			"Tool arguments:",
+			'- use_skill: {"command":"skill command from SkillCatalog","reason":"why the skill matches the current task"}',
 			'- ls: {"path":"optional path","recursive":false,"maxEntries":120}',
 			'- read: {"path":"file path","maxChars":10000}',
 			'- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
@@ -95,6 +116,9 @@ export class PromptContextEngine {
 			"",
 			"User: read notes/project-overview.md",
 			'Assistant: {"type":"tool_call","assistant":"Read file.","tool":{"name":"read","args":{"path":"notes/project-overview.md"}}}',
+			"",
+			"User: 帮我做一个结构白板",
+			'Assistant: {"type":"tool_call","assistant":"Load the most relevant skill before continuing.","tool":{"name":"use_skill","args":{"command":"json-canvas","reason":"The user explicitly wants a whiteboard-style structured canvas."}}}',
 			"",
 			'User: create test.md with content "hello"',
 			'Assistant: {"type":"tool_call","assistant":"Create file in workspace.","tool":{"name":"write","args":{"path":"workspace/test.md","content":"hello","mode":"create"}}}',
@@ -145,10 +169,18 @@ export class PromptContextEngine {
 			lines.push("--- End memory context ---");
 		}
 
+		if (mentionContextText) {
+			lines.push("");
+			lines.push("--- Mention context ---");
+			lines.push(mentionContextText);
+			lines.push("--- End mention context ---");
+		}
+
 		const assembledContext = this.contextAssembler.assemble({
 			userQuery: input.userPrompt ?? "",
 			system: input.fridayMd ?? "",
 			policy: trimmedExtra,
+			mentions: mentionContextText,
 			history: memoryContext,
 			secondaryContext: autoSkillContext,
 			attachments: wikiKnowledgeContext,
@@ -162,6 +194,10 @@ export class PromptContextEngine {
 			hasWikiContext: Boolean(wikiKnowledgeContext),
 			hasMemoryContext: Boolean(memoryContext),
 			hasAutoSkillContext: Boolean(autoSkillContext),
+			hasMentionContext: Boolean(input.mentionContext?.entries?.length),
+			mentionResolvedCount: input.mentionContext?.resolvedCount ?? 0,
+			mentionTokenTypes: [...new Set(input.mentionContext?.tokenTypes ?? [])].sort(),
+			mentionSourceMap: [...(input.mentionContext?.sourceMap ?? [])],
 		};
 
 		if (assembledContext.text) {
@@ -178,5 +214,19 @@ export class PromptContextEngine {
 			prompt: lines.join("\n"),
 			summary,
 		};
+	}
+
+	private formatMentionContext(mentionContext?: PromptMentionContext): string {
+		if (!mentionContext || mentionContext.entries.length === 0) {
+			return "";
+		}
+		const lines: string[] = [];
+		for (const entry of mentionContext.entries) {
+			lines.push(`[${entry.channel}] ${entry.title}`);
+			lines.push(`token=${entry.tokenId} type=${entry.tokenType} target=${entry.target}`);
+			lines.push(entry.body);
+			lines.push("");
+		}
+		return lines.join("\n").trim();
 	}
 }

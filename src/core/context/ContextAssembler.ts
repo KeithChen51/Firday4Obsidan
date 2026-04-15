@@ -11,7 +11,7 @@ export interface ContextAssemblerResult {
 
 const SOFT_RATIO = 0.55;
 const HARD_RATIO = 0.70;
-const TRIM_ORDER = ["attachments", "history", "secondary_context"] as const;
+const TRIM_ORDER = ["attachments", "history", "secondary_context", "mentions"] as const;
 
 type TrimmableKey = (typeof TRIM_ORDER)[number];
 
@@ -27,6 +27,7 @@ export class ContextAssembler {
 			system: input.system?.trim() ?? "",
 			policy: input.policy?.trim() ?? "",
 			user_query: input.userQuery.trim(),
+			mentions: input.mentions?.trim() ?? "",
 			history: input.history?.trim() ?? "",
 			attachments: input.attachments?.trim() ?? "",
 			secondary_context: input.secondaryContext?.trim() ?? "",
@@ -81,7 +82,7 @@ export class ContextAssembler {
 
 	private joinChannels(channels: Record<string, string>): string {
 		const lines: string[] = [];
-		const orderedKeys = ["system", "policy", "user_query", "history", "attachments", "secondary_context"];
+		const orderedKeys = ["system", "policy", "user_query", "mentions", "history", "attachments", "secondary_context"];
 		for (const key of orderedKeys) {
 			const value = channels[key];
 			if (!value) {

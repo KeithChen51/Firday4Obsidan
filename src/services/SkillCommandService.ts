@@ -26,6 +26,14 @@ function normalizePortablePath(value: string): string {
 	return value.replace(/\\/g, "/");
 }
 
+function normalizeMatcherPath(value: string): string {
+	const portable = normalizePortablePath(value);
+	if (typeof normalizePath === "function") {
+		return normalizePath(portable);
+	}
+	return portable.replace(/\/{2,}/g, "/");
+}
+
 export type SkillTriggerMode = "auto" | "manual";
 export type SkillInvocationMode = "manual" | "auto";
 
@@ -60,6 +68,11 @@ export interface SuggestedSkill {
 	skill: SkillDescriptor;
 	score: number;
 	reasons: string[];
+}
+
+interface BuildSkillCatalogContextOptions {
+	currentFilePath?: string;
+	limit?: number;
 }
 
 interface BuildSkillSystemContextOptions {
@@ -173,6 +186,7 @@ export class SkillCommandService {
 
 		const promptLower = normalizedPrompt.toLowerCase();
 		const tokens = this.extractIntentTokens(normalizedPrompt);
+		const semanticTokens = this.extractSemanticTokens(normalizedPrompt);
 		const normalizedCurrentPath = normalizePortablePath(currentFilePath ?? "").toLowerCase();
 		const fileName = normalizedCurrentPath ? path.basename(normalizedCurrentPath) : "";
 
@@ -188,7 +202,7 @@ export class SkillCommandService {
 
 			for (const alias of entry.normalizedAliases) {
 				if (!alias) continue;
-				if (tokens.includes(alias)) {
+				if (semanticTokens.includes(alias)) {
 					score += 12;
 					reasons.push(`鍛戒腑鍒悕: ${alias}`);
 					continue;
@@ -201,7 +215,7 @@ export class SkillCommandService {
 
 			for (const tag of entry.normalizedTags) {
 				if (!tag) continue;
-				if (tokens.includes(tag)) {
+				if (semanticTokens.includes(tag)) {
 					score += 8;
 					reasons.push(`鍛戒腑鏍囩: ${tag}`);
 				}
@@ -218,8 +232,8 @@ export class SkillCommandService {
 
 			if (normalizedCurrentPath && entry.globs.length > 0) {
 				const pathHit = entry.globs.some((glob) => this.matchGlob(glob, normalizedCurrentPath, fileName));
-				if (pathHit) {
-					score += 15;
+				if (pathHit && score > 0) {
+					score += 4;
 					reasons.push("鍛戒腑鏂囦欢璺緞瑙勫垯");
 				}
 			}
@@ -296,6 +310,32 @@ export class SkillCommandService {
 
 		systemContextLines.push("[/SkillInvocation]");
 		return { skill, systemContext: systemContextLines.join("\n") };
+	}
+
+	async buildSkillCatalogContext(
+		options: BuildSkillCatalogContextOptions = {},
+	): Promise<string> {
+		const skills = await this.listSkills(options.limit ?? 24);
+		const currentFilePath = options.currentFilePath?.trim() ?? "";
+		const lines = [
+			"[SkillCatalog]",
+			"Available skills (summary only; full skill content is not loaded yet).",
+			"If a skill clearly helps with the current task, call the use_skill tool first.",
+			"After use_skill returns, follow the loaded skill instructions before continuing.",
+			"Do not call use_skill unless the user intent clearly matches the skill domain.",
+			...(currentFilePath ? [`current_file: ${currentFilePath}`] : []),
+			"skills:",
+		];
+		for (const skill of skills) {
+			const tagText = skill.tags.slice(0, 6).join(", ") || "(none)";
+			lines.push(`- command: ${skill.command}`);
+			lines.push(`  name: ${skill.name}`);
+			lines.push(`  description: ${this.truncateText(skill.description || "N/A", 180)}`);
+			lines.push(`  trigger: ${skill.trigger}`);
+			lines.push(`  tags: ${tagText}`);
+		}
+		lines.push("[/SkillCatalog]");
+		return lines.join("\n");
 	}
 
 	invalidateCache(): void {
@@ -743,8 +783,31 @@ export class SkillCommandService {
 		return [...new Set(normalized)];
 	}
 
+	private extractSemanticTokens(prompt: string): string[] {
+		const baseTokens = this.extractIntentTokens(prompt);
+		const fragments = new Set(baseTokens);
+		const chineseRuns = prompt.match(/[\u4e00-\u9fa5]{2,}/g) ?? [];
+		for (const run of chineseRuns) {
+			const normalizedRun = this.normalizeToken(run);
+			if (normalizedRun.length >= 2) {
+				fragments.add(normalizedRun);
+			}
+			const compact = run.replace(/[^\u4e00-\u9fa5]/g, "");
+			const maxWindow = Math.min(6, compact.length);
+			for (let windowSize = 2; windowSize <= maxWindow; windowSize += 1) {
+				for (let index = 0; index + windowSize <= compact.length; index += 1) {
+					const fragment = this.normalizeToken(compact.slice(index, index + windowSize));
+					if (fragment.length >= 2) {
+						fragments.add(fragment);
+					}
+				}
+			}
+		}
+		return [...fragments];
+	}
+
 	private matchGlob(globPattern: string, normalizedPath: string, fileName: string): boolean {
-		const normalizedGlob = normalizePath(globPattern.trim()).toLowerCase();
+		const normalizedGlob = normalizeMatcherPath(globPattern.trim()).toLowerCase();
 		if (!normalizedGlob) return false;
 		const regex = this.globToRegex(normalizedGlob);
 		if (regex.test(normalizedPath)) {
@@ -755,11 +818,25 @@ export class SkillCommandService {
 	}
 
 	private globToRegex(globPattern: string): RegExp {
-		let pattern = globPattern.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-		pattern = pattern.replace(/\\\*\\\*/g, "___DOUBLE_STAR___");
-		pattern = pattern.replace(/\\\*/g, "[^/]*");
-		pattern = pattern.replace(/\\\?/g, ".");
-		pattern = pattern.replace(/___DOUBLE_STAR___/g, ".*");
+		let pattern = "";
+		for (let index = 0; index < globPattern.length; index += 1) {
+			const current = globPattern[index] ?? "";
+			const next = globPattern[index + 1];
+			if (current === "*" && next === "*") {
+				pattern += ".*";
+				index += 1;
+				continue;
+			}
+			if (current === "*") {
+				pattern += "[^/]*";
+				continue;
+			}
+			if (current === "?") {
+				pattern += ".";
+				continue;
+			}
+			pattern += current.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+		}
 		return new RegExp(`^${pattern}$`, "i");
 	}
 

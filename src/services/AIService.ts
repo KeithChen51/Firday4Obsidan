@@ -1,6 +1,12 @@
 ﻿import { requestUrl } from "obsidian";
 import { FridaySettings } from "../types/settings";
 import { ToolCall, ToolDefinition } from "../types/tools";
+import {
+	buildLlmHeaders,
+	extractHttpStatus,
+	getLlmRetryDelayMs,
+	shouldRetryLlmRequest,
+} from "../core/llm/LlmTransportPolicy";
 
 export interface ChatMessage {
 	role: "system" | "user" | "assistant" | "tool";
@@ -80,6 +86,8 @@ export interface ModelCapabilityInfo {
 }
 
 export class AIService {
+	private static readonly MAX_RETRY_ATTEMPTS = 3;
+
 	constructor(private readonly getConfig: () => FridaySettings["llm"]) {}
 
 	isConfigured(): boolean {
@@ -230,12 +238,6 @@ export class AIService {
 		}
 	}
 
-	private extractHttpStatus(error: unknown): number | null {
-		const raw = String(error ?? "").toLowerCase();
-		const matched = raw.match(/\b(400|401|403|404|405|408|409|422|429|500|502|503|504)\b/);
-		return matched ? Number.parseInt(matched[1]!, 10) : null;
-	}
-
 	private formatTriedEndpoints(endpoints: string[]): string {
 		return endpoints.map((item) => `\n- ${item}`).join("");
 	}
@@ -365,17 +367,6 @@ export class AIService {
 				content: item.parts && item.parts.length > 0 ? item.parts : item.content,
 			};
 		});
-	}
-
-	private buildHeaders(): Record<string, string> {
-		const config = this.getConfig();
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-		if (config.mode !== "group" && config.apiKey?.trim()) {
-			headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-		}
-		return headers;
 	}
 
 	private extractStreamDeltaText(eventData: unknown): string {
@@ -534,13 +525,7 @@ export class AIService {
 			throw new Error("LLM API 地址为空，请先在设置中配置。");
 		}
 
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-
-		if (config.mode !== "group" && config.apiKey?.trim()) {
-			headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-		}
+		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);
 
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
@@ -548,27 +533,35 @@ export class AIService {
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
-			const payload = this.buildPayload(messages, endpoint, options);
+			let attempt = 0;
 
-			try {
-				const response = await requestUrl({
-					url: endpoint,
-					method: "POST",
-					headers,
-					body: JSON.stringify(payload),
-				});
-				return this.extractMessageContent(response.json as ChatResponseBody);
-			} catch (error) {
-				lastError = error;
-				const status = this.extractHttpStatus(error);
-				const hasFallback = index < endpoints.length - 1;
-				if ((status === 404 || status === 405) && hasFallback) {
-					continue;
+			while (true) {
+				const payload = this.buildPayload(messages, endpoint, options);
+				try {
+					const response = await requestUrl({
+						url: endpoint,
+						method: "POST",
+						headers,
+						body: JSON.stringify(payload),
+					});
+					return this.extractMessageContent(response.json as ChatResponseBody);
+				} catch (error) {
+					lastError = error;
+					const status = extractHttpStatus(error);
+					const hasFallback = index < endpoints.length - 1;
+					if ((status === 404 || status === 405) && hasFallback) {
+						break;
+					}
+					if (status === 400 && this.isResponsesEndpoint(endpoint) && hasFallback) {
+						break;
+					}
+					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
+						await this.delay(getLlmRetryDelayMs(attempt));
+						attempt += 1;
+						continue;
+					}
+					throw this.normalizeError(error, endpoint, triedEndpoints);
 				}
-				if (status === 400 && this.isResponsesEndpoint(endpoint) && hasFallback) {
-					continue;
-				}
-				throw this.normalizeError(error, endpoint, triedEndpoints);
 			}
 		}
 
@@ -591,118 +584,126 @@ export class AIService {
 			throw new Error("LLM API 地址为空，请先在设置中配置。");
 		}
 
-		const headers = this.buildHeaders();
+		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
 
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
-			const payload = this.buildPayload(messages, endpoint, options);
-			payload.stream = true;
+			let attempt = 0;
 
-			try {
-				const response = await fetch(endpoint, {
-					method: "POST",
-					headers,
-					body: JSON.stringify(payload),
-					signal: options?.signal,
-				});
-				if (!response.ok) {
-					throw new Error(`${response.status} ${response.statusText}`.trim());
-				}
+			while (true) {
+				const payload = this.buildPayload(messages, endpoint, options);
+				payload.stream = true;
 
-				const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-				if (!response.body || contentType.includes("application/json")) {
-					const body = (await response.json()) as ChatResponseBody;
-					const text = this.extractMessageContent(body);
-					if (text) {
-						options?.onDelta?.(text);
+				try {
+					const response = await fetch(endpoint, {
+						method: "POST",
+						headers,
+						body: JSON.stringify(payload),
+						signal: options?.signal,
+					});
+					if (!response.ok) {
+						throw new Error(`${response.status} ${response.statusText}`.trim());
 					}
-					return text;
-				}
 
-				const reader = response.body.getReader();
-				const decoder = new TextDecoder("utf-8");
-				let buffer = "";
-				let fullText = "";
+					const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+					if (!response.body || contentType.includes("application/json")) {
+						const body = (await response.json()) as ChatResponseBody;
+						const text = this.extractMessageContent(body);
+						if (text) {
+							options?.onDelta?.(text);
+						}
+						return text;
+					}
 
-				while (true) {
-					const chunk = await reader.read();
-					if (chunk.done) {
+					const reader = response.body.getReader();
+					const decoder = new TextDecoder("utf-8");
+					let buffer = "";
+					let fullText = "";
+
+					while (true) {
+						const chunk = await reader.read();
+						if (chunk.done) {
+							break;
+						}
+						buffer += decoder.decode(chunk.value, { stream: true });
+
+						let newlineIndex = buffer.indexOf("\n");
+						while (newlineIndex >= 0) {
+							const rawLine = buffer.slice(0, newlineIndex).replace(/\r$/, "");
+							buffer = buffer.slice(newlineIndex + 1);
+							newlineIndex = buffer.indexOf("\n");
+
+							const line = rawLine.trim();
+							if (!line || !line.startsWith("data:")) {
+								continue;
+							}
+
+							const data = line.slice(5).trim();
+							if (!data || data === "[DONE]") {
+								continue;
+							}
+
+							let parsed: unknown;
+							try {
+								parsed = JSON.parse(data);
+							} catch {
+								continue;
+							}
+							const deltaText = this.extractStreamDeltaText(parsed);
+							if (!deltaText) {
+								continue;
+							}
+							fullText += deltaText;
+							options?.onDelta?.(deltaText);
+						}
+					}
+
+					buffer += decoder.decode();
+					if (buffer.trim().startsWith("data:")) {
+						const data = buffer.trim().slice(5).trim();
+						if (data && data !== "[DONE]") {
+							try {
+								const parsed = JSON.parse(data);
+								const deltaText = this.extractStreamDeltaText(parsed);
+								if (deltaText) {
+									fullText += deltaText;
+									options?.onDelta?.(deltaText);
+								}
+							} catch {
+								// Ignore trailing partial event.
+							}
+						}
+					}
+
+					if (fullText.trim()) {
+						return fullText;
+					}
+
+					return this.chat(messages, options);
+				} catch (error) {
+					lastError = error;
+					const status = extractHttpStatus(error);
+					const hasFallback = index < endpoints.length - 1;
+					if ((status === 404 || status === 405 || status === 400) && hasFallback) {
 						break;
 					}
-					buffer += decoder.decode(chunk.value, { stream: true });
-
-					let newlineIndex = buffer.indexOf("\n");
-					while (newlineIndex >= 0) {
-						const rawLine = buffer.slice(0, newlineIndex).replace(/\r$/, "");
-						buffer = buffer.slice(newlineIndex + 1);
-						newlineIndex = buffer.indexOf("\n");
-
-						const line = rawLine.trim();
-						if (!line || !line.startsWith("data:")) {
-							continue;
-						}
-
-						const data = line.slice(5).trim();
-						if (!data || data === "[DONE]") {
-							continue;
-						}
-
-						let parsed: unknown;
-						try {
-							parsed = JSON.parse(data);
-						} catch {
-							continue;
-						}
-						const deltaText = this.extractStreamDeltaText(parsed);
-						if (!deltaText) {
-							continue;
-						}
-						fullText += deltaText;
-						options?.onDelta?.(deltaText);
+					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
+						await this.delay(getLlmRetryDelayMs(attempt));
+						attempt += 1;
+						continue;
 					}
-				}
-
-				buffer += decoder.decode();
-				if (buffer.trim().startsWith("data:")) {
-					const data = buffer.trim().slice(5).trim();
-					if (data && data !== "[DONE]") {
-						try {
-							const parsed = JSON.parse(data);
-							const deltaText = this.extractStreamDeltaText(parsed);
-							if (deltaText) {
-								fullText += deltaText;
-								options?.onDelta?.(deltaText);
-							}
-						} catch {
-							// Ignore trailing partial event.
-						}
+					if (status != null) {
+						throw this.normalizeError(error, endpoint, triedEndpoints);
 					}
-				}
 
-				if (fullText.trim()) {
-					return fullText;
-				}
-
-				return this.chat(messages, options);
-			} catch (error) {
-				lastError = error;
-				const status = this.extractHttpStatus(error);
-				const hasFallback = index < endpoints.length - 1;
-				if ((status === 404 || status === 405 || status === 400) && hasFallback) {
-					continue;
-				}
-				if (status != null) {
-					throw this.normalizeError(error, endpoint, triedEndpoints);
-				}
-
-				// If streaming is not supported by runtime/network, gracefully fallback to non-streaming.
-				try {
-					return await this.chat(messages, options);
-				} catch (fallbackError) {
-					throw this.normalizeError(fallbackError, endpoint, triedEndpoints);
+					try {
+						return await this.chat(messages, options);
+					} catch (fallbackError) {
+						throw this.normalizeError(fallbackError, endpoint, triedEndpoints);
+					}
 				}
 			}
 		}
@@ -809,43 +810,46 @@ export class AIService {
 			throw new Error("当前 API 地址仅命中 responses 端点，无法执行 native tool calling。");
 		}
 
-		const headers: Record<string, string> = {
-			"Content-Type": "application/json",
-		};
-		if (config.mode !== "group" && config.apiKey?.trim()) {
-			headers.Authorization = `Bearer ${config.apiKey.trim()}`;
-		}
+		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);
 
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
-			const payload = this.buildToolPayload(messages, tools, options);
+			let attempt = 0;
 
-			try {
-				const response = await requestUrl({
-					url: endpoint,
-					method: "POST",
-					headers,
-					body: JSON.stringify(payload),
-				});
-				const body = response.json as ChatResponseBody;
-				const assistantText = this.extractMessageContent(body, true);
-				const toolCall = this.extractToolCall(body);
-				return {
-					assistantText,
-					toolCall,
-					finishReason: body.choices?.[0]?.finish_reason ?? "",
-				};
-			} catch (error) {
-				lastError = error;
-				const status = this.extractHttpStatus(error);
-				const hasFallback = index < endpoints.length - 1;
-				if ((status === 404 || status === 405 || status === 400) && hasFallback) {
-					continue;
+			while (true) {
+				const payload = this.buildToolPayload(messages, tools, options);
+				try {
+					const response = await requestUrl({
+						url: endpoint,
+						method: "POST",
+						headers,
+						body: JSON.stringify(payload),
+					});
+					const body = response.json as ChatResponseBody;
+					const assistantText = this.extractMessageContent(body, true);
+					const toolCall = this.extractToolCall(body);
+					return {
+						assistantText,
+						toolCall,
+						finishReason: body.choices?.[0]?.finish_reason ?? "",
+					};
+				} catch (error) {
+					lastError = error;
+					const status = extractHttpStatus(error);
+					const hasFallback = index < endpoints.length - 1;
+					if ((status === 404 || status === 405 || status === 400) && hasFallback) {
+						break;
+					}
+					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
+						await this.delay(getLlmRetryDelayMs(attempt));
+						attempt += 1;
+						continue;
+					}
+					throw this.normalizeError(error, endpoint, triedEndpoints);
 				}
-				throw this.normalizeError(error, endpoint, triedEndpoints);
 			}
 		}
 
@@ -883,6 +887,12 @@ export class AIService {
 		} catch (error) {
 			throw new Error(`解析 JSON 响应失败：${String(error)}`);
 		}
+	}
+
+	private async delay(ms: number): Promise<void> {
+		await new Promise<void>((resolve) => {
+			window.setTimeout(resolve, ms);
+		});
 	}
 }
 
