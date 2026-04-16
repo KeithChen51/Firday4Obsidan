@@ -46,12 +46,13 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 			}
 
 			const result = await plugin.syncService.sync(currentProject);
+			const projectLabel = currentProject.projectName || currentProject.projectId || currentProject.slug;
 			if (result.success) {
 				currentProject.lastSyncAt = new Date().toISOString();
 				await plugin.saveSettings();
-				new Notice(plugin.t("notice.syncSuccess", { slug: currentProject.slug }), 3000);
+				new Notice(plugin.t("notice.syncSuccess", { slug: projectLabel }), 3000);
 			} else {
-				new Notice(plugin.t("notice.syncFailed", { error: result.error ?? currentProject.slug }), 6000);
+				new Notice(plugin.t("notice.syncFailed", { error: result.error ?? projectLabel }), 6000);
 			}
 
 			plugin.workbenchStateStore.recordSyncReport({

@@ -92,10 +92,16 @@ export function validateProjectDraft(
 	if (normalizedDraft.mode === "remote_bootstrap" && !normalizedDraft.gitRemote) {
 		throw new Error("Git remote is required for remote bootstrap.");
 	}
+	if (normalizedDraft.mode === "local_only" && normalizedDraft.gitRemote) {
+		throw new Error("local_only mode cannot bind a remote repository.");
+	}
 	if (Boolean(normalizedDraft.gitUsername) !== Boolean(normalizedDraft.gitToken)) {
 		throw new Error("Git username and token must both be provided, or both left empty.");
 	}
 	const rawRoot = String(draft.boundaryPath || ("projectRootPath" in draft ? draft.projectRootPath : "") || "").trim();
+	if (normalizedDraft.mode === "local_only" && !rawRoot) {
+		return;
+	}
 	if (!isVaultRelativePath(rawRoot)) {
 		throw new Error("Project root must be a Vault-relative path.");
 	}
@@ -119,6 +125,13 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		normalizedDraft.mode === "register_existing_dir" || normalizedDraft.mode === "remote_bootstrap"
 			? await detectProjectGitState(resolvedPath)
 			: null;
+	if (
+		normalizedDraft.mode === "register_existing_dir" &&
+		normalizedDraft.gitRemote.trim() &&
+		detectedState?.gitState === "none"
+	) {
+		throw new Error("register_existing_dir cannot bind a remote unless the selected directory is already a Git repository root.");
+	}
 	const hasRemote = Boolean(normalizedDraft.gitRemote.trim());
 	const entry: ProjectEntry = {
 		projectId: normalizedDraft.projectId,
@@ -131,8 +144,6 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		autoSync: hasRemote ? normalizedDraft.autoSync : false,
 		lastSyncAt: initial?.lastSyncAt ?? "",
 	};
-
-	await syncService.prepareRepository(entry);
 	return entry;
 }
 

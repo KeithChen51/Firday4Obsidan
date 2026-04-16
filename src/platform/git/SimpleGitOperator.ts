@@ -3,7 +3,14 @@ import path from "path";
 import simpleGit, { type SimpleGit } from "simple-git";
 import { App, normalizePath } from "obsidian";
 import { getPathPresets, getRootCandidates, PRIMARY_PATHS } from "../../constants/paths";
-import type { ProjectEntry, ProjectGitCredential, SyncResult, SyncStatus } from "../../types/project";
+import type {
+	ProjectEntry,
+	ProjectGitCredential,
+	SyncResult,
+	SyncStatus,
+	SyncWorkingTreeChange,
+	SyncWorkingTreeChangeKind,
+} from "../../types/project";
 import type { FridaySettings } from "../../types/settings";
 import { formatDate } from "../../utils/dateUtils";
 import { getVaultBasePath } from "../../utils/vaultPath";
@@ -198,6 +205,7 @@ export class SimpleGitOperator implements GitOperator {
 			}
 
 			const status = await git.status();
+			const workingTreeChanges = this.buildWorkingTreeChanges(status);
 			const connected = project.gitRemote ? await this.canReachRemote(project, git) : false;
 
 			return {
@@ -207,9 +215,10 @@ export class SimpleGitOperator implements GitOperator {
 				connected,
 				ahead: status.ahead,
 				behind: status.behind,
-				dirty: status.files.length,
+				dirty: workingTreeChanges.length,
 				conflicts: status.conflicted.length,
 				lastSyncAt: project.lastSyncAt || "",
+				workingTreeChanges,
 			};
 		} catch (error) {
 			console.error("[Friday] Failed to get sync status:", error);
@@ -400,7 +409,7 @@ export class SimpleGitOperator implements GitOperator {
 		const user = this.getSettings().user;
 		const credential = await this.getProjectGitCredential(project.projectId || project.slug);
 		const inferredName = credential?.username?.trim() || owner;
-		const inferredEmail = user.gitUserEmail?.trim() || (owner ? `${owner}@users.noreply.gitee.com` : "");
+		const inferredEmail = user.gitUserEmail?.trim() || this.inferNoreplyEmail(project.gitRemote, owner);
 
 		if (!localName && !globalName) {
 			if (!inferredName) {
@@ -449,6 +458,31 @@ export class SimpleGitOperator implements GitOperator {
 			return "";
 		}
 		return segments[segments.length - 2] ?? "";
+	}
+
+	private parseRemoteHost(remote: string): string {
+		const input = remote.trim();
+		if (!input) {
+			return "";
+		}
+		const sshLike = input.match(/^git@([^:]+):.+$/i);
+		const sshProtocol = input.match(/^ssh:\/\/git@([^/]+)\/.+$/i);
+		const httpsLike = input.match(/^[a-z]+:\/\/([^/]+)\/.+$/i);
+		return (sshLike?.[1] ?? sshProtocol?.[1] ?? httpsLike?.[1] ?? "").toLowerCase();
+	}
+
+	private inferNoreplyEmail(remote: string, owner: string): string {
+		if (!owner) {
+			return "";
+		}
+		const host = this.parseRemoteHost(remote);
+		if (host.includes("github.com")) {
+			return `${owner}@users.noreply.github.com`;
+		}
+		if (host.includes("gitee.com")) {
+			return `${owner}@users.noreply.gitee.com`;
+		}
+		return "";
 	}
 
 	private async canReachRemote(project: ProjectEntry, git: SimpleGit): Promise<boolean> {
@@ -507,6 +541,42 @@ export class SimpleGitOperator implements GitOperator {
 			dirty: 0,
 			conflicts: 0,
 			lastSyncAt: project.lastSyncAt || "",
+			workingTreeChanges: [],
 		};
+	}
+
+	private buildWorkingTreeChanges(
+		status: Awaited<ReturnType<SimpleGit["status"]>>,
+	): SyncWorkingTreeChange[] {
+		const changes = new Map<string, SyncWorkingTreeChangeKind>();
+		const addPaths = (paths: string[] | undefined, kind: SyncWorkingTreeChangeKind) => {
+			for (const item of paths ?? []) {
+				if (!item?.trim()) {
+					continue;
+				}
+				changes.set(normalizePath(item.trim()), kind);
+			}
+		};
+		const summary = status as typeof status & {
+			not_added?: string[];
+			modified?: string[];
+			deleted?: string[];
+			conflicted?: string[];
+			created?: string[];
+			renamed?: Array<{ from: string; to: string }>;
+		};
+		addPaths(summary.not_added, "untracked");
+		addPaths(summary.created, "untracked");
+		addPaths(summary.modified, "modified");
+		addPaths(summary.deleted, "deleted");
+		addPaths(summary.conflicted, "conflicted");
+		for (const item of summary.renamed ?? []) {
+			if (item?.to?.trim()) {
+				changes.set(normalizePath(item.to.trim()), "renamed");
+			}
+		}
+		return [...changes.entries()]
+			.map(([path, kind]) => ({ path, kind }))
+			.sort((left, right) => left.path.localeCompare(right.path, "en"));
 	}
 }

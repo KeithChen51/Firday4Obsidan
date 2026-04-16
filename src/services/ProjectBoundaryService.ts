@@ -39,6 +39,9 @@ export class ProjectBoundaryService {
 			return "";
 		}
 		const projectRootPath = project.boundaryPath?.trim();
+		if (projectRootPath === "") {
+			return "";
+		}
 		if (projectRootPath && !path.isAbsolute(projectRootPath)) {
 			return normalizeVaultPath(projectRootPath);
 		}
@@ -49,7 +52,11 @@ export class ProjectBoundaryService {
 		if (!project) {
 			return "";
 		}
-		return path.join(this.getVaultBasePath(), ...this.getProjectVaultPath(project).split("/"));
+		const vaultPath = this.getProjectVaultPath(project);
+		if (!vaultPath) {
+			return this.getVaultBasePath();
+		}
+		return path.join(this.getVaultBasePath(), ...vaultPath.split("/"));
 	}
 
 	getProjectRoot(project: ProjectEntry): string {
@@ -67,6 +74,9 @@ export class ProjectBoundaryService {
 	isWithinProject(project: ProjectEntry, vaultRelativePath: string): boolean {
 		const normalizedPath = normalizeVaultPath(vaultRelativePath);
 		const root = this.getProjectRoot(project);
+		if (!root) {
+			return true;
+		}
 		return normalizedPath === root || normalizedPath.startsWith(`${root}/`);
 	}
 
@@ -89,6 +99,9 @@ export class ProjectBoundaryService {
 			return normalizedInput;
 		}
 		const root = this.getProjectVaultPath(project);
+		if (!root) {
+			return normalizedInput;
+		}
 		if (normalizedInput === root || normalizedInput.startsWith(`${root}/`)) {
 			return normalizedInput;
 		}

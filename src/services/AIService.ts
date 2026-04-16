@@ -85,13 +85,28 @@ export interface ModelCapabilityInfo {
 	reason: string;
 }
 
+export interface ConnectionProbeResult {
+	probeText: string;
+	visionCapability: ModelCapabilityInfo;
+}
+
+const VISION_PROBE_IMAGE_DATA_URL =
+	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6u8AAAAASUVORK5CYII=";
+
 export class AIService {
 	private static readonly MAX_RETRY_ATTEMPTS = 3;
 
 	constructor(private readonly getConfig: () => FridaySettings["llm"]) {}
 
 	isConfigured(): boolean {
-		return Boolean(this.getConfig().apiUrl?.trim());
+		const config = this.getConfig();
+		if (!config.apiUrl?.trim()) {
+			return false;
+		}
+		if (config.mode === "group") {
+			return Boolean(config.model?.trim());
+		}
+		return true;
 	}
 
 	getModelCapability(modelOverride?: string): ModelCapabilityInfo {
@@ -155,6 +170,45 @@ export class AIService {
 			confidence: "low",
 			reason: "无法从模型名称可靠判断，建议实际测试。",
 		};
+	}
+
+	private buildCapabilityInfo(
+		model: string,
+		vision: VisionCapability,
+		confidence: "high" | "medium" | "low",
+		reason: string,
+	): ModelCapabilityInfo {
+		return {
+			model: model.trim(),
+			vision,
+			confidence,
+			reason,
+		};
+	}
+
+	private classifyVisionProbeError(error: unknown, model: string): ModelCapabilityInfo {
+		const raw = String(error ?? "").trim();
+		const lower = raw.toLowerCase();
+		const status = extractHttpStatus(error);
+		if (
+			status === 400 ||
+			status === 404 ||
+			status === 405 ||
+			status === 422 ||
+			lower.includes("unsupported") ||
+			lower.includes("vision") ||
+			lower.includes("image") ||
+			lower.includes("multimodal") ||
+			lower.includes("input_image")
+		) {
+			return this.buildCapabilityInfo(model, "unsupported", "medium", "图片探测失败，当前模型或网关可能不支持视觉输入。");
+		}
+		return this.buildCapabilityInfo(
+			model,
+			"unknown",
+			"low",
+			`视觉探测未完成：${raw || "未知错误"}`,
+		);
 	}
 
 	private addCandidate(list: string[], value: string): void {
@@ -867,6 +921,36 @@ export class AIService {
 			{ maxTokens: 16 },
 		);
 		return probe.trim();
+	}
+
+	async probeVisionCapability(): Promise<ModelCapabilityInfo> {
+		const model = this.getConfig().model.trim();
+		try {
+			await this.chat(
+				[
+					{
+						role: "user",
+						content: "请仅回复 OK",
+						parts: [
+							{ type: "text", text: "请仅回复 OK" },
+							{ type: "image_url", image_url: { url: VISION_PROBE_IMAGE_DATA_URL } },
+						],
+					},
+				],
+				{ maxTokens: 16 },
+			);
+			return this.buildCapabilityInfo(model, "supported", "high", "已通过图片输入探测。");
+		} catch (error) {
+			return this.classifyVisionProbeError(error, model);
+		}
+	}
+
+	async checkConnectionCapabilities(): Promise<ConnectionProbeResult> {
+		const probeText = await this.checkConnection();
+		return {
+			probeText,
+			visionCapability: await this.probeVisionCapability(),
+		};
 	}
 
 	async chatJSON<T>(messages: ChatMessage[], schema?: object): Promise<T> {

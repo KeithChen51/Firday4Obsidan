@@ -55,6 +55,13 @@ export interface ProjectEntry {
 	lastSyncAt: string;
 }
 
+export type SyncWorkingTreeChangeKind = "untracked" | "modified" | "deleted" | "conflicted" | "renamed";
+
+export interface SyncWorkingTreeChange {
+	path: string;
+	kind: SyncWorkingTreeChangeKind;
+}
+
 export interface RawSidecarMeta {
 	metaVersion: number;
 	docId: string;
@@ -138,4 +145,5 @@ export interface SyncStatus {
 	dirty: number;
 	conflicts: number;
 	lastSyncAt: string;
+	workingTreeChanges: SyncWorkingTreeChange[];
 }

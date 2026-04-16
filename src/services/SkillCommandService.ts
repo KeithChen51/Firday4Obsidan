@@ -96,7 +96,7 @@ export class SkillCommandService {
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly getSettings: () => FridaySettings,
 		private readonly getVaultBasePath: () => string,
-		private readonly getLocale: () => LocaleCode,
+		private readonly getLocale: () => LocaleCode = () => "zh-CN",
 	) {}
 
 	parseSlashCommand(rawPrompt: string): ParsedSkillSlashCommand {

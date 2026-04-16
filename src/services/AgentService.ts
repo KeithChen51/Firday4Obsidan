@@ -143,6 +143,7 @@ export class AgentService {
 				name: "默认 Agent",
 				description: "系统默认通用助手",
 				model: settings.llm.model,
+				modelMode: settings.llm.mode,
 			});
 			settings.agents = [created];
 			settings.activeAgentId = created.id;
@@ -166,6 +167,7 @@ export class AgentService {
 		name: string;
 		description: string;
 		model?: string;
+		modelMode?: "openai" | "group";
 	}): Promise<AgentProfile> {
 		const now = new Date().toISOString();
 		const id = this.ensureUniqueAgentId(this.normalizeAgentId(input.id || input.name));
@@ -174,6 +176,7 @@ export class AgentService {
 			name: input.name.trim() || "未命名 Agent",
 			description: input.description.trim(),
 			model: input.model?.trim() ?? "",
+			modelMode: input.model?.trim() ? input.modelMode : undefined,
 			agentFilePath: this.getAgentFilePath(id),
 			createdAt: now,
 			updatedAt: now,

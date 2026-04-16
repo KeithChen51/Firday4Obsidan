@@ -154,6 +154,14 @@ test("sync service syncAll source no longer filters projects by autoSync", async
 	assert.match(source, /for \(const project of projects\)/);
 });
 
+test("sync service queues conflict resolution actions instead of bypassing the global sync queue", async () => {
+	const source = readSyncServiceSource();
+	assert.match(
+		source,
+		/async resolveConflict\(project: ProjectEntry, filePath: string, strategy: "ours" \| "theirs"\): Promise<void> \{[\s\S]*?this\.queue\.enqueue\(async \(\) => \{/,
+	);
+});
+
 test("sync orchestrator emits recovery-failed event when stash pop restoration fails", async () => {
 	const { orchestratorModule, queueModule, eventBusModule } = await loadModules();
 	const bus = new eventBusModule.SyncEventBus();

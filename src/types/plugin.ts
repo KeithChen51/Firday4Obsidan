@@ -56,10 +56,12 @@ export interface FridayPluginApi {
 	addSettingTab: Plugin["addSettingTab"];
 	saveSettings(): Promise<void>;
 	upsertProject(project: ProjectEntry): Promise<void>;
-	removeProject(slug: string): Promise<void>;
-	setActiveProject(projectSlug: string): Promise<void>;
+	removeProject(projectId: string): Promise<void>;
+	setActiveProject(projectId: string): Promise<void>;
 	getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null>;
 	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
+	setSyncMode(mode: FridaySettings["sync"]["mode"]): Promise<void>;
+	setProjectAutoSync(projectId: string, enabled: boolean): Promise<void>;
 	compileWikiForActiveProject(rawPaths?: string[], forceRebuild?: boolean): Promise<RuntimeWikiCompileSummary>;
 	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
 	removeProjectGroup(groupId: string): Promise<void>;

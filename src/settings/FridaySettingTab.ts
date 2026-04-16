@@ -80,6 +80,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private ignoreManagerProjectId = "";
 	private ignoreManagerCandidates: GitIgnoreCandidate[] = [];
 	private ignoreManagerError = "";
+	private ignoreManagerPendingRulePath = "";
 	private readonly gitIgnoreService: GitIgnoreService;
 
 	constructor(app: App, plugin: SettingsHost) {
@@ -226,8 +227,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
 			toggle.setValue(this.host.settings.sync.mode === "continuous_auto").onChange(async (value) => {
-				this.host.settings.sync.mode = value ? "continuous_auto" : "manual";
-				await this.host.saveSettings();
+				await this.host.setSyncMode(value ? "continuous_auto" : "manual");
 				this.display();
 			}),
 		);
@@ -250,10 +250,10 @@ export class FridaySettingTab extends PluginSettingTab {
 						const parsed = Number.parseInt(value, 10);
 						const nextValue = Number.isFinite(parsed) ? parsed : 0;
 						this.host.settings.sync.idleMinutes = nextValue;
-						if (this.host.settings.sync.mode !== "continuous_auto") {
-							this.host.settings.sync.mode = nextValue > 0 ? "idle_auto" : "manual";
-						}
 						await this.host.saveSettings();
+						if (this.host.settings.sync.mode !== "continuous_auto") {
+							await this.host.setSyncMode(nextValue > 0 ? "idle_auto" : "manual");
+						}
 						this.display();
 					}),
 			);
@@ -1072,6 +1072,7 @@ export class FridaySettingTab extends PluginSettingTab {
 								this.ignoreManagerProjectId = "";
 								this.ignoreManagerCandidates = [];
 								this.ignoreManagerError = "";
+								this.ignoreManagerPendingRulePath = "";
 								this.display();
 								return;
 							}
@@ -1825,9 +1826,11 @@ export class FridaySettingTab extends PluginSettingTab {
 		try {
 			this.ignoreManagerCandidates = await this.gitIgnoreService.listCandidates(project);
 			this.ignoreManagerError = "";
+			this.ignoreManagerPendingRulePath = "";
 		} catch (error) {
 			this.ignoreManagerCandidates = [];
 			this.ignoreManagerError = error instanceof Error ? error.message : String(error ?? "");
+			this.ignoreManagerPendingRulePath = "";
 		}
 	}
 
@@ -1857,17 +1860,35 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			});
 			const actions = row.createDiv({ cls: "friday-approval-actions" });
-			const button = actions.createEl("button", {
-				text: this.t("projects.ignore.apply", "Ignore"),
-			});
-			button.onclick = () => {
-				void this.applyProjectIgnoreRule(project, candidate.path);
-			};
+			if (this.ignoreManagerPendingRulePath === candidate.path) {
+				const confirmButton = actions.createEl("button", {
+					text: this.t("projects.ignore.confirmAction", "确认写入"),
+				});
+				confirmButton.onclick = () => {
+					void this.applyProjectIgnoreRule(project, candidate.path);
+				};
+				const cancelButton = actions.createEl("button", {
+					text: this.t("projects.ignore.cancelAction", "取消"),
+				});
+				cancelButton.onclick = () => {
+					this.ignoreManagerPendingRulePath = "";
+					this.display();
+				};
+			} else {
+				const button = actions.createEl("button", {
+					text: this.t("projects.ignore.apply", "Ignore"),
+				});
+				button.onclick = () => {
+					this.ignoreManagerPendingRulePath = candidate.path;
+					this.display();
+				};
+			}
 		}
 	}
 
 	private async applyProjectIgnoreRule(project: ProjectEntry, rulePath: string): Promise<void> {
 		await this.gitIgnoreService.applyRule(project, rulePath);
+		this.ignoreManagerPendingRulePath = "";
 		new Notice(this.t("projects.ignore.applied", "已写入忽略规则：{path}", { path: rulePath }), 3000);
 		await this.loadProjectIgnoreCandidates(project);
 		this.display();

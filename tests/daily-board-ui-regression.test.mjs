@@ -39,11 +39,11 @@ function readLocaleSource(localePath) {
 	return fs.readFileSync(localePath, "utf8");
 }
 
-test("tool approval prompt handler no longer forces checks page", async () => {
+test("tool approval prompt handler no longer forces tools page", async () => {
 	const source = readViewSource();
 	const match = source.match(/setPromptHandler\(async \(request\) => \{([\s\S]*?)return decision;/);
 	assert.ok(match, "prompt handler block should exist");
-	assert.ok(!/this\.activePage\s*=\s*"checks"/.test(match[1] ?? ""), "prompt handler should stay inline on chat page");
+	assert.ok(!/this\.activePage\s*=\s*"tools"/.test(match[1] ?? ""), "prompt handler should stay inline on chat page");
 });
 
 test("daily board view supports collapsible session nav", async () => {
@@ -118,10 +118,10 @@ test("project navigation and page copy now present sync-first wording", async ()
 	assert.match(en, /"projects\.header": "Sync"/);
 });
 
-test("checks page is dedicated to tool and skill management only", async () => {
+test("tools page is dedicated to tool and skill management only", async () => {
 	const source = readViewSource();
-	const match = source.match(/private renderChecksPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderApprovalCard/);
-	assert.ok(match, "renderChecksPage block should exist");
+	const match = source.match(/private renderToolsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderApprovalCard/);
+	assert.ok(match, "renderToolsPage block should exist");
 	const block = match[1] ?? "";
 	assert.match(block, /populateControlCenter\(/);
 	assert.doesNotMatch(block, /approvalQueue\.list\(/);
@@ -135,15 +135,15 @@ test("checks page is dedicated to tool and skill management only", async () => {
 
 test("sync actions stay on sync page instead of jumping to tools page", async () => {
 	const source = readViewSource();
-	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
-	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
-	assert.match(source, /private async generateConflictProposal\(projectId: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "projects"/);
+	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);
+	assert.match(source, /private async syncSingleProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);
+	assert.match(source, /private async generateConflictProposal\(projectId: string, filePath: string\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);
 });
 
 test("sync page no longer renders a duplicate project editor before empty-state handling", async () => {
 	const source = readViewSource();
-	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
-	assert.ok(match, "renderProjectsPage block should exist");
+	const match = source.match(/private renderSyncPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncProjectCard/);
+	assert.ok(match, "renderSyncPage block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /projectEditorDraft/);
 	assert.doesNotMatch(block, /renderProjectEditorCard\(/);
@@ -151,8 +151,8 @@ test("sync page no longer renders a duplicate project editor before empty-state 
 
 test("sync page empty-state routes users to settings instead of inline project creation", async () => {
 	const source = readViewSource();
-	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
-	assert.ok(match, "renderProjectsPage block should exist");
+	const match = source.match(/private renderSyncPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncProjectCard/);
+	assert.ok(match, "renderSyncPage block should exist");
 	const block = match[1] ?? "";
 	const emptyMatch = block.match(/if \(projects.length === 0\) \{([\s\S]*?)return;/);
 	assert.ok(emptyMatch, "empty-state branch should exist");
@@ -174,14 +174,14 @@ test("daily board view no longer owns project editor state or handoff consumptio
 
 test("sync page no longer renders member editor or member actions", async () => {
 	const source = readViewSource();
-	const projectsPageMatch = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
-	assert.ok(projectsPageMatch, "renderProjectsPage block should exist");
-	const projectsBlock = projectsPageMatch[1] ?? "";
-	assert.doesNotMatch(projectsBlock, /memberEditorProjectSlug/);
-	assert.doesNotMatch(projectsBlock, /renderMemberEditorCard\(/);
+	const syncPageMatch = source.match(/private renderSyncPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncProjectCard/);
+	assert.ok(syncPageMatch, "renderSyncPage block should exist");
+	const syncBlock = syncPageMatch[1] ?? "";
+	assert.doesNotMatch(syncBlock, /memberEditorProjectSlug/);
+	assert.doesNotMatch(syncBlock, /renderMemberEditorCard\(/);
 
-	const cardMatch = source.match(/private renderProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectStatusPanel/);
-	assert.ok(cardMatch, "renderProjectCard block should exist");
+	const cardMatch = source.match(/private renderSyncProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncAutomationControls/);
+	assert.ok(cardMatch, "renderSyncProjectCard block should exist");
 	const cardBlock = cardMatch[1] ?? "";
 	assert.doesNotMatch(cardBlock, /projects\.button\.members/);
 	assert.doesNotMatch(cardBlock, /openMemberEditor\(/);
@@ -191,8 +191,8 @@ test("sync page no longer renders member editor or member actions", async () => 
 
 test("sync page branches on none, git_local, and git_remote_bound project states", async () => {
 	const source = readViewSource();
-	const cardMatch = source.match(/private renderProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectStatusPanel/);
-	assert.ok(cardMatch, "renderProjectCard block should exist");
+	const cardMatch = source.match(/private renderSyncProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncAutomationControls/);
+	assert.ok(cardMatch, "renderSyncProjectCard block should exist");
 	const cardBlock = cardMatch[1] ?? "";
 	assert.match(cardBlock, /project\.gitState === "none"/);
 	assert.match(cardBlock, /project\.gitState === "git_local"/);
@@ -205,13 +205,13 @@ test("sync page branches on none, git_local, and git_remote_bound project states
 
 test("sync page renders only the active project context instead of a multi-project grid", async () => {
 	const source = readViewSource();
-	const match = source.match(/private renderProjectsPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectCard/);
-	assert.ok(match, "renderProjectsPage block should exist");
+	const match = source.match(/private renderSyncPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncProjectCard/);
+	assert.ok(match, "renderSyncPage block should exist");
 	const block = match[1] ?? "";
 	assert.match(block, /const activeProject = this\.getActiveProjectEntry\(\)/);
 	assert.doesNotMatch(block, /friday-project-grid/);
 	assert.doesNotMatch(block, /for \(const project of projects\)/);
-	assert.match(block, /this\.renderProjectCard\(containerEl, activeProject\)/);
+	assert.match(block, /this\.renderSyncProjectCard\(containerEl, activeProject\)/);
 });
 
 test("sync page exposes ignore management through dedicated integration points", async () => {
@@ -244,6 +244,31 @@ test("sync page renders typed conflict records with accept-local accept-remote a
 	assert.match(source, /expandedConflictKey/);
 	assert.doesNotMatch(source, /private async finalizeConflictAction/);
 	assert.doesNotMatch(source, /checks\.sync\.finalize/);
+});
+
+test("daily board view uses sync and tools page identifiers internally", async () => {
+	const source = readViewSource();
+	assert.match(source, /private activePage: "chat" \| "sync" \| "tools" = "chat"/);
+	assert.match(source, /private renderSyncPage\(containerEl: HTMLElement\): void/);
+	assert.match(source, /private renderToolsPage\(containerEl: HTMLElement\): void/);
+	assert.doesNotMatch(source, /private activePage: "chat" \| "projects" \| "checks"/);
+});
+
+test("sync page exposes inline auto-sync controls for the active project", async () => {
+	const source = readViewSource();
+	assert.match(source, /private renderSyncAutomationControls\(containerEl: HTMLElement, project: ProjectEntry\): void/);
+	assert.match(source, /setSyncMode\(/);
+	assert.match(source, /setProjectAutoSync\(/);
+	assert.match(source, /projects\.sync\.autoMode/);
+	assert.match(source, /projects\.sync\.autoProject/);
+});
+
+test("sync page renders working tree change groups and conflict diff comparison blocks", async () => {
+	const source = readViewSource();
+	assert.match(source, /workingTreeChanges/);
+	assert.match(source, /projects\.sync\.changesTitle/);
+	assert.match(source, /private renderConflictDiffComparison\(containerEl: HTMLElement, conflict: SyncConflictRecord\): void/);
+	assert.match(source, /friday-sync-diff/);
 });
 
 test("sync page and sync commands key runtime records by projectId instead of slug", async () => {

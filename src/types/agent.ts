@@ -5,6 +5,7 @@ export interface AgentProfile {
 	name: string;
 	description: string;
 	model: string;
+	modelMode?: "openai" | "group";
 	agentFilePath: string;
 	createdAt: string;
 	updatedAt: string;

@@ -77,7 +77,7 @@ interface RuntimeExecutionState {
 
 export class DailyBoardView extends ItemView {
 	private refreshTimer: number | null = null;
-	private activePage: "chat" | "projects" | "checks" = "chat";
+	private activePage: "chat" | "sync" | "tools" = "chat";
 	private readonly approvalQueue = new ApprovalQueue();
 	private pendingProjectRemoval: ProjectEntry | null = null;
 	private memberEditorProjectSlug = "";
@@ -85,6 +85,7 @@ export class DailyBoardView extends ItemView {
 	private memberEditorNewUserId = "";
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
 	private expandedConflictKey = "";
+	private pendingIgnoreConfirmationKey = "";
 
 	private aiConversation: ChatMessage[] = [];
 	private aiSessions: ConversationSession[] = [];
@@ -202,12 +203,12 @@ export class DailyBoardView extends ItemView {
 		this.renderShellHeader(shellHeaderEl);
 		this.renderTopNav(topNavEl);
 		if (this.plugin.settings.projects.length === 0) {
-			this.activePage = "projects";
-			this.renderProjectsPage(contentEl);
-		} else if (this.activePage === "projects") {
-			this.renderProjectsPage(contentEl);
-		} else if (this.activePage === "checks") {
-			this.renderChecksPage(contentEl);
+			this.activePage = "sync";
+			this.renderSyncPage(contentEl);
+		} else if (this.activePage === "sync") {
+			this.renderSyncPage(contentEl);
+		} else if (this.activePage === "tools") {
+			this.renderToolsPage(contentEl);
 		} else {
 			this.renderAiPage(contentEl);
 		}
@@ -273,13 +274,13 @@ export class DailyBoardView extends ItemView {
 
 	private renderTopNav(containerEl: HTMLElement): void {
 		this.addNavButton(containerEl, "chat", this.t("nav.chat", "Chat"), "message-square");
-		this.addNavButton(containerEl, "projects", this.t("nav.projects", "Projects"), "folder");
-		this.addNavButton(containerEl, "checks", this.t("nav.checks", "Checks"), "shield");
+		this.addNavButton(containerEl, "sync", this.t("nav.projects", "Sync"), "folder");
+		this.addNavButton(containerEl, "tools", this.t("nav.checks", "Tools & Skills"), "shield");
 	}
 
 	private addNavButton(
 		containerEl: HTMLElement,
-		page: "chat" | "projects" | "checks",
+		page: "chat" | "sync" | "tools",
 		label: string,
 		icon: string,
 	): void {
@@ -315,7 +316,7 @@ export class DailyBoardView extends ItemView {
 		return button;
 	}
 
-	private renderChecksPage(containerEl: HTMLElement): void {
+	private renderToolsPage(containerEl: HTMLElement): void {
 		const header = containerEl.createDiv({ cls: "friday-page-header" });
 		header.createEl("h3", { text: this.t("checks.title", "Tools & Skills") });
 		containerEl.createEl("p", {
@@ -372,13 +373,15 @@ export class DailyBoardView extends ItemView {
 		});
 		card.createDiv({
 			cls: "friday-approval-detail",
-			text: this.t("projects.remove.pendingDesc", "Remove project {slug} from the workspace?", { slug: project.slug }),
+			text: this.t("projects.remove.pendingDesc", "Remove project {project} from the workspace?", {
+				project: this.getProjectLabel(project),
+			}),
 		});
 		const actions = card.createDiv({ cls: "friday-approval-actions" });
 		this.addPageButton(actions, this.t("projects.remove.confirm", "Remove now"), async () => {
-			await this.plugin.removeProject(project.slug);
+			await this.plugin.removeProject(project.projectId);
 			this.pendingProjectRemoval = null;
-			this.activePage = "projects";
+			this.activePage = "sync";
 			await this.safeRenderBoard();
 		});
 		this.addPageButton(actions, this.t("projects.remove.cancel", "Cancel"), async () => {
@@ -569,7 +572,7 @@ export class DailyBoardView extends ItemView {
 			});
 		}
 		this.expandedConflictKey = this.getSyncConflictKey(projectId, filePath);
-		this.activePage = "projects";
+		this.activePage = "sync";
 		this.renderBoard();
 	}
 
@@ -617,15 +620,15 @@ export class DailyBoardView extends ItemView {
 		await this.plugin.setActiveProject(this.getProjectKey(activeProject));
 	}
 
-	private async switchActiveProject(projectSlug: string): Promise<void> {
-		if (!projectSlug || projectSlug === this.plugin.settings.activeProjectId || this.aiBusy) {
+	private async switchActiveProject(projectId: string): Promise<void> {
+		if (!projectId || projectId === this.plugin.settings.activeProjectId || this.aiBusy) {
 			return;
 		}
-		await this.plugin.setActiveProject(projectSlug);
+		await this.plugin.setActiveProject(projectId);
 		await this.safeRenderBoard();
 	}
 
-	private renderProjectsPage(containerEl: HTMLElement): void {
+	private renderSyncPage(containerEl: HTMLElement): void {
 		const projects = this.plugin.settings.projects;
 		const activeProject = this.getActiveProjectEntry();
 		const header = containerEl.createDiv({ cls: "friday-page-header" });
@@ -658,10 +661,10 @@ export class DailyBoardView extends ItemView {
 		if (!activeProject) {
 			return;
 		}
-		this.renderProjectCard(containerEl, activeProject);
+		this.renderSyncProjectCard(containerEl, activeProject);
 	}
 
-	private renderProjectCard(containerEl: HTMLElement, project: ProjectEntry): void {
+	private renderSyncProjectCard(containerEl: HTMLElement, project: ProjectEntry): void {
 		const card = containerEl.createDiv({ cls: "friday-project-card" });
 		if (this.getProjectKey(project) === this.plugin.settings.activeProjectId) {
 			card.addClass("is-active");
@@ -751,7 +754,48 @@ export class DailyBoardView extends ItemView {
 			void this.populateIgnoreCandidates(card, project);
 		}
 
+		this.renderSyncAutomationControls(card, project);
 		this.renderProjectStatusPanel(card, project);
+	}
+
+	private renderSyncAutomationControls(containerEl: HTMLElement, project: ProjectEntry): void {
+		if (project.gitState !== "git_remote_bound") {
+			return;
+		}
+		const panel = containerEl.createDiv({ cls: "friday-project-status-group" });
+		panel.createEl("h5", { text: this.t("projects.sync.autoTitle", "自动同步") });
+		panel.createEl("p", {
+			text: this.t("projects.sync.autoMode", "当前模式：{mode}", {
+				mode: this.getSyncModeLabel(this.plugin.settings.sync.mode),
+			}),
+		});
+
+		const modeRow = panel.createDiv({ cls: "friday-project-sync-control-row" });
+		modeRow.createSpan({
+			cls: "friday-project-sync-control-label",
+			text: this.t("projects.sync.autoModeLabel", "同步模式"),
+		});
+		const modeSelect = modeRow.createEl("select", { cls: "friday-shell-project-select" });
+		for (const option of this.getSyncModeOptions()) {
+			const element = modeSelect.createEl("option", { text: option.label });
+			element.value = option.value;
+			element.selected = option.value === this.plugin.settings.sync.mode;
+		}
+		modeSelect.onchange = () => {
+			void this.updateSyncMode(modeSelect.value as "manual" | "idle_auto" | "continuous_auto");
+		};
+
+		const projectRow = panel.createDiv({ cls: "friday-project-sync-control-row" });
+		projectRow.createSpan({
+			cls: "friday-project-sync-control-label",
+			text: this.t("projects.sync.autoProject", "当前项目参与自动同步"),
+		});
+		const toggleHost = projectRow.createDiv({ cls: "friday-control-toggle-host" });
+		const toggle = new ToggleComponent(toggleHost);
+		toggle.toggleEl.addClass("friday-control-native-toggle");
+		toggle.setValue(project.autoSync).onChange((value) => {
+			void this.updateProjectAutoSync(project, value);
+		});
 	}
 
 	private async populateProjectSyncStatus(containerEl: HTMLElement, project: ProjectEntry): Promise<void> {
@@ -785,6 +829,7 @@ export class DailyBoardView extends ItemView {
 					},
 				),
 			});
+			this.renderWorkingTreeChanges(containerEl, status.workingTreeChanges);
 		} catch (error) {
 			containerEl.createEl("p", {
 				text: this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
@@ -792,6 +837,79 @@ export class DailyBoardView extends ItemView {
 				}),
 			});
 		}
+	}
+
+	private renderWorkingTreeChanges(
+		containerEl: HTMLElement,
+		workingTreeChanges: Array<{ path: string; kind: string }>,
+	): void {
+		const panel = containerEl.createDiv({ cls: "friday-project-status-group" });
+		panel.createEl("h5", {
+			text: this.t("projects.sync.changesTitle", "工作区变化"),
+		});
+		if (workingTreeChanges.length === 0) {
+			panel.createEl("p", {
+				text: this.t("projects.sync.noChanges", "当前工作区无待同步变化。"),
+			});
+			return;
+		}
+		for (const change of workingTreeChanges) {
+			panel.createDiv({
+				cls: "friday-approval-detail",
+				text: this.t("projects.sync.changeItem", "{kind}: {path}", {
+					kind: this.getWorkingTreeChangeLabel(change.kind),
+					path: change.path,
+				}),
+			});
+		}
+	}
+
+	private getWorkingTreeChangeLabel(kind: string): string {
+		switch (kind) {
+			case "untracked":
+				return this.t("projects.sync.changeKind.untracked", "未跟踪");
+			case "modified":
+				return this.t("projects.sync.changeKind.modified", "已修改");
+			case "deleted":
+				return this.t("projects.sync.changeKind.deleted", "已删除");
+			case "conflicted":
+				return this.t("projects.sync.changeKind.conflicted", "冲突");
+			case "renamed":
+				return this.t("projects.sync.changeKind.renamed", "已重命名");
+			default:
+				return kind;
+		}
+	}
+
+	private getSyncModeOptions(): Array<{ value: "manual" | "idle_auto" | "continuous_auto"; label: string }> {
+		return [
+			{ value: "manual", label: this.getSyncModeLabel("manual") },
+			{ value: "idle_auto", label: this.getSyncModeLabel("idle_auto") },
+			{ value: "continuous_auto", label: this.getSyncModeLabel("continuous_auto") },
+		];
+	}
+
+	private getSyncModeLabel(mode: "manual" | "idle_auto" | "continuous_auto"): string {
+		switch (mode) {
+			case "manual":
+				return this.t("projects.sync.mode.manual", "手动同步");
+			case "idle_auto":
+				return this.t("projects.sync.mode.idle", "空闲自动同步");
+			case "continuous_auto":
+				return this.t("projects.sync.mode.continuous", "连续自动同步");
+			default:
+				return mode;
+		}
+	}
+
+	private async updateSyncMode(mode: "manual" | "idle_auto" | "continuous_auto"): Promise<void> {
+		await this.plugin.setSyncMode(mode);
+		this.renderBoard();
+	}
+
+	private async updateProjectAutoSync(project: ProjectEntry, enabled: boolean): Promise<void> {
+		await this.plugin.setProjectAutoSync(project.projectId, enabled);
+		this.renderBoard();
 	}
 
 	private async populateIgnoreCandidates(containerEl: HTMLElement, project: ProjectEntry): Promise<void> {
@@ -811,9 +929,20 @@ export class DailyBoardView extends ItemView {
 					}),
 				});
 				const actions = row.createDiv({ cls: "friday-approval-actions" });
-				this.addPageButton(actions, this.t("projects.ignore.apply", "Ignore"), async () => {
-					await this.applyIgnoreRule(project, candidate.path);
-				});
+				if (this.getIgnoreConfirmationKey(project.projectId, candidate.path) === this.pendingIgnoreConfirmationKey) {
+					this.addPageButton(actions, this.t("projects.ignore.confirmAction", "确认写入"), async () => {
+						await this.applyIgnoreRule(project, candidate.path);
+					});
+					this.addPageButton(actions, this.t("projects.ignore.cancelAction", "取消"), async () => {
+						this.pendingIgnoreConfirmationKey = "";
+						this.renderBoard();
+					});
+				} else {
+					this.addPageButton(actions, this.t("projects.ignore.apply", "Ignore"), async () => {
+						this.pendingIgnoreConfirmationKey = this.getIgnoreConfirmationKey(project.projectId, candidate.path);
+						this.renderBoard();
+					});
+				}
 			}
 		} catch (error) {
 			containerEl.createEl("p", {
@@ -826,8 +955,13 @@ export class DailyBoardView extends ItemView {
 
 	private async applyIgnoreRule(project: ProjectEntry, rulePath: string): Promise<void> {
 		await this.gitIgnoreService.applyRule(project, rulePath);
+		this.pendingIgnoreConfirmationKey = "";
 		new Notice(this.t("projects.ignore.applied", "Ignore rule added: {path}", { path: rulePath }), 3000);
 		await this.safeRenderBoard();
+	}
+
+	private getIgnoreConfirmationKey(projectId: string, rulePath: string): string {
+		return `${projectId}::${rulePath}`;
 	}
 
 	private renderProjectStatusPanel(containerEl: HTMLElement, project: ProjectEntry): void {
@@ -892,16 +1026,7 @@ export class DailyBoardView extends ItemView {
 				text: this.t("checks.sync.snapshot", "Snapshot") + `: ${conflict.snapshotPath}`,
 			});
 		}
-		card.createDiv({
-			cls: "friday-approval-detail",
-			text: this.t("projects.conflicts.local", "Local version"),
-		});
-		card.createEl("pre", { cls: "friday-exec-output", text: conflict.localSnippet || "(empty)" });
-		card.createDiv({
-			cls: "friday-approval-detail",
-			text: this.t("projects.conflicts.remote", "Remote version"),
-		});
-		card.createEl("pre", { cls: "friday-exec-output", text: conflict.remoteSnippet || "(empty)" });
+		this.renderConflictDiffComparison(card, conflict);
 		card.createDiv({
 			cls: "friday-approval-detail",
 			text: this.t("projects.conflicts.merged", "Working tree"),
@@ -925,6 +1050,48 @@ export class DailyBoardView extends ItemView {
 		this.addPageButton(actions, this.t("projects.conflicts.defer", "Not now"), async () => {
 			this.deferConflictAction(conflict.projectId, conflict.filePath);
 		});
+	}
+
+	private renderConflictDiffComparison(containerEl: HTMLElement, conflict: SyncConflictRecord): void {
+		const wrap = containerEl.createDiv({ cls: "friday-sync-diff" });
+		this.renderConflictDiffColumn(
+			wrap,
+			this.t("projects.conflicts.local", "Local version"),
+			conflict.localSnippet || "(empty)",
+			conflict.remoteSnippet || "(empty)",
+		);
+		this.renderConflictDiffColumn(
+			wrap,
+			this.t("projects.conflicts.remote", "Remote version"),
+			conflict.remoteSnippet || "(empty)",
+			conflict.localSnippet || "(empty)",
+		);
+	}
+
+	private renderConflictDiffColumn(
+		containerEl: HTMLElement,
+		title: string,
+		primaryText: string,
+		secondaryText: string,
+	): void {
+		const column = containerEl.createDiv({ cls: "friday-sync-diff-column" });
+		column.createDiv({
+			cls: "friday-approval-detail",
+			text: title,
+		});
+		const primaryLines = primaryText.split(/\r?\n/);
+		const secondaryLines = secondaryText.split(/\r?\n/);
+		const body = column.createDiv({ cls: "friday-sync-diff-body" });
+		const total = Math.max(primaryLines.length, secondaryLines.length, 1);
+		for (let index = 0; index < total; index += 1) {
+			const line = body.createDiv({ cls: "friday-sync-diff-line" });
+			const primary = primaryLines[index] ?? "";
+			const secondary = secondaryLines[index] ?? "";
+			if (primary !== secondary) {
+				line.addClass("is-changed");
+			}
+			line.setText(primary || " ");
+		}
 	}
 
 	private getSyncConflictKey(projectId: string, filePath: string): string {
@@ -3131,7 +3298,7 @@ export class DailyBoardView extends ItemView {
 		this.memberEditorMembers = await this.plugin.dataService.getProjectMembers(projectSlug);
 		this.memberEditorNewUserId = "";
 		this.memberEditorNewRole = "editor";
-		this.activePage = "projects";
+		this.activePage = "sync";
 		this.renderBoard();
 	}
 
@@ -3202,7 +3369,7 @@ export class DailyBoardView extends ItemView {
 		} else if (this.expandedConflictKey.startsWith(`${project.projectId}::`)) {
 			this.expandedConflictKey = "";
 		}
-		this.activePage = "projects";
+		this.activePage = "sync";
 		this.renderBoard();
 	}
 
@@ -3240,7 +3407,7 @@ export class DailyBoardView extends ItemView {
 				recordedAt,
 			}))
 			.slice(0, 12));
-		this.activePage = "projects";
+		this.activePage = "sync";
 		this.renderBoard();
 	}
 

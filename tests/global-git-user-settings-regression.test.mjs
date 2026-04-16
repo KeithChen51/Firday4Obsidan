@@ -14,6 +14,7 @@ const settingTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts"
 const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const syncServicePath = path.join(projectRoot, "src/services/SyncService.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
+const gitOperatorPath = path.join(projectRoot, "src/platform/git/SimpleGitOperator.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
@@ -88,4 +89,10 @@ test("settings migration still detects legacy git credentials for secure-storage
 	assert.match(source, /gitUserEmail/);
 	assert.match(source, /gitToken/);
 	assert.match(source, /pendingLegacyGitCredentials|migrateLegacyGitCredentials/);
+});
+
+test("git identity inference no longer hardcodes a gitee noreply fallback for every remote", async () => {
+	const source = read(gitOperatorPath);
+	assert.match(source, /inferNoreplyEmail|parseRemoteHost/);
+	assert.doesNotMatch(source, /owner \? `\$\{owner\}@users\.noreply\.gitee\.com` : ""/);
 });

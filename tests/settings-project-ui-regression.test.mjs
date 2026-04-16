@@ -73,3 +73,10 @@ test("settings project section manages ignore candidates inline instead of redir
 	assert.match(source, /renderProjectIgnoreManager\(/);
 	assert.doesNotMatch(source, /openWorkspaceView\(\)/);
 });
+
+test("settings project ignore flow asks for confirmation before writing shared gitignore rules", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /ignoreManagerPendingRulePath/);
+	assert.match(source, /projects\.ignore\.confirmAction/);
+	assert.doesNotMatch(source, /window\.confirm\(/);
+});

@@ -57,3 +57,10 @@ test("sync status bar subscribes to sync runtime store updates", async () => {
 	assert.match(source, /setText/);
 	assert.match(source, /getProjectState/);
 });
+
+test("sync status bar exposes stage-aware summary text and click-through affordance", async () => {
+	const source = read(statusBarPath);
+	assert.match(source, /getStageLabel/);
+	assert.match(source, /data-sync-stage/);
+	assert.match(source, /onclick/);
+});

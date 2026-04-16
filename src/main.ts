@@ -87,6 +87,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	syncRuntimeStore!: SyncRuntimeStore;
 	syncStatusBar!: SyncStatusBar;
 	private readonly rawIngestTimers = new Map<string, number>();
+	private idleAutoSyncInterval: number | null = null;
+	private continuousAutoSyncListenerRegistered = false;
 	private compileWikiInFlight: Promise<WikiCompileResult> | null = null;
 	private detectedUserId = "";
 	private pendingLegacyGitCredentials: ProjectGitCredential | null = null;
@@ -247,6 +249,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.syncRuntimeStore,
 				statusBarItem,
 				() => this.settings.activeProjectId,
+				() => {
+					void this.openWorkspaceView();
+				},
 			);
 
 			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
@@ -266,6 +271,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			window.clearTimeout(timer);
 		}
 		this.rawIngestTimers.clear();
+		if (this.idleAutoSyncInterval != null) {
+			window.clearInterval(this.idleAutoSyncInterval);
+			this.idleAutoSyncInterval = null;
+		}
 		this.syncStatusBar?.destroy();
 		this.syncRuntimeStore?.destroy();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_BOARD);
@@ -326,6 +335,25 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 	}
 
+	async setSyncMode(mode: FridaySettings["sync"]["mode"]): Promise<void> {
+		if (this.settings.sync.mode === mode) {
+			return;
+		}
+		this.settings.sync.mode = mode;
+		await this.saveSettings();
+		this.startAutoSync();
+	}
+
+	async setProjectAutoSync(projectId: string, enabled: boolean): Promise<void> {
+		const project = this.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
+		if (!project) {
+			throw new Error(`未找到项目: ${projectId}`);
+		}
+		project.autoSync = project.gitState === "git_remote_bound" && Boolean(project.gitRemote) ? enabled : false;
+		await this.saveSettings();
+		this.startAutoSync();
+	}
+
 	getPrimaryUserId(): string {
 		return this.settings.user.userId || this.detectedUserId;
 	}
@@ -378,6 +406,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.settings.activeProjectId = normalizedProject.projectId;
 		}
 		await this.saveSettings();
+		this.startAutoSync();
 	}
 
 	async removeProject(projectId: string): Promise<void> {
@@ -392,6 +421,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			await this.setProjectGitCredential(projectId, null);
 		}
 		await this.saveSettings();
+		this.startAutoSync();
 	}
 
 	async setActiveProject(projectId: string): Promise<void> {
@@ -974,32 +1004,38 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	private startIdleAutoSync(): void {
+		if (this.idleAutoSyncInterval != null) {
+			window.clearInterval(this.idleAutoSyncInterval);
+			this.idleAutoSyncInterval = null;
+		}
 		const { mode, idleMinutes } = this.settings.sync;
 		if (mode !== "idle_auto" || !idleMinutes || idleMinutes <= 0 || this.settings.projects.length === 0) {
 			return;
 		}
 
 		const ms = idleMinutes * 60 * 1000;
-		this.registerInterval(
-			window.setInterval(() => {
-				if (!this.settings.projects.some((item) => item.autoSync)) {
-					return;
-				}
-				void this.autoSyncManager
-					.runIdleCycle()
-					.catch((error) => {
-						console.error("[Friday] Idle auto sync failed:", error);
-					});
-			}, ms),
-		);
+		this.idleAutoSyncInterval = window.setInterval(() => {
+			if (!this.settings.projects.some((item) => item.autoSync)) {
+				return;
+			}
+			void this.autoSyncManager
+				.runIdleCycle()
+				.catch((error) => {
+					console.error("[Friday] Idle auto sync failed:", error);
+				});
+		}, ms);
 	}
 
 	private startContinuousAutoSync(): void {
-		if (this.settings.sync.mode !== "continuous_auto") {
+		if (this.continuousAutoSyncListenerRegistered) {
 			return;
 		}
+		this.continuousAutoSyncListenerRegistered = true;
 		this.registerEvent(
 			this.app.vault.on("modify", (file) => {
+				if (this.settings.sync.mode !== "continuous_auto") {
+					return;
+				}
 				const projectSlug = this.dataService.getProjectSlugFromPath(file.path);
 				if (!projectSlug) {
 					return;

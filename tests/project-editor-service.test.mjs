@@ -51,12 +51,48 @@ test("project editor service allows Chinese project name without git credential 
 				projectId: "alpha",
 				projectName: "胖东来白板",
 				boundaryPath: "F.R.I.D.A.Y/项目/alpha",
-				gitRemote: "https://example.com/repo.git",
+				gitRemote: "",
 				autoSync: false,
 			},
 			new Set(),
 		);
 	});
+});
+
+test("project editor service allows local_only projects to leave boundaryPath empty for whole-vault scope", async () => {
+	const mod = await loadModule();
+	assert.doesNotThrow(() => {
+		mod.validateProjectDraft(
+			{
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "alpha",
+				projectName: "整个仓库项目",
+				boundaryPath: "",
+				gitRemote: "",
+				autoSync: false,
+			},
+			new Set(),
+		);
+	});
+});
+
+test("project editor service rejects git remote for local_only mode", async () => {
+	const mod = await loadModule();
+	assert.throws(() => {
+		mod.validateProjectDraft(
+			{
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "",
+				gitRemote: "https://example.com/demo.git",
+				autoSync: false,
+			},
+			new Set(),
+		);
+	}, /local_only/i);
 });
 
 test("project editor service returns unified project model without pre-generating scaffold files", async () => {
@@ -100,7 +136,7 @@ test("project editor service returns unified project model without pre-generatin
 		assert.equal("projectRootPath" in entry, false);
 		assert.equal("localPath" in entry, false);
 		assert.equal(entry.autoSync, false);
-		assert.equal(syncCalls.length, 1);
+		assert.equal(syncCalls.length, 0);
 
 		const projectDir = path.join(vaultRoot, "projects", "alpha-project");
 		const rawDir = path.join(projectDir, "raw");
@@ -166,6 +202,48 @@ test("project editor service rejects Vault-external absolute paths for register 
 				new Set(),
 			);
 		}, /Vault-relative path/);
+	}
+});
+
+test("project editor service rejects remote binding during register_existing_dir when target is not a git repository root", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-register-existing-"));
+
+	try {
+		const plainDir = path.join(vaultRoot, "projects", "plain");
+		await fs.mkdir(plainDir, { recursive: true });
+
+		await assert.rejects(
+			mod.submitProjectDraft({
+				app: {
+					vault: {
+						adapter: {
+							basePath: vaultRoot,
+						},
+					},
+				},
+				syncService: {
+					async prepareRepository() {
+						throw new Error("prepareRepository should not run for invalid register_existing_dir remote binding");
+					},
+				},
+				draft: {
+					groupId: "default-group",
+					mode: "register_existing_dir",
+					projectId: "plain",
+					projectName: "Plain",
+					boundaryPath: "projects/plain",
+					gitRemote: "https://example.com/demo.git",
+					autoSync: true,
+				},
+				existingProjectIds: new Set(),
+				fridayRoot: "F.R.I.D.A.Y",
+				currentUserId: "keith",
+			}),
+			/cannot bind a remote|register_existing_dir/i,
+		);
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
 	}
 });
 

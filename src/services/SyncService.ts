@@ -126,14 +126,16 @@ export class SyncService {
 	}
 
 	async resolveConflict(project: ProjectEntry, filePath: string, strategy: "ours" | "theirs"): Promise<void> {
-		await this.operator.resolveConflict(project, filePath, strategy);
-		this.eventBus?.emit({
-			type: "sync_conflict_resolved_written_back",
-			projectId: project.projectId,
-			projectSlug: project.slug,
-			filePath,
-			strategy,
-			recordedAt: new Date().toISOString(),
+		await this.queue.enqueue(async () => {
+			await this.operator.resolveConflict(project, filePath, strategy);
+			this.eventBus?.emit({
+				type: "sync_conflict_resolved_written_back",
+				projectId: project.projectId,
+				projectSlug: project.slug,
+				filePath,
+				strategy,
+				recordedAt: new Date().toISOString(),
+			});
 		});
 	}
 
