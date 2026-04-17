@@ -2312,60 +2312,108 @@
 	display: flex;
 	flex-direction: column;
 	gap: 10px;
-	padding: 12px;
-	border-radius: 16px;
-	border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in srgb, var(--background-primary) 94%, var(--interactive-accent) 3%) 0%,
-			color-mix(in srgb, var(--background-secondary) 96%, var(--interactive-accent) 5%) 100%
-		);
-	box-shadow: 0 18px 44px color-mix(in srgb, var(--background-primary) 32%, transparent);
+	padding: 12px 10px 10px;
+	border-radius: 18px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+	background: color-mix(in srgb, var(--background-secondary) 94%, var(--background-primary) 6%);
+	box-shadow: 0 16px 32px color-mix(in srgb, var(--background-primary) 18%, transparent);
 }
 
 .friday-ai-drawer-backdrop {
 	position: absolute;
 	inset: 0;
 	z-index: 20;
-	background: color-mix(in srgb, var(--background-primary) 42%, transparent);
-	backdrop-filter: blur(2px);
+	background: color-mix(in srgb, var(--background-primary) 10%, transparent);
 }
 
 .friday-ai-session-drawer-header,
 .friday-ai-session-drawer-actions {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 8px;
+}
+
+.friday-ai-session-drawer-header {
+	justify-content: space-between;
+	padding: 0 2px;
+}
+
+.friday-ai-session-drawer-heading {
+	min-width: 0;
 }
 
 .friday-ai-session-drawer-header h4 {
 	margin: 0;
 	font-size: 0.9em;
+	font-weight: 700;
+}
+
+.friday-ai-session-header-button {
+	flex-shrink: 0;
+}
+
+.friday-ai-session-manage.is-active {
+	color: var(--text-normal);
+	border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+}
+
+.friday-ai-session-search-wrap {
+	position: relative;
+	display: flex;
+	align-items: center;
+	min-height: 34px;
+	border-radius: 10px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: var(--background-primary);
+}
+
+.friday-ai-session-search-icon {
+	position: absolute;
+	left: 10px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+	pointer-events: none;
+}
+
+.friday-ai-session-search-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.friday-ai-session-search {
+	width: 100%;
+	height: 34px;
+	padding: 0 10px 0 32px;
+	border: 0;
+	background: transparent;
+	color: var(--text-normal);
+	font-size: 0.82em;
+}
+
+.friday-ai-session-search:focus {
+	outline: none;
 }
 
 .friday-ai-session-list {
-	padding: 0;
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 14px;
+	min-height: 0;
+	padding: 0 4px 0 0;
+	overflow-y: auto;
 }
 
-.friday-ai-session-item {
-	min-height: 58px;
-	padding: 9px 10px;
-	border-radius: 12px;
+.friday-ai-session-empty {
+	padding: 12px 10px;
+	border: 1px dashed color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	border-radius: 10px;
 	background: color-mix(in srgb, var(--background-primary) 88%, transparent);
-}
-
-.friday-ai-session-item-meta {
-	font-size: 0.74em;
-}
-
-.friday-ai-session-note {
-	font-size: 0.76em;
-	line-height: 1.5;
+	font-size: 0.82em;
 	color: var(--text-muted);
-	padding-top: 2px;
-	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
 }
 
 .friday-policy-panel {
@@ -2395,7 +2443,7 @@
 		margin-left: 0;
 	}
 
-	.friday-ai-session-drawer {
+.friday-ai-session-drawer {
 		width: calc(100% - 16px);
 	}
 }
@@ -2431,24 +2479,26 @@
 	width: min(100%, 640px);
 }
 
-.friday-ai-session-manage,
-.friday-ai-session-bulkbutton,
-.friday-ai-session-mini-action {
+.friday-ai-session-bulkbutton {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
 	min-height: 28px;
 	padding: 0 10px;
-	border-radius: 999px;
-	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
-	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
+	border-radius: 8px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: var(--background-primary);
 	font-size: 0.75em;
-	font-weight: 600;
+	font-weight: 500;
 	cursor: pointer;
 }
 
-.friday-ai-session-bulkbutton.is-danger,
-.friday-ai-session-mini-action.is-danger {
+.friday-ai-session-bulkbutton:hover {
+	border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
+}
+
+.friday-ai-session-bulkbutton.is-danger {
 	border-color: color-mix(in srgb, var(--color-red) 34%, var(--background-modifier-border));
 	background: color-mix(in srgb, var(--color-red) 10%, var(--background-primary));
 }
@@ -2458,10 +2508,7 @@
 	align-items: center;
 	justify-content: space-between;
 	gap: 8px;
-	padding: 8px 10px;
-	border-radius: 12px;
-	background: color-mix(in srgb, var(--background-primary) 90%, transparent);
-	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	padding: 0 2px;
 }
 
 .friday-ai-session-bulktext {
@@ -2476,25 +2523,75 @@
 	flex-wrap: wrap;
 }
 
+.friday-ai-session-group {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.friday-ai-session-group-label {
+	padding: 0 6px;
+	font-size: 0.72em;
+	font-weight: 700;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-muted);
+}
+
+.friday-ai-session-group-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
 .friday-ai-session-item {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	padding: 2px 6px 6px 10px;
+	border-radius: 10px;
+	background: transparent;
+	transition: background-color 120ms ease;
+}
+
+.friday-ai-session-item::before {
+	content: "";
+	position: absolute;
+	left: 0;
+	top: 6px;
+	bottom: 6px;
+	width: 2px;
+	border-radius: 999px;
+	background: transparent;
+}
+
+.friday-ai-session-item:hover,
+.friday-ai-session-item:focus-within {
+	background: var(--background-modifier-hover);
 }
 
 .friday-ai-session-item.is-selected {
-	border-color: color-mix(in srgb, var(--interactive-accent) 50%, var(--background-modifier-border));
-	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+	background: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-modifier-hover));
 }
 
-.friday-ai-session-item-header {
+.friday-ai-session-item.is-active {
+	background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-modifier-hover));
+}
+
+.friday-ai-session-item.is-active::before {
+	background: var(--interactive-accent);
+}
+
+.friday-ai-session-item-row {
 	display: flex;
 	align-items: flex-start;
 	gap: 8px;
+	min-width: 0;
 }
 
 .friday-ai-session-checkbox {
-	margin-top: 5px;
+	margin-top: 8px;
 }
 
 .friday-ai-session-item-body {
@@ -2502,35 +2599,82 @@
 	display: flex;
 	flex-direction: column;
 	align-items: flex-start;
-	gap: 4px;
+	gap: 3px;
 	background: transparent;
 	border: 0;
-	padding: 0;
+	padding: 4px 0;
 	text-align: left;
 	cursor: pointer;
 	min-width: 0;
 }
 
+.friday-ai-session-item-title {
+	width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 0.86em;
+	font-weight: 600;
+	line-height: 1.35;
+}
+
+.friday-ai-session-item-meta {
+	font-size: 0.75em;
+	color: var(--text-muted);
+}
+
 .friday-ai-session-item-actions {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	flex-wrap: wrap;
+	gap: 4px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 120ms ease;
+}
+
+.friday-ai-session-item:hover .friday-ai-session-item-actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.friday-ai-session-item:focus-within .friday-ai-session-item-actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.friday-ai-session-item-menu {
+	width: 28px;
+	height: 28px;
+	border-radius: 8px;
+}
+
+.friday-ai-session-item-menu svg {
+	width: 14px;
+	height: 14px;
 }
 
 .friday-ai-session-rename {
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	margin-left: 16px;
+	padding: 0 0 2px;
 }
 
 .friday-ai-session-rename-input {
 	width: 100%;
-	border-radius: 10px;
-	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
-	background: color-mix(in srgb, var(--background-primary) 94%, transparent);
-	padding: 8px 10px;
+	min-height: 32px;
+	border-radius: 8px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: var(--background-primary);
+	padding: 0 10px;
 	font-size: 0.82em;
+}
+
+.friday-ai-session-rename-input:focus {
+	outline: none;
+	border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 }
 
 .friday-ai-session-rename-actions {

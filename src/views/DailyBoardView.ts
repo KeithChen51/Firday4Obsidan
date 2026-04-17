@@ -1,6 +1,7 @@
 ﻿import {
 	ItemView,
 	MarkdownRenderer,
+	Menu,
 	Notice,
 	TFile,
 	TFolder,
@@ -76,6 +77,12 @@ interface RuntimeExecutionState {
 	activeContextEntryKey: string | null;
 }
 
+interface SessionListGroup {
+	key: string;
+	label: string;
+	sessions: ConversationSession[];
+}
+
 export class DailyBoardView extends ItemView {
 	private refreshTimer: number | null = null;
 	private activePage: "chat" | "sync" | "tools" = "chat";
@@ -95,6 +102,7 @@ export class DailyBoardView extends ItemView {
 	private aiSessions: ConversationSession[] = [];
 	private aiSessionId = "";
 	private aiSessionNavCollapsed = true;
+	private aiSessionSearchQuery = "";
 	private aiDraft = "";
 	private aiComposerSnapshot: MentionComposerSnapshot = createEmptyMentionComposerSnapshot();
 	private aiBusy = false;
@@ -1539,33 +1547,36 @@ export class DailyBoardView extends ItemView {
 
 		const drawerEl = containerEl.createDiv({ cls: "friday-ai-session-drawer" });
 		const headerEl = drawerEl.createDiv({ cls: "friday-ai-session-drawer-header" });
-		headerEl.createEl("h4", {
+		const headingEl = headerEl.createDiv({ cls: "friday-ai-session-drawer-heading" });
+		headingEl.createEl("h4", {
 			text: this.t("ai.sessions.title", "对话记录"),
 		});
 		const actionsEl = headerEl.createDiv({ cls: "friday-ai-session-drawer-actions" });
-		const newButton = actionsEl.createEl("button", {
-			cls: "friday-ai-session-new",
-			text: this.t("ai.sessions.new", "新建"),
-		});
-		newButton.type = "button";
+		const newButton = this.createIconButton(
+			actionsEl,
+			"friday-shell-icon-button friday-ai-session-header-button",
+			"plus",
+			this.t("ai.sessions.new", "新建"),
+			() => {
+				this.startNewAiSession();
+			},
+		);
 		newButton.disabled = this.aiBusy;
-		newButton.onclick = () => {
-			this.startNewAiSession();
-		};
-		const manageButton = actionsEl.createEl("button", {
-			cls: "friday-ai-session-new friday-ai-session-manage",
-			text: this.aiSessionManageMode
+		const manageButton = this.createIconButton(
+			actionsEl,
+			`friday-shell-icon-button friday-ai-session-header-button friday-ai-session-manage${this.aiSessionManageMode ? " is-active" : ""}`,
+			this.aiSessionManageMode ? "check" : "list",
+			this.aiSessionManageMode
 				? this.t("ai.sessions.manage.done", "完成")
 				: this.t("ai.sessions.manage.enter", "管理"),
-		});
-		manageButton.type = "button";
+			() => {
+				this.toggleSessionManageMode();
+			},
+		);
 		manageButton.disabled = this.aiBusy || this.aiSessions.length === 0;
-		manageButton.onclick = () => {
-			this.toggleSessionManageMode();
-		};
 		this.createIconButton(
 			actionsEl,
-			"friday-shell-icon-button friday-ai-meta-button",
+			"friday-shell-icon-button friday-ai-session-header-button",
 			"x",
 			this.t("ai.sessions.collapse", "收起对话列表"),
 			() => {
@@ -1574,10 +1585,42 @@ export class DailyBoardView extends ItemView {
 			},
 		);
 
+		const searchWrap = drawerEl.createDiv({ cls: "friday-ai-session-search-wrap" });
+		const searchIcon = searchWrap.createSpan({ cls: "friday-ai-session-search-icon" });
+		setIcon(searchIcon, "search");
+		const searchInput = searchWrap.createEl("input", {
+			cls: "friday-ai-session-search",
+			attr: {
+				type: "search",
+				placeholder: this.t("ai.sessions.search.placeholder", "搜索对话…"),
+			},
+		});
+		searchInput.value = this.aiSessionSearchQuery;
+		searchInput.oninput = () => {
+			this.aiSessionSearchQuery = searchInput.value;
+			this.renderBoard();
+		};
+		searchInput.onkeydown = (event) => {
+			if (event.key === "Escape" && this.aiSessionSearchQuery) {
+				event.preventDefault();
+				this.aiSessionSearchQuery = "";
+				this.renderBoard();
+			}
+		};
+
+		const filteredSessions = this.getFilteredAiSessions();
+		const visibleSessionIds = filteredSessions.map((session) => session.sessionId);
+		const selectedVisibleCount = visibleSessionIds.filter((sessionId) => this.aiSessionSelection.has(sessionId)).length;
+		const allVisibleSelected = visibleSessionIds.length > 0 && selectedVisibleCount === visibleSessionIds.length;
 		const listEl = drawerEl.createDiv({ cls: "friday-ai-session-list" });
 		if (this.aiSessions.length === 0) {
 			const emptyEl = listEl.createDiv({ cls: "friday-ai-session-empty" });
 			emptyEl.setText(this.t("ai.sessions.empty", "暂无对话记录"));
+			return;
+		}
+		if (filteredSessions.length === 0) {
+			const emptyEl = listEl.createDiv({ cls: "friday-ai-session-empty" });
+			emptyEl.setText(this.t("ai.sessions.emptyFiltered", "没有匹配的对话"));
 			return;
 		}
 
@@ -1586,134 +1629,144 @@ export class DailyBoardView extends ItemView {
 			const counter = bulkBar.createDiv({
 				cls: "friday-ai-session-bulktext",
 				text: this.t("ai.sessions.manage.selected", "已选 {count} 项", {
-					count: this.aiSessionSelection.size,
+					count: selectedVisibleCount,
 				}),
 			});
 			counter.setAttribute("aria-live", "polite");
 			const bulkActions = bulkBar.createDiv({ cls: "friday-ai-session-bulkactions" });
 			const selectAll = bulkActions.createEl("button", {
 				cls: "friday-ai-session-bulkbutton",
-				text: this.aiSessionSelection.size === this.aiSessions.length
+				text: allVisibleSelected
 					? this.t("ai.sessions.manage.clear", "清空选择")
 					: this.t("ai.sessions.manage.selectAll", "全选"),
 			});
 			selectAll.type = "button";
 			selectAll.onclick = () => {
-				this.toggleAllSessionSelections();
+				this.toggleAllSessionSelections(visibleSessionIds);
 			};
 			const deleteSelected = bulkActions.createEl("button", {
 				cls: "friday-ai-session-bulkbutton is-danger",
 				text: this.t("ai.sessions.manage.deleteSelected", "删除所选"),
 			});
 			deleteSelected.type = "button";
-			deleteSelected.disabled = this.aiSessionSelection.size === 0 || this.aiBusy;
+			deleteSelected.disabled = selectedVisibleCount === 0 || this.aiBusy;
 			deleteSelected.onclick = () => {
 				void this.deleteSelectedSessions();
 			};
 		}
 
-		for (const session of this.aiSessions) {
-			const itemEl = listEl.createDiv({ cls: "friday-ai-session-item" });
-			if (session.sessionId === this.aiSessionId) {
-				itemEl.addClass("is-active");
-			}
-			if (this.aiSessionSelection.has(session.sessionId)) {
-				itemEl.addClass("is-selected");
-			}
-			const rowHeader = itemEl.createDiv({ cls: "friday-ai-session-item-header" });
-			if (this.aiSessionManageMode) {
-				const checkbox = rowHeader.createEl("input", { attr: { type: "checkbox" }, cls: "friday-ai-session-checkbox" });
-				checkbox.checked = this.aiSessionSelection.has(session.sessionId);
-				checkbox.onclick = (event) => {
-					event.stopPropagation();
-				};
-				checkbox.onchange = () => {
-					this.toggleSessionSelection(session.sessionId);
-				};
-			}
-			const bodyButton = rowHeader.createEl("button", { cls: "friday-ai-session-item-body" });
-			bodyButton.type = "button";
-			bodyButton.createDiv({
-				cls: "friday-ai-session-item-title",
-				text: this.buildSessionTitle(session),
-			});
-			bodyButton.createDiv({
-				cls: "friday-ai-session-item-meta",
-				text: this.formatSessionUpdatedAt(session.updatedAt),
-			});
-			bodyButton.onclick = () => {
-				if (this.aiSessionManageMode) {
-					this.toggleSessionSelection(session.sessionId);
-					return;
+		const groups = this.buildSessionGroups(filteredSessions);
+		for (const group of groups) {
+			const groupEl = listEl.createDiv({ cls: "friday-ai-session-group" });
+			groupEl.createDiv({ cls: "friday-ai-session-group-label", text: group.label });
+			const groupList = groupEl.createDiv({ cls: "friday-ai-session-group-list" });
+			for (const session of group.sessions) {
+				const itemEl = groupList.createDiv({ cls: "friday-ai-session-item" });
+				if (session.sessionId === this.aiSessionId) {
+					itemEl.addClass("is-active");
 				}
-				void this.switchAiSession(session.sessionId);
-			};
-
-			const utility = rowHeader.createDiv({ cls: "friday-ai-session-item-actions" });
-			if (!this.aiSessionManageMode) {
-				const renameButton = utility.createEl("button", {
-					cls: "friday-ai-session-mini-action",
-					text: this.t("ai.sessions.rename.action", "重命名"),
+				if (this.aiSessionSelection.has(session.sessionId)) {
+					itemEl.addClass("is-selected");
+				}
+				const rowEl = itemEl.createDiv({ cls: "friday-ai-session-item-row" });
+				if (this.aiSessionManageMode) {
+					const checkbox = rowEl.createEl("input", { attr: { type: "checkbox" }, cls: "friday-ai-session-checkbox" });
+					checkbox.checked = this.aiSessionSelection.has(session.sessionId);
+					checkbox.onclick = (event) => {
+						event.stopPropagation();
+					};
+					checkbox.onchange = () => {
+						this.toggleSessionSelection(session.sessionId);
+					};
+				}
+				const bodyButton = rowEl.createEl("button", { cls: "friday-ai-session-item-body" });
+				bodyButton.type = "button";
+				bodyButton.createDiv({
+					cls: "friday-ai-session-item-title",
+					text: this.buildSessionTitle(session),
 				});
-				renameButton.type = "button";
-				renameButton.onclick = (event) => {
+				bodyButton.createDiv({
+					cls: "friday-ai-session-item-meta",
+					text: this.formatSessionUpdatedAt(session.updatedAt),
+				});
+				bodyButton.onclick = () => {
+					if (this.aiSessionManageMode) {
+						this.toggleSessionSelection(session.sessionId);
+						return;
+					}
+					void this.switchAiSession(session.sessionId);
+				};
+				bodyButton.ondblclick = () => {
+					if (!this.aiSessionManageMode) {
+						this.beginSessionRename(session);
+					}
+				};
+				bodyButton.oncontextmenu = (event) => {
+					if (this.aiSessionManageMode) {
+						return;
+					}
+					event.preventDefault();
 					event.stopPropagation();
-					this.beginSessionRename(session);
+					this.openSessionActionsMenu(session, event);
 				};
-			}
-			const deleteButton = utility.createEl("button", {
-				cls: "friday-ai-session-mini-action is-danger",
-				text: this.aiSessionManageMode
-					? this.t("ai.sessions.delete.one", "删")
-					: this.t("ai.sessions.delete.action", "删除"),
-			});
-			deleteButton.type = "button";
-			deleteButton.onclick = (event) => {
-				event.stopPropagation();
-				void this.deleteSingleSession(session.sessionId);
-			};
+				if (!this.aiSessionManageMode) {
+					const utility = rowEl.createDiv({ cls: "friday-ai-session-item-actions" });
+					const menuButton = utility.createEl("button", {
+						cls: "friday-shell-icon-button friday-ai-session-item-menu",
+					});
+					menuButton.type = "button";
+					menuButton.setAttribute("aria-label", this.t("ai.sessions.more", "更多操作"));
+					setIcon(menuButton, "more-horizontal");
+					menuButton.onclick = (event) => {
+						event.stopPropagation();
+						this.openSessionActionsMenu(session, event);
+					};
+				}
 
-			if (this.aiSessionRenameId === session.sessionId) {
-				const renameRow = itemEl.createDiv({ cls: "friday-ai-session-rename" });
-				const renameInput = renameRow.createEl("input", {
-					cls: "friday-ai-session-rename-input",
-					attr: { type: "text" },
-				});
-				renameInput.value = this.aiSessionRenameDraft;
-				renameInput.oninput = () => {
-					this.aiSessionRenameDraft = renameInput.value;
-				};
-				renameInput.onkeydown = (event) => {
-					if (event.key === "Enter") {
-						event.preventDefault();
+				if (this.aiSessionRenameId === session.sessionId) {
+					const renameRow = itemEl.createDiv({ cls: "friday-ai-session-rename" });
+					const renameInput = renameRow.createEl("input", {
+						cls: "friday-ai-session-rename-input",
+						attr: { type: "text" },
+					});
+					renameInput.value = this.aiSessionRenameDraft;
+					renameInput.oninput = () => {
+						this.aiSessionRenameDraft = renameInput.value;
+					};
+					renameInput.onkeydown = (event) => {
+						if (event.key === "Enter") {
+							event.preventDefault();
+							void this.commitSessionRename(session.sessionId);
+						}
+						if (event.key === "Escape") {
+							event.preventDefault();
+							this.cancelSessionRename();
+							this.renderBoard();
+						}
+					};
+					window.setTimeout(() => {
+						renameInput.focus();
+						renameInput.select();
+					}, 0);
+					const renameActions = renameRow.createDiv({ cls: "friday-ai-session-rename-actions" });
+					const saveRename = renameActions.createEl("button", {
+						cls: "friday-ai-session-bulkbutton",
+						text: this.t("ai.sessions.rename.save", "保存"),
+					});
+					saveRename.type = "button";
+					saveRename.onclick = () => {
 						void this.commitSessionRename(session.sessionId);
-					}
-					if (event.key === "Escape") {
-						event.preventDefault();
+					};
+					const cancelRename = renameActions.createEl("button", {
+						cls: "friday-ai-session-bulkbutton",
+						text: this.t("ai.sessions.rename.cancel", "取消"),
+					});
+					cancelRename.type = "button";
+					cancelRename.onclick = () => {
 						this.cancelSessionRename();
-					}
-				};
-				window.setTimeout(() => {
-					renameInput.focus();
-					renameInput.select();
-				}, 0);
-				const renameActions = renameRow.createDiv({ cls: "friday-ai-session-rename-actions" });
-				const saveRename = renameActions.createEl("button", {
-					cls: "friday-ai-session-bulkbutton",
-					text: this.t("ai.sessions.rename.save", "保存"),
-				});
-				saveRename.type = "button";
-				saveRename.onclick = () => {
-					void this.commitSessionRename(session.sessionId);
-				};
-				const cancelRename = renameActions.createEl("button", {
-					cls: "friday-ai-session-bulkbutton",
-					text: this.t("ai.sessions.rename.cancel", "取消"),
-				});
-				cancelRename.type = "button";
-				cancelRename.onclick = () => {
-					this.cancelSessionRename();
-				};
+						this.renderBoard();
+					};
+				}
 			}
 		}
 	}
@@ -1746,6 +1799,7 @@ export class DailyBoardView extends ItemView {
 		this.aiLastCompletedRuntimeExecutionState = null;
 		this.aiRuntimePreviewExpanded = false;
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
+		this.aiSessionSearchQuery = "";
 		this.aiSessionModelOverride = "";
 		this.aiSessionPermissionOverride = "";
 		this.aiSessionNavCollapsed = true;
@@ -1812,11 +1866,19 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private toggleAllSessionSelections(): void {
-		if (this.aiSessionSelection.size === this.aiSessions.length) {
-			this.aiSessionSelection.clear();
+	private toggleAllSessionSelections(sessionIds: string[]): void {
+		if (sessionIds.length === 0) {
+			return;
+		}
+		const allSelected = sessionIds.every((sessionId) => this.aiSessionSelection.has(sessionId));
+		if (allSelected) {
+			for (const sessionId of sessionIds) {
+				this.aiSessionSelection.delete(sessionId);
+			}
 		} else {
-			this.aiSessionSelection = new Set(this.aiSessions.map((session) => session.sessionId));
+			for (const sessionId of sessionIds) {
+				this.aiSessionSelection.add(sessionId);
+			}
 		}
 		this.renderBoard();
 	}
@@ -1890,6 +1952,90 @@ export class DailyBoardView extends ItemView {
 			this.aiLastCompletedRuntimeExecutionState = null;
 		}
 		this.renderBoard();
+	}
+
+	private getFilteredAiSessions(): ConversationSession[] {
+		const normalizedQuery = this.aiSessionSearchQuery.trim().toLowerCase();
+		if (!normalizedQuery) {
+			return this.aiSessions;
+		}
+		return this.aiSessions.filter((session) => this.matchesSessionSearch(session, normalizedQuery));
+	}
+
+	private matchesSessionSearch(session: ConversationSession, normalizedQuery: string): boolean {
+		if (this.buildSessionTitle(session).toLowerCase().includes(normalizedQuery)) {
+			return true;
+		}
+		return session.messages.some((message) =>
+			parseLegacyMentionMarkup(message.content).text.toLowerCase().includes(normalizedQuery),
+		);
+	}
+
+	private buildSessionGroups(sessions: ConversationSession[]): SessionListGroup[] {
+		const groups = new Map<string, SessionListGroup>();
+		for (const session of sessions) {
+			const meta = this.resolveSessionGroupMeta(session.updatedAt);
+			const group = groups.get(meta.key) ?? {
+				key: meta.key,
+				label: meta.label,
+				sessions: [],
+			};
+			group.sessions.push(session);
+			groups.set(meta.key, group);
+		}
+		return [...groups.values()];
+	}
+
+	private resolveSessionGroupMeta(updatedAt: string): { key: string; label: string } {
+		const parsed = new Date(updatedAt);
+		if (Number.isNaN(parsed.getTime())) {
+			return {
+				key: "unknown",
+				label: this.t("common.unknownTime", "未知时间"),
+			};
+		}
+		const now = new Date();
+		const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+		const dayStart = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+		const diffDays = Math.round((todayStart.getTime() - dayStart.getTime()) / (24 * 60 * 60 * 1000));
+		if (diffDays === 0) {
+			return {
+				key: "today",
+				label: this.t("common.time.today", "今天"),
+			};
+		}
+		if (diffDays === 1) {
+			return {
+				key: "yesterday",
+				label: this.t("common.time.yesterday", "昨天"),
+			};
+		}
+		const key = `${dayStart.getFullYear()}-${String(dayStart.getMonth() + 1).padStart(2, "0")}-${String(dayStart.getDate()).padStart(2, "0")}`;
+		return {
+			key,
+			label: parsed.toLocaleDateString(),
+		};
+	}
+
+	private openSessionActionsMenu(session: ConversationSession, event: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((item) => {
+			item
+				.setTitle(this.t("ai.sessions.rename.action", "重命名"))
+				.setIcon("pencil")
+				.onClick(() => {
+					this.beginSessionRename(session);
+				});
+		});
+		menu.addItem((item) => {
+			item
+				.setTitle(this.t("ai.sessions.delete.action", "删除"))
+				.setIcon("trash-2")
+				.onClick(() => {
+					void this.deleteSingleSession(session.sessionId);
+				});
+		});
+		menu.showAtMouseEvent(event);
 	}
 
 	private buildSessionTitle(session: ConversationSession): string {

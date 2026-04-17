@@ -52,6 +52,33 @@ test("daily board view supports collapsible session nav", async () => {
 	assert.match(source, /toggleAiSessionNavCollapsed/);
 });
 
+test("session drawer supports search and date-grouped browsing", async () => {
+	const source = readViewSource();
+	assert.match(source, /aiSessionSearchQuery/);
+	assert.match(source, /friday-ai-session-search/);
+	assert.match(source, /buildSessionGroups\(/);
+	assert.match(source, /friday-ai-session-group-label/);
+	assert.match(source, /ai\.sessions\.search\.placeholder/);
+});
+
+test("session drawer uses context-menu actions instead of always-visible text pills", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	assert.match(source, /new Menu\(\)/);
+	assert.match(source, /showAtMouseEvent\(/);
+	assert.match(source, /more-horizontal/);
+	assert.doesNotMatch(source, /friday-ai-session-mini-action/);
+	assert.match(styles, /\.friday-ai-session-item-menu\b/);
+});
+
+test("session drawer styles favor native list rows over floating cards", async () => {
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-ai-session-group-label\b/);
+	assert.match(styles, /\.friday-ai-session-item::before\b/);
+	assert.match(styles, /\.friday-ai-session-item-actions\s*\{[\s\S]*opacity:\s*0/);
+	assert.match(styles, /\.friday-ai-session-item:hover \.friday-ai-session-item-actions\s*\{[\s\S]*opacity:\s*1/);
+});
+
 test("explicit skill invocation stays on runtime path instead of builtin shortcut", async () => {
 	const source = readViewSource();
 	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
