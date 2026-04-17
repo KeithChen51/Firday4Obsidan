@@ -71,8 +71,24 @@ export class SecureStorage {
 		return this.mode;
 	}
 
+	async getUserGitCredential(): Promise<ProjectGitCredential | null> {
+		return this.readCredential(this.buildUserCredentialKey());
+	}
+
 	async getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null> {
-		const raw = this.storage.getItem(this.buildProjectCredentialKey(projectId));
+		return this.readCredential(this.buildProjectCredentialKey(projectId));
+	}
+
+	async setUserGitCredential(credential: ProjectGitCredential | null): Promise<void> {
+		this.writeCredential(this.buildUserCredentialKey(), credential);
+	}
+
+	async setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void> {
+		this.writeCredential(this.buildProjectCredentialKey(projectId), credential);
+	}
+
+	private readCredential(key: string): ProjectGitCredential | null {
+		const raw = this.storage.getItem(key);
 		if (!raw) {
 			return null;
 		}
@@ -92,8 +108,7 @@ export class SecureStorage {
 		}
 	}
 
-	async setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void> {
-		const key = this.buildProjectCredentialKey(projectId);
+	private writeCredential(key: string, credential: ProjectGitCredential | null): void {
 		if (!credential?.username?.trim() || !credential.token?.trim()) {
 			this.storage.removeItem(key);
 			return;
@@ -173,5 +188,9 @@ export class SecureStorage {
 
 	private buildProjectCredentialKey(projectId: string): string {
 		return `${this.namespace}:project-git-credential:${projectId.trim()}`;
+	}
+
+	private buildUserCredentialKey(): string {
+		return `${this.namespace}:user-git-credential`;
 	}
 }

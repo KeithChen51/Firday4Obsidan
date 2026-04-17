@@ -9,6 +9,7 @@ import { ProjectEntry, ProjectGitCredential, SyncResult, SyncStatus } from "../t
 import type { SyncConflictRecord } from "../types/sync";
 import type { FridaySettings } from "../types/settings";
 import { ProjectBoundaryService } from "./ProjectBoundaryService";
+import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 
 type PostPullHandler = (
 	project: ProjectEntry,
@@ -149,6 +150,18 @@ export class SyncService {
 
 	async setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void> {
 		await this.operator.setProjectGitCredential(projectId, credential);
+	}
+
+	async getUserGitCredential(): Promise<ProjectGitCredential | null> {
+		return this.operator.getUserGitCredential();
+	}
+
+	async setUserGitCredential(credential: ProjectGitCredential | null): Promise<void> {
+		await this.operator.setUserGitCredential(credential);
+	}
+
+	async getGitRuntimeStatus(): Promise<GitRuntimeStatus> {
+		return this.operator.getGitRuntimeStatus();
 	}
 
 	private async buildConflictRecords(

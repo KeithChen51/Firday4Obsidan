@@ -11,7 +11,6 @@ const projectRoot = path.resolve(testDir, "..");
 const settingsPath = path.join(projectRoot, "src/types/settings.ts");
 const projectTypesPath = path.join(projectRoot, "src/types/project.ts");
 const settingTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
-const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const syncServicePath = path.join(projectRoot, "src/services/SyncService.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const gitOperatorPath = path.join(projectRoot, "src/platform/git/SimpleGitOperator.ts");
@@ -37,14 +36,31 @@ test("project entry no longer stores git credential fields", async () => {
 	assert.doesNotMatch(block, /gitToken:/);
 });
 
-test("settings tab keeps git email in user section but removes global username and token fields", async () => {
+test("settings tab keeps git username before email and stores credentials outside synced settings", async () => {
 	const source = read(settingTabPath);
 	const userSectionMatch = source.match(/private renderUserSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
 	assert.ok(userSectionMatch, "renderUserSection block should exist");
 	const block = userSectionMatch[1] ?? "";
+	const gitUsernameIndex = block.indexOf('settings.user.gitUsername.name');
+	const gitEmailIndex = block.indexOf('settings.user.gitUserEmail.name');
+	const gitTokenIndex = block.indexOf('settings.user.gitToken.name');
+	const gitRuntimeIndex = block.indexOf('settings.user.update.gitRuntime.name');
 	assert.match(block, /settings\.user\.gitUserEmail/);
-	assert.doesNotMatch(block, /settings\.user\.gitUsername/);
-	assert.doesNotMatch(block, /settings\.user\.gitToken/);
+	assert.match(block, /userGitUsernameDraft/);
+	assert.match(block, /userGitTokenDraft/);
+	assert.ok(gitUsernameIndex >= 0, "git username input should exist");
+	assert.ok(gitEmailIndex >= 0, "git email input should exist");
+	assert.ok(gitTokenIndex >= 0, "git token input should exist");
+	assert.ok(gitRuntimeIndex >= 0, "git runtime row should exist");
+	assert.ok(gitUsernameIndex < gitEmailIndex, "git username should render before git email");
+	assert.ok(gitEmailIndex < gitTokenIndex, "git email should render before git token");
+	assert.ok(gitTokenIndex < gitRuntimeIndex, "git runtime row should render below git token");
+	assert.match(source, /ensureUserGitCredentialLoaded\(/);
+	assert.match(source, /persistUserGitCredential\(/);
+	assert.match(source, /getUserGitCredential\(/);
+	assert.match(source, /setUserGitCredential\(/);
+	assert.doesNotMatch(block, /settings\.user\.gitUsername\s*=/);
+	assert.doesNotMatch(block, /settings\.user\.gitToken\s*=/);
 });
 
 test("settings nav places project immediately after user", async () => {
@@ -63,23 +79,22 @@ test("settings nav places project immediately after user", async () => {
 });
 
 test("project editor no longer renders git credential inputs", async () => {
-	const source = read(dailyBoardPath);
-	assert.doesNotMatch(source, /projects\.editor\.user/);
-	assert.doesNotMatch(source, /projects\.editor\.email/);
-	assert.doesNotMatch(source, /projects\.editor\.token/);
-	assert.doesNotMatch(source, /draft\.gitUsername/);
-	assert.doesNotMatch(source, /draft\.gitUserEmail/);
-	assert.doesNotMatch(source, /draft\.gitToken/);
+	const source = read(settingTabPath);
+	assert.doesNotMatch(source, /projects\.editor\.gitUsername/);
+	assert.doesNotMatch(source, /projects\.editor\.gitToken/);
+	assert.doesNotMatch(source, /renderProjectEditorText\(fields, this\.t\("projects\.editor\.gitUsername"/);
+	assert.doesNotMatch(source, /renderProjectEditorText\(fields, this\.t\("projects\.editor\.gitToken"/);
 });
 
 test("sync service reads git credentials from secure storage instead of synced settings or project entry", async () => {
 	const source = read(syncServicePath);
+	assert.match(source, /getUserGitCredential/);
 	assert.match(source, /getProjectGitCredential/);
 	assert.doesNotMatch(source, /project\.gitUsername/);
 	assert.doesNotMatch(source, /project\.gitUserEmail/);
 	assert.doesNotMatch(source, /project\.gitToken/);
-	assert.doesNotMatch(source, /user\.gitUsername/);
-	assert.doesNotMatch(source, /user\.gitToken/);
+	assert.doesNotMatch(source, /settings\.user\.gitUsername/);
+	assert.doesNotMatch(source, /settings\.user\.gitToken/);
 });
 
 test("settings migration still detects legacy git credentials for secure-storage migration", async () => {

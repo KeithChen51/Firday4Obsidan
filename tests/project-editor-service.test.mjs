@@ -23,6 +23,12 @@ test("project editor service builds default project root path from project id", 
 	assert.equal(root, "F.R.I.D.A.Y/项目/alpha-project");
 });
 
+test("project editor service keeps Chinese project names when building default project root path", async () => {
+	const mod = await loadModule();
+	const root = mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "胖东来白板");
+	assert.equal(root, "F.R.I.D.A.Y/项目/胖东来白板");
+});
+
 test("project editor service rejects invalid project id", async () => {
 	const mod = await loadModule();
 	assert.throws(() => {
@@ -39,6 +45,43 @@ test("project editor service rejects invalid project id", async () => {
 			new Set(),
 		);
 	});
+});
+
+test("project editor service auto-generates project id when creating a project without manual id", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-project-editor-auto-id-"));
+
+	try {
+		const entry = await mod.submitProjectDraft({
+			app: {
+				vault: {
+					adapter: {
+						basePath: vaultRoot,
+					},
+				},
+			},
+			syncService: {
+				async prepareRepository() {},
+			},
+			draft: {
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "",
+				projectName: "胖东来白板",
+				boundaryPath: "",
+				gitRemote: "",
+				autoSync: false,
+			},
+			existingProjectIds: new Set(),
+			fridayRoot: "F.R.I.D.A.Y",
+			currentUserId: "keith",
+		});
+
+		assert.match(entry.projectId, /^project-/);
+		assert.equal(entry.slug, entry.projectId);
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
 });
 
 test("project editor service allows Chinese project name without git credential fields", async () => {
@@ -241,6 +284,49 @@ test("project editor service rejects remote binding during register_existing_dir
 				currentUserId: "keith",
 			}),
 			/cannot bind a remote|register_existing_dir/i,
+		);
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});
+
+test("project editor service rejects remote bootstrap into a non-empty target directory", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-remote-bootstrap-non-empty-"));
+
+	try {
+		const nonEmptyDir = path.join(vaultRoot, "projects", "occupied");
+		await fs.mkdir(nonEmptyDir, { recursive: true });
+		await fs.writeFile(path.join(nonEmptyDir, "README.md"), "# existing");
+
+		await assert.rejects(
+			mod.submitProjectDraft({
+				app: {
+					vault: {
+						adapter: {
+							basePath: vaultRoot,
+						},
+					},
+				},
+				syncService: {
+					async prepareRepository() {
+						throw new Error("prepareRepository should not run for invalid remote bootstrap target");
+					},
+				},
+				draft: {
+					groupId: "default-group",
+					mode: "remote_bootstrap",
+					projectId: "occupied",
+					projectName: "Occupied",
+					boundaryPath: "projects/occupied",
+					gitRemote: "https://example.com/demo.git",
+					autoSync: true,
+				},
+				existingProjectIds: new Set(),
+				fridayRoot: "F.R.I.D.A.Y",
+				currentUserId: "keith",
+			}),
+			/Remote bootstrap target must be empty/i,
 		);
 	} finally {
 		await fs.rm(vaultRoot, { recursive: true, force: true });

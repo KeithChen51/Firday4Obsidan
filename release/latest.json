@@ -1,0 +1,13 @@
+{
+	"schemaVersion": 1,
+	"pluginId": "friday-obsidian-plugin",
+	"version": "0.2.1",
+	"minAppVersion": "1.0.0",
+	"branch": "master",
+	"publishedAt": "2026-04-17T03:32:51.428Z",
+	"files": {
+		"main.js": "release/friday-obsidian-plugin/main.js",
+		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
+		"styles.css": "release/friday-obsidian-plugin/styles.css"
+	}
+}

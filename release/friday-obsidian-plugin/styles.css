@@ -229,6 +229,245 @@
 	color: var(--text-muted);
 }
 
+.friday-card {
+	background: linear-gradient(
+		160deg,
+		color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent) 4%) 0%,
+		color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 2%) 100%
+	);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 16px;
+	padding: 16px;
+}
+
+.friday-native-settings-group {
+	margin: 8px 0 20px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+	border-radius: 18px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--background-primary-alt) 78%, var(--background-secondary) 22%);
+}
+
+.friday-native-settings-group-header {
+	padding: 18px 20px 12px;
+}
+
+.friday-native-settings-group-title {
+	font-size: 1em;
+	font-weight: 700;
+	line-height: 1.35;
+	text-align: left;
+}
+
+.friday-native-settings-group-description {
+	margin-top: 4px;
+	font-size: 0.84em;
+	line-height: 1.5;
+	color: var(--text-muted);
+	text-align: left;
+}
+
+.friday-native-settings-group .setting-item {
+	margin: 0;
+	padding: 18px 20px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+}
+
+.friday-native-settings-group > .setting-item:first-child,
+.friday-native-settings-group > .friday-native-settings-group-header + .setting-item {
+	border-top: none;
+}
+
+.friday-native-settings-group .setting-item-info,
+.friday-native-settings-group .setting-item-name,
+.friday-native-settings-group .setting-item-description {
+	text-align: left;
+}
+
+.friday-native-settings-group > p,
+.friday-native-settings-group > pre,
+.friday-native-settings-group > .friday-ai-error {
+	margin: 0;
+	padding: 18px 20px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+}
+
+.friday-plugin-update-group {
+	margin-top: 10px;
+}
+
+.friday-plugin-update-prerequisites-list {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 8px;
+}
+
+.friday-plugin-update-prereq-line {
+	color: var(--text-muted);
+}
+
+.friday-plugin-update-prereq-line.is-ready {
+	color: var(--text-normal);
+}
+
+.friday-project-settings-shell {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.friday-project-register-panel {
+	margin: 0;
+}
+
+.friday-project-register-panel .setting-item {
+	align-items: center;
+}
+
+.friday-project-register-row {
+	margin: 0;
+}
+
+.friday-project-group-heading {
+	margin: 24px 0 12px;
+	font-size: 0.92em;
+	font-weight: 700;
+	color: var(--text-normal);
+}
+
+.friday-project-settings-panel {
+	background: color-mix(in srgb, var(--background-primary-alt) 78%, var(--background-secondary) 22%);
+	border-color: color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+	box-shadow: none;
+}
+
+.friday-project-panel-header {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: 4px;
+	margin-bottom: 12px;
+}
+
+.friday-project-panel-title {
+	font-size: 1em;
+	width: 100%;
+	align-self: stretch;
+	text-align: left !important;
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.friday-project-panel-description {
+	margin: 0;
+	font-size: 0.84em;
+	line-height: 1.5;
+	color: var(--text-muted);
+	width: 100%;
+	text-align: left;
+}
+
+.friday-project-list-group .setting-item {
+	align-items: flex-start;
+}
+
+.friday-project-list-group .setting-item-control {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	justify-content: flex-end;
+}
+
+.friday-project-setting-detail {
+	font-size: 0.84em;
+	line-height: 1.45;
+	color: var(--text-muted);
+}
+
+.friday-project-group-manager-create input,
+.friday-project-group-item-controls input {
+	width: 100%;
+	min-height: 40px;
+	padding: 0 12px;
+	border-radius: 14px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent) 4%);
+	color: var(--text-normal);
+	box-sizing: border-box;
+}
+
+.friday-project-list-group .setting-item-control button {
+	white-space: nowrap;
+}
+
+.friday-project-group-manager-create input:focus,
+.friday-project-group-item-controls input:focus {
+	outline: none;
+	border-color: color-mix(in srgb, var(--interactive-accent) 52%, var(--background-modifier-border));
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+}
+
+.friday-project-group-manager-create {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+}
+
+.friday-project-group-manager-create input {
+	flex: 1 1 240px;
+}
+
+.friday-project-group-manager-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-top: 12px;
+}
+
+.friday-project-group-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 12px;
+	border-radius: 14px;
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 14%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--background-primary-alt) 92%, var(--interactive-accent) 3%);
+}
+
+.friday-project-group-item.is-default {
+	border-style: dashed;
+}
+
+.friday-project-group-item-meta {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.friday-project-group-item-meta strong {
+	font-size: 0.92em;
+}
+
+.friday-project-group-item-meta small {
+	font-size: 0.78em;
+	color: var(--text-muted);
+}
+
+.friday-project-group-item-controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	align-items: center;
+}
+
+.friday-project-group-item-controls input {
+	flex: 1 1 180px;
+	min-width: 180px;
+}
+
 .friday-project-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -238,28 +477,31 @@
 }
 
 .friday-project-card {
-	background: var(--background-primary-alt);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 10px;
-	padding: 10px;
+	background: color-mix(in srgb, var(--background-primary-alt) 90%, var(--interactive-accent) 4%);
+	border: 1px solid color-mix(in srgb, var(--interactive-accent) 14%, var(--background-modifier-border));
+	border-radius: 14px;
+	padding: 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
+	gap: 10px;
 }
 
 .friday-project-card.is-active {
 	border-color: color-mix(in srgb, var(--interactive-accent) 45%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--background-primary-alt) 80%, var(--interactive-accent) 8%);
 }
 
 .friday-project-title {
 	display: flex;
-	align-items: center;
+	align-items: flex-start;
 	justify-content: space-between;
+	gap: 10px;
 }
 
 .friday-project-title h4 {
 	margin: 0;
 	font-size: 0.95em;
+	line-height: 1.4;
 }
 
 .friday-project-badges {
@@ -283,6 +525,16 @@
 	word-break: break-all;
 }
 
+.friday-project-group-stack {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+}
+
+.friday-project-group-panel .friday-project-grid {
+	padding-bottom: 0;
+}
+
 .friday-project-actions {
 	display: flex;
 	flex-wrap: wrap;
@@ -290,7 +542,65 @@
 }
 
 .friday-project-actions button {
-	padding: 4px 8px;
+	min-height: 36px;
+	padding: 0 12px;
+	border-radius: 12px;
+}
+
+.friday-project-settings-toolbar button,
+.friday-project-group-manager-create button,
+.friday-project-group-item-controls button,
+.friday-project-editor-actions button {
+	min-height: 36px;
+	padding: 0 12px;
+	border-radius: 12px;
+}
+
+.friday-project-editor-setting {
+	align-items: flex-start;
+	gap: 16px;
+}
+
+.friday-project-editor-setting .setting-item-info {
+	flex: 1 1 0;
+	min-width: 0;
+}
+
+.friday-project-editor-setting .setting-item-control {
+	flex: 0 1 340px;
+	width: min(340px, 100%);
+}
+
+.friday-project-editor-input {
+	width: 100%;
+	min-width: 220px;
+}
+
+.friday-project-editor-choice-card {
+	margin-top: 8px;
+}
+
+.friday-project-editor-choice-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+
+.friday-project-editor-choice-actions button {
+	min-height: 34px;
+	padding: 0 12px;
+	border-radius: 12px;
+}
+
+.friday-project-editor-actions {
+	margin-top: 0;
+	padding: 18px 20px 20px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	justify-content: flex-end;
+}
+
+.friday-project-ignore-panel {
+	margin-top: 12px;
 }
 
 .friday-empty-state,
@@ -300,15 +610,58 @@
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 10px;
 	padding: 12px;
+	text-align: left;
 }
 
 .friday-empty-state h4 {
 	margin: 0 0 4px;
+	text-align: left !important;
+}
+
+.friday-project-empty-title {
+	margin: 0 0 4px;
+	width: 100%;
+	text-align: left !important;
+	font-size: 1em;
+	font-weight: 700;
+	line-height: 1.35;
 }
 
 .friday-empty-state p,
 .friday-ai-placeholder p {
 	margin: 0 0 8px;
+}
+
+@media (max-width: 720px) {
+	.friday-project-inline-control,
+	.friday-project-settings-toolbar {
+		justify-content: stretch;
+	}
+
+	.friday-project-inline-select-wrap,
+	.friday-project-settings-toolbar button {
+		width: 100%;
+	}
+
+	.friday-project-group-manager-create,
+	.friday-project-group-item,
+	.friday-project-group-item-controls {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.friday-project-group-item-controls input {
+		min-width: 0;
+	}
+
+	.friday-project-editor-setting {
+		flex-direction: column;
+		align-items: flex-start;
+	}
+
+	.friday-project-editor-setting .setting-item-control {
+		width: 100%;
+	}
 }
 
 .friday-ai-muted {
@@ -1468,17 +1821,29 @@
 	padding: 6px 8px;
 	border-radius: 10px;
 	background: transparent;
+	gap: 8px;
+	justify-content: center;
+	min-width: 0;
 }
 
 .friday-nav-button-icon {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
+	flex-shrink: 0;
 }
 
 .friday-nav-button-icon svg {
 	width: 18px;
 	height: 18px;
+}
+
+.friday-nav-button-label {
+	display: inline-block;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	line-height: 1.1;
 }
 
 .friday-nav-button.is-active {
@@ -2300,5 +2665,59 @@
 	font-size: 0.78em;
 	font-weight: 700;
 	color: var(--text-muted);
+}
+
+.friday-project-sync-control-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.friday-project-sync-control-label {
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+.friday-sync-diff {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 12px;
+}
+
+.friday-sync-diff-column {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-sync-diff-body {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 8px;
+	border-radius: 8px;
+	background: var(--background-secondary);
+	font-family: var(--font-monospace);
+	font-size: 0.82em;
+	overflow-x: auto;
+}
+
+.friday-sync-diff-line {
+	white-space: pre;
+	padding: 2px 6px;
+	border-radius: 4px;
+}
+
+.friday-sync-diff-line.is-changed {
+	background: color-mix(in srgb, var(--text-accent) 14%, transparent);
+}
+
+@media (max-width: 900px) {
+	.friday-sync-diff {
+		grid-template-columns: 1fr;
+	}
 }
 

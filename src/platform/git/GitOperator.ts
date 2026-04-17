@@ -1,4 +1,4 @@
-import type { ProjectEntry, SyncResult, SyncStatus } from "../../types/project";
+import type { ProjectEntry, ProjectGitCredential, SyncResult, SyncStatus } from "../../types/project";
 
 export interface GitPullResult {
 	success: boolean;
@@ -35,5 +35,9 @@ export interface GitOperator {
 	getStatus(project: ProjectEntry): Promise<SyncStatus>;
 	resolveConflict(project: ProjectEntry, filePath: string, strategy: "ours" | "theirs"): Promise<void>;
 	finalizeConflictResolution(project: ProjectEntry): Promise<void>;
+	getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null>;
+	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
+	getUserGitCredential(): Promise<ProjectGitCredential | null>;
+	setUserGitCredential(credential: ProjectGitCredential | null): Promise<void>;
 	makeErrorResult(projectSlug: string, error: unknown): SyncResult;
 }

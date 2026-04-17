@@ -27,16 +27,20 @@ import {
 	switchLlmMode,
 } from "../core/llm/LlmSettingsResolver";
 import type { ModelCapabilityInfo } from "../services/AIService";
-import { FridayPluginApi } from "../types/plugin";
+import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
 import type { LocaleCode } from "../i18n/types";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
+import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 
 type SettingsHost = FridayPluginApi & Plugin;
 type LlmMode = "openai" | "group";
 type LlmStatus = "unconfigured" | "idle" | "checking" | "connected" | "failed";
 type VisionProbeStatus = "idle" | "checking";
+type ProjectEditorSelectOption = string | { value: string; label: string };
+type RemoteBootstrapDirectoryState = "unknown" | "empty" | "non_empty";
+type RemoteBootstrapResolution = "unset" | "direct" | "create_child";
 const BUILTIN_GROUP_MODELS = [
 	"glm-4.7",
 	"kimi-k2.5",
@@ -77,6 +81,16 @@ export class FridaySettingTab extends PluginSettingTab {
 	private projectEditorInitialProjectId = "";
 	private projectEditorError = "";
 	private projectGitDetection: Awaited<ReturnType<typeof detectProjectGitState>> | null = null;
+	private projectEditorRemoteBootstrapBasePath = "";
+	private projectEditorRemoteBootstrapDirectoryState: RemoteBootstrapDirectoryState = "unknown";
+	private projectEditorRemoteBootstrapResolution: RemoteBootstrapResolution = "unset";
+	private projectEditorRemoteBootstrapChoiceInitialized = false;
+	private userGitCredentialLoaded = false;
+	private userGitUsernameDraft = "";
+	private userGitTokenDraft = "";
+	private gitRuntimeStatus: GitRuntimeStatus | null = null;
+	private gitRuntimeStatusLoading = false;
+	private pluginUpdateActionPending = false;
 	private ignoreManagerProjectId = "";
 	private ignoreManagerCandidates: GitIgnoreCandidate[] = [];
 	private ignoreManagerError = "";
@@ -89,6 +103,13 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.gitIgnoreService = new GitIgnoreService((project) =>
 			this.host.projectBoundaryService.getProjectAbsolutePath(project),
 		);
+	}
+
+	focusSection(section: SettingsSection): void {
+		if (this.activeSection === section) {
+			return;
+		}
+		this.activeSection = section;
 	}
 
 	display(): void {
@@ -142,10 +163,38 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 	}
 
-	private renderUserSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.user") });
+	private createNativeSettingsGroup(
+		containerEl: HTMLElement,
+		options: { title?: string; description?: string; extraClass?: string } = {},
+	): HTMLDivElement {
+		const group = containerEl.createDiv({
+			cls: ["friday-native-settings-group", options.extraClass].filter(Boolean).join(" "),
+		});
+		if (options.title || options.description) {
+			const header = group.createDiv({ cls: "friday-native-settings-group-header" });
+			if (options.title) {
+				header.createDiv({
+					cls: "friday-native-settings-group-title",
+					text: options.title,
+				});
+			}
+			if (options.description) {
+				header.createDiv({
+					cls: "friday-native-settings-group-description",
+					text: options.description,
+				});
+			}
+		}
+		return group;
+	}
 
-		const localeSetting = new Setting(containerEl)
+	private renderUserSection(containerEl: HTMLElement): void {
+		void this.ensureUserGitCredentialLoaded();
+		void this.ensureGitRuntimeStatusLoaded();
+		const profileGroup = this.createNativeSettingsGroup(containerEl);
+		const gitGroup = this.createNativeSettingsGroup(containerEl);
+
+		const localeSetting = new Setting(profileGroup)
 			.setName(this.host.t("settings.locale.name"))
 			.setDesc(this.host.t("settings.locale.desc"));
 		localeSetting.addDropdown((dropdown) => {
@@ -170,7 +219,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 		});
 
-		new Setting(containerEl)
+		new Setting(profileGroup)
 			.setName(this.t("settings.user.autoDetect.name", "自动识别用户 ID"))
 			.setDesc(this.t("settings.user.autoDetect.desc", "若下方用户 ID 为空，则使用当前机器名推断。"))
 			.addToggle((toggle) =>
@@ -184,7 +233,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			);
 
-			new Setting(containerEl)
+			new Setting(profileGroup)
 				.setName(this.t("settings.user.userId.name", "用户 ID"))
 				.setDesc(this.t("settings.user.userId.desc", "用于标识当前用户。"))
 				.addText((text) =>
@@ -197,7 +246,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl).setName(this.t("settings.user.displayName.name", "显示名称")).addText((text) =>
+		new Setting(profileGroup).setName(this.t("settings.user.displayName.name", "显示名称")).addText((text) =>
 			text
 				.setPlaceholder("Keith")
 				.setValue(this.host.settings.user.displayName)
@@ -207,7 +256,25 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 		);
 
-		new Setting(containerEl)
+		new Setting(gitGroup)
+			.setName(this.t("settings.user.gitUsername.name", "Git 用户名"))
+			.setDesc(this.t("settings.user.gitUsername.desc", "作为所有项目同步认证的统一用户名。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("alice")
+					.setValue(this.userGitUsernameDraft)
+					.onChange(async (value) => {
+						const nextValue = value.trim();
+						const visibilityChanged = Boolean(this.userGitUsernameDraft) !== Boolean(nextValue);
+						this.userGitUsernameDraft = nextValue;
+						await this.persistUserGitCredential();
+						if (visibilityChanged) {
+							this.display();
+						}
+					}),
+			);
+
+		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitUserEmail.name", "Git 邮箱"))
 			.setDesc(this.t("settings.user.gitUserEmail.desc", "用于所有项目的 Git 提交身份。"))
 			.addText((text) =>
@@ -215,31 +282,229 @@ export class FridaySettingTab extends PluginSettingTab {
 					.setPlaceholder("you@example.com")
 					.setValue(this.host.settings.user.gitUserEmail)
 					.onChange(async (value) => {
-						this.host.settings.user.gitUserEmail = value.trim();
+						const nextValue = value.trim();
+						const visibilityChanged = Boolean(this.host.settings.user.gitUserEmail.trim()) !== Boolean(nextValue);
+						this.host.settings.user.gitUserEmail = nextValue;
 						await this.host.saveSettings();
+						if (visibilityChanged) {
+							this.display();
+						}
 					}),
 			);
 
+		new Setting(gitGroup)
+			.setName(this.t("settings.user.gitToken.name", "Git 令牌"))
+			.setDesc(this.t("settings.user.gitToken.desc", "作为所有项目同步认证的统一令牌。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("token")
+					.setValue(this.userGitTokenDraft)
+					.onChange(async (value) => {
+						const nextValue = value.trim();
+						const visibilityChanged = Boolean(this.userGitTokenDraft) !== Boolean(nextValue);
+						this.userGitTokenDraft = nextValue;
+						await this.persistUserGitCredential();
+						if (visibilityChanged) {
+							this.display();
+						}
+					}),
+			);
+
+		new Setting(gitGroup)
+			.setName(this.t("settings.user.update.gitRuntime.name", "Git 环境"))
+			.setDesc(this.getGitRuntimeStatusDesc())
+			.addButton((button) =>
+				button
+					.setButtonText(this.t("settings.user.update.gitRuntime.refresh", "重新检测"))
+					.setDisabled(this.gitRuntimeStatusLoading)
+					.onClick(async () => {
+						this.gitRuntimeStatus = null;
+						await this.ensureGitRuntimeStatusLoaded();
+					}),
+			);
+
+		this.renderPluginUpdateCard(containerEl);
+	}
+
+	private renderPluginUpdateCard(containerEl: HTMLElement): void {
+		containerEl.createEl("h3", {
+			text: this.t("settings.user.update.title", "自动更新"),
+		});
+		const card = this.createNativeSettingsGroup(containerEl, { extraClass: "friday-plugin-update-group" });
+
+		const gitStatus = this.gitRuntimeStatus;
+		const gitAvailable = Boolean(gitStatus?.available);
+		const gitProfileComplete = this.isGitProfileComplete();
+		const prerequisitesReady = gitAvailable && gitProfileComplete;
+		const prereqDetails = this.getPluginUpdatePrereqDetails(gitAvailable);
+		const updateEnabled = prerequisitesReady && this.host.settings.update.enabled;
+		const availableVersion = this.host.settings.update.availableVersion.trim();
+
+		new Setting(card)
+			.setName(
+				this.t("settings.user.update.currentVersion.name", "当前版本号：{version}", {
+					version: this.host.manifest.version,
+				}),
+			)
+			.setDesc(this.getPluginUpdateStatusDesc())
+			.addButton((button) =>
+				button
+					.setButtonText(this.t("settings.user.update.currentVersion.check", "检查更新"))
+					.setDisabled(!prerequisitesReady || this.pluginUpdateActionPending)
+					.onClick(async () => {
+						await this.runPluginUpdateCheck();
+					}),
+			);
+
+		this.renderPluginUpdatePrerequisitesSetting(card, prereqDetails);
+
+		new Setting(card)
+			.setName(this.t("settings.user.update.enabled.name", "启用自动更新"))
+			.setDesc(this.t("settings.user.update.enabled.desc", "开启后可检查并应用内网仓库中的插件更新。"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.host.settings.update.enabled)
+					.setDisabled(!prerequisitesReady)
+					.onChange(async (value) => {
+						this.host.settings.update.enabled = value;
+						await this.host.saveSettings();
+						this.display();
+					}),
+			);
+
+		if (prerequisitesReady) {
+			new Setting(card)
+				.setName(this.t("settings.user.update.checkOnStartup.name", "启动时自动检查"))
+				.setDesc(this.t("settings.user.update.checkOnStartup.desc", "启动后按设定延迟自动检查是否有新版本。"))
+				.addToggle((toggle) =>
+					toggle
+						.setValue(this.host.settings.update.checkOnStartup)
+						.setDisabled(!updateEnabled)
+						.onChange(async (value) => {
+							this.host.settings.update.checkOnStartup = value;
+							await this.host.saveSettings();
+						}),
+				);
+
+			new Setting(card)
+				.setName(this.t("settings.user.update.delay.name", "启动检查延迟（ms）"))
+				.setDesc(this.t("settings.user.update.delay.desc", "避免在插件刚启动时立即拉取远程更新信息。"))
+				.addText((text) =>
+					text
+						.setPlaceholder("5000")
+						.setValue(String(this.host.settings.update.startupDelayMs))
+						.setDisabled(!updateEnabled)
+						.onChange(async (value) => {
+							const parsed = Number.parseInt(value, 10);
+							this.host.settings.update.startupDelayMs = Number.isFinite(parsed) ? Math.max(parsed, 0) : 5000;
+							await this.host.saveSettings();
+						}),
+				);
+
+			new Setting(card)
+				.setName(this.t("settings.user.update.status.name", "更新状态"))
+				.setDesc(this.getPluginUpdateStatusDesc());
+
+			new Setting(card)
+				.setName(this.t("settings.user.update.actions.name", "更新操作"))
+				.setDesc(
+					availableVersion
+						? this.t("settings.user.update.actions.available", "检测到可用版本：{version}", { version: availableVersion })
+						: this.t("settings.user.update.actions.none", "尚未检测到可用更新。"),
+				)
+				.addButton((button) =>
+					button
+						.setButtonText(this.t("settings.user.update.actions.apply", "应用更新"))
+						.setDisabled(!updateEnabled || this.pluginUpdateActionPending || !availableVersion)
+						.onClick(async () => {
+							await this.runPluginUpdateApply();
+						}),
+				)
+				.addButton((button) =>
+					button
+						.setButtonText(this.t("settings.user.update.actions.dismiss", "忽略当前版本"))
+						.setDisabled(!availableVersion)
+						.onClick(async () => {
+							this.host.settings.update.dismissedVersion = availableVersion;
+							await this.host.saveSettings();
+							this.display();
+						}),
+				);
+		}
+	}
+
+	private renderPluginUpdatePrerequisitesSetting(
+		containerEl: HTMLElement,
+		details: { readyLabels: string[]; pendingLabels: string[]; summary: string },
+	): void {
+		const setting = new Setting(containerEl)
+			.setName(this.t("settings.user.update.prerequisites.name", "前置条件"))
+			.setDesc(
+				details.pendingLabels.length === 0
+					? this.t("settings.user.update.prerequisites.complete", "已满足自动更新的全部前置条件。")
+					: details.summary,
+			);
+
+		const lineWrap = setting.descEl.createDiv({ cls: "friday-plugin-update-prerequisites-list" });
+		if (details.readyLabels.length > 0) {
+			lineWrap.createDiv({
+				cls: "friday-plugin-update-prereq-line is-ready",
+				text: this.t("settings.user.update.prerequisites.ready", "已完成：{items}", {
+					items: details.readyLabels.join("、"),
+				}),
+			});
+		}
+		if (details.pendingLabels.length > 0) {
+			lineWrap.createDiv({
+				cls: "friday-plugin-update-prereq-line",
+				text: this.t("settings.user.update.prerequisites.pending", "待完成：{items}", {
+					items: details.pendingLabels.join("、"),
+				}),
+			});
+		}
+	}
+
+	private getPluginUpdatePrereqDetails(gitAvailable: boolean): { readyLabels: string[]; pendingLabels: string[]; summary: string } {
+		const items = [
+			{ done: this.userGitUsernameDraft.trim().length > 0, label: this.t("settings.user.gitUsername.name", "Git 用户名") },
+			{ done: this.host.settings.user.gitUserEmail.trim().length > 0, label: this.t("settings.user.gitUserEmail.name", "Git 邮箱") },
+			{ done: this.userGitTokenDraft.trim().length > 0, label: this.t("settings.user.gitToken.name", "Git 令牌") },
+			{ done: gitAvailable, label: this.t("settings.user.update.gitRuntime.summary", "本地 Git 环境") },
+		];
+		const readyLabels = items.filter((item) => item.done).map((item) => item.label);
+		const pendingLabels = items.filter((item) => !item.done).map((item) => item.label);
+		let missingCount = 0;
+		if (!this.userGitUsernameDraft.trim()) missingCount += 1;
+		if (!this.host.settings.user.gitUserEmail.trim()) missingCount += 1;
+		if (!this.userGitTokenDraft.trim()) missingCount += 1;
+		if (!gitAvailable) missingCount += 1;
+		return {
+			readyLabels,
+			pendingLabels,
+			summary: this.t("settings.user.update.prereqSummary", "还缺 {count} 项前置条件。", {
+				count: String(missingCount),
+			}),
+		};
 	}
 
 	private renderSyncSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.sync") });
+		const group = this.createNativeSettingsGroup(containerEl);
 
-		new Setting(containerEl).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
+		new Setting(group).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
 			toggle.setValue(this.host.settings.sync.mode === "continuous_auto").onChange(async (value) => {
 				await this.host.setSyncMode(value ? "continuous_auto" : "manual");
 				this.display();
 			}),
 		);
 
-		new Setting(containerEl).setName(this.t("settings.sync.onStartup", "启动时同步")).addToggle((toggle) =>
+		new Setting(group).setName(this.t("settings.sync.onStartup", "启动时同步")).addToggle((toggle) =>
 			toggle.setValue(this.host.settings.sync.syncOnStartup).onChange(async (value) => {
 				this.host.settings.sync.syncOnStartup = value;
 				await this.host.saveSettings();
 			}),
 		);
 
-		new Setting(containerEl)
+		new Setting(group)
 			.setName(this.t("settings.sync.interval.name", "同步间隔（分钟）"))
 			.setDesc(this.t("settings.sync.interval.desc", "0 表示关闭定时同步。"))
 			.addText((text) =>
@@ -265,15 +530,11 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (this.host.settings.llm.mode !== mode) {
 			this.host.settings.llm.mode = mode;
 		}
+		const statusGroup = this.createNativeSettingsGroup(containerEl);
+		const connectionGroup = this.createNativeSettingsGroup(containerEl);
+		const capabilityGroup = this.createNativeSettingsGroup(containerEl);
 
-		const header = containerEl.createDiv({ cls: "friday-llm-header-row" });
-		header.createEl("h3", { text: this.host.t("settings.section.llm") });
-		header.createSpan({
-			cls: `friday-llm-status-pill is-${this.llmStatus}`,
-			text: this.getLlmStatusLabel(),
-		});
-
-		new Setting(containerEl)
+		new Setting(statusGroup)
 			.setName(this.t("settings.llm.connection.name", "连通状态"))
 			.setDesc(this.getLlmStatusDesc())
 			.addButton((button) =>
@@ -289,7 +550,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(statusGroup)
 			.setName(this.t("settings.llm.mode.name", "接入模式"))
 			.setDesc(this.t("settings.llm.mode.desc", "可选通用 OpenAI 协议，或集团集采网关模式。"))
 			.addDropdown((dropdown) => {
@@ -319,7 +580,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			const modelPresets = this.getModelPresetResult();
 			const activeProvider = modelPresets.activeProvider;
 			if (modelPresets.providers.length > 0) {
-				new Setting(containerEl)
+				new Setting(statusGroup)
 					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
 					.setDesc(
 						activeProvider
@@ -374,7 +635,7 @@ export class FridaySettingTab extends PluginSettingTab {
 							}),
 					);
 			} else {
-				new Setting(containerEl)
+				new Setting(statusGroup)
 					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
 					.setDesc(
 						this.t(
@@ -385,7 +646,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			}
 		}
 
-		new Setting(containerEl)
+		new Setting(connectionGroup)
 			.setName(this.t("settings.llm.apiUrl.name", "API 地址（必填）"))
 			.setDesc(this.t("settings.llm.apiUrl.desc", "可填网关基础地址或完整 chat/completions 地址。"))
 			.addText((text) =>
@@ -401,7 +662,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(connectionGroup)
 			.setName(this.t("settings.llm.apiKey.name", "API 密钥（选填）"))
 			.setDesc(this.t("settings.llm.apiKey.desc", "如果网关不需要密钥，可留空。"))
 			.addText((text) => {
@@ -424,7 +685,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			const selected = modelPresets.models.includes(currentModel)
 				? currentModel
 				: modelPresets.models[0] ?? "";
-			new Setting(containerEl)
+			new Setting(connectionGroup)
 				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
 				.setDesc(this.t("settings.llm.presetModel.source", "来源: {source}", { source: modelPresets.source }))
 				.addDropdown((dropdown) => {
@@ -453,7 +714,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 
 		if (mode !== "group") {
-			new Setting(containerEl)
+			new Setting(connectionGroup)
 				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
 				.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
 				.addText((text) =>
@@ -482,7 +743,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					? this.t("settings.llm.vision.confidence.medium", "中")
 					: this.t("settings.llm.vision.confidence.low", "低")
 			: this.t("settings.llm.vision.confidence.unknown", "未测试");
-		new Setting(containerEl)
+		new Setting(capabilityGroup)
 			.setName(this.t("settings.llm.vision.name", "视觉能力"))
 			.setDesc(
 				this.t("settings.llm.vision.desc", "结果：{result} | 置信度：{confidence} | {reason}", {
@@ -506,7 +767,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(capabilityGroup)
 			.setName(this.t("settings.llm.temperature.name", "温度（选填）"))
 			.setDesc(this.t("settings.llm.temperature.desc", "留空时不发送 temperature 参数。"))
 			.addText((text) =>
@@ -521,7 +782,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(capabilityGroup)
 			.setName(this.t("settings.llm.maxTokens.name", "最大 Token（选填）"))
 			.setDesc(this.t("settings.llm.maxTokens.desc", "留空时不发送 max_tokens 参数。"))
 			.addText((text) =>
@@ -536,7 +797,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(capabilityGroup)
 			.setName(this.t("settings.llm.streaming.name", "流式输出"))
 			.setDesc(this.t("settings.llm.streaming.desc", "开启后，聊天回复将实时逐字显示。"))
 			.addToggle((toggle) =>
@@ -549,10 +810,9 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		if (this.llmStatus === "failed" && this.llmStatusDetail) {
-			const wrap = containerEl.createDiv({ cls: "friday-llm-error-detail-wrap" });
-			wrap.createDiv({
-				cls: "friday-llm-error-detail-title",
-				text: this.t("settings.llm.errorDetail.title", "错误详情（点击文本可复制）"),
+			const wrap = this.createNativeSettingsGroup(containerEl, {
+				title: this.t("settings.llm.errorDetail.title", "错误详情（点击文本可复制）"),
+				extraClass: "friday-llm-error-detail-wrap",
 			});
 			const detail = wrap.createEl("pre", {
 				cls: "friday-llm-error-detail",
@@ -570,11 +830,13 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderAgentSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.agent") });
 		const agents = this.host.settings.agents;
 		const activeAgent = this.host.getActiveAgent();
+		const identityGroup = this.createNativeSettingsGroup(containerEl);
+		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
+		const pathGroup = this.createNativeSettingsGroup(containerEl);
 
-		new Setting(containerEl)
+		new Setting(identityGroup)
 			.setName(this.t("settings.agent.current.name", "当前 Agent"))
 			.setDesc(this.t("settings.agent.current.desc", "切换后，模型、对话、记忆和知识都会隔离。"))
 			.addDropdown((dropdown) => {
@@ -615,7 +877,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (activeAgent) {
 			const agentModelOptions = this.getAvailableAgentModelOptions();
 			const selectedModelValue = resolveSelectedAgentModelValue(activeAgent, agentModelOptions);
-			new Setting(containerEl)
+			new Setting(identityGroup)
 				.setName(this.t("settings.agent.model.name", "当前 Agent 模型"))
 				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
 				.addDropdown((dropdown) => {
@@ -635,7 +897,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 		}
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.runtime.name", "启用 Agent 工具运行时"))
 			.setDesc(this.t("settings.agent.runtime.desc", "开启后，AI 将按需调用 read/grep/glob/ls/write/delete/subagent。"))
 			.addToggle((toggle) =>
@@ -645,7 +907,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.toolCalling.name", "Tool Calling 模式"))
 			.setDesc(
 				this.t(
@@ -664,7 +926,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 			});
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.maxToolIterations.name", "单轮最大工具步数"))
 			.setDesc(this.t("settings.agent.maxToolIterations.desc", "限制单次对话中的工具循环次数，防止无限调用。"))
 			.addText((text) =>
@@ -680,7 +942,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			);
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.permissionMode.name", "工具权限模式"))
 			.setDesc(
 				this.t(
@@ -699,9 +961,18 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 			});
 
-		this.renderProjectPolicyEditor(containerEl);
+		if (this.host.settings.projects.length > 0) {
+			const policyGroup = this.createNativeSettingsGroup(containerEl, {
+				title: this.t("settings.agent.policy.title", "项目工具策略"),
+				description: this.t(
+					"settings.agent.policy.desc",
+					"持久化层按 project > global 合并；session 级临时覆写在工作台对话页设置，只影响当前会话。",
+				),
+			});
+			this.renderProjectPolicyEditor(policyGroup);
+		}
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.enableSubagent.name", "启用子代理"))
 			.setDesc(this.t("settings.agent.enableSubagent.desc", "允许 Agent 将子任务委托给子代理执行。"))
 			.addToggle((toggle) =>
@@ -711,7 +982,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			);
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.enableExec.name", "启用命令执行 (exec)"))
 			.setDesc(this.t("settings.agent.enableExec.desc", "⚠️ 允许 Agent 在系统中执行 shell 命令（spawn 模式）。"))
 			.addToggle((toggle) =>
@@ -723,7 +994,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		if (this.host.settings.agentRuntime.enableExecTool) {
-			new Setting(containerEl)
+			new Setting(runtimeGroup)
 				.setName(this.t("settings.agent.execTimeout.name", "命令超时（秒）"))
 				.setDesc(this.t("settings.agent.execTimeout.desc", "单条命令执行的最大等待时间。"))
 				.addText((text) =>
@@ -740,7 +1011,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				);
 		}
 
-		new Setting(containerEl)
+		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.maxSubagentDepth.name", "子代理最大深度"))
 			.setDesc(this.t("settings.agent.maxSubagentDepth.desc", "避免无限递归。默认 1 表示仅允许一层子代理。"))
 			.addText((text) =>
@@ -757,7 +1028,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		this.renderPathListSetting(
-			containerEl,
+			pathGroup,
 			this.t("settings.agent.path.vaultFocus.name", "Vault 聚焦路径"),
 			this.t("settings.agent.path.vaultFocus.desc", "每行一个相对 Vault 的目录；为空表示允许读取整个 Vault。"),
 			this.host.settings.agentRuntime.vaultFocusPaths,
@@ -768,7 +1039,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		);
 
 		this.renderPathListSetting(
-			containerEl,
+			pathGroup,
 			this.t("settings.agent.path.externalReadonly.name", "外路径只读白名单"),
 			this.t("settings.agent.path.externalReadonly.desc", "每行一个绝对路径，供 Agent 只读访问。"),
 			this.host.settings.agentRuntime.externalReadOnlyPaths,
@@ -779,7 +1050,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		);
 
 		this.renderPathListSetting(
-			containerEl,
+			pathGroup,
 			this.t("settings.agent.path.skillExternal.name", "Skill 外路径"),
 			this.t("settings.agent.path.skillExternal.desc", "每行一个绝对路径，用于加载外部 skill 元数据。"),
 			this.host.settings.agentRuntime.externalSkillPaths,
@@ -799,16 +1070,6 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!this.policyEditorProjectSlug || !projects.some((item) => this.getProjectKey(item) === this.policyEditorProjectSlug)) {
 			this.policyEditorProjectSlug = this.host.settings.activeProjectId || this.getProjectKey(projects[0]!);
 		}
-
-		containerEl.createEl("h4", {
-			text: this.t("settings.agent.policy.title", "项目工具策略"),
-		});
-		containerEl.createEl("p", {
-			text: this.t(
-				"settings.agent.policy.desc",
-				"持久化层按 project > global 合并；session 级临时覆写在工作台对话页设置，只影响当前会话。",
-			),
-		});
 
 		new Setting(containerEl)
 			.setName(this.t("settings.agent.policy.project", "策略作用项目"))
@@ -851,9 +1112,9 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSlashCommandSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.slash") });
+		const manageGroup = this.createNativeSettingsGroup(containerEl);
 
-		new Setting(containerEl)
+		new Setting(manageGroup)
 			.setName(this.t("settings.slash.manage.name", "命令管理"))
 			.setDesc(this.t("settings.slash.manage.desc", "支持 {arg}（必填）与 {arg?}（选填）占位符，并可限制可用工具与模型。"))
 			.addButton((button) =>
@@ -905,7 +1166,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		if (this.host.settings.slashCommands.length === 0) {
-			containerEl.createEl("p", {
+			const emptyGroup = this.createNativeSettingsGroup(containerEl);
+			emptyGroup.createEl("p", {
 				text: this.t("settings.slash.empty", "暂无自定义命令。示例：/draft {arg} -> 请起草{arg}的技术方案。"),
 			});
 			return;
@@ -915,8 +1177,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			a.name.localeCompare(b.name, "zh-CN"),
 		);
 		for (const command of commands) {
-			const card = containerEl.createDiv({ cls: "friday-card" });
-			card.createEl("h4", { text: `/${command.name}` });
+			const card = this.createNativeSettingsGroup(containerEl, { title: `/${command.name}` });
 
 			new Setting(card)
 				.setName(this.t("settings.slash.command.enabled.name", "启用"))
@@ -1007,22 +1268,21 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderProjectSection(containerEl: HTMLElement): void {
-		containerEl.createEl("h3", { text: this.host.t("settings.section.project") });
-		this.renderActiveProjectSelector(containerEl);
-		this.renderProjectGroupSection(containerEl);
-
-		new Setting(containerEl).addButton((button) =>
-			button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
-				void this.openRegisterProjectModal();
-			}),
-		);
+		const shell = containerEl.createDiv({ cls: "friday-project-settings-shell" });
+		this.renderActiveProjectSelector(shell);
 
 		if (this.projectEditorDraft) {
-			this.renderProjectEditorCard(containerEl);
+			this.renderProjectEditorCard(shell);
 		}
 
+		this.renderProjectGroupSection(shell);
+
 		if (this.host.settings.projects.length === 0) {
-			containerEl.createEl("p", { text: this.t("settings.project.empty", "尚未注册项目。") });
+			this.createNativeSettingsGroup(shell, {
+				title: this.t("settings.project.empty", "尚未注册项目。"),
+				description: this.t("settings.project.active.desc", "Agent 与工具读写将严格限制在该项目根目录下。"),
+				extraClass: "friday-empty-state friday-project-settings-panel",
+			});
 			return;
 		}
 
@@ -1033,91 +1293,36 @@ export class FridaySettingTab extends PluginSettingTab {
 			if (projectsInGroup.length === 0) {
 				continue;
 			}
-			containerEl.createEl("h4", {
-				text: `${group.name} (${projectsInGroup.length})`,
-				cls: "friday-setting-project-group-title",
-			});
-
-			for (const project of projectsInGroup) {
-				const projectKey = this.getProjectKey(project);
-				const active = projectKey === this.host.settings.activeProjectId;
-				new Setting(containerEl)
-					.setName(
-						active
-							? `${this.getProjectLabel(project)} · ${this.t("settings.project.active.badge", "当前")}`
-							: this.getProjectLabel(project),
-					)
-					.setDesc(this.buildProjectDescription(project))
-					.addButton((button) =>
-						button
-							.setButtonText(
-								active
-									? this.t("settings.project.active.badge", "当前")
-									: this.t("settings.project.setActive", "设为当前"),
-							)
-							.setDisabled(active)
-							.onClick(async () => {
-								await this.host.setActiveProject(projectKey);
-								this.display();
-							}),
-					)
-					.addButton((button) =>
-						button.setButtonText(this.t("settings.project.edit", "编辑")).onClick(() => {
-							void this.openRegisterProjectModal(project);
-						}),
-					)
-					.addButton((button) =>
-						button.setButtonText(this.t("settings.project.ignore", "忽略规则")).onClick(async () => {
-							if (this.ignoreManagerProjectId === projectKey) {
-								this.ignoreManagerProjectId = "";
-								this.ignoreManagerCandidates = [];
-								this.ignoreManagerError = "";
-								this.ignoreManagerPendingRulePath = "";
-								this.display();
-								return;
-							}
-							await this.loadProjectIgnoreCandidates(project);
-							this.display();
-						}),
-					)
-					.addButton((button) =>
-						button.setButtonText(this.t("settings.project.remove", "移除")).onClick(async () => {
-							await this.host.removeProject(projectKey);
-							this.display();
-						}),
-					);
-				if (this.ignoreManagerProjectId === projectKey) {
-					this.renderProjectIgnoreManager(containerEl, project);
-				}
-			}
+			this.renderProjectListGroup(shell, group, projectsInGroup);
 		}
 	}
 
 	private renderActiveProjectSelector(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName(this.t("settings.project.active.name", "当前项目"))
-			.setDesc(this.t("settings.project.active.desc", "Agent 与工具读写将严格限制在该项目根目录下。"))
-			.addDropdown((dropdown) => {
-				for (const project of this.host.settings.projects) {
-					dropdown.addOption(this.getProjectKey(project), this.getProjectLabel(project));
-				}
-				const fallback = this.host.settings.projects[0] ? this.getProjectKey(this.host.settings.projects[0]) : "";
-				const current = this.host.settings.activeProjectId || fallback;
-				if (current) {
-					dropdown.setValue(current);
-				}
-				dropdown.setDisabled(this.host.settings.projects.length === 0);
-				dropdown.onChange(async (value) => {
-					await this.host.setActiveProject(value);
-					this.display();
-				});
-			});
+		const panel = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-project-register-panel",
+		});
+		const registerSetting = new Setting(panel)
+			.setName(this.t("settings.project.register", "注册项目"))
+			.setDesc(this.t("settings.project.register.desc", "创建一个新的项目配置。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
+					void this.openRegisterProjectModal();
+				}),
+			);
+		registerSetting.settingEl.addClass("friday-project-register-row");
 	}
 
 	private renderProjectGroupSection(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName(this.t("settings.project.group.manage", "项目组管理"))
-			.setDesc(this.t("settings.project.group.manageDesc", "支持创建、重命名、删除项目组。删除时项目会迁移到 default-group。"))
+		containerEl.createEl("h4", {
+			cls: "friday-project-group-heading",
+			text: this.t("settings.project.group.manage", "项目组管理"),
+		});
+		const panel = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-project-settings-panel friday-project-group-manager-panel",
+		});
+		new Setting(panel)
+			.setName(this.t("settings.project.group.create", "新建项目组"))
+			.setDesc(this.t("settings.project.group.createPrompt", "输入项目组名称"))
 			.addText((text) =>
 				text
 					.setPlaceholder(this.t("settings.project.group.createPrompt", "输入项目组名称"))
@@ -1127,78 +1332,213 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 			)
 			.addButton((button) =>
-				button.setButtonText(this.t("settings.project.group.create", "新建项目组")).onClick(async () => {
-					const name = this.newProjectGroupDraft.trim();
-					if (!name) {
-						return;
-					}
-					const id = name
-						.toLowerCase()
-						.replace(/[^a-z0-9_-]+/g, "-")
-						.replace(/^-+|-+$/g, "");
-					if (!id) {
-						new Notice(this.t("settings.project.group.invalidId", "项目组名称无法生成合法 ID。"), 3000);
-						return;
-					}
-					if (this.host.settings.projectGroups.some((item) => item.id === id)) {
-						new Notice(this.t("settings.project.group.idExists", "项目组 ID 已存在：{id}", { id }), 3000);
-						return;
-					}
-					const now = new Date().toISOString();
-					await this.host.upsertProjectGroup({
-						id,
-						name,
-						description: "",
-						projectIds: [],
-						createdAt: now,
-						updatedAt: now,
-					});
-					this.newProjectGroupDraft = "";
-					this.display();
+				button.setButtonText(this.t("settings.project.group.create", "新建项目组")).onClick(() => {
+					void this.createProjectGroup();
 				}),
 			);
 
 		for (const group of this.getProjectGroupsForDisplay()) {
-			const count = this.host.settings.projects.filter((item) => item.groupId === group.id).length;
-			new Setting(containerEl)
-				.setName(`${group.name} (${count})`)
-				.setDesc(`${group.id}`)
+			const count = this.host.settings.projects.filter((item) => (item.groupId || "default-group") === group.id).length;
+			new Setting(panel)
+				.setName(`${this.getProjectGroupDisplayName(group)} (${count})`)
+				.setDesc(group.id)
 				.addText((text) =>
 					text
 						.setPlaceholder(this.t("settings.project.group.renamePrompt", "输入新名称"))
 						.setValue(group.name)
-						.onChange(async (value) => {
-							const name = value.trim();
-							if (!name || name === group.name) {
-								return;
-							}
-							await this.host.upsertProjectGroup({
-								...group,
-								name,
-								updatedAt: new Date().toISOString(),
-							});
+						.onChange((value) => {
+							void this.renameProjectGroup(group, value);
 						}),
 				)
-				.addButton((button) =>
-					button
-						.setButtonText(
-							this.pendingDeleteGroupId === group.id
-								? this.t("settings.project.group.removeConfirmInline", "再次点击删除")
-								: this.t("settings.project.group.remove", "删除"),
-						)
-						.setDisabled(group.id === "default-group")
-						.onClick(async () => {
-							if (this.pendingDeleteGroupId !== group.id) {
-								this.pendingDeleteGroupId = group.id;
-								this.display();
-								return;
-							}
-							await this.host.removeProjectGroup(group.id);
-							this.pendingDeleteGroupId = "";
-							this.display();
-						}),
-				);
+				.addButton((button) => {
+					button.setButtonText(
+						this.pendingDeleteGroupId === group.id
+							? this.t("settings.project.group.removeConfirmInline", "再次点击删除")
+							: this.t("settings.project.group.remove", "删除"),
+					);
+					button.setDisabled(group.id === "default-group");
+					button.onClick(() => {
+						void this.handleProjectGroupDeletion(group.id);
+					});
+				});
 		}
+	}
+
+	private createProjectSettingsPanel(
+		containerEl: HTMLElement,
+		title: string,
+		description = "",
+		extraClass = "",
+	): HTMLDivElement {
+		const panel = this.createNativeSettingsGroup(containerEl, {
+			extraClass: ["friday-project-settings-panel", extraClass].filter(Boolean).join(" "),
+		});
+		const header = panel.createDiv({ cls: "friday-project-panel-header" });
+		header.createDiv({ cls: "friday-project-panel-title", text: title });
+		if (description) {
+			header.createDiv({ cls: "friday-project-panel-description", text: description });
+		}
+		return panel;
+	}
+
+	private renderProjectListGroup(
+		containerEl: HTMLElement,
+		group: Pick<ProjectGroupEntry, "id" | "name">,
+		projects: ProjectEntry[],
+	): void {
+		containerEl.createEl("h4", {
+			cls: "friday-project-group-heading",
+			text: `${this.getProjectGroupDisplayName(group)} (${projects.length})`,
+		});
+		const listGroup = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-project-list-group",
+		});
+		let expandedIgnoreProject: ProjectEntry | null = null;
+		for (const project of projects) {
+			this.renderProjectRow(listGroup, project);
+			if (this.ignoreManagerProjectId === this.getProjectKey(project)) {
+				expandedIgnoreProject = project;
+			}
+		}
+		if (expandedIgnoreProject) {
+			this.renderProjectIgnoreManager(containerEl, expandedIgnoreProject);
+		}
+	}
+
+	private renderProjectRow(listGroup: HTMLElement, project: ProjectEntry): void {
+		const projectKey = this.getProjectKey(project);
+		const active = projectKey === this.host.settings.activeProjectId;
+		const setting = new Setting(listGroup)
+			.setName(
+				active
+					? `${this.getProjectLabel(project)} · ${this.t("settings.project.active.badge", "当前")}`
+					: this.getProjectLabel(project),
+			)
+			.setDesc("");
+
+		setting.descEl.empty();
+		[
+			`${this.t("projects.editor.vaultDir", "Vault directory")}: ${project.boundaryPath?.trim() || "/"}`,
+			project.gitRemote
+				? this.t("settings.project.desc.remote", "远程：{value}", { value: project.gitRemote })
+				: this.t("settings.project.desc.remoteNotSet", "未设置远程"),
+			project.lastSyncAt
+				? this.t("settings.project.desc.lastSync", "最近同步：{value}", { value: project.lastSyncAt })
+				: this.t("settings.project.desc.lastSyncNever", "从未同步"),
+			`${this.getProjectGroupName(project.groupId || "default-group")} · ${
+				project.autoSync
+					? this.t("settings.project.desc.autoSyncOn", "自动同步：开")
+					: this.t("settings.project.desc.autoSyncOff", "自动同步：关")
+			}`,
+		].forEach((line) => {
+			setting.descEl.createDiv({
+				cls: "friday-project-setting-detail",
+				text: line,
+			});
+		});
+
+		const actionsSetting = setting;
+		actionsSetting.addButton((button) => {
+			button.setButtonText(
+				active
+					? this.t("settings.project.active.badge", "当前")
+					: this.t("settings.project.setActive", "设为当前"),
+			);
+			button.setDisabled(active);
+			button.onClick(() => {
+				void (async () => {
+					await this.host.setActiveProject(projectKey);
+					this.display();
+				})();
+			});
+		});
+		actionsSetting.addButton((button) => {
+			button.setButtonText(this.t("settings.project.edit", "编辑"));
+			button.onClick(() => {
+				void this.openRegisterProjectModal(project);
+			});
+		});
+		actionsSetting.addButton((button) => {
+			button.setButtonText(this.t("settings.project.ignore", "忽略规则"));
+			button.onClick(() => {
+				void (async () => {
+					if (this.ignoreManagerProjectId === projectKey) {
+						this.ignoreManagerProjectId = "";
+						this.ignoreManagerCandidates = [];
+						this.ignoreManagerError = "";
+						this.ignoreManagerPendingRulePath = "";
+						this.display();
+						return;
+					}
+					await this.loadProjectIgnoreCandidates(project);
+					this.display();
+				})();
+			});
+		});
+		actionsSetting.addButton((button) => {
+			button.setButtonText(this.t("settings.project.remove", "移除"));
+			button.setWarning();
+			button.onClick(() => {
+				void (async () => {
+					await this.host.removeProject(projectKey);
+					this.display();
+				})();
+			});
+		});
+	}
+
+	private async createProjectGroup(): Promise<void> {
+		const name = this.newProjectGroupDraft.trim();
+		if (!name) {
+			return;
+		}
+		const id = name
+			.toLowerCase()
+			.replace(/[^a-z0-9_-]+/g, "-")
+			.replace(/^-+|-+$/g, "");
+		if (!id) {
+			new Notice(this.t("settings.project.group.invalidId", "项目组名称无法生成合法 ID。"), 3000);
+			return;
+		}
+		if (this.host.settings.projectGroups.some((item) => item.id === id)) {
+			new Notice(this.t("settings.project.group.idExists", "项目组 ID 已存在：{id}", { id }), 3000);
+			return;
+		}
+		const now = new Date().toISOString();
+		await this.host.upsertProjectGroup({
+			id,
+			name,
+			description: "",
+			projectIds: [],
+			createdAt: now,
+			updatedAt: now,
+		});
+		this.newProjectGroupDraft = "";
+		this.display();
+	}
+
+	private async renameProjectGroup(group: ProjectGroupEntry, rawValue: string): Promise<void> {
+		const name = rawValue.trim();
+		if (!name || name === group.name) {
+			return;
+		}
+		await this.host.upsertProjectGroup({
+			...group,
+			name,
+			updatedAt: new Date().toISOString(),
+		});
+		this.display();
+	}
+
+	private async handleProjectGroupDeletion(groupId: string): Promise<void> {
+		if (this.pendingDeleteGroupId !== groupId) {
+			this.pendingDeleteGroupId = groupId;
+			this.display();
+			return;
+		}
+		await this.host.removeProjectGroup(groupId);
+		this.pendingDeleteGroupId = "";
+		this.display();
 	}
 
 	private getProjectGroupsForDisplay(): ProjectGroupEntry[] {
@@ -1210,7 +1550,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!map.has("default-group")) {
 			map.set("default-group", {
 				id: "default-group",
-				name: "Default Group",
+				name: this.t("settings.project.group.defaultName", "默认项目组"),
 				description: "",
 				projectIds: [],
 				createdAt: now,
@@ -1235,6 +1575,35 @@ export class FridaySettingTab extends PluginSettingTab {
 			if (b.id === "default-group") return 1;
 			return a.name.localeCompare(b.name, "zh-CN");
 		});
+	}
+
+	private getProjectGroupName(groupId: string): string {
+		if (groupId === "default-group") {
+			return this.t("settings.project.group.defaultName", "默认项目组");
+		}
+		return this.host.settings.projectGroups.find((group) => group.id === groupId)?.name ?? groupId;
+	}
+
+	private getProjectGroupDisplayName(group: Pick<ProjectGroupEntry, "id" | "name">): string {
+		return group.id === "default-group" ? this.t("settings.project.group.defaultName", "默认项目组") : group.name;
+	}
+
+	private getProjectRegistrationModeLabel(mode: ProjectEditorDraft["mode"]): string {
+		return this.t(`projects.editor.mode.${mode}`, mode);
+	}
+
+	private getProjectRegistrationModeOptions(): ProjectEditorSelectOption[] {
+		return (["local_only", "register_existing_dir", "remote_bootstrap"] as const).map((mode) => ({
+			value: mode,
+			label: this.getProjectRegistrationModeLabel(mode),
+		}));
+	}
+
+	private getProjectGroupOptions(): ProjectEditorSelectOption[] {
+		return this.getProjectGroupsForDisplay().map((group) => ({
+			value: group.id,
+			label: this.getProjectGroupDisplayName(group),
+		}));
 	}
 
 	private renderPathListSetting(
@@ -1590,14 +1959,10 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private async openRegisterProjectModal(initial?: ProjectEntry): Promise<void> {
 		const draft = this.createProjectEditorDraft(initial);
-		if (initial) {
-			const credential = await this.host.getProjectGitCredential(this.getProjectKey(initial));
-			draft.gitUsername = credential?.username ?? "";
-			draft.gitToken = credential?.token ?? "";
-		}
 		this.projectEditorDraft = draft;
 		this.projectEditorInitialProjectId = initial ? this.getProjectKey(initial) : "";
 		this.projectEditorError = "";
+		this.resetRemoteBootstrapDirectoryChoice();
 		await this.refreshProjectGitDetection(draft);
 		this.activeSection = "project";
 		this.display();
@@ -1608,7 +1973,12 @@ export class FridaySettingTab extends PluginSettingTab {
 			const projectId = this.getProjectKey(initial);
 			const boundaryPath =
 				initial.boundaryPath ||
-				buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), projectId);
+				this.computeDraftDefaultBoundaryPath({
+					mode: initial.gitState === "none" ? "local_only" : "register_existing_dir",
+					projectId,
+					projectName: this.getProjectLabel(initial),
+					gitRemote: initial.gitRemote,
+				});
 			return {
 				groupId: initial.groupId || "default-group",
 				mode: initial.gitState === "none" ? "local_only" : "register_existing_dir",
@@ -1622,7 +1992,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				projectRootPath: boundaryPath,
 			};
 		}
-		const defaultBoundaryPath = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), "");
+		const defaultBoundaryPath = "";
 		return {
 			groupId: this.host.settings.projectGroups[0]?.id ?? "default-group",
 			mode: "local_only",
@@ -1642,81 +2012,110 @@ export class FridaySettingTab extends PluginSettingTab {
 			return;
 		}
 		const draft = this.projectEditorDraft;
-		const card = containerEl.createDiv({ cls: "friday-card" });
-		card.createEl("h4", {
-			text: this.projectEditorInitialProjectId
-				? this.t("projects.editor.edit", "Edit project")
-				: this.t("projects.editor.create", "Register project"),
+		const card = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-project-settings-panel friday-project-editor-card",
 		});
 		if (this.projectEditorError) {
 			card.createDiv({ cls: "friday-ai-error", text: this.projectEditorError });
 		}
-
-		const fields = card.createDiv({ cls: "friday-project-editor-grid" });
-		this.renderProjectEditorInput(
-			fields,
+		this.renderProjectEditorDropdownSetting(
+			card,
 			this.t("projects.editor.mode", "Registration mode"),
+			this.t("settings.project.editor.mode.desc", "决定项目是仅登记本地目录、接入已有仓库，还是从远程初始化。"),
 			draft.mode,
 			(value) => {
 				draft.mode = value as ProjectEditorDraft["mode"];
 				if (draft.mode === "remote_bootstrap") {
 					this.applyRemoteBootstrapDefaults(draft);
+					this.resetRemoteBootstrapDirectoryChoice();
+					draft.boundaryPath = "";
+					draft.projectRootPath = "";
+				} else {
+					this.resetRemoteBootstrapDirectoryChoice();
 				}
 				void this.refreshProjectGitDetection(draft);
 				this.display();
 			},
-			["local_only", "register_existing_dir", "remote_bootstrap"],
+			this.getProjectRegistrationModeOptions(),
 		);
-		this.renderProjectEditorInput(
-			fields,
+		this.renderProjectEditorDropdownSetting(
+			card,
 			this.t("projects.editor.group", "Group"),
+			this.t("settings.project.editor.group.desc", "项目会显示在对应项目组中；未指定时归入默认项目组。"),
 			draft.groupId,
 			(value) => {
 				draft.groupId = value;
 			},
-			this.host.settings.projectGroups.map((group) => group.id),
+			this.getProjectGroupOptions(),
 		);
-		this.renderProjectEditorText(fields, this.t("projects.editor.projectName", "Project name"), draft.projectName, (value) => {
-			draft.projectName = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.projectId", "Project ID"), draft.projectId, (value) => {
-			const previousDefault = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId);
-			draft.projectId = value.trim().toLowerCase();
-			draft.slug = draft.projectId;
-			const nextDefault = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId);
-			if (draft.mode !== "remote_bootstrap" && (!draft.boundaryPath || draft.boundaryPath === previousDefault)) {
-				draft.boundaryPath = nextDefault;
-				draft.projectRootPath = nextDefault;
-			}
-			void this.refreshProjectGitDetection(draft);
-			this.display();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.remote", "Git remote"), draft.gitRemote, (value) => {
-			draft.gitRemote = value.trim();
-			if (draft.mode === "remote_bootstrap") {
-				this.applyRemoteBootstrapDefaults(draft);
-			}
-			void this.refreshProjectGitDetection(draft);
-			this.display();
-		});
-		if (draft.mode === "register_existing_dir") {
-			this.renderProjectEditorInput(
-				fields,
+		this.renderProjectEditorTextSetting(
+			card,
+			this.t("projects.editor.projectName", "Project name"),
+			this.t("settings.project.editor.projectName.desc", "用于设置页和工作台显示的项目名称。"),
+			draft.projectName,
+			(value) => {
+				const previousProjectIdDefault = this.computeProjectIdBoundaryPath(draft.projectId);
+				const previousNameDefault = this.computeDraftDefaultBoundaryPath(draft);
+				draft.projectName = value.trim();
+				if (draft.mode === "remote_bootstrap") {
+					this.syncRemoteBootstrapBoundaryPath(draft);
+				} else {
+					const shouldSyncBoundary =
+						draft.mode !== "register_existing_dir" &&
+						(!draft.boundaryPath ||
+							draft.boundaryPath === previousNameDefault ||
+							draft.boundaryPath === previousProjectIdDefault);
+					if (shouldSyncBoundary) {
+						const nextDefault = this.computeDraftDefaultBoundaryPath(draft);
+						draft.boundaryPath = nextDefault;
+						draft.projectRootPath = nextDefault;
+					}
+				}
+			},
+			"text",
+			() => {
+				this.refreshProjectEditorAfterTextCommit(draft);
+			},
+		);
+		this.renderProjectEditorTextSetting(
+			card,
+			this.t("projects.editor.remote", "Git remote"),
+			this.t("settings.project.editor.remote.desc", "远程初始化模式必填；仅本地项目可留空。"),
+			draft.gitRemote,
+			(value) => {
+				draft.gitRemote = value.trim();
+				if (draft.mode === "remote_bootstrap") {
+					this.applyRemoteBootstrapDefaults(draft);
+					this.syncRemoteBootstrapBoundaryPath(draft);
+				}
+			},
+			"text",
+			() => {
+				this.refreshProjectEditorAfterTextCommit(draft);
+			},
+		);
+		const fields = card;
+		if (draft.mode === "remote_bootstrap") {
+			this.renderRemoteBootstrapDirectoryPicker(fields, draft);
+		} else if (draft.mode === "local_only" || draft.mode === "register_existing_dir") {
+			this.renderProjectEditorDropdownSetting(
+				card,
 				this.t("projects.editor.vaultDir", "Vault directory"),
-				draft.boundaryPath,
+				this.t(
+					"settings.project.editor.vaultDir.desc",
+					"选择项目在 Vault 中的目录范围；接入现有目录时应指向已有仓库根目录。",
+				),
+				this.normalizeVaultDirectorySelectionValue(draft.boundaryPath),
 				(value) => {
-					draft.boundaryPath = value.trim();
+					draft.boundaryPath = this.parseVaultDirectorySelectionValue(value);
 					draft.projectRootPath = draft.boundaryPath;
 					void this.refreshProjectGitDetection(draft);
+					this.display();
 				},
-				this.listVaultDirectoryOptions(),
+					draft.mode === "local_only"
+						? this.listVaultDirectoryOptions(true)
+						: this.listVaultDirectoryOptions(),
 			);
-		} else {
-			this.renderProjectEditorText(fields, this.t("projects.editor.root", "Project root"), draft.boundaryPath, (value) => {
-				draft.boundaryPath = value.trim();
-				draft.projectRootPath = draft.boundaryPath;
-				void this.refreshProjectGitDetection(draft);
-			});
 		}
 		if (this.projectGitDetection?.detectedParentRepository) {
 			card.createDiv({
@@ -1728,23 +2127,20 @@ export class FridaySettingTab extends PluginSettingTab {
 				),
 			});
 		}
-		this.renderProjectEditorText(fields, this.t("projects.editor.gitUsername", "Git username"), draft.gitUsername ?? "", (value) => {
-			draft.gitUsername = value.trim();
-		});
-		this.renderProjectEditorText(fields, this.t("projects.editor.gitToken", "Git token"), draft.gitToken ?? "", (value) => {
-			draft.gitToken = value.trim();
-		}, "password");
+		this.renderProjectEditorToggleSetting(
+			card,
+			this.t("projects.editor.autoSync", "Auto sync"),
+			this.t("settings.project.editor.autoSync.desc", "开启后会按同步设置自动处理这个项目。"),
+			draft.autoSync,
+			(value) => {
+				draft.autoSync = value;
+				this.display();
+			},
+		);
 
-		const toggleRow = fields.createDiv({ cls: "friday-project-editor-field" });
-		toggleRow.createEl("label", { text: this.t("projects.editor.autoSync", "Auto sync") });
-		const toggle = toggleRow.createEl("input", { attr: { type: "checkbox" } });
-		toggle.checked = draft.autoSync;
-		toggle.onchange = () => {
-			draft.autoSync = toggle.checked;
-		};
-
-		const actions = card.createDiv({ cls: "friday-approval-actions" });
+		const actions = card.createDiv({ cls: "friday-approval-actions friday-project-editor-actions" });
 		const saveButton = actions.createEl("button", { text: this.t("projects.editor.save", "Save project") });
+		saveButton.addClass("mod-cta");
 		saveButton.onclick = () => {
 			void this.submitProjectEditor();
 		};
@@ -1754,53 +2150,264 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.projectEditorInitialProjectId = "";
 			this.projectEditorError = "";
 			this.projectGitDetection = null;
+			this.resetRemoteBootstrapDirectoryChoice();
 			this.display();
 		};
 	}
 
-	private renderProjectEditorText(
+	private renderProjectEditorTextSetting(
 		containerEl: HTMLElement,
 		label: string,
+		description: string,
 		value: string,
 		onChange: (value: string) => void,
 		type = "text",
+		onCommit?: () => void,
 	): void {
-		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
-		row.createEl("label", { text: label });
-		const input = row.createEl("input", { attr: { type, value } });
-		input.oninput = () => {
-			onChange(input.value);
-		};
+		const setting = new Setting(containerEl).setName(label).setDesc(description);
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.addText((text) => {
+			text.setValue(value).onChange((nextValue) => {
+				onChange(nextValue);
+			});
+			const input = text.inputEl;
+			input.type = type;
+			input.addClass("friday-project-editor-input");
+			input.onblur = () => {
+				onCommit?.();
+			};
+		});
 	}
 
-	private renderProjectEditorInput(
+	private renderProjectEditorDropdownSetting(
 		containerEl: HTMLElement,
 		label: string,
+		description: string,
 		value: string,
 		onChange: (value: string) => void,
-		options: string[],
+		options: ProjectEditorSelectOption[],
 	): void {
-		const row = containerEl.createDiv({ cls: "friday-project-editor-field" });
-		row.createEl("label", { text: label });
-		const select = row.createEl("select");
-		for (const optionValue of [...new Set(options.length > 0 ? options : ["default-group"])]) {
-			const option = select.createEl("option", { text: optionValue });
-			option.value = optionValue;
-			option.selected = optionValue === value;
-		}
-		select.onchange = () => {
-			onChange(select.value);
-		};
+		const setting = new Setting(containerEl).setName(label).setDesc(description);
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.addDropdown((dropdown) => {
+			const normalizedOptions =
+				options.length > 0 ? options : [{ value: "default-group", label: this.getProjectGroupName("default-group") }];
+			for (const item of normalizedOptions) {
+				const optionValue = typeof item === "string" ? item : item.value;
+				const optionLabel = typeof item === "string" ? item : item.label;
+				dropdown.addOption(optionValue, optionLabel);
+			}
+			dropdown.setValue(value);
+			dropdown.selectEl.addClass("friday-project-editor-input");
+			dropdown.onChange((nextValue) => {
+				onChange(nextValue);
+			});
+		});
 	}
 
-	private listVaultDirectoryOptions(): string[] {
+	private renderProjectEditorToggleSetting(
+		containerEl: HTMLElement,
+		label: string,
+		description: string,
+		value: boolean,
+		onChange: (value: boolean) => void,
+	): void {
+		const setting = new Setting(containerEl).setName(label).setDesc(description);
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.addToggle((toggle) => {
+			toggle.setValue(value).onChange((nextValue) => {
+				onChange(nextValue);
+			});
+		});
+	}
+
+	private renderRemoteBootstrapDirectoryPicker(containerEl: HTMLElement, draft: ProjectEditorDraft): void {
+		if (!this.projectEditorRemoteBootstrapChoiceInitialized) {
+			this.primeRemoteBootstrapDirectoryChoice(draft);
+		}
+
+		const setting = new Setting(containerEl)
+			.setName(this.t("projects.editor.root", "Project root"))
+			.setDesc(
+				this.t(
+					"settings.project.remoteBootstrap.directoryHelp",
+					"先选择放置远程仓库的 Vault 目录；若目录非空，可改为在该目录下新建子文件夹。",
+				),
+			);
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.addDropdown((dropdown) => {
+			dropdown.addOption("", this.t("settings.project.remoteBootstrap.directoryPlaceholder", "请选择目标文件夹"));
+			for (const optionValue of this.listVaultDirectoryOptions(true)) {
+				dropdown.addOption(optionValue, optionValue);
+			}
+			dropdown.setValue(this.normalizeVaultDirectorySelectionValue(this.projectEditorRemoteBootstrapBasePath));
+			dropdown.selectEl.addClass("friday-project-editor-input");
+			dropdown.onChange((selectionValue) => {
+				void this.handleRemoteBootstrapDirectorySelection(draft, selectionValue);
+			});
+		});
+
+		if (this.projectEditorRemoteBootstrapDirectoryState === "non_empty") {
+			const warning = containerEl.createDiv({ cls: "friday-empty-state friday-project-editor-choice-card" });
+			warning.createDiv({
+				cls: "friday-project-empty-title",
+				text: this.t("settings.project.remoteBootstrap.nonEmpty.title", "所选目录不是空文件夹"),
+			});
+			warning.createEl("p", {
+				text: this.t(
+					"settings.project.remoteBootstrap.nonEmpty.desc",
+					"直接拉取远程仓库可能失败。你可以在该目录下创建一个新文件夹，或重新选择路径。",
+				),
+			});
+			const actions = warning.createDiv({ cls: "friday-project-editor-choice-actions" });
+			const createChildButton = actions.createEl("button", {
+				text: this.t(
+					"settings.project.remoteBootstrap.nonEmpty.createChild",
+					"在所选目录下创建新文件夹",
+				),
+			});
+			createChildButton.addClass("mod-cta");
+			createChildButton.onclick = () => {
+				this.projectEditorRemoteBootstrapResolution = "create_child";
+				this.syncRemoteBootstrapBoundaryPath(draft);
+				this.display();
+			};
+			const reselectButton = actions.createEl("button", {
+				text: this.t("settings.project.remoteBootstrap.nonEmpty.reselect", "重选路径"),
+			});
+			reselectButton.onclick = () => {
+				this.clearRemoteBootstrapDirectoryChoice();
+				this.syncRemoteBootstrapBoundaryPath(draft);
+				this.display();
+			};
+
+			if (this.projectEditorRemoteBootstrapResolution === "create_child" && draft.boundaryPath.trim()) {
+				warning.createEl("p", {
+					cls: "friday-ai-muted",
+					text: this.t("settings.project.remoteBootstrap.nonEmpty.preview", "将创建到：{path}", {
+						path: draft.boundaryPath,
+					}),
+				});
+			}
+		}
+	}
+
+	private listVaultDirectoryOptions(includeVaultRoot = false): string[] {
 		const folders = this.app.vault
 			.getAllLoadedFiles()
 			.filter((item): item is TFolder => item instanceof TFolder)
 			.map((folder) => folder.path.trim())
 			.filter(Boolean)
 			.sort((left, right) => left.localeCompare(right, "en"));
-		return [...new Set(folders)];
+		const options = [...new Set(folders)];
+		return includeVaultRoot ? ["/", ...options] : options;
+	}
+
+	private async handleRemoteBootstrapDirectorySelection(draft: ProjectEditorDraft, selectionValue: string): Promise<void> {
+		if (!selectionValue) {
+			this.clearRemoteBootstrapDirectoryChoice();
+			this.syncRemoteBootstrapBoundaryPath(draft);
+			this.display();
+			return;
+		}
+
+		const basePath = this.parseVaultDirectorySelectionValue(selectionValue);
+		this.projectEditorRemoteBootstrapChoiceInitialized = true;
+		this.projectEditorRemoteBootstrapBasePath = basePath;
+		this.projectEditorRemoteBootstrapDirectoryState = this.getRemoteBootstrapDirectoryState(basePath);
+		this.projectEditorRemoteBootstrapResolution =
+			this.projectEditorRemoteBootstrapDirectoryState === "empty" ? "direct" : "unset";
+		this.syncRemoteBootstrapBoundaryPath(draft);
+		this.display();
+	}
+
+	private primeRemoteBootstrapDirectoryChoice(draft: ProjectEditorDraft): void {
+		this.projectEditorRemoteBootstrapChoiceInitialized = true;
+		const fallbackPath = this.computeDraftDefaultBoundaryPath(draft);
+		const basePath = this.getParentVaultDirectory(fallbackPath);
+		const optionValue = this.normalizeVaultDirectorySelectionValue(basePath);
+		if (!this.listVaultDirectoryOptions(true).includes(optionValue)) {
+			return;
+		}
+		this.projectEditorRemoteBootstrapBasePath = basePath;
+		this.projectEditorRemoteBootstrapDirectoryState = this.getRemoteBootstrapDirectoryState(basePath);
+		this.projectEditorRemoteBootstrapResolution =
+			this.projectEditorRemoteBootstrapDirectoryState === "empty" ? "direct" : "unset";
+		this.syncRemoteBootstrapBoundaryPath(draft);
+	}
+
+	private resetRemoteBootstrapDirectoryChoice(): void {
+		this.projectEditorRemoteBootstrapBasePath = "";
+		this.projectEditorRemoteBootstrapDirectoryState = "unknown";
+		this.projectEditorRemoteBootstrapResolution = "unset";
+		this.projectEditorRemoteBootstrapChoiceInitialized = false;
+	}
+
+	private clearRemoteBootstrapDirectoryChoice(): void {
+		this.projectEditorRemoteBootstrapBasePath = "";
+		this.projectEditorRemoteBootstrapDirectoryState = "unknown";
+		this.projectEditorRemoteBootstrapResolution = "unset";
+		this.projectEditorRemoteBootstrapChoiceInitialized = true;
+	}
+
+	private syncRemoteBootstrapBoundaryPath(draft: ProjectEditorDraft): void {
+		if (draft.mode !== "remote_bootstrap") {
+			return;
+		}
+		if (!this.projectEditorRemoteBootstrapBasePath && this.projectEditorRemoteBootstrapResolution === "unset") {
+			draft.boundaryPath = "";
+			draft.projectRootPath = "";
+			return;
+		}
+		if (this.projectEditorRemoteBootstrapResolution === "direct") {
+			draft.boundaryPath = this.projectEditorRemoteBootstrapBasePath.trim();
+			draft.projectRootPath = draft.boundaryPath;
+			return;
+		}
+		if (this.projectEditorRemoteBootstrapResolution === "create_child") {
+			const nestedPath = this.buildRemoteBootstrapNestedPath(draft, this.projectEditorRemoteBootstrapBasePath);
+			draft.boundaryPath = nestedPath;
+			draft.projectRootPath = nestedPath;
+			return;
+		}
+		draft.boundaryPath = "";
+		draft.projectRootPath = "";
+	}
+
+	private buildRemoteBootstrapNestedPath(
+		draft: Pick<ProjectEditorDraft, "mode" | "projectId" | "projectName" | "gitRemote">,
+		basePath: string,
+	): string {
+		const defaultPath = this.computeDraftDefaultBoundaryPath(draft);
+		const segment = defaultPath.split("/").filter(Boolean).pop() ?? "new-project";
+		return basePath.trim() ? `${basePath.trim()}/${segment}` : segment;
+	}
+
+	private getParentVaultDirectory(value: string): string {
+		const segments = value
+			.trim()
+			.replace(/\\/g, "/")
+			.split("/")
+			.map((item) => item.trim())
+			.filter(Boolean);
+		segments.pop();
+		return segments.join("/");
+	}
+
+	private getRemoteBootstrapDirectoryState(basePath: string): RemoteBootstrapDirectoryState {
+		const folder = this.resolveVaultFolder(basePath);
+		if (!folder) {
+			return "unknown";
+		}
+		return folder.children.length === 0 ? "empty" : "non_empty";
+	}
+
+	private resolveVaultFolder(basePath: string): TFolder | null {
+		if (!basePath.trim()) {
+			return this.app.vault.getRoot();
+		}
+		const target = this.app.vault.getAbstractFileByPath(basePath.trim());
+		return target instanceof TFolder ? target : null;
 	}
 
 	private applyRemoteBootstrapDefaults(draft: ProjectEditorDraft): void {
@@ -1815,10 +2422,45 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!draft.projectName.trim()) {
 			draft.projectName = defaults.projectName;
 		}
-		if (!draft.boundaryPath.trim() || draft.boundaryPath === buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), draft.projectId)) {
-			draft.boundaryPath = defaults.boundaryPath;
-			draft.projectRootPath = defaults.boundaryPath;
+		const projectIdDefault = this.computeProjectIdBoundaryPath(draft.projectId);
+		const currentDefault = this.computeDraftDefaultBoundaryPath(draft);
+		if (!draft.boundaryPath.trim() || draft.boundaryPath === projectIdDefault || draft.boundaryPath === currentDefault) {
+			const nextDefault = this.computeDraftDefaultBoundaryPath(draft);
+			draft.boundaryPath = nextDefault;
+			draft.projectRootPath = nextDefault;
 		}
+	}
+
+	private computeDraftDefaultBoundaryPath(
+		draft: Pick<ProjectEditorDraft, "mode" | "projectId" | "projectName" | "gitRemote">,
+	): string {
+		if (draft.mode === "local_only") {
+			return "";
+		}
+		const preferredName = draft.projectName.trim() || draft.projectId.trim();
+		if (!preferredName) {
+			return buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), "");
+		}
+		return buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), preferredName);
+	}
+
+	private computeProjectIdBoundaryPath(projectId: string): string {
+		return buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), projectId.trim());
+	}
+
+	private normalizeVaultDirectorySelectionValue(value: string): string {
+		return value.trim() || "/";
+	}
+
+	private parseVaultDirectorySelectionValue(value: string): string {
+		return value.trim() === "/" ? "" : value.trim();
+	}
+
+	private refreshProjectEditorAfterTextCommit(draft: ProjectEditorDraft): void {
+		void (async () => {
+			await this.refreshProjectGitDetection(draft);
+			this.display();
+		})();
 	}
 
 	private async loadProjectIgnoreCandidates(project: ProjectEntry): Promise<void> {
@@ -1835,11 +2477,11 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderProjectIgnoreManager(containerEl: HTMLElement, project: ProjectEntry): void {
-		const wrap = containerEl.createDiv({ cls: "friday-card" });
-		wrap.createEl("h5", {
-			text: this.t("settings.project.ignoreTitle", "忽略候选：{project}", {
+		const wrap = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.project.ignoreTitle", "忽略候选：{project}", {
 				project: this.getProjectLabel(project),
 			}),
+			extraClass: "friday-project-ignore-panel",
 		});
 		if (this.ignoreManagerError) {
 			wrap.createDiv({ cls: "friday-ai-error", text: this.ignoreManagerError });
@@ -1924,12 +2566,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 			await this.host.upsertProject(entry);
 			await this.host.setActiveProject(this.getProjectKey(entry));
-			await this.host.setProjectGitCredential(this.getProjectKey(entry), draft.gitUsername && draft.gitToken
-				? {
-					username: draft.gitUsername,
-					token: draft.gitToken,
-				}
-				: null);
 			this.projectEditorDraft = null;
 			this.projectEditorInitialProjectId = "";
 			this.projectEditorError = "";
@@ -1944,6 +2580,127 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.display();
 		} catch (error) {
 			this.projectEditorError = error instanceof Error ? error.message : String(error ?? "");
+			this.display();
+		}
+	}
+
+	private async ensureUserGitCredentialLoaded(): Promise<void> {
+		if (this.userGitCredentialLoaded) {
+			return;
+		}
+		const credential = await this.host.getUserGitCredential();
+		this.userGitUsernameDraft = credential?.username ?? "";
+		this.userGitTokenDraft = credential?.token ?? "";
+		this.userGitCredentialLoaded = true;
+		this.display();
+	}
+
+	private async ensureGitRuntimeStatusLoaded(): Promise<void> {
+		if (this.gitRuntimeStatusLoading) {
+			return;
+		}
+		if (this.gitRuntimeStatus) {
+			return;
+		}
+		this.gitRuntimeStatusLoading = true;
+		try {
+			this.gitRuntimeStatus = await this.host.getGitRuntimeStatus();
+		} finally {
+			this.gitRuntimeStatusLoading = false;
+			this.display();
+		}
+	}
+
+	private async persistUserGitCredential(): Promise<void> {
+		await this.host.setUserGitCredential(
+			this.userGitUsernameDraft && this.userGitTokenDraft
+				? {
+					username: this.userGitUsernameDraft,
+					token: this.userGitTokenDraft,
+				}
+				: null,
+		);
+	}
+
+	private isGitProfileComplete(): boolean {
+		return Boolean(
+			this.host.settings.user.gitUserEmail.trim() &&
+			this.userGitUsernameDraft.trim() &&
+			this.userGitTokenDraft.trim(),
+		);
+	}
+
+	private getGitRuntimeStatusDesc(): string {
+		if (this.gitRuntimeStatusLoading) {
+			return this.t("settings.user.update.gitRuntime.checking", "正在检测本机 Git 环境...");
+		}
+		if (!this.gitRuntimeStatus) {
+			return this.t("settings.user.update.gitRuntime.idle", "尚未检测 Git 环境。");
+		}
+		if (!this.gitRuntimeStatus.available) {
+			return this.t("settings.user.update.gitRuntime.unavailable", "未检测到本机 Git：{error}", {
+				error: this.gitRuntimeStatus.error || this.t("common.unknownError", "未知错误"),
+			});
+		}
+		return this.t("settings.user.update.gitRuntime.available", "Git 已可用：{version}", {
+			version: this.gitRuntimeStatus.version || this.t("common.notSet", "未设置"),
+		});
+	}
+
+	private getPluginUpdateStatusDesc(): string {
+		const lastChecked = this.host.settings.update.lastCheckedAt || this.t("common.never", "从未同步");
+		const availableVersion = this.host.settings.update.availableVersion || this.t("common.notSet", "未设置");
+		return this.t("settings.user.update.status.desc", "结果：{result} | 最近检查：{checkedAt} | 可用版本：{version}", {
+			result: this.host.settings.update.lastResult,
+			checkedAt: lastChecked,
+			version: availableVersion,
+		});
+	}
+
+	private async runPluginUpdateCheck(): Promise<void> {
+		this.pluginUpdateActionPending = true;
+		try {
+			const result = await this.host.pluginUpdateService.checkForUpdate();
+			this.host.settings.update.lastCheckedAt = new Date().toISOString();
+			this.host.settings.update.lastResult = result.hasUpdate ? "available" : "up-to-date";
+			this.host.settings.update.availableVersion = result.hasUpdate ? result.latestVersion : "";
+			await this.host.saveSettings();
+			new Notice(
+				result.hasUpdate
+					? this.t("settings.user.update.notice.available", "发现新版本：{version}", { version: result.latestVersion })
+					: this.t("settings.user.update.notice.upToDate", "当前已是最新版本。"),
+				4000,
+			);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error ?? "");
+			this.host.settings.update.lastResult = "error";
+			this.host.settings.update.lastCheckedAt = new Date().toISOString();
+			await this.host.saveSettings();
+			new Notice(this.t("settings.user.update.notice.failed", "更新检查失败：{error}", { error: message }), 6000);
+		} finally {
+			this.pluginUpdateActionPending = false;
+			this.display();
+		}
+	}
+
+	private async runPluginUpdateApply(): Promise<void> {
+		this.pluginUpdateActionPending = true;
+		try {
+			const result = await this.host.pluginUpdateService.applyUpdate();
+			if (!result.success) {
+				this.host.settings.update.lastResult = "error";
+				await this.host.saveSettings();
+				new Notice(this.t("settings.user.update.notice.applyFailed", "应用更新失败：{error}", {
+					error: result.error || this.t("common.unknownError", "未知错误"),
+				}), 6000);
+				return;
+			}
+			this.host.settings.update.lastResult = "applied";
+			this.host.settings.update.dismissedVersion = "";
+			await this.host.saveSettings();
+			new Notice(this.t("settings.user.update.notice.applied", "更新已写入，重载 Obsidian 后生效。"), 6000);
+		} finally {
+			this.pluginUpdateActionPending = false;
 			this.display();
 		}
 	}
@@ -1970,5 +2727,9 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 }
 
-type SettingsSection = "user" | "sync" | "llm" | "agent" | "slash" | "project";
+type SettingsSection = FridaySettingsSection;
+
+export function isFridaySettingsSection(value: string | undefined): value is FridaySettingsSection {
+	return value === "user" || value === "project" || value === "sync" || value === "llm" || value === "agent" || value === "slash";
+}
 

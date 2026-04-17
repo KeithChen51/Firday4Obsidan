@@ -9,6 +9,7 @@
 	WorkspaceLeaf,
 } from "obsidian";
 import { ApprovalQueue, type PendingApproval } from "../features/workbench/ApprovalQueue";
+import { PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
@@ -86,6 +87,9 @@ export class DailyBoardView extends ItemView {
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
 	private expandedConflictKey = "";
 	private pendingIgnoreConfirmationKey = "";
+	private readonly handleProjectStateChanged = () => {
+		void this.safeRenderBoard();
+	};
 
 	private aiConversation: ChatMessage[] = [];
 	private aiSessions: ConversationSession[] = [];
@@ -148,6 +152,7 @@ export class DailyBoardView extends ItemView {
 				}
 			}),
 		);
+		window.addEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
 		await this.ensureActiveProjectInitialized();
 		await this.ensureAiSessionLoaded();
 		await this.safeRenderBoard();
@@ -164,6 +169,7 @@ export class DailyBoardView extends ItemView {
 		this.plugin.toolApprovalService.clearPromptHandler();
 		this.aiSendAbortController?.abort();
 		this.aiSendAbortController = null;
+		window.removeEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
 		this.contentEl.empty();
 	}
 
@@ -274,8 +280,8 @@ export class DailyBoardView extends ItemView {
 
 	private renderTopNav(containerEl: HTMLElement): void {
 		this.addNavButton(containerEl, "chat", this.t("nav.chat", "Chat"), "message-square");
-		this.addNavButton(containerEl, "sync", this.t("nav.projects", "Sync"), "folder");
-		this.addNavButton(containerEl, "tools", this.t("nav.checks", "Tools & Skills"), "shield");
+		this.addNavButton(containerEl, "sync", this.t("nav.projects", "Sync"), "refresh-cw");
+		this.addNavButton(containerEl, "tools", this.t("nav.checks", "Tools"), "sliders-horizontal");
 	}
 
 	private addNavButton(
@@ -289,9 +295,9 @@ export class DailyBoardView extends ItemView {
 		});
 		button.type = "button";
 		button.setAttribute("aria-label", label);
-		button.title = label;
 		const iconEl = button.createSpan({ cls: "friday-nav-button-icon" });
 		setIcon(iconEl, icon);
+		button.createSpan({ cls: "friday-nav-button-label", text: label });
 		button.disabled = this.aiBusy && page !== this.activePage;
 		button.onclick = () => {
 			this.activePage = page;
@@ -310,7 +316,6 @@ export class DailyBoardView extends ItemView {
 		const button = containerEl.createEl("button", { cls: className });
 		button.type = "button";
 		button.setAttribute("aria-label", label);
-		button.title = label;
 		setIcon(button, icon);
 		button.onclick = onClick;
 		return button;
@@ -635,7 +640,7 @@ export class DailyBoardView extends ItemView {
 		header.createEl("h3", { text: this.plugin.t("projects.header") });
 		const actionBar = header.createDiv({ cls: "friday-page-actions" });
 		this.addPageButton(actionBar, this.t("projects.button.settings", "Project Settings"), async () => {
-			this.plugin.openSettingsTab();
+			this.plugin.openSettingsTab("project");
 		});
 		if (projects.length > 0) {
 			this.addPageButton(actionBar, this.t("projects.button.syncAll", "Sync All"), async () => {
@@ -653,7 +658,7 @@ export class DailyBoardView extends ItemView {
 				text: this.t("projects.empty.desc", "Configure a project in settings first, then review sync status here."),
 			});
 			this.addPageButton(emptyEl, this.t("projects.empty.action", "Open Project Settings"), async () => {
-				this.plugin.openSettingsTab();
+				this.plugin.openSettingsTab("project");
 			});
 			return;
 		}
@@ -719,7 +724,7 @@ export class DailyBoardView extends ItemView {
 				),
 			});
 			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
-				this.plugin.openSettingsTab();
+				this.plugin.openSettingsTab("project");
 			});
 		} else if (project.gitState === "git_local") {
 			stateEl.createDiv({
@@ -732,7 +737,7 @@ export class DailyBoardView extends ItemView {
 			const syncButton = actionsEl.createEl("button", { text: this.t("projects.button.sync", "Sync") });
 			syncButton.disabled = true;
 			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
-				this.plugin.openSettingsTab();
+				this.plugin.openSettingsTab("project");
 			});
 			void this.populateProjectSyncStatus(stateEl, project);
 			void this.populateIgnoreCandidates(card, project);
@@ -748,7 +753,7 @@ export class DailyBoardView extends ItemView {
 				await this.syncSingleProject(project);
 			});
 			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
-				this.plugin.openSettingsTab();
+				this.plugin.openSettingsTab("project");
 			});
 			void this.populateProjectSyncStatus(stateEl, project);
 			void this.populateIgnoreCandidates(card, project);

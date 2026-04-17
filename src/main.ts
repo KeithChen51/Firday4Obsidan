@@ -3,11 +3,11 @@ import { Notice, Plugin, TAbstractFile, WorkspaceLeaf, normalizePath } from "obs
 import { registerInitCommand } from "./commands/initCommand";
 import { registerProjectCommands } from "./commands/projectCommands";
 import { registerSyncCommands } from "./commands/syncCommands";
+import { PROJECT_STATE_CHANGED_EVENT } from "./constants/events";
 import { FRIDAY_ICON_ID } from "./constants/icon";
 import { PRIMARY_PATHS } from "./constants/paths";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
-import { FridaySettingTab } from "./settings/FridaySettingTab";
 import { AgentActionService } from "./services/AgentActionService";
 import { AgentRuntimeService } from "./services/AgentRuntimeService";
 import { AgentService } from "./services/AgentService";
@@ -23,6 +23,7 @@ import { SyncService } from "./services/SyncService";
 import { ToolApprovalService } from "./services/ToolApprovalService";
 import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
 import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
+import { PluginUpdateService } from "./services/PluginUpdateService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
 import { IngestEventStore } from "./services/IngestEventStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
@@ -42,6 +43,7 @@ import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
+import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 type WikiCompileResult = {
@@ -86,6 +88,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	syncEventBus!: SyncEventBus;
 	syncRuntimeStore!: SyncRuntimeStore;
 	syncStatusBar!: SyncStatusBar;
+	fridaySettingTab!: FridaySettingTab;
+	pluginUpdateService!: PluginUpdateService;
 	private readonly rawIngestTimers = new Map<string, number>();
 	private idleAutoSyncInterval: number | null = null;
 	private continuousAutoSyncListenerRegistered = false;
@@ -137,6 +141,21 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					project.lastSyncAt = recordedAt;
 					await this.saveSettings();
 				},
+			});
+			this.pluginUpdateService = new PluginUpdateService({
+				pluginId: this.manifest.id,
+				currentVersion: this.manifest.version,
+				adapter: this.app.vault.adapter as unknown as {
+					exists(path: string, sensitive?: boolean): Promise<boolean>;
+					mkdir(path: string): Promise<void>;
+					read(path: string): Promise<string>;
+					write(path: string, data: string): Promise<void>;
+					remove(path: string): Promise<void>;
+					rename(path: string, newPath: string): Promise<void>;
+				},
+				getGitRuntimeStatus: () => this.getGitRuntimeStatus(),
+				getUserCredential: () => this.getUserGitCredential(),
+				getUserGitEmail: () => this.settings.user.gitUserEmail,
 			});
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
@@ -238,7 +257,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			registerProjectCommands(this);
 			registerSyncCommands(this);
 			registerInitCommand(this);
-			this.addSettingTab(new FridaySettingTab(this.app, this));
+			this.fridaySettingTab = new FridaySettingTab(this.app, this);
+			this.addSettingTab(this.fridaySettingTab);
 			this.addRibbonIcon(FRIDAY_ICON_ID, this.t("app.name"), () => {
 				void this.openWorkspaceView();
 			});
@@ -256,6 +276,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
 				void this.runStartupSync();
+			}
+			if (this.settings.update.enabled && this.settings.update.checkOnStartup) {
+				void this.runStartupPluginUpdateCheck();
 			}
 
 			this.startAutoSync();
@@ -304,6 +327,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			sync: {
 				...DEFAULT_SETTINGS.sync,
 				...(migrated.sync ?? {}),
+			},
+			update: {
+				...DEFAULT_SETTINGS.update,
+				...(migrated.update ?? {}),
 			},
 			agentRuntime: {
 				...DEFAULT_SETTINGS.agentRuntime,
@@ -406,6 +433,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.settings.activeProjectId = normalizedProject.projectId;
 		}
 		await this.saveSettings();
+		window.dispatchEvent(new CustomEvent(PROJECT_STATE_CHANGED_EVENT));
 		this.startAutoSync();
 	}
 
@@ -421,6 +449,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			await this.setProjectGitCredential(projectId, null);
 		}
 		await this.saveSettings();
+		window.dispatchEvent(new CustomEvent(PROJECT_STATE_CHANGED_EVENT));
 		this.startAutoSync();
 	}
 
@@ -432,6 +461,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		this.settings.activeProjectId = target.projectId;
 		this.syncStatusBar?.refresh();
 		await this.saveSettings();
+		window.dispatchEvent(new CustomEvent(PROJECT_STATE_CHANGED_EVENT));
 	}
 
 	async getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null> {
@@ -440,6 +470,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void> {
 		await this.secureStorage.setProjectGitCredential(projectId, credential);
+	}
+
+	async getUserGitCredential(): Promise<ProjectGitCredential | null> {
+		return this.secureStorage.getUserGitCredential();
+	}
+
+	async setUserGitCredential(credential: ProjectGitCredential | null): Promise<void> {
+		await this.secureStorage.setUserGitCredential(credential);
 	}
 
 	async upsertProjectGroup(group: ProjectGroupEntry): Promise<void> {
@@ -469,12 +507,18 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		await this.saveSettings();
 	}
 
-	openSettingsTab(): void {
+	openSettingsTab(section?: string): void {
 		const manager = this.app as typeof this.app & {
 			setting?: { open: () => void; openTabById: (id: string) => void };
 		};
+		if (isFridaySettingsSection(section)) {
+			this.fridaySettingTab?.focusSection(section);
+		}
 		manager.setting?.open();
 		manager.setting?.openTabById(this.manifest.id);
+		if (isFridaySettingsSection(section)) {
+			this.fridaySettingTab?.display();
+		}
 	}
 
 	getLocale(): LocaleCode {
@@ -486,6 +530,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	t(key: string, params?: I18nParams): string {
 		return translate(this.getLocale(), key, params);
+	}
+
+	async getGitRuntimeStatus() {
+		return this.syncService.getGitRuntimeStatus();
 	}
 
 	async openWorkspaceView(): Promise<void> {
@@ -996,6 +1044,39 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		} catch (error) {
 			console.error("[Friday] Startup sync failed:", error);
 		}
+	}
+
+	private async runStartupPluginUpdateCheck(): Promise<void> {
+		const gitStatus = await this.getGitRuntimeStatus();
+		const gitAvailable = gitStatus.available;
+		const credential = await this.getUserGitCredential();
+		const gitProfileComplete = Boolean(
+			this.settings.user.gitUserEmail.trim() &&
+			credential?.username?.trim() &&
+			credential?.token?.trim(),
+		);
+		if (!gitAvailable || !gitProfileComplete) {
+			return;
+		}
+
+		window.setTimeout(() => {
+			void (async () => {
+				const result = await this.pluginUpdateService.checkForUpdate();
+				this.settings.update.lastCheckedAt = new Date().toISOString();
+				this.settings.update.lastResult = result.hasUpdate ? "available" : "up-to-date";
+				this.settings.update.availableVersion = result.hasUpdate ? result.latestVersion : "";
+				await this.saveSettings();
+				if (!result.hasUpdate || result.latestVersion === this.settings.update.dismissedVersion) {
+					return;
+				}
+				new Notice(
+					`Friday 发现新版本 ${result.latestVersion}。前往 设置 -> F.R.I.D.A.Y -> 基础配置 -> 内部更新 应用更新。`,
+					8000,
+				);
+			})().catch((error) => {
+				console.error("[Friday] Startup plugin update check failed:", error);
+			});
+		}, this.settings.update.startupDelayMs);
 	}
 
 	private startAutoSync(): void {

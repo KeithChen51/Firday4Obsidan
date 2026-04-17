@@ -52,9 +52,9 @@ interface NormalizedProjectDraft {
 	gitToken: string;
 }
 
-export function buildDefaultProjectRootPath(fridayRoot: string, slug: string): string {
-	const safeSlug = slug.trim().toLowerCase() || "new-project";
-	return normalizeVaultPath(`${fridayRoot}/${PRIMARY_PATHS.projects}/${safeSlug}`);
+export function buildDefaultProjectRootPath(fridayRoot: string, name: string): string {
+	const safeName = normalizeProjectRootSegment(name);
+	return normalizeVaultPath(`${fridayRoot}/${PRIMARY_PATHS.projects}/${safeName || "new-project"}`);
 }
 
 export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: string): {
@@ -113,7 +113,13 @@ export function validateProjectDraft(
 
 export async function submitProjectDraft(options: SubmitOptions): Promise<ProjectEntry> {
 	const { app, syncService, draft, initial } = options;
-	const normalizedDraft = normalizeProjectDraft(applyRemoteBootstrapDraftDefaults(draft, options.fridayRoot));
+	let normalizedDraft = normalizeProjectDraft(applyRemoteBootstrapDraftDefaults(draft, options.fridayRoot));
+	if (!normalizedDraft.projectId) {
+		normalizedDraft = {
+			...normalizedDraft,
+			projectId: generateProjectId(normalizedDraft.projectName, options.existingProjectIds),
+		};
+	}
 	validateProjectDraft(normalizedDraft, options.existingProjectIds, initial?.projectId ?? initial?.slug ?? "");
 
 	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
@@ -294,4 +300,25 @@ function extractRepositoryName(gitRemote: string): string {
 		.map((item) => item.trim())
 		.filter(Boolean);
 	return segments[segments.length - 1] ?? "new-project";
+}
+
+function normalizeProjectRootSegment(value: string): string {
+	return value
+		.trim()
+		.replace(/[\\/:*?"<>|]/g, "-")
+		.replace(/\s+/g, " ")
+		.replace(/^\.+/, "")
+		.replace(/\.+$/, "");
+}
+
+function generateProjectId(projectName: string, existingProjectIds: Set<string>): string {
+	const base = "project";
+	for (let attempt = 0; attempt < 10; attempt += 1) {
+		const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+		const candidate = `${base}-${suffix}`;
+		if (!existingProjectIds.has(candidate)) {
+			return candidate;
+		}
+	}
+	return `${base}-${Date.now().toString(36)}-${existingProjectIds.size + 1}`;
 }

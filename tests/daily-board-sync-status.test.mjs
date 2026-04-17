@@ -24,6 +24,13 @@ test("main wires sync event bus, runtime store, and status bar together", async 
 	assert.match(source, /new SyncStatusBar\(/);
 });
 
+test("main broadcasts project state change events after project registration and active-project changes", async () => {
+	const source = read(mainPath);
+	assert.match(source, /window\.dispatchEvent\(new CustomEvent\(PROJECT_STATE_CHANGED_EVENT\)\)/);
+	assert.match(source, /async upsertProject\(project: ProjectEntry\): Promise<void> \{[\s\S]*dispatchEvent/);
+	assert.match(source, /async setActiveProject\(projectId: string\): Promise<void> \{[\s\S]*dispatchEvent/);
+});
+
 test("sync orchestrator emits runtime stage and completion events", async () => {
 	const source = read(orchestratorPath);
 	assert.match(source, /sync_stage_changed/);

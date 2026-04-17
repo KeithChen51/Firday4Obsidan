@@ -296,6 +296,21 @@ export class AIService {
 		return endpoints.map((item) => `\n- ${item}`).join("");
 	}
 
+	private localizeKnownErrorMessage(raw: string): string {
+		const trimmed = raw.trim();
+		const lower = trimmed.toLowerCase();
+
+		if (lower.includes("llm response has no usable message content")) {
+			return (
+				"LLM 已返回响应，但响应体里没有可用的文本内容。" +
+				"这通常表示接口已经连通，但返回格式与当前解析规则不一致；" +
+				"请检查网关是否返回 choices[0].message.content、output_text 或 output[].content[].text。"
+			);
+		}
+
+		return trimmed;
+	}
+
 	private normalizeError(error: unknown, endpoint: string, triedEndpoints: string[]): Error {
 		const raw = String(error ?? "").trim();
 		const lower = raw.toLowerCase();
@@ -332,7 +347,7 @@ export class AIService {
 			return new Error(`模型服务暂时不可用，请稍后重试。原始错误：${raw}`);
 		}
 
-		return new Error(raw || "未知网络错误");
+		return new Error(this.localizeKnownErrorMessage(raw) || "未知网络错误");
 	}
 
 	private buildPayload(messages: ChatMessage[], endpoint: string, options?: ChatOptions): Record<string, unknown> {
@@ -560,7 +575,9 @@ export class AIService {
 			return "";
 		}
 
-		throw new Error("LLM response has no usable message content.");
+		throw new Error(
+			this.localizeKnownErrorMessage("LLM response has no usable message content."),
+		);
 	}
 
 	async chat(messages: ChatMessage[], options?: ChatOptions): Promise<string> {

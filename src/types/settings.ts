@@ -50,6 +50,15 @@ export interface FridaySettings {
 		idleMinutes: number;
 		syncOnStartup: boolean;
 	};
+	update: {
+		enabled: boolean;
+		checkOnStartup: boolean;
+		startupDelayMs: number;
+		dismissedVersion: string;
+		lastCheckedAt: string;
+		lastResult: "idle" | "up-to-date" | "available" | "applied" | "error";
+		availableVersion: string;
+	};
 	projectGroups: ProjectGroupEntry[];
 	projects: ProjectEntry[];
 	activeProjectId: string;
@@ -59,7 +68,7 @@ export interface FridaySettings {
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 6;
+export const SETTINGS_VERSION = 7;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -106,6 +115,15 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		mode: "manual",
 		idleMinutes: 0,
 		syncOnStartup: true,
+	},
+	update: {
+		enabled: false,
+		checkOnStartup: true,
+		startupDelayMs: 5000,
+		dismissedVersion: "",
+		lastCheckedAt: "",
+		lastResult: "idle",
+		availableVersion: "",
 	},
 	projectGroups: [],
 	projects: [],

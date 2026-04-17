@@ -103,9 +103,9 @@ test("checks page no longer exposes quality report generation", async () => {
 test("checks navigation and title are renamed to tools and skills", async () => {
 	const zh = readLocaleSource(zhLocalePath);
 	const en = readLocaleSource(enLocalePath);
-	assert.match(zh, /"nav\.checks": "Tools & Skills"/);
+	assert.match(zh, /"nav\.checks": "工具\/技能"/);
 	assert.match(zh, /"checks\.title": "Tools & Skills"/);
-	assert.match(en, /"nav\.checks": "Tools & Skills"/);
+	assert.match(en, /"nav\.checks": "Tools"/);
 	assert.match(en, /"checks\.title": "Tools & Skills"/);
 });
 
@@ -201,6 +201,19 @@ test("sync page branches on none, git_local, and git_remote_bound project states
 	assert.match(cardBlock, /projects\.sync\.none/);
 	assert.match(cardBlock, /projects\.sync\.gitLocal/);
 	assert.match(cardBlock, /projects\.button\.sync/);
+});
+
+test("sync page project-setting entry points jump directly to settings project section", async () => {
+	const source = readViewSource();
+	assert.match(source, /openSettingsTab\("project"\)/);
+});
+
+test("daily board view subscribes to project state change events and refreshes when they fire", async () => {
+	const source = readViewSource();
+	assert.match(source, /window\.addEventListener\(PROJECT_STATE_CHANGED_EVENT/);
+	assert.match(source, /window\.removeEventListener\(PROJECT_STATE_CHANGED_EVENT/);
+	assert.match(source, /handleProjectStateChanged = \(\) => \{/);
+	assert.match(source, /void this\.safeRenderBoard\(\)/);
 });
 
 test("sync page renders only the active project context instead of a multi-project grid", async () => {
@@ -389,4 +402,29 @@ test("chat composer layout keeps the editable surface full-width and placeholder
 	assert.match(styles, /\.friday-mention-composer-editor\s*\{[\s\S]*width:\s*100%;/);
 	assert.match(styles, /\.friday-mention-composer-editor \.ProseMirror\s*\{[\s\S]*width:\s*100%;/);
 	assert.match(styles, /\.friday-mention-composer-editor\.is-empty::before\s*\{[\s\S]*right:\s*0;/);
+});
+
+test("top navigation removes duplicate title tooltips from nav and shell icon buttons", async () => {
+	const source = readViewSource();
+	const navMatch = source.match(/private addNavButton\([\s\S]*?\): void \{([\s\S]*?)\n\t\}/);
+	assert.ok(navMatch, "addNavButton block should exist");
+	assert.doesNotMatch(navMatch[1] ?? "", /button\.title\s*=/);
+
+	const iconMatch = source.match(/private createIconButton\([\s\S]*?\): HTMLButtonElement \{([\s\S]*?)\n\t\}/);
+	assert.ok(iconMatch, "createIconButton block should exist");
+	assert.doesNotMatch(iconMatch[1] ?? "", /button\.title\s*=/);
+});
+
+test("top navigation uses icon plus short labels with sync and tools semantic icons", async () => {
+	const source = readViewSource();
+	assert.match(source, /this\.addNavButton\(containerEl, "chat", this\.t\("nav\.chat", "Chat"\), "message-square"\)/);
+	assert.match(source, /this\.addNavButton\(containerEl, "sync", this\.t\("nav\.projects", "Sync"\), "refresh-cw"\)/);
+	assert.match(source, /this\.addNavButton\(containerEl, "tools", this\.t\("nav\.checks", "Tools"\), "sliders-horizontal"\)/);
+
+	const navMatch = source.match(/private addNavButton\([\s\S]*?\): void \{([\s\S]*?)\n\t\}/);
+	assert.ok(navMatch, "addNavButton block should exist");
+	assert.match(navMatch[1] ?? "", /createSpan\(\{ cls: "friday-nav-button-label", text: label \}\)/);
+
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-nav-button-label\b/);
 });

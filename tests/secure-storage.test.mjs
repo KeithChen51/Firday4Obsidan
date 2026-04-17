@@ -45,6 +45,21 @@ test("secure storage saves, reads, and clears per-project git credentials", asyn
 	assert.equal(await storage.getProjectGitCredential("alpha"), null);
 });
 
+test("secure storage saves, reads, and clears user git credentials", async () => {
+	const mod = await loadModule();
+	const storage = new mod.SecureStorage("friday-test", createMemoryStorage());
+
+	assert.equal(await storage.getUserGitCredential(), null);
+	await storage.setUserGitCredential({ username: "alice", token: "token-1" });
+	assert.deepEqual(await storage.getUserGitCredential(), {
+		username: "alice",
+		token: "token-1",
+	});
+
+	await storage.setUserGitCredential(null);
+	assert.equal(await storage.getUserGitCredential(), null);
+});
+
 test("secure storage encrypts payloads when electron safeStorage is available", async () => {
 	const mod = await loadModule();
 	const backing = createMemoryStorage();

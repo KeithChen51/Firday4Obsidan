@@ -24,6 +24,10 @@ import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project
 import { FridaySettings } from "./settings";
 import { I18nParams, LocaleCode } from "../i18n/types";
 import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
+import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
+import type { PluginUpdateService } from "../services/PluginUpdateService";
+
+export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "agent" | "slash";
 
 export interface FridayPluginApi {
 	app: App;
@@ -50,6 +54,7 @@ export interface FridayPluginApi {
 	syncEventBus: SyncEventBus;
 	syncRuntimeStore: SyncRuntimeStore;
 	projectBoundaryService: ProjectBoundaryService;
+	pluginUpdateService: PluginUpdateService;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];
 	addRibbonIcon: Plugin["addRibbonIcon"];
@@ -60,15 +65,18 @@ export interface FridayPluginApi {
 	setActiveProject(projectId: string): Promise<void>;
 	getProjectGitCredential(projectId: string): Promise<ProjectGitCredential | null>;
 	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
+	getUserGitCredential(): Promise<ProjectGitCredential | null>;
+	setUserGitCredential(credential: ProjectGitCredential | null): Promise<void>;
 	setSyncMode(mode: FridaySettings["sync"]["mode"]): Promise<void>;
 	setProjectAutoSync(projectId: string, enabled: boolean): Promise<void>;
 	compileWikiForActiveProject(rawPaths?: string[], forceRebuild?: boolean): Promise<RuntimeWikiCompileSummary>;
 	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
 	removeProjectGroup(groupId: string): Promise<void>;
-	openSettingsTab(): void;
+	openSettingsTab(section?: FridaySettingsSection): void;
 	openWorkspaceView(): Promise<void>;
 	getLocale(): LocaleCode;
 	t(key: string, params?: I18nParams): string;
+	getGitRuntimeStatus(): Promise<GitRuntimeStatus>;
 	getPrimaryUserId(): string;
 	getDetectedUserId(): string;
 	getActiveAgent(): AgentProfile | null;

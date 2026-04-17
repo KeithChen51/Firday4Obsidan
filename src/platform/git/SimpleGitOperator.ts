@@ -17,6 +17,7 @@ import { getVaultBasePath } from "../../utils/vaultPath";
 import { SecureStorage } from "../obsidian/SecureStorage";
 import type { GitConflictContent, GitConflictResult, GitOperator, GitPullResult, GitPushResult } from "./GitOperator";
 import { ProjectBoundaryService } from "../../services/ProjectBoundaryService";
+import { probeGitRuntime, type GitRuntimeStatus } from "./GitRuntimeProbe";
 
 type PostPullHandler = (
 	project: ProjectEntry,
@@ -26,6 +27,7 @@ type PostPullHandler = (
 
 export class SimpleGitOperator implements GitOperator {
 	private gitAvailable: boolean | null = null;
+	private gitVersion = "";
 	private postPullHandler: PostPullHandler | null = null;
 
 	constructor(
@@ -259,6 +261,26 @@ export class SimpleGitOperator implements GitOperator {
 		await this.secureStorage.setProjectGitCredential(projectId, credential);
 	}
 
+	async getUserGitCredential(): Promise<ProjectGitCredential | null> {
+		return this.secureStorage.getUserGitCredential();
+	}
+
+	async setUserGitCredential(credential: ProjectGitCredential | null): Promise<void> {
+		await this.secureStorage.setUserGitCredential(credential);
+	}
+
+	async getGitRuntimeStatus(): Promise<GitRuntimeStatus> {
+		const status = await probeGitRuntime();
+		if (status.available) {
+			this.gitAvailable = true;
+			this.gitVersion = status.version;
+		} else {
+			this.gitAvailable = false;
+			this.gitVersion = "";
+		}
+		return status;
+	}
+
 	private async ensureGitAvailable(): Promise<void> {
 		if (this.gitAvailable === true) {
 			return;
@@ -267,12 +289,9 @@ export class SimpleGitOperator implements GitOperator {
 			throw new Error("当前环境不可用 Git。");
 		}
 
-		try {
-			await simpleGit().raw(["--version"]);
-			this.gitAvailable = true;
-		} catch (error) {
-			this.gitAvailable = false;
-			throw new Error(`未找到 Git：${String(error)}`);
+		const status = await this.getGitRuntimeStatus();
+		if (!status.available) {
+			throw new Error(`未找到 Git：${status.error}`);
 		}
 	}
 
@@ -371,7 +390,7 @@ export class SimpleGitOperator implements GitOperator {
 	}
 
 	private async authArgs(project: ProjectEntry): Promise<string[]> {
-		const credential = await this.getProjectGitCredential(project.projectId || project.slug);
+		const credential = await this.resolveGitCredential(project);
 		if (!credential?.username || !credential.token) {
 			return [];
 		}
@@ -407,7 +426,7 @@ export class SimpleGitOperator implements GitOperator {
 
 		const owner = this.parseRemoteOwner(project.gitRemote);
 		const user = this.getSettings().user;
-		const credential = await this.getProjectGitCredential(project.projectId || project.slug);
+		const credential = await this.resolveGitCredential(project);
 		const inferredName = credential?.username?.trim() || owner;
 		const inferredEmail = user.gitUserEmail?.trim() || this.inferNoreplyEmail(project.gitRemote, owner);
 
@@ -578,5 +597,14 @@ export class SimpleGitOperator implements GitOperator {
 		return [...changes.entries()]
 			.map(([path, kind]) => ({ path, kind }))
 			.sort((left, right) => left.path.localeCompare(right.path, "en"));
+	}
+
+	private async resolveGitCredential(project: ProjectEntry): Promise<ProjectGitCredential | null> {
+		const projectId = project.projectId || project.slug;
+		const projectCredential = projectId ? await this.getProjectGitCredential(projectId) : null;
+		if (projectCredential) {
+			return projectCredential;
+		}
+		return this.getUserGitCredential();
 	}
 }

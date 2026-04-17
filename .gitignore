@@ -6,17 +6,27 @@
 .idea
 
 # npm
-node_modules
+node_modules/
 
-# Don't include the compiled main.js file in the repo.
-# They should be uploaded to GitHub releases instead.
-main.js
+# Don't include the compiled root main.js file in the repo.
+/main.js
+
+# Keep auto-update release feed and tracked release artifacts in repo.
+!/release/latest.json
+!/release/friday-obsidian-plugin/
+!/release/friday-obsidian-plugin/main.js
+!/release/friday-obsidian-plugin/manifest.json
+!/release/friday-obsidian-plugin/styles.css
+
+# Generated release archives are reproducible and don't need to live in git.
+/release/*.zip
 
 # Exclude sourcemaps
 *.map
 
 # obsidian
 data.json
+data.json.bak-*
 
 # Exclude macOS Finder (System Explorer) View States
 .DS_Store
