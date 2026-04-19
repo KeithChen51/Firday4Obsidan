@@ -13,15 +13,15 @@ const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function readSettingsSource() {
-	return fs.readFileSync(settingsPath, "utf8");
+	return fs.readFileSync(settingsPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readStylesSource() {
-	return fs.readFileSync(stylesPath, "utf8");
+	return fs.readFileSync(stylesPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readLocaleSource(localePath) {
-	return fs.readFileSync(localePath, "utf8");
+	return fs.readFileSync(localePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("settings project editor opens inline instead of redirecting to workspace", async () => {
@@ -33,7 +33,13 @@ test("settings project editor opens inline instead of redirecting to workspace",
 	assert.doesNotMatch(block, /openWorkspaceView\(/);
 	assert.match(block, /const draft = this\.createProjectEditorDraft/);
 	assert.match(block, /this\.projectEditorDraft = draft/);
-	assert.match(block, /this\.display\(\)/);
+	assert.match(block, /void this\.refreshProjectGitDetection\(draft\)/);
+	assert.doesNotMatch(block, /await this\.refreshProjectGitDetection\(draft\)/);
+	const displayIndex = block.indexOf("this.display();");
+	const refreshIndex = block.indexOf("void this.refreshProjectGitDetection(draft)");
+	assert.ok(displayIndex >= 0, "openRegisterProjectModal should render the editor immediately");
+	assert.ok(refreshIndex >= 0, "openRegisterProjectModal should still trigger git detection");
+	assert.ok(displayIndex < refreshIndex, "editor should display before the background git detection starts");
 });
 
 test("settings project section renders inline editor before empty-state return", async () => {
@@ -87,11 +93,26 @@ test("settings user section reads and writes git credentials through secure stor
 	assert.match(source, /userGitTokenDraft/);
 });
 
-test("settings project editor no longer renders a local path field and now exposes vault directory options", async () => {
+test("settings project editor uses only local_only and remote_bootstrap registration modes", async () => {
 	const source = readSettingsSource();
-	assert.doesNotMatch(source, /projects\.editor\.local/);
-	assert.match(source, /listVaultDirectoryOptions\(/);
-	assert.match(source, /draft\.mode === "local_only" \|\| draft\.mode === "register_existing_dir"/);
+	assert.match(source, /\["local_only", "remote_bootstrap"\] as const/);
+	assert.doesNotMatch(source, /register_existing_dir/);
+});
+
+test("settings project editor lets local mode choose an Obsidian local path from current vault folders", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /draft\.mode === "local_only"/);
+	assert.match(source, /this\.renderProjectEditorDropdownSetting\(\s*card,\s*this\.t\("projects\.editor\.vaultDir"/);
+	assert.match(source, /this\.listVaultDirectoryOptions\(false\)/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.localDesc/);
+});
+
+test("settings project editor keeps remote mode on the vault folder picker flow", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /if \(draft\.mode === "remote_bootstrap"\) \{\s*this\.renderRemoteBootstrapDirectoryPicker\(fields, draft\);/);
+	assert.match(source, /private renderRemoteBootstrapDirectoryPicker\(containerEl: HTMLElement, draft: ProjectEditorDraft\): void \{/);
+	assert.match(source, /this\.listVaultDirectoryOptions\(true\)/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.remoteDesc/);
 });
 
 test("settings project editor surfaces detected parent repository hints for nested git folders", async () => {
@@ -159,10 +180,11 @@ test("settings project ignore flow asks for confirmation before writing shared g
 	assert.doesNotMatch(source, /window\.confirm\(/);
 });
 
-test("project editor keeps default boundary path in sync with Chinese project names when path has not been customized", async () => {
+test("project editor only syncs derived path logic for remote mode and no longer rewrites local selections from project name", async () => {
 	const source = readSettingsSource();
 	assert.match(source, /draft\.projectName = value\.trim\(\)/);
-	assert.match(source, /computeDraftDefaultBoundaryPath\(/);
+	assert.match(source, /if \(draft\.mode === "remote_bootstrap"\) \{\s*this\.syncRemoteBootstrapBoundaryPath\(draft\);/);
+	assert.doesNotMatch(source, /draft\.mode !== "register_existing_dir"/);
 });
 
 test("project editor no longer asks users to type project id manually when creating projects", async () => {
@@ -196,7 +218,15 @@ test("settings project editor renders native setting rows without an extra heade
 
 test("settings project styles define the new project settings panels", async () => {
 	const styles = readStylesSource();
-	assert.match(styles, /\.friday-project-settings-shell \{/);
+	const shellMatch = styles.match(/\.friday-project-settings-shell \{([\s\S]*?)\n\}/);
+	assert.ok(shellMatch, "project settings shell rule should exist");
+	assert.match(shellMatch[1] ?? "", /margin-top: 8px/);
+	assert.match(styles, /\.friday-project-settings-shell > \.friday-project-settings-panel \{[\s\S]*margin: 0/);
+	assert.match(
+		styles,
+		/\.friday-project-settings-shell > \.friday-project-group-heading \+ \.friday-project-settings-panel \{[\s\S]*margin-top: -6px/,
+	);
+	assert.match(styles, /\.friday-project-group-heading \{[\s\S]*margin: 0/);
 	assert.match(styles, /\.friday-project-settings-panel \{/);
 	assert.match(styles, /\.friday-project-register-panel \{/);
 	assert.match(styles, /\.friday-project-register-row \{/);
@@ -222,14 +252,18 @@ test("settings project editor uses translated labels instead of raw registration
 	assert.doesNotMatch(source, /summaryBadges\.createSpan\(\{ cls: "friday-badge", text: draft\.mode \}\)/);
 });
 
-test("settings project locale files cover active project, project group, and editor mode labels", async () => {
+test("settings project locale files cover active project, project group, editor mode labels, and auto-sync guidance", async () => {
 	for (const localeSource of [readLocaleSource(zhLocalePath), readLocaleSource(enLocalePath)]) {
 		assert.match(localeSource, /"settings\.project\.active\.name":/);
 		assert.match(localeSource, /"settings\.project\.group\.manage":/);
 		assert.match(localeSource, /"projects\.editor\.mode":/);
 		assert.match(localeSource, /"projects\.editor\.mode\.local_only":/);
+		assert.match(localeSource, /"projects\.editor\.mode\.remote_bootstrap":/);
 		assert.match(localeSource, /"projects\.editor\.vaultDir":/);
 		assert.match(localeSource, /"projects\.editor\.parentRepoDetected":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.localDesc":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.remoteDesc":/);
+		assert.match(localeSource, /"settings\.project\.editor\.autoSync\.needsRemote":/);
 	}
 });
 
@@ -248,12 +282,9 @@ test("settings project text inputs do not rerender the whole tab on every keystr
 	assert.match(source, /input\.onblur = \(\) => \{\s*onCommit\?\.\(\);\s*\};/);
 });
 
-test("settings project remote bootstrap mode uses a folder picker and explicit non-empty directory resolution", async () => {
+test("settings project editor disables auto sync until a git remote is available", async () => {
 	const source = readSettingsSource();
-	assert.match(source, /if \(draft\.mode === "remote_bootstrap"\) \{\s*this\.renderRemoteBootstrapDirectoryPicker\(fields, draft\);/);
-	assert.match(source, /private renderRemoteBootstrapDirectoryPicker\(containerEl: HTMLElement, draft: ProjectEditorDraft\): void \{/);
-	assert.match(source, /this\.listVaultDirectoryOptions\(true\)/);
-	assert.match(source, /settings\.project\.remoteBootstrap\.nonEmpty\.title/);
-	assert.match(source, /settings\.project\.remoteBootstrap\.nonEmpty\.createChild/);
-	assert.match(source, /settings\.project\.remoteBootstrap\.nonEmpty\.reselect/);
+	assert.match(source, /setDisabled\(disabled\)/);
+	assert.match(source, /settings\.project\.editor\.autoSync\.needsRemote/);
+	assert.match(source, /this\.getDraftAutoSyncAvailability\(draft\)/);
 });

@@ -25,8 +25,8 @@ test("project editor service builds default project root path from project id", 
 
 test("project editor service keeps Chinese project names when building default project root path", async () => {
 	const mod = await loadModule();
-	const root = mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "胖东来白板");
-	assert.equal(root, "F.R.I.D.A.Y/项目/胖东来白板");
+	const root = mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "胖东来白衬衫");
+	assert.equal(root, "F.R.I.D.A.Y/项目/胖东来白衬衫");
 });
 
 test("project editor service rejects invalid project id", async () => {
@@ -44,7 +44,7 @@ test("project editor service rejects invalid project id", async () => {
 			},
 			new Set(),
 		);
-	});
+	}, /项目 ID 只能使用小写字母、数字或连字符。/);
 });
 
 test("project editor service auto-generates project id when creating a project without manual id", async () => {
@@ -67,8 +67,8 @@ test("project editor service auto-generates project id when creating a project w
 				groupId: "default-group",
 				mode: "local_only",
 				projectId: "",
-				projectName: "胖东来白板",
-				boundaryPath: "",
+				projectName: "胖东来白衬衫",
+				boundaryPath: "projects/pangdonglai",
 				gitRemote: "",
 				autoSync: false,
 			},
@@ -92,7 +92,7 @@ test("project editor service allows Chinese project name without git credential 
 				groupId: "default-group",
 				mode: "local_only",
 				projectId: "alpha",
-				projectName: "胖东来白板",
+				projectName: "胖东来白衬衫",
 				boundaryPath: "F.R.I.D.A.Y/项目/alpha",
 				gitRemote: "",
 				autoSync: false,
@@ -102,9 +102,9 @@ test("project editor service allows Chinese project name without git credential 
 	});
 });
 
-test("project editor service allows local_only projects to leave boundaryPath empty for whole-vault scope", async () => {
+test("project editor service requires a Vault directory for local_only mode", async () => {
 	const mod = await loadModule();
-	assert.doesNotThrow(() => {
+	assert.throws(() => {
 		mod.validateProjectDraft(
 			{
 				groupId: "default-group",
@@ -117,25 +117,25 @@ test("project editor service allows local_only projects to leave boundaryPath em
 			},
 			new Set(),
 		);
-	});
+	}, /Project root is required/i);
 });
 
-test("project editor service rejects git remote for local_only mode", async () => {
+test("project editor service allows git remote for local_only mode", async () => {
 	const mod = await loadModule();
-	assert.throws(() => {
+	assert.doesNotThrow(() => {
 		mod.validateProjectDraft(
 			{
 				groupId: "default-group",
 				mode: "local_only",
 				projectId: "alpha",
 				projectName: "Alpha",
-				boundaryPath: "",
+				boundaryPath: "projects/alpha",
 				gitRemote: "https://example.com/demo.git",
 				autoSync: false,
 			},
 			new Set(),
 		);
-	}, /local_only/i);
+	});
 });
 
 test("project editor service returns unified project model without pre-generating scaffold files", async () => {
@@ -161,7 +161,7 @@ test("project editor service returns unified project model without pre-generatin
 				groupId: "default-group",
 				mode: "local_only",
 				projectId: "alpha-project",
-				projectName: "胖东来白板",
+				projectName: "胖东来白衬衫",
 				boundaryPath: "projects/alpha-project",
 				gitRemote: "",
 				autoSync: true,
@@ -172,7 +172,7 @@ test("project editor service returns unified project model without pre-generatin
 		});
 
 		assert.equal(entry.projectId, "alpha-project");
-		assert.equal(entry.projectName, "胖东来白板");
+		assert.equal(entry.projectName, "胖东来白衬衫");
 		assert.equal(entry.boundaryPath, "projects/alpha-project");
 		assert.equal(entry.gitState, "none");
 		assert.equal(entry.slug, "alpha-project");
@@ -212,25 +212,28 @@ test("project editor service detects git state for repo root, remote-bound repo,
 		assert.equal(localState.gitState, "git_local");
 		assert.equal(localState.repositoryRoot, repoRoot);
 		assert.equal(localState.detectedParentRepository, false);
+		assert.equal(localState.gitRemote, "");
 
 		execFileSync("git", ["remote", "add", "origin", "https://example.com/demo.git"], { cwd: repoRoot, stdio: "ignore" });
 		const remoteState = await mod.detectProjectGitState(repoRoot);
 		assert.equal(remoteState.gitState, "git_remote_bound");
 		assert.equal(remoteState.repositoryRoot, repoRoot);
 		assert.equal(remoteState.detectedParentRepository, false);
+		assert.equal(remoteState.gitRemote, "https://example.com/demo.git");
 
 		const nestedState = await mod.detectProjectGitState(nestedPath);
 		assert.equal(nestedState.gitState, "none");
 		assert.equal(nestedState.repositoryRoot, repoRoot);
 		assert.equal(nestedState.detectedParentRepository, true);
+		assert.equal(nestedState.gitRemote, "");
 	} finally {
 		await fs.rm(tempRoot, { recursive: true, force: true });
 	}
 });
 
-test("project editor service rejects Vault-external absolute paths for register and bootstrap modes", async () => {
+test("project editor service rejects Vault-external absolute paths for local and remote modes", async () => {
 	const mod = await loadModule();
-	for (const mode of ["register_existing_dir", "remote_bootstrap"]) {
+	for (const mode of ["local_only", "remote_bootstrap"]) {
 		assert.throws(() => {
 			mod.validateProjectDraft(
 				{
@@ -248,13 +251,103 @@ test("project editor service rejects Vault-external absolute paths for register 
 	}
 });
 
-test("project editor service rejects remote binding during register_existing_dir when target is not a git repository root", async () => {
+test("project editor service fills git remote from an existing local repository root", async () => {
 	const mod = await loadModule();
-	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-register-existing-"));
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-existing-local-repo-"));
 
 	try {
-		const plainDir = path.join(vaultRoot, "projects", "plain");
-		await fs.mkdir(plainDir, { recursive: true });
+		const repoDir = path.join(vaultRoot, "projects", "alpha");
+		await fs.mkdir(repoDir, { recursive: true });
+		execFileSync("git", ["init"], { cwd: repoDir, stdio: "ignore" });
+		execFileSync("git", ["remote", "add", "origin", "https://example.com/existing.git"], { cwd: repoDir, stdio: "ignore" });
+
+		const entry = await mod.submitProjectDraft({
+			app: {
+				vault: {
+					adapter: {
+						basePath: vaultRoot,
+					},
+				},
+			},
+			syncService: {
+				async prepareRepository() {},
+			},
+			draft: {
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "projects/alpha",
+				gitRemote: "",
+				autoSync: false,
+			},
+			existingProjectIds: new Set(),
+			fridayRoot: "F.R.I.D.A.Y",
+			currentUserId: "keith",
+		});
+
+		assert.equal(entry.gitState, "git_remote_bound");
+		assert.equal(entry.gitRemote, "https://example.com/existing.git");
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});
+
+test("project editor service initializes git when local_only mode provides a remote", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-local-init-"));
+	let prepareCalls = 0;
+
+	try {
+		const entry = await mod.submitProjectDraft({
+			app: {
+				vault: {
+					adapter: {
+						basePath: vaultRoot,
+					},
+				},
+			},
+			syncService: {
+				async prepareRepository(project) {
+					prepareCalls += 1;
+					const targetDir = path.join(vaultRoot, ...project.boundaryPath.split("/"));
+					execFileSync("git", ["init"], { cwd: targetDir, stdio: "ignore" });
+					execFileSync("git", ["remote", "add", "origin", project.gitRemote], { cwd: targetDir, stdio: "ignore" });
+				},
+			},
+			draft: {
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "projects/alpha",
+				gitRemote: "https://example.com/demo.git",
+				autoSync: true,
+			},
+			existingProjectIds: new Set(),
+			fridayRoot: "F.R.I.D.A.Y",
+			currentUserId: "keith",
+		});
+
+		assert.equal(prepareCalls, 1);
+		assert.equal(entry.gitState, "git_remote_bound");
+		assert.equal(entry.gitRemote, "https://example.com/demo.git");
+		assert.equal(entry.autoSync, true);
+		await fs.stat(path.join(vaultRoot, "projects", "alpha", ".git"));
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});
+
+test("project editor service rejects binding a remote inside a parent repository", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-parent-repo-"));
+
+	try {
+		const repoRoot = path.join(vaultRoot, "projects", "repo-root");
+		const nestedDir = path.join(repoRoot, "nested");
+		await fs.mkdir(nestedDir, { recursive: true });
+		execFileSync("git", ["init"], { cwd: repoRoot, stdio: "ignore" });
 
 		await assert.rejects(
 			mod.submitProjectDraft({
@@ -267,24 +360,61 @@ test("project editor service rejects remote binding during register_existing_dir
 				},
 				syncService: {
 					async prepareRepository() {
-						throw new Error("prepareRepository should not run for invalid register_existing_dir remote binding");
+						throw new Error("prepareRepository should not run when the selected directory is inside a parent repo");
 					},
 				},
 				draft: {
 					groupId: "default-group",
-					mode: "register_existing_dir",
-					projectId: "plain",
-					projectName: "Plain",
-					boundaryPath: "projects/plain",
+					mode: "local_only",
+					projectId: "nested",
+					projectName: "Nested",
+					boundaryPath: "projects/repo-root/nested",
 					gitRemote: "https://example.com/demo.git",
-					autoSync: true,
+					autoSync: false,
 				},
 				existingProjectIds: new Set(),
 				fridayRoot: "F.R.I.D.A.Y",
 				currentUserId: "keith",
 			}),
-			/cannot bind a remote|register_existing_dir/i,
+			/parent git repository|repository root/i,
 		);
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});
+
+test("project editor service derives a valid slug from project name when hidden projectId is invalid", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-project-editor-hidden-id-"));
+
+	try {
+		const entry = await mod.submitProjectDraft({
+			app: {
+				vault: {
+					adapter: {
+						basePath: vaultRoot,
+					},
+				},
+			},
+			syncService: {
+				async prepareRepository() {},
+			},
+			draft: {
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "Bad Slug",
+				projectName: "Alpha Project",
+				boundaryPath: "projects/alpha-project",
+				gitRemote: "",
+				autoSync: false,
+			},
+			existingProjectIds: new Set(),
+			fridayRoot: "F.R.I.D.A.Y",
+			currentUserId: "keith",
+		});
+
+		assert.equal(entry.projectId, "alpha-project");
+		assert.equal(entry.slug, "alpha-project");
 	} finally {
 		await fs.rm(vaultRoot, { recursive: true, force: true });
 	}
@@ -339,4 +469,12 @@ test("remote bootstrap defaults derive project identity from repository name", a
 	assert.equal(defaults.projectId, "demo-repo");
 	assert.equal(defaults.projectName, "demo-repo");
 	assert.equal(defaults.boundaryPath, mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "demo-repo"));
+});
+
+test("remote bootstrap defaults sanitize repository names into valid hidden slugs", async () => {
+	const mod = await loadModule();
+	const defaults = mod.buildRemoteBootstrapDefaults("F.R.I.D.A.Y", "https://example.com/team/next_gen.git");
+	assert.equal(defaults.projectId, "next-gen");
+	assert.equal(defaults.projectName, "next_gen");
+	assert.equal(defaults.boundaryPath, mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "next-gen"));
 });

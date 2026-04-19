@@ -16,27 +16,27 @@ const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function readViewSource() {
-	return fs.readFileSync(viewPath, "utf8");
+	return fs.readFileSync(viewPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readRuntimeSource() {
-	return fs.readFileSync(runtimePath, "utf8");
+	return fs.readFileSync(runtimePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readSkillServiceSource() {
-	return fs.readFileSync(skillServicePath, "utf8");
+	return fs.readFileSync(skillServicePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readBuiltinSkillSource() {
-	return fs.readFileSync(builtinSkillPath, "utf8");
+	return fs.readFileSync(builtinSkillPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readStylesSource() {
-	return fs.readFileSync(stylesPath, "utf8");
+	return fs.readFileSync(stylesPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readLocaleSource(localePath) {
-	return fs.readFileSync(localePath, "utf8");
+	return fs.readFileSync(localePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("tool approval prompt handler no longer forces tools page", async () => {
@@ -374,6 +374,18 @@ test("tool and skill toggles use native Obsidian toggles instead of custom switc
 	assert.doesNotMatch(source, /toggleSkillAvailability\(skill\.command, !enabled\)/);
 	assert.doesNotMatch(source, /policy\.toggle\.on/);
 	assert.doesNotMatch(source, /policy\.toggle\.off/);
+});
+
+test("skill cards render review note icons and popovers for builtin skills with change notes", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	assert.match(source, /resolveBuiltinSkillReviewNote\(/);
+	assert.match(source, /friday-control-center-item-note-button/);
+	assert.match(source, /friday-control-center-item-note-popover/);
+	assert.match(source, /setIcon\(noteButton, "info"\)/);
+	assert.match(styles, /\.friday-control-center-item-note-button\b/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\b/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\.is-open\b/);
 });
 
 test("skill descriptions can prefer chinese localized metadata", async () => {

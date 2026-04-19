@@ -157,6 +157,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
 			});
+			try {
+				await this.pluginUpdateService.syncBundledUpdateLog();
+			} catch (error) {
+				console.warn("[Friday] Failed to sync bundled plugin changelog:", error);
+			}
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
@@ -277,7 +282,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
 				void this.runStartupSync();
 			}
-			if (this.settings.update.enabled && this.settings.update.checkOnStartup) {
+			if (this.settings.update.checkOnStartup) {
 				void this.runStartupPluginUpdateCheck();
 			}
 
@@ -547,6 +552,26 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			active: true,
 		});
 		this.app.workspace.revealLeaf(leaf);
+	}
+
+	reloadObsidianApp(): void {
+		const appWithCommands = this.app as typeof this.app & {
+			commands?: {
+				executeCommandById?: (commandId: string) => boolean;
+			};
+		};
+		try {
+			const executeCommandById = appWithCommands.commands?.executeCommandById;
+			if (typeof executeCommandById === "function") {
+				const handled = executeCommandById("app:reload");
+				if (handled !== false) {
+					return;
+				}
+			}
+		} catch (error) {
+			console.warn("[Friday] Failed to invoke Obsidian reload command, falling back to window reload.", error);
+		}
+		window.location.reload();
 	}
 
 	private getEffectiveLlmSettings(): FridaySettings["llm"] {
@@ -1066,11 +1091,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.settings.update.lastResult = result.hasUpdate ? "available" : "up-to-date";
 				this.settings.update.availableVersion = result.hasUpdate ? result.latestVersion : "";
 				await this.saveSettings();
-				if (!result.hasUpdate || result.latestVersion === this.settings.update.dismissedVersion) {
+				if (!result.hasUpdate) {
 					return;
 				}
 				new Notice(
-					`Friday 发现新版本 ${result.latestVersion}。前往 设置 -> F.R.I.D.A.Y -> 基础配置 -> 内部更新 应用更新。`,
+					`Friday 发现新版本 ${result.latestVersion}。前往 设置 -> F.R.I.D.A.Y -> 基础配置 -> 自动更新，点击“应用更新”。`,
 					8000,
 				);
 			})().catch((error) => {

@@ -2,6 +2,7 @@
 import { homedir } from "os";
 import path from "path";
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFolder } from "obsidian";
+import { normalizeProjectGroupIdCandidate } from "./projectGroupId";
 import {
 	buildDefaultProjectRootPath,
 	buildRemoteBootstrapDefaults,
@@ -259,56 +260,56 @@ export class FridaySettingTab extends PluginSettingTab {
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitUsername.name", "Git 用户名"))
 			.setDesc(this.t("settings.user.gitUsername.desc", "作为所有项目同步认证的统一用户名。"))
-			.addText((text) =>
+			.addText((text) => {
 				text
 					.setPlaceholder("alice")
 					.setValue(this.userGitUsernameDraft)
 					.onChange(async (value) => {
-						const nextValue = value.trim();
-						const visibilityChanged = Boolean(this.userGitUsernameDraft) !== Boolean(nextValue);
-						this.userGitUsernameDraft = nextValue;
+						this.userGitUsernameDraft = value.trim();
 						await this.persistUserGitCredential();
-						if (visibilityChanged) {
-							this.display();
-						}
-					}),
-			);
+					});
+				text.inputEl.onblur = () => {
+					if (this.activeSection === "user") {
+						this.display();
+					}
+				};
+			});
 
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitUserEmail.name", "Git 邮箱"))
 			.setDesc(this.t("settings.user.gitUserEmail.desc", "用于所有项目的 Git 提交身份。"))
-			.addText((text) =>
+			.addText((text) => {
 				text
 					.setPlaceholder("you@example.com")
 					.setValue(this.host.settings.user.gitUserEmail)
 					.onChange(async (value) => {
-						const nextValue = value.trim();
-						const visibilityChanged = Boolean(this.host.settings.user.gitUserEmail.trim()) !== Boolean(nextValue);
-						this.host.settings.user.gitUserEmail = nextValue;
+						this.host.settings.user.gitUserEmail = value.trim();
 						await this.host.saveSettings();
-						if (visibilityChanged) {
-							this.display();
-						}
-					}),
-			);
+					});
+				text.inputEl.onblur = () => {
+					if (this.activeSection === "user") {
+						this.display();
+					}
+				};
+			});
 
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitToken.name", "Git 令牌"))
 			.setDesc(this.t("settings.user.gitToken.desc", "作为所有项目同步认证的统一令牌。"))
-			.addText((text) =>
+			.addText((text) => {
 				text
 					.setPlaceholder("token")
 					.setValue(this.userGitTokenDraft)
 					.onChange(async (value) => {
-						const nextValue = value.trim();
-						const visibilityChanged = Boolean(this.userGitTokenDraft) !== Boolean(nextValue);
-						this.userGitTokenDraft = nextValue;
+						this.userGitTokenDraft = value.trim();
 						await this.persistUserGitCredential();
-						if (visibilityChanged) {
-							this.display();
-						}
-					}),
-			);
+					});
+				text.inputEl.onblur = () => {
+					if (this.activeSection === "user") {
+						this.display();
+					}
+				};
+			});
 
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.update.gitRuntime.name", "Git 环境"))
@@ -337,8 +338,8 @@ export class FridaySettingTab extends PluginSettingTab {
 		const gitProfileComplete = this.isGitProfileComplete();
 		const prerequisitesReady = gitAvailable && gitProfileComplete;
 		const prereqDetails = this.getPluginUpdatePrereqDetails(gitAvailable);
-		const updateEnabled = prerequisitesReady && this.host.settings.update.enabled;
 		const availableVersion = this.host.settings.update.availableVersion.trim();
+		const hasAvailableUpdate = Boolean(availableVersion);
 
 		new Setting(card)
 			.setName(
@@ -347,30 +348,29 @@ export class FridaySettingTab extends PluginSettingTab {
 				}),
 			)
 			.setDesc(this.getPluginUpdateStatusDesc())
-			.addButton((button) =>
+			.addButton((button) => {
 				button
-					.setButtonText(this.t("settings.user.update.currentVersion.check", "检查更新"))
-					.setDisabled(!prerequisitesReady || this.pluginUpdateActionPending)
-					.onClick(async () => {
-						await this.runPluginUpdateCheck();
-					}),
-			);
+					.setButtonText(
+						hasAvailableUpdate
+							? this.t("settings.user.update.currentVersion.apply", "应用更新")
+							: this.t("settings.user.update.currentVersion.check", "检查更新"),
+					)
+					.setDisabled(!prerequisitesReady || this.pluginUpdateActionPending);
+				if (hasAvailableUpdate) {
+					button.setCta();
+				} else {
+					button.removeCta();
+				}
+				button.onClick(async () => {
+					if (hasAvailableUpdate) {
+						await this.runPluginUpdateApply();
+						return;
+					}
+					await this.runPluginUpdateCheck();
+				});
+			});
 
 		this.renderPluginUpdatePrerequisitesSetting(card, prereqDetails);
-
-		new Setting(card)
-			.setName(this.t("settings.user.update.enabled.name", "启用自动更新"))
-			.setDesc(this.t("settings.user.update.enabled.desc", "开启后可检查并应用内网仓库中的插件更新。"))
-			.addToggle((toggle) =>
-				toggle
-					.setValue(this.host.settings.update.enabled)
-					.setDisabled(!prerequisitesReady)
-					.onChange(async (value) => {
-						this.host.settings.update.enabled = value;
-						await this.host.saveSettings();
-						this.display();
-					}),
-			);
 
 		if (prerequisitesReady) {
 			new Setting(card)
@@ -379,7 +379,6 @@ export class FridaySettingTab extends PluginSettingTab {
 				.addToggle((toggle) =>
 					toggle
 						.setValue(this.host.settings.update.checkOnStartup)
-						.setDisabled(!updateEnabled)
 						.onChange(async (value) => {
 							this.host.settings.update.checkOnStartup = value;
 							await this.host.saveSettings();
@@ -393,7 +392,6 @@ export class FridaySettingTab extends PluginSettingTab {
 					text
 						.setPlaceholder("5000")
 						.setValue(String(this.host.settings.update.startupDelayMs))
-						.setDisabled(!updateEnabled)
 						.onChange(async (value) => {
 							const parsed = Number.parseInt(value, 10);
 							this.host.settings.update.startupDelayMs = Number.isFinite(parsed) ? Math.max(parsed, 0) : 5000;
@@ -404,32 +402,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			new Setting(card)
 				.setName(this.t("settings.user.update.status.name", "更新状态"))
 				.setDesc(this.getPluginUpdateStatusDesc());
-
-			new Setting(card)
-				.setName(this.t("settings.user.update.actions.name", "更新操作"))
-				.setDesc(
-					availableVersion
-						? this.t("settings.user.update.actions.available", "检测到可用版本：{version}", { version: availableVersion })
-						: this.t("settings.user.update.actions.none", "尚未检测到可用更新。"),
-				)
-				.addButton((button) =>
-					button
-						.setButtonText(this.t("settings.user.update.actions.apply", "应用更新"))
-						.setDisabled(!updateEnabled || this.pluginUpdateActionPending || !availableVersion)
-						.onClick(async () => {
-							await this.runPluginUpdateApply();
-						}),
-				)
-				.addButton((button) =>
-					button
-						.setButtonText(this.t("settings.user.update.actions.dismiss", "忽略当前版本"))
-						.setDisabled(!availableVersion)
-						.onClick(async () => {
-							this.host.settings.update.dismissedVersion = availableVersion;
-							await this.host.saveSettings();
-							this.display();
-						}),
-				);
 		}
 	}
 
@@ -1492,10 +1464,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!name) {
 			return;
 		}
-		const id = name
-			.toLowerCase()
-			.replace(/[^a-z0-9_-]+/g, "-")
-			.replace(/^-+|-+$/g, "");
+		const id = normalizeProjectGroupIdCandidate(name);
 		if (!id) {
 			new Notice(this.t("settings.project.group.invalidId", "项目组名称无法生成合法 ID。"), 3000);
 			return;
@@ -1593,7 +1562,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getProjectRegistrationModeOptions(): ProjectEditorSelectOption[] {
-		return (["local_only", "register_existing_dir", "remote_bootstrap"] as const).map((mode) => ({
+		return (["local_only", "remote_bootstrap"] as const).map((mode) => ({
 			value: mode,
 			label: this.getProjectRegistrationModeLabel(mode),
 		}));
@@ -1962,10 +1931,19 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.projectEditorDraft = draft;
 		this.projectEditorInitialProjectId = initial ? this.getProjectKey(initial) : "";
 		this.projectEditorError = "";
+		this.projectGitDetection = null;
 		this.resetRemoteBootstrapDirectoryChoice();
-		await this.refreshProjectGitDetection(draft);
 		this.activeSection = "project";
 		this.display();
+		void this.refreshProjectGitDetection(draft)
+			.then(() => {
+				if (this.projectEditorDraft === draft) {
+					this.display();
+				}
+			})
+			.catch((error: unknown) => {
+				console.error("[Friday] Failed to refresh project git detection while opening editor:", error);
+			});
 	}
 
 	private createProjectEditorDraft(initial?: ProjectEntry): ProjectEditorDraft {
@@ -1974,14 +1952,14 @@ export class FridaySettingTab extends PluginSettingTab {
 			const boundaryPath =
 				initial.boundaryPath ||
 				this.computeDraftDefaultBoundaryPath({
-					mode: initial.gitState === "none" ? "local_only" : "register_existing_dir",
+					mode: "local_only",
 					projectId,
 					projectName: this.getProjectLabel(initial),
 					gitRemote: initial.gitRemote,
 				});
 			return {
 				groupId: initial.groupId || "default-group",
-				mode: initial.gitState === "none" ? "local_only" : "register_existing_dir",
+				mode: "local_only",
 				projectId,
 				projectName: this.getProjectLabel(initial),
 				boundaryPath,
@@ -2001,7 +1979,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			boundaryPath: defaultBoundaryPath,
 			localPath: "",
 			gitRemote: "",
-			autoSync: true,
+			autoSync: false,
 			slug: "",
 			projectRootPath: defaultBoundaryPath,
 		};
@@ -2021,7 +1999,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.renderProjectEditorDropdownSetting(
 			card,
 			this.t("projects.editor.mode", "Registration mode"),
-			this.t("settings.project.editor.mode.desc", "决定项目是仅登记本地目录、接入已有仓库，还是从远程初始化。"),
+			this.t("settings.project.editor.mode.desc", "决定项目是本地新建，还是从远端拉取。"),
 			draft.mode,
 			(value) => {
 				draft.mode = value as ProjectEditorDraft["mode"];
@@ -2032,6 +2010,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					draft.projectRootPath = "";
 				} else {
 					this.resetRemoteBootstrapDirectoryChoice();
+					draft.boundaryPath = "";
+					draft.projectRootPath = "";
+					draft.autoSync = false;
 				}
 				void this.refreshProjectGitDetection(draft);
 				this.display();
@@ -2054,22 +2035,9 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.t("settings.project.editor.projectName.desc", "用于设置页和工作台显示的项目名称。"),
 			draft.projectName,
 			(value) => {
-				const previousProjectIdDefault = this.computeProjectIdBoundaryPath(draft.projectId);
-				const previousNameDefault = this.computeDraftDefaultBoundaryPath(draft);
 				draft.projectName = value.trim();
 				if (draft.mode === "remote_bootstrap") {
 					this.syncRemoteBootstrapBoundaryPath(draft);
-				} else {
-					const shouldSyncBoundary =
-						draft.mode !== "register_existing_dir" &&
-						(!draft.boundaryPath ||
-							draft.boundaryPath === previousNameDefault ||
-							draft.boundaryPath === previousProjectIdDefault);
-					if (shouldSyncBoundary) {
-						const nextDefault = this.computeDraftDefaultBoundaryPath(draft);
-						draft.boundaryPath = nextDefault;
-						draft.projectRootPath = nextDefault;
-					}
 				}
 			},
 			"text",
@@ -2080,7 +2048,12 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.renderProjectEditorTextSetting(
 			card,
 			this.t("projects.editor.remote", "Git remote"),
-			this.t("settings.project.editor.remote.desc", "远程初始化模式必填；仅本地项目可留空。"),
+			draft.mode === "remote_bootstrap"
+				? this.t("settings.project.editor.remote.requiredDesc", "远端拉取模式必填。")
+				: this.t(
+					"settings.project.editor.remote.localDesc",
+					"本地新建模式可选；如果所选目录已经绑定远端，这里会自动填入。",
+				),
 			draft.gitRemote,
 			(value) => {
 				draft.gitRemote = value.trim();
@@ -2088,22 +2061,25 @@ export class FridaySettingTab extends PluginSettingTab {
 					this.applyRemoteBootstrapDefaults(draft);
 					this.syncRemoteBootstrapBoundaryPath(draft);
 				}
+				if (!draft.gitRemote) {
+					draft.autoSync = false;
+				}
 			},
 			"text",
 			() => {
-				this.refreshProjectEditorAfterTextCommit(draft);
+				this.commitProjectEditorRemoteChange(draft);
 			},
 		);
 		const fields = card;
 		if (draft.mode === "remote_bootstrap") {
 			this.renderRemoteBootstrapDirectoryPicker(fields, draft);
-		} else if (draft.mode === "local_only" || draft.mode === "register_existing_dir") {
+		} else {
 			this.renderProjectEditorDropdownSetting(
 				card,
-				this.t("projects.editor.vaultDir", "Vault directory"),
+				this.t("projects.editor.vaultDir", "Obsidian local path"),
 				this.t(
-					"settings.project.editor.vaultDir.desc",
-					"选择项目在 Vault 中的目录范围；接入现有目录时应指向已有仓库根目录。",
+					"settings.project.editor.vaultDir.localDesc",
+					"从当前 Obsidian Vault 中选择一个目录；如果该目录已经是 Git 仓库，会自动识别远端。",
 				),
 				this.normalizeVaultDirectorySelectionValue(draft.boundaryPath),
 				(value) => {
@@ -2112,12 +2088,16 @@ export class FridaySettingTab extends PluginSettingTab {
 					void this.refreshProjectGitDetection(draft);
 					this.display();
 				},
-					draft.mode === "local_only"
-						? this.listVaultDirectoryOptions(true)
-						: this.listVaultDirectoryOptions(),
+				[
+					{
+						value: "",
+						label: this.t("settings.project.editor.vaultDir.placeholder", "请选择 Obsidian 本地路径"),
+					},
+					...this.listVaultDirectoryOptions(false).map((option) => ({ value: option, label: option })),
+				],
 			);
 		}
-		if (this.projectGitDetection?.detectedParentRepository) {
+		if (draft.mode === "local_only" && this.projectGitDetection?.detectedParentRepository) {
 			card.createDiv({
 				cls: "friday-ai-error",
 				text: this.t(
@@ -2127,15 +2107,16 @@ export class FridaySettingTab extends PluginSettingTab {
 				),
 			});
 		}
+		const autoSyncAvailability = this.getDraftAutoSyncAvailability(draft);
 		this.renderProjectEditorToggleSetting(
 			card,
 			this.t("projects.editor.autoSync", "Auto sync"),
-			this.t("settings.project.editor.autoSync.desc", "开启后会按同步设置自动处理这个项目。"),
-			draft.autoSync,
+			autoSyncAvailability.description,
+			autoSyncAvailability.enabled ? draft.autoSync : false,
 			(value) => {
-				draft.autoSync = value;
-				this.display();
+				draft.autoSync = autoSyncAvailability.enabled ? value : false;
 			},
+			!autoSyncAvailability.enabled,
 		);
 
 		const actions = card.createDiv({ cls: "friday-approval-actions friday-project-editor-actions" });
@@ -2211,14 +2192,47 @@ export class FridaySettingTab extends PluginSettingTab {
 		description: string,
 		value: boolean,
 		onChange: (value: boolean) => void,
+		disabled = false,
 	): void {
 		const setting = new Setting(containerEl).setName(label).setDesc(description);
 		setting.settingEl.addClass("friday-project-editor-setting");
 		setting.addToggle((toggle) => {
+			toggle.setDisabled(disabled);
 			toggle.setValue(value).onChange((nextValue) => {
 				onChange(nextValue);
 			});
 		});
+	}
+
+	private commitProjectEditorBoundaryPath(draft: ProjectEditorDraft): void {
+		void (async () => {
+			await this.refreshProjectGitDetection(draft);
+			this.display();
+		})();
+	}
+
+	private commitProjectEditorRemoteChange(draft: ProjectEditorDraft): void {
+		if (!this.getDraftAutoSyncAvailability(draft).enabled) {
+			draft.autoSync = false;
+		}
+		this.display();
+	}
+
+	private getDraftAutoSyncAvailability(draft: ProjectEditorDraft): { enabled: boolean; description: string } {
+		const effectiveRemote = draft.gitRemote.trim() || this.projectGitDetection?.gitRemote?.trim() || "";
+		if (!effectiveRemote) {
+			return {
+				enabled: false,
+				description: this.t(
+					"settings.project.editor.autoSync.needsRemote",
+					"填写或检测到 Git 远程地址后，才能开启自动同步。",
+				),
+			};
+		}
+		return {
+			enabled: true,
+			description: this.t("settings.project.editor.autoSync.desc", "开启后会按同步设置自动处理这个项目。"),
+		};
 	}
 
 	private renderRemoteBootstrapDirectoryPicker(containerEl: HTMLElement, draft: ProjectEditorDraft): void {
@@ -2227,16 +2241,16 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 
 		const setting = new Setting(containerEl)
-			.setName(this.t("projects.editor.root", "Project root"))
+			.setName(this.t("projects.editor.vaultDir", "Obsidian local path"))
 			.setDesc(
 				this.t(
-					"settings.project.remoteBootstrap.directoryHelp",
-					"先选择放置远程仓库的 Vault 目录；若目录非空，可改为在该目录下新建子文件夹。",
+					"settings.project.editor.vaultDir.remoteDesc",
+					"先从当前 Obsidian Vault 中选择一个目录；若目录非空，可改为在该目录下新建子文件夹。",
 				),
 			);
 		setting.settingEl.addClass("friday-project-editor-setting");
 		setting.addDropdown((dropdown) => {
-			dropdown.addOption("", this.t("settings.project.remoteBootstrap.directoryPlaceholder", "请选择目标文件夹"));
+			dropdown.addOption("", this.t("settings.project.editor.vaultDir.placeholder", "请选择 Obsidian 本地路径"));
 			for (const optionValue of this.listVaultDirectoryOptions(true)) {
 				dropdown.addOption(optionValue, optionValue);
 			}
@@ -2537,13 +2551,22 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private async refreshProjectGitDetection(draft: ProjectEditorDraft): Promise<void> {
-		if (draft.mode !== "register_existing_dir" || !draft.boundaryPath.trim()) {
+		if (draft.mode !== "local_only" || !draft.boundaryPath.trim()) {
 			this.projectGitDetection = null;
 			return;
 		}
+		const previousDetectedRemote = this.projectGitDetection?.gitRemote?.trim() || "";
 		const basePath = (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".";
 		const absolutePath = path.join(basePath, ...draft.boundaryPath.trim().replace(/\\/g, "/").split("/"));
-		this.projectGitDetection = await detectProjectGitState(absolutePath);
+		const nextDetection = await detectProjectGitState(absolutePath);
+		const currentRemote = draft.gitRemote.trim();
+		if (!currentRemote || currentRemote === previousDetectedRemote) {
+			draft.gitRemote = nextDetection.gitRemote;
+		}
+		this.projectGitDetection = nextDetection;
+		if (!this.getDraftAutoSyncAvailability(draft).enabled) {
+			draft.autoSync = false;
+		}
 	}
 
 	private async submitProjectEditor(): Promise<void> {
@@ -2696,13 +2719,43 @@ export class FridaySettingTab extends PluginSettingTab {
 				return;
 			}
 			this.host.settings.update.lastResult = "applied";
-			this.host.settings.update.dismissedVersion = "";
+			this.host.settings.update.availableVersion = "";
 			await this.host.saveSettings();
-			new Notice(this.t("settings.user.update.notice.applied", "更新已写入，重载 Obsidian 后生效。"), 6000);
+			this.showPluginUpdateRestartNotice();
 		} finally {
 			this.pluginUpdateActionPending = false;
 			this.display();
 		}
+	}
+
+	private showPluginUpdateRestartNotice(): void {
+		const fragment = document.createDocumentFragment();
+		const wrapper = document.createElement("div");
+		wrapper.className = "friday-plugin-update-notice";
+
+		const message = document.createElement("div");
+		message.className = "friday-plugin-update-notice-text";
+		message.textContent = this.t(
+			"settings.user.update.notice.applied",
+			"更新已写入，Friday Update 更新日志已同步。点击下方按钮即可立即重启 Obsidian 并加载新版本。",
+		);
+		wrapper.appendChild(message);
+
+		const actions = document.createElement("div");
+		actions.className = "friday-plugin-update-notice-actions";
+		const restartButton = document.createElement("button");
+		restartButton.type = "button";
+		restartButton.classList.add("mod-cta");
+		restartButton.textContent = this.t("settings.user.update.notice.restart", "立即重启 Obsidian");
+		let notice: Notice | null = null;
+		restartButton.addEventListener("click", () => {
+			notice?.hide();
+			this.host.reloadObsidianApp();
+		});
+		actions.appendChild(restartButton);
+		wrapper.appendChild(actions);
+		fragment.appendChild(wrapper);
+		notice = new Notice(fragment, 0);
 	}
 
 	private buildProjectDescription(project: ProjectEntry): string {

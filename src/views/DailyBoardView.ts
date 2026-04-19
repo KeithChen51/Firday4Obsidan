@@ -30,6 +30,7 @@ import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
 import type { SyncConflictRecord } from "../types/sync";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { SkillRegistry } from "../core/execution/SkillRegistry";
+import { resolveBuiltinSkillReviewNote, type ResolvedBuiltinSkillReviewNote } from "../skills/packs/builtin/reviewNotes";
 import type { MentionSuggestion } from "./components/MentionDropdown";
 import {
 	MentionResolver,
@@ -1489,7 +1490,12 @@ export class DailyBoardView extends ItemView {
 		const normalized = skill.command.trim().toLowerCase();
 		const item = containerEl.createDiv({ cls: "friday-control-center-item" });
 		const meta = item.createDiv({ cls: "friday-control-center-item-meta" });
-		meta.createDiv({ cls: "friday-control-center-item-title", text: `/${skill.command}` });
+		const titleRow = meta.createDiv({ cls: "friday-control-center-item-title-row" });
+		titleRow.createDiv({ cls: "friday-control-center-item-title", text: `/${skill.command}` });
+		const reviewNote = resolveBuiltinSkillReviewNote(skill.command, this.plugin.getLocale());
+		if (reviewNote) {
+			this.renderSkillReviewNote(titleRow, reviewNote);
+		}
 		meta.createDiv({
 			cls: "friday-control-center-item-desc",
 			text: skill.description || this.t("policy.skills.noDesc", "暂无说明"),
@@ -1497,6 +1503,81 @@ export class DailyBoardView extends ItemView {
 		this.createAvailabilityToggle(item, skill.command, !disabledSkills.has(normalized), async () => {
 			await this.toggleSkillAvailability(skill.command, disabledSkills.has(normalized));
 		});
+	}
+
+	private renderSkillReviewNote(containerEl: HTMLElement, note: ResolvedBuiltinSkillReviewNote): void {
+		const host = containerEl.createDiv({ cls: "friday-control-center-item-note-host" });
+		const noteButton = host.createEl("button", {
+			cls: "friday-control-center-item-note-button",
+		});
+		noteButton.type = "button";
+		noteButton.setAttribute(
+			"aria-label",
+			this.t("policy.skills.reviewNote.button", "查看此 Skill 的改动说明"),
+		);
+		setIcon(noteButton, "info");
+
+		const popover = host.createDiv({ cls: "friday-control-center-item-note-popover" });
+		popover.createDiv({
+			cls: "friday-control-center-item-note-version",
+			text: this.t("policy.skills.reviewNote.version", "更新于 {version}", { version: note.version }),
+		});
+		popover.createEl("h6", {
+			cls: "friday-control-center-item-note-title",
+			text: note.title,
+		});
+		this.renderSkillReviewNoteSection(
+			popover,
+			this.t("policy.skills.reviewNote.original", "原版是什么"),
+			[note.original],
+		);
+		this.renderSkillReviewNoteSection(
+			popover,
+			this.t("policy.skills.reviewNote.issues", "为什么不好"),
+			note.issues,
+		);
+		this.renderSkillReviewNoteSection(
+			popover,
+			this.t("policy.skills.reviewNote.changes", "改成了什么"),
+			note.changes,
+		);
+
+		let pinned = false;
+		const setOpen = (open: boolean) => {
+			popover.toggleClass("is-open", open);
+		};
+		const closeIfNotPinned = () => {
+			if (!pinned) {
+				setOpen(false);
+			}
+		};
+
+		noteButton.onmouseenter = () => setOpen(true);
+		host.onmouseleave = () => closeIfNotPinned();
+		noteButton.onfocus = () => setOpen(true);
+		host.addEventListener("focusout", (event: FocusEvent) => {
+			const next = event.relatedTarget;
+			if (next instanceof Node && host.contains(next)) {
+				return;
+			}
+			pinned = false;
+			setOpen(false);
+		});
+		noteButton.onclick = (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			pinned = !pinned;
+			setOpen(pinned);
+		};
+	}
+
+	private renderSkillReviewNoteSection(containerEl: HTMLElement, title: string, items: string[]): void {
+		const section = containerEl.createDiv({ cls: "friday-control-center-item-note-section" });
+		section.createDiv({ cls: "friday-control-center-item-note-section-title", text: title });
+		const list = section.createEl("ul", { cls: "friday-control-center-item-note-list" });
+		for (const item of items) {
+			list.createEl("li", { text: item });
+		}
 	}
 
 	private async toggleToolAvailability(toolName: string, currentlyDisabled: boolean): Promise<void> {

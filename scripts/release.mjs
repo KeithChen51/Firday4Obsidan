@@ -9,7 +9,8 @@ const RELEASE_BRANCH = "master";
 const RELEASE_DIR = "release";
 const RELEASE_ARTIFACT_DIRNAME = "friday-obsidian-plugin";
 const RELEASE_ARTIFACT_RELATIVE_DIR = `${RELEASE_DIR}/${RELEASE_ARTIFACT_DIRNAME}`;
-const RELEASE_FILES = ["main.js", "manifest.json", "styles.css"];
+const RELEASE_FILES = ["main.js", "manifest.json", "styles.css", "CHANGELOG.md"];
+const CHANGELOG_FILE = "CHANGELOG.md";
 
 function ensureFile(projectRoot, relativePath) {
 	const absolutePath = path.join(projectRoot, relativePath);
@@ -42,8 +43,41 @@ function runNpmScript(cwd, scriptName) {
 	runCommand("npm", ["run", scriptName], cwd);
 }
 
-export function buildReleaseFeed(manifest, publishedAt = new Date().toISOString()) {
-	return {
+export function extractReleaseNotes(changelogText, version) {
+	const normalized = changelogText.replace(/\r\n?/g, "\n");
+	const versionPattern = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const headingPattern = new RegExp(`^##\\s+\\[?${versionPattern}\\]?(?:\\s+-.*)?$`);
+	const lines = normalized.split("\n");
+	let capturing = false;
+	const captured = [];
+
+	for (const line of lines) {
+		const trimmed = line.trim();
+		if (!capturing) {
+			if (headingPattern.test(trimmed)) {
+				capturing = true;
+			}
+			continue;
+		}
+		if (/^##\s+/.test(trimmed)) {
+			break;
+		}
+		captured.push(line);
+	}
+
+	return captured.join("\n").trim();
+}
+
+function readReleaseNotes(projectRoot, version) {
+	const changelogPath = path.join(projectRoot, CHANGELOG_FILE);
+	if (!fs.existsSync(changelogPath)) {
+		return "";
+	}
+	return extractReleaseNotes(fs.readFileSync(changelogPath, "utf8"), version);
+}
+
+export function buildReleaseFeed(manifest, publishedAt = new Date().toISOString(), releaseNotes = "") {
+	const feed = {
 		schemaVersion: 1,
 		pluginId: manifest.id,
 		version: manifest.version,
@@ -56,6 +90,10 @@ export function buildReleaseFeed(manifest, publishedAt = new Date().toISOString(
 			"styles.css": `${RELEASE_ARTIFACT_RELATIVE_DIR}/styles.css`,
 		},
 	};
+	if (releaseNotes.trim()) {
+		feed.releaseNotes = releaseNotes.trim();
+	}
+	return feed;
 }
 
 export function createZipArchive(sourceDir, zipPath) {
@@ -100,7 +138,8 @@ export function syncReleaseArtifacts({
 		fs.copyFileSync(sourcePath, targetPath);
 	}
 
-	const latestJson = buildReleaseFeed(manifest, publishedAt);
+	const releaseNotes = readReleaseNotes(projectRoot, manifest.version);
+	const latestJson = buildReleaseFeed(manifest, publishedAt, releaseNotes);
 	const latestJsonPath = path.join(releaseRoot, "latest.json");
 	writeJson(latestJsonPath, latestJson);
 

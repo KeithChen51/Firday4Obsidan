@@ -22,8 +22,6 @@ export class SyncOrchestrator {
 			try {
 				this.emitStage(project, "checking");
 				await this.operator.prepareRepository(project);
-				this.emitStage(project, "committing");
-				await this.commitWorkingTree(project);
 				this.emitStage(project, "pulling");
 				const pulled = await this.pull(project);
 				if (!pulled.success) {
@@ -59,6 +57,8 @@ export class SyncOrchestrator {
 					};
 				}
 
+				this.emitStage(project, "committing");
+				await this.commitWorkingTree(project);
 				this.emitStage(project, "pushing");
 				const pushed = await this.push(project);
 				if (!pushed.success) {

@@ -14,7 +14,7 @@ const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function read(filePath) {
-	return fs.readFileSync(filePath, "utf8");
+	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("settings model includes update state for plugin auto-update", () => {
@@ -38,11 +38,16 @@ test("settings section label renames user section to basic configuration in both
 	assert.match(zh, /"settings\.user\.update\.title":/);
 	assert.match(zh, /"settings\.user\.update\.enabled\.name":/);
 	assert.match(zh, /"settings\.user\.update\.currentVersion\.name":/);
+	assert.match(zh, /"settings\.user\.update\.currentVersion\.name": "当前版本号：\{version\}"/);
+	assert.match(zh, /"settings\.user\.update\.currentVersion\.apply":/);
 	assert.match(en, /"settings\.user\.update\.title": "Automatic Updates"/);
 	assert.match(en, /"settings\.user\.update\.enabled\.name": "Enable automatic updates"/);
 	assert.match(en, /"settings\.user\.update\.currentVersion\.name":/);
+	assert.match(en, /"settings\.user\.update\.currentVersion\.apply":/);
 	assert.match(zh, /"settings\.user\.update\.prerequisites\.name":/);
 	assert.match(en, /"settings\.user\.update\.prerequisites\.name": "Prerequisites"/);
+	assert.match(zh, /"settings\.user\.update\.notice\.restart":/);
+	assert.match(en, /"settings\.user\.update\.notice\.restart":/);
 });
 
 test("renderUserSection includes an automatic update group after git credential inputs", () => {
@@ -79,22 +84,45 @@ test("plugin update section uses a native settings group and hides advanced cont
 	assert.doesNotMatch(source, /friday-card friday-plugin-update-card/);
 	assert.match(source, /if \(prerequisitesReady\)/);
 	assert.match(source, /settings\.user\.update\.checkOnStartup\.name/);
-	assert.match(source, /settings\.user\.update\.actions\.name/);
+	assert.match(source, /settings\.user\.update\.status\.name/);
+	assert.doesNotMatch(source, /settings\.user\.update\.actions\.name/);
+	assert.doesNotMatch(source, /settings\.user\.update\.enabled\.name/);
 });
 
-test("plugin update card shows current version before update toggles and does not keep git runtime inside the card", () => {
+test("plugin update card uses the current-version row as the only check-or-apply action", () => {
 	const source = read(settingsPath);
 	const match = source.match(/private renderPluginUpdateCard\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderPluginUpdatePrerequisitesSetting/);
 	assert.ok(match, "renderPluginUpdateCard block should exist");
 	const block = match[1] ?? "";
 	const currentVersionIndex = block.indexOf('settings.user.update.currentVersion.name');
 	const prerequisitesIndex = block.indexOf("renderPluginUpdatePrerequisitesSetting(");
-	const enabledIndex = block.indexOf('settings.user.update.enabled.name');
+	const startupCheckIndex = block.indexOf('settings.user.update.checkOnStartup.name');
 	assert.ok(currentVersionIndex >= 0, "current version row should exist");
 	assert.ok(prerequisitesIndex >= 0, "prerequisites row should exist");
-	assert.ok(enabledIndex >= 0, "enable update toggle should exist");
+	assert.ok(startupCheckIndex >= 0, "startup check toggle should exist");
 	assert.ok(currentVersionIndex < prerequisitesIndex, "current version row should render before prerequisites");
-	assert.ok(currentVersionIndex < enabledIndex, "current version row should render before the auto update toggle");
+	assert.ok(currentVersionIndex < startupCheckIndex, "current version row should render before startup auto-check");
 	assert.doesNotMatch(block, /settings\.user\.update\.gitRuntime\.name/);
-	assert.doesNotMatch(block, /settings\.user\.update\.actions\.checkNow/);
+	assert.doesNotMatch(block, /settings\.user\.update\.actions\.apply/);
+	assert.doesNotMatch(block, /settings\.user\.update\.actions\.dismiss/);
+	assert.doesNotMatch(block, /dismissedVersion/);
+	assert.match(block, /const hasAvailableUpdate = Boolean\(availableVersion\);/);
+	assert.match(block, /setButtonText\([\s\S]*hasAvailableUpdate[\s\S]*settings\.user\.update\.currentVersion\.apply/);
+	assert.match(block, /if \(hasAvailableUpdate\) \{\s*button\.setCta\(\);\s*\} else \{\s*button\.removeCta\(\);\s*\}/);
+});
+
+test("plugin update apply flow shows a persistent restart CTA notice after a successful update", () => {
+	const source = read(settingsPath);
+	assert.match(source, /showPluginUpdateRestartNotice\(\)/);
+	assert.match(source, /new Notice\(fragment,\s*0\)/);
+	assert.match(source, /settings\.user\.update\.notice\.restart/);
+	assert.match(source, /this\.host\.reloadObsidianApp\(\)/);
+
+	const match = source.match(/private async runPluginUpdateApply\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate buildProjectDescription/);
+	assert.ok(match, "runPluginUpdateApply block should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /this\.showPluginUpdateRestartNotice\(\);/);
+	assert.doesNotMatch(block, /new Notice\(this\.t\("settings\.user\.update\.notice\.applied"/);
+	assert.match(block, /this\.host\.settings\.update\.availableVersion = "";/);
+	assert.doesNotMatch(block, /dismissedVersion/);
 });

@@ -5,6 +5,8 @@ import simpleGit from "simple-git";
 import {
 	PLUGIN_UPDATE_ARTIFACT_DIR,
 	PLUGIN_UPDATE_BRANCH,
+	PLUGIN_UPDATE_CHANGELOG_PATH,
+	PLUGIN_UPDATE_LOG_VAULT_PATH,
 	PLUGIN_UPDATE_MAIN_JS_PATH,
 	PLUGIN_UPDATE_MANIFEST_JSON_PATH,
 	PLUGIN_UPDATE_MANIFEST_PATH,
@@ -53,6 +55,7 @@ export interface PluginUpdateServiceDeps {
 interface UpdateSnapshot {
 	release: ReleaseFeed;
 	files: Map<string, string>;
+	changelog: string | null;
 }
 
 export class PluginUpdateService {
@@ -171,11 +174,20 @@ export class PluginUpdateService {
 					backupContents.set(fileName, null);
 				}
 			}
+			const runtimeLogBackup = await this.readOptionalFile(PLUGIN_UPDATE_LOG_VAULT_PATH);
+			const bundledChangelogPath = normalizePathLite(`${this.pluginRoot}/${PLUGIN_UPDATE_CHANGELOG_PATH}`);
+			const bundledChangelogBackup = await this.readOptionalFile(bundledChangelogPath);
 
 			try {
 				for (const [name, content] of snapshot.files.entries()) {
 					await this.deps.adapter.write(normalizePathLite(`${this.pluginRoot}/${name}`), content);
 					updatedFiles.push(name);
+				}
+				if (snapshot.changelog?.trim()) {
+					await this.deps.adapter.write(bundledChangelogPath, snapshot.changelog);
+					updatedFiles.push("CHANGELOG.md");
+					await this.writeVaultLog(snapshot.changelog);
+					updatedFiles.push(PLUGIN_UPDATE_LOG_VAULT_PATH);
 				}
 			} catch (error) {
 				for (const [name, content] of backupContents.entries()) {
@@ -188,6 +200,8 @@ export class PluginUpdateService {
 					}
 					await this.deps.adapter.write(livePath, content);
 				}
+				await this.restoreOptionalFile(bundledChangelogPath, bundledChangelogBackup);
+				await this.restoreOptionalFile(PLUGIN_UPDATE_LOG_VAULT_PATH, runtimeLogBackup);
 				throw error;
 			}
 
@@ -241,10 +255,35 @@ export class PluginUpdateService {
 				files.set("styles.css", await gitClient.readText("FETCH_HEAD", PLUGIN_UPDATE_STYLES_PATH));
 			}
 
-			return { release, files };
+			let changelog: string | null = null;
+			try {
+				const rawChangelog = await gitClient.readText("FETCH_HEAD", PLUGIN_UPDATE_CHANGELOG_PATH);
+				changelog = sanitizeVersionedChangelog(rawChangelog);
+			} catch (error) {
+				console.warn("[Friday] Failed to read repository changelog for plugin update:", error);
+			}
+			if (!changelog && release.releaseNotes?.trim()) {
+				changelog = buildFallbackChangelog(release);
+			}
+
+			return { release, files, changelog };
 		} finally {
 			await gitClient.cleanup();
 		}
+	}
+
+	async syncBundledUpdateLog(): Promise<boolean> {
+		const bundledChangelogPath = normalizePathLite(`${this.pluginRoot}/${PLUGIN_UPDATE_CHANGELOG_PATH}`);
+		const changelog = await this.readOptionalFile(bundledChangelogPath);
+		if (!changelog?.trim()) {
+			return false;
+		}
+		const normalized = sanitizeVersionedChangelog(changelog);
+		if (!normalized) {
+			return false;
+		}
+		await this.writeVaultLog(normalized);
+		return true;
 	}
 
 	private validateReleaseFeed(raw: string): ReleaseFeed {
@@ -274,6 +313,44 @@ export class PluginUpdateService {
 			}
 		}
 		return parsed as ReleaseFeed;
+	}
+
+	private async writeVaultLog(content: string): Promise<void> {
+		await this.ensureDirectory(path.posix.dirname(PLUGIN_UPDATE_LOG_VAULT_PATH));
+		await this.deps.adapter.write(PLUGIN_UPDATE_LOG_VAULT_PATH, content);
+	}
+
+	private async ensureDirectory(targetDir: string): Promise<void> {
+		const normalized = normalizePathLite(targetDir);
+		const segments = normalized.split("/").filter(Boolean);
+		let current = "";
+		for (const segment of segments) {
+			current = current ? `${current}/${segment}` : segment;
+			if (await this.deps.adapter.exists(current)) {
+				continue;
+			}
+			await this.deps.adapter.mkdir(current);
+		}
+	}
+
+	private async readOptionalFile(targetPath: string): Promise<string | null> {
+		const normalized = normalizePathLite(targetPath);
+		if (!(await this.deps.adapter.exists(normalized))) {
+			return null;
+		}
+		return this.deps.adapter.read(normalized);
+	}
+
+	private async restoreOptionalFile(targetPath: string, content: string | null): Promise<void> {
+		const normalized = normalizePathLite(targetPath);
+		if (content == null) {
+			if (await this.deps.adapter.exists(normalized)) {
+				await this.deps.adapter.remove(normalized);
+			}
+			return;
+		}
+		await this.ensureDirectory(path.posix.dirname(normalized));
+		await this.deps.adapter.write(normalized, content);
 	}
 
 	private async removeIfExists(targetPath: string): Promise<void> {
@@ -322,6 +399,34 @@ function normalizePathLite(value: string): string {
 		.replace(/\/\.\//g, "/")
 		.replace(/^\.\//, "")
 		.replace(/\/$/, "");
+}
+
+function sanitizeVersionedChangelog(raw: string): string {
+	const normalized = raw.replace(/\r\n?/g, "\n").trim();
+	if (!normalized) {
+		return "";
+	}
+	const lines = normalized.split("\n");
+	const versionHeadingIndex = lines.findIndex((line) => /^##\s+\[?\d+\.\d+\.\d+\]?(\s+-.*)?$/.test(line.trim()));
+	if (versionHeadingIndex <= 0) {
+		return normalized;
+	}
+	return [lines[0], "", ...lines.slice(versionHeadingIndex)].join("\n").trim();
+}
+
+function buildFallbackChangelog(release: ReleaseFeed): string {
+	const lines = [
+		"# Changelog",
+		"",
+		`## ${release.version}`,
+	];
+	if (release.publishedAt) {
+		lines.push(``, `- Published at: ${release.publishedAt}`);
+	}
+	if (release.releaseNotes?.trim()) {
+		lines.push("", release.releaseNotes.trim());
+	}
+	return lines.join("\n").trim();
 }
 
 async function createGitReleaseClient(credential: ProjectGitCredential): Promise<UpdateGitClient> {

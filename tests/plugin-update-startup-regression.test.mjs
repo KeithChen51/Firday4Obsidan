@@ -10,7 +10,7 @@ const projectRoot = path.resolve(testDir, "..");
 const mainPath = path.join(projectRoot, "src/main.ts");
 
 function read(filePath) {
-	return fs.readFileSync(filePath, "utf8");
+	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("main constructs plugin update service and stores it on the plugin", () => {
@@ -19,10 +19,31 @@ test("main constructs plugin update service and stores it on the plugin", () => 
 	assert.match(source, /new PluginUpdateService\(/);
 });
 
-test("startup update check is gated by enabled flag, git runtime, and credential completeness", () => {
+test("startup update check is gated by startup toggle, git runtime, and credential completeness only", () => {
 	const source = read(mainPath);
 	assert.match(source, /checkOnStartup/);
 	assert.match(source, /gitAvailable/);
 	assert.match(source, /gitProfileComplete/);
 	assert.match(source, /setTimeout/);
+	assert.doesNotMatch(source, /this\.settings\.update\.enabled && this\.settings\.update\.checkOnStartup/);
+});
+
+test("main backfills runtime changelog from bundled plugin changelog during startup", () => {
+	const source = read(mainPath);
+	assert.match(source, /pluginUpdateService\.syncBundledUpdateLog\(\)/);
+});
+
+test("main exposes a reload helper that prefers Obsidian's reload command and falls back to window reload", () => {
+	const source = read(mainPath);
+	assert.match(source, /reloadObsidianApp\(\): void \{/);
+	assert.match(source, /executeCommandById\("app:reload"\)/);
+	assert.match(source, /window\.location\.reload\(\)/);
+});
+
+test("startup plugin update check no longer suppresses notices via dismissed versions", () => {
+	const source = read(mainPath);
+	const match = source.match(/private async runStartupPluginUpdateCheck\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate startAutoSync/);
+	assert.ok(match, "runStartupPluginUpdateCheck block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /dismissedVersion/);
 });

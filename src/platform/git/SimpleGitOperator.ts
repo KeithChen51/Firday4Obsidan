@@ -86,7 +86,7 @@ export class SimpleGitOperator implements GitOperator {
 		try {
 			await this.ensureGitAvailable();
 			const git = await this.requireSyncGit(project);
-			const hasTracking = await this.hasTrackingBranch(git);
+			const hasTracking = await this.ensureTrackingBranchForPull(project, git);
 			if (!hasTracking) {
 				return {
 					success: true,
@@ -344,6 +344,35 @@ export class SimpleGitOperator implements GitOperator {
 		}
 		const branches = summary.branches as Record<string, { tracking?: string }>;
 		return Boolean(branches[branch]?.tracking);
+	}
+
+	private async ensureTrackingBranchForPull(project: ProjectEntry, git: SimpleGit): Promise<boolean> {
+		if (await this.hasTrackingBranch(git)) {
+			return true;
+		}
+
+		const branchSummary = await git.branchLocal();
+		const branchName = branchSummary.current?.trim();
+		if (!branchName || !project.gitRemote?.trim()) {
+			return false;
+		}
+
+		const remoteBranchExists = await this.remoteBranchExists(project, git, branchName);
+		if (!remoteBranchExists) {
+			return false;
+		}
+
+		await git.raw(["branch", "--set-upstream-to", `origin/${branchName}`, branchName]);
+		return true;
+	}
+
+	private async remoteBranchExists(project: ProjectEntry, git: SimpleGit, branchName: string): Promise<boolean> {
+		try {
+			const output = await git.raw([...(await this.authArgs(project)), "ls-remote", "--heads", "origin", branchName]);
+			return Boolean(output.trim());
+		} catch {
+			return false;
+		}
 	}
 
 	private async getHeadRevision(git: SimpleGit): Promise<string> {

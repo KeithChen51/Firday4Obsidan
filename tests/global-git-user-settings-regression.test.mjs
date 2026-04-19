@@ -16,7 +16,7 @@ const mainPath = path.join(projectRoot, "src/main.ts");
 const gitOperatorPath = path.join(projectRoot, "src/platform/git/SimpleGitOperator.ts");
 
 function read(filePath) {
-	return fs.readFileSync(filePath, "utf8");
+	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("synced settings model keeps git email only and no longer stores git username or token", async () => {
@@ -61,6 +61,42 @@ test("settings tab keeps git username before email and stores credentials outsid
 	assert.match(source, /setUserGitCredential\(/);
 	assert.doesNotMatch(block, /settings\.user\.gitUsername\s*=/);
 	assert.doesNotMatch(block, /settings\.user\.gitToken\s*=/);
+});
+
+test("git identity inputs defer settings rerender until blur so the first keystroke keeps focus", async () => {
+	const source = read(settingTabPath);
+	const userSectionMatch = source.match(/private renderUserSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
+	assert.ok(userSectionMatch, "renderUserSection block should exist");
+	const block = userSectionMatch[1] ?? "";
+	const gitUsernameIndex = block.indexOf('settings.user.gitUsername.name');
+	const gitEmailIndex = block.indexOf('settings.user.gitUserEmail.name');
+	const gitTokenIndex = block.indexOf('settings.user.gitToken.name');
+	const gitRuntimeIndex = block.indexOf('settings.user.update.gitRuntime.name');
+	assert.ok(gitUsernameIndex >= 0, "git username input should exist");
+	assert.ok(gitEmailIndex >= 0, "git email input should exist");
+	assert.ok(gitTokenIndex >= 0, "git token input should exist");
+	assert.ok(gitRuntimeIndex >= 0, "git runtime row should exist");
+
+	const gitUsernameBlock = block.slice(gitUsernameIndex, gitEmailIndex);
+	const gitEmailBlock = block.slice(gitEmailIndex, gitTokenIndex);
+	const gitTokenBlock = block.slice(gitTokenIndex, gitRuntimeIndex);
+
+	for (const [label, inputBlock] of [
+		["git username", gitUsernameBlock],
+		["git email", gitEmailBlock],
+		["git token", gitTokenBlock],
+	]) {
+		const onChangeMatch = inputBlock.match(/\.onChange\(async \(value\) => \{([\s\S]*?)\}\);/);
+		assert.ok(onChangeMatch, `${label} should define an async onChange handler`);
+		const onChangeBlock = onChangeMatch[1] ?? "";
+		assert.doesNotMatch(inputBlock, /const visibilityChanged =/i, `${label} should not track first-character visibility changes`);
+		assert.doesNotMatch(onChangeBlock, /this\.display\(\)/, `${label} should not rerender the whole settings tab during onChange`);
+		assert.match(
+			inputBlock,
+			/inputEl\.(?:onblur\s*=|addEventListener\(\s*"blur")/,
+			`${label} should trigger rerender only after the input loses focus`,
+		);
+	}
 });
 
 test("settings nav places project immediately after user", async () => {

@@ -74,6 +74,7 @@ export interface FridayPluginApi {
 	removeProjectGroup(groupId: string): Promise<void>;
 	openSettingsTab(section?: FridaySettingsSection): void;
 	openWorkspaceView(): Promise<void>;
+	reloadObsidianApp(): void;
 	getLocale(): LocaleCode;
 	t(key: string, params?: I18nParams): string;
 	getGitRuntimeStatus(): Promise<GitRuntimeStatus>;

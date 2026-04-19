@@ -7,7 +7,7 @@ import { SyncService } from "../../services/SyncService";
 import { ProjectEntry, ProjectGitCredential, ProjectGitState } from "../../types/project";
 import { getVaultBasePath } from "../../utils/vaultPath";
 
-export type ProjectRegistrationMode = "local_only" | "register_existing_dir" | "remote_bootstrap";
+export type ProjectRegistrationMode = "local_only" | "remote_bootstrap";
 
 export interface ProjectEditorDraft {
 	groupId: string;
@@ -28,6 +28,7 @@ export interface ProjectGitStateDetection {
 	gitState: ProjectGitState;
 	repositoryRoot: string;
 	detectedParentRepository: boolean;
+	gitRemote: string;
 }
 
 interface SubmitOptions {
@@ -63,7 +64,7 @@ export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: stri
 	boundaryPath: string;
 } {
 	const repoName = extractRepositoryName(gitRemote);
-	const projectId = repoName.trim().toLowerCase();
+	const projectId = normalizeProjectIdCandidate(repoName) || "new-project";
 	return {
 		projectId,
 		projectName: repoName,
@@ -80,8 +81,8 @@ export function validateProjectDraft(
 		"localPath" in draft || "projectRootPath" in draft || "slug" in draft
 			? normalizeProjectDraft(draft as ProjectEditorDraft)
 			: draft;
-	if (!normalizedDraft.projectId || !/^[a-z0-9-]+$/.test(normalizedDraft.projectId)) {
-		throw new Error("Project ID must use lowercase letters, numbers, or hyphens only.");
+	if (!normalizedDraft.projectId || !PROJECT_ID_PATTERN.test(normalizedDraft.projectId)) {
+		throw new Error("项目 ID 只能使用小写字母、数字或连字符。");
 	}
 	if (existingProjectIds.has(normalizedDraft.projectId) && initialProjectId !== normalizedDraft.projectId) {
 		throw new Error(`Project already exists: ${normalizedDraft.projectId}`);
@@ -92,15 +93,13 @@ export function validateProjectDraft(
 	if (normalizedDraft.mode === "remote_bootstrap" && !normalizedDraft.gitRemote) {
 		throw new Error("Git remote is required for remote bootstrap.");
 	}
-	if (normalizedDraft.mode === "local_only" && normalizedDraft.gitRemote) {
-		throw new Error("local_only mode cannot bind a remote repository.");
-	}
 	if (Boolean(normalizedDraft.gitUsername) !== Boolean(normalizedDraft.gitToken)) {
 		throw new Error("Git username and token must both be provided, or both left empty.");
 	}
+
 	const rawRoot = String(draft.boundaryPath || ("projectRootPath" in draft ? draft.projectRootPath : "") || "").trim();
-	if (normalizedDraft.mode === "local_only" && !rawRoot) {
-		return;
+	if (!rawRoot) {
+		throw new Error("Project root is required.");
 	}
 	if (!isVaultRelativePath(rawRoot)) {
 		throw new Error("Project root must be a Vault-relative path.");
@@ -114,43 +113,66 @@ export function validateProjectDraft(
 export async function submitProjectDraft(options: SubmitOptions): Promise<ProjectEntry> {
 	const { app, syncService, draft, initial } = options;
 	let normalizedDraft = normalizeProjectDraft(applyRemoteBootstrapDraftDefaults(draft, options.fridayRoot));
-	if (!normalizedDraft.projectId) {
+	if (!initial && (!normalizedDraft.projectId || !PROJECT_ID_PATTERN.test(normalizedDraft.projectId))) {
+		const preferredProjectIdSource =
+			normalizedDraft.projectName
+			|| (normalizedDraft.mode === "remote_bootstrap" ? extractRepositoryName(normalizedDraft.gitRemote) : "")
+			|| normalizedDraft.projectId;
 		normalizedDraft = {
 			...normalizedDraft,
-			projectId: generateProjectId(normalizedDraft.projectName, options.existingProjectIds),
+			projectId: generateProjectId(preferredProjectIdSource, options.existingProjectIds),
 		};
 	}
 	validateProjectDraft(normalizedDraft, options.existingProjectIds, initial?.projectId ?? initial?.slug ?? "");
 
 	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
 	const resolvedPath = await resolveProjectPath(app, normalizedDraft.mode, normalizedRoot);
+	let detectedBefore =
+		normalizedDraft.mode === "local_only" ? await detectProjectGitState(resolvedPath) : null;
+	const effectiveGitRemote = resolveEffectiveGitRemote(normalizedDraft, detectedBefore);
+
+	if (normalizedDraft.mode === "local_only" && effectiveGitRemote && detectedBefore?.detectedParentRepository) {
+		throw new Error(
+			"The selected directory is inside a parent Git repository. Choose the repository root before binding a remote.",
+		);
+	}
+
 	await prepareProjectDirectory(normalizedDraft, resolvedPath);
 	await persistProjectGitCredential(syncService, normalizedDraft.projectId, normalizeProjectGitCredential(normalizedDraft));
 
-	const detectedState =
-		normalizedDraft.mode === "register_existing_dir" || normalizedDraft.mode === "remote_bootstrap"
+	if (normalizedDraft.mode === "local_only" && effectiveGitRemote) {
+		await syncService.prepareRepository({
+			projectId: normalizedDraft.projectId,
+			projectName: normalizedDraft.projectName,
+			boundaryPath: normalizedRoot,
+			gitState: detectedBefore?.gitState ?? "none",
+			slug: normalizedDraft.projectId,
+			groupId: normalizedDraft.groupId,
+			gitRemote: effectiveGitRemote,
+			autoSync: false,
+			lastSyncAt: initial?.lastSyncAt ?? "",
+		});
+	}
+
+	const detectedAfter =
+		normalizedDraft.mode === "local_only" || normalizedDraft.mode === "remote_bootstrap"
 			? await detectProjectGitState(resolvedPath)
 			: null;
-	if (
-		normalizedDraft.mode === "register_existing_dir" &&
-		normalizedDraft.gitRemote.trim() &&
-		detectedState?.gitState === "none"
-	) {
-		throw new Error("register_existing_dir cannot bind a remote unless the selected directory is already a Git repository root.");
-	}
-	const hasRemote = Boolean(normalizedDraft.gitRemote.trim());
-	const entry: ProjectEntry = {
+	const finalGitRemote = detectedAfter?.gitRemote || effectiveGitRemote;
+	const finalGitState = detectedAfter?.gitState ?? (finalGitRemote ? "git_remote_bound" : "none");
+	const autoSyncAllowed = finalGitState === "git_remote_bound" && Boolean(finalGitRemote);
+
+	return {
 		projectId: normalizedDraft.projectId,
 		projectName: normalizedDraft.projectName,
 		boundaryPath: normalizedRoot,
-		gitState: detectedState?.gitState ?? (hasRemote ? "git_remote_bound" : "none"),
+		gitState: finalGitState,
 		groupId: normalizedDraft.groupId.trim() || "default-group",
 		slug: normalizedDraft.projectId,
-		gitRemote: normalizedDraft.gitRemote.trim(),
-		autoSync: hasRemote ? normalizedDraft.autoSync : false,
+		gitRemote: finalGitRemote,
+		autoSync: autoSyncAllowed ? normalizedDraft.autoSync : false,
 		lastSyncAt: initial?.lastSyncAt ?? "",
 	};
-	return entry;
 }
 
 export async function detectProjectGitState(targetPath: string): Promise<ProjectGitStateDetection> {
@@ -163,19 +185,23 @@ export async function detectProjectGitState(targetPath: string): Promise<Project
 				gitState: "none",
 				repositoryRoot,
 				detectedParentRepository: true,
+				gitRemote: "",
 			};
 		}
 		const remotes = await git.getRemotes(true);
+		const gitRemote = pickGitRemote(remotes);
 		return {
-			gitState: remotes.length > 0 ? "git_remote_bound" : "git_local",
+			gitState: gitRemote ? "git_remote_bound" : "git_local",
 			repositoryRoot,
 			detectedParentRepository: false,
+			gitRemote,
 		};
 	} catch {
 		return {
 			gitState: "none",
 			repositoryRoot: "",
 			detectedParentRepository: false,
+			gitRemote: "",
 		};
 	}
 }
@@ -186,11 +212,8 @@ async function resolveProjectPath(
 	projectRootPath: string,
 ): Promise<string> {
 	const expectedPath = getVaultProjectAbsolutePath(app, projectRootPath);
-	if (mode === "register_existing_dir") {
-		const expectedStat = await fs.stat(expectedPath).catch(() => null);
-		if (!expectedStat?.isDirectory()) {
-			throw new Error(`Local path does not exist: ${expectedPath}`);
-		}
+	if (mode === "remote_bootstrap") {
+		await fs.mkdir(expectedPath, { recursive: true });
 		return expectedPath;
 	}
 
@@ -202,9 +225,6 @@ async function prepareProjectDirectory(
 	draft: NormalizedProjectDraft,
 	resolvedPath: string,
 ): Promise<void> {
-	if (draft.mode === "register_existing_dir") {
-		return;
-	}
 	if (draft.mode === "remote_bootstrap") {
 		const stat = await fs.stat(resolvedPath).catch(() => null);
 		const entries = stat?.isDirectory() ? await fs.readdir(resolvedPath) : [];
@@ -214,7 +234,6 @@ async function prepareProjectDirectory(
 		if (draft.gitRemote) {
 			await simpleGit().clone(draft.gitRemote, resolvedPath);
 		}
-		return;
 	}
 }
 
@@ -255,9 +274,10 @@ function applyRemoteBootstrapDraftDefaults(draft: ProjectEditorDraft, fridayRoot
 		return draft;
 	}
 	const defaults = buildRemoteBootstrapDefaults(fridayRoot, draft.gitRemote);
+	const sanitizedProjectId = normalizeProjectIdCandidate(draft.projectId ?? "");
 	return {
 		...draft,
-		projectId: draft.projectId?.trim() || defaults.projectId,
+		projectId: sanitizedProjectId || defaults.projectId,
 		projectName: draft.projectName?.trim() || defaults.projectName,
 		boundaryPath: draft.boundaryPath?.trim() || defaults.boundaryPath,
 		projectRootPath: draft.projectRootPath?.trim() || defaults.boundaryPath,
@@ -272,6 +292,22 @@ function normalizeProjectGitCredential(draft: NormalizedProjectDraft): ProjectGi
 		username: draft.gitUsername,
 		token: draft.gitToken,
 	};
+}
+
+function resolveEffectiveGitRemote(
+	draft: NormalizedProjectDraft,
+	detectedState: ProjectGitStateDetection | null,
+): string {
+	return draft.gitRemote.trim() || detectedState?.gitRemote || "";
+}
+
+function pickGitRemote(remotes: Array<{ name: string; refs?: { fetch?: string; push?: string } }>): string {
+	if (!remotes.length) {
+		return "";
+	}
+	const origin = remotes.find((remote) => remote.name === "origin");
+	const target = origin ?? remotes[0];
+	return target?.refs?.fetch?.trim() || target?.refs?.push?.trim() || "";
 }
 
 function normalizeVaultPath(value: string): string {
@@ -311,7 +347,31 @@ function normalizeProjectRootSegment(value: string): string {
 		.replace(/\.+$/, "");
 }
 
+const PROJECT_ID_PATTERN = /^[a-z0-9-]+$/;
+
+function normalizeProjectIdCandidate(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/-+/g, "-")
+		.replace(/^-+/, "")
+		.replace(/-+$/, "");
+}
+
 function generateProjectId(projectName: string, existingProjectIds: Set<string>): string {
+	const preferred = normalizeProjectIdCandidate(projectName);
+	if (preferred && !existingProjectIds.has(preferred)) {
+		return preferred;
+	}
+	if (preferred) {
+		for (let attempt = 2; attempt < 100; attempt += 1) {
+			const candidate = `${preferred}-${attempt}`;
+			if (!existingProjectIds.has(candidate)) {
+				return candidate;
+			}
+		}
+	}
 	const base = "project";
 	for (let attempt = 0; attempt < 10; attempt += 1) {
 		const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;

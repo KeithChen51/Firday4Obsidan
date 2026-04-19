@@ -12,6 +12,7 @@ const jiti = createJiti(import.meta.url);
 const orchestratorModulePath = path.join(projectRoot, "src/features/sync/SyncOrchestrator.ts");
 const queueModulePath = path.join(projectRoot, "src/platform/git/PromiseQueue.ts");
 const eventBusModulePath = path.join(projectRoot, "src/features/sync/SyncEventBus.ts");
+const gitOperatorModulePath = path.join(projectRoot, "src/platform/git/SimpleGitOperator.ts");
 
 async function loadModules() {
 	const [orchestratorModule, queueModule, eventBusModule] = await Promise.all([
@@ -42,7 +43,11 @@ function readSyncServiceSource() {
 	return fs.readFileSync(path.join(projectRoot, "src/services/SyncService.ts"), "utf8");
 }
 
-test("sync orchestrator runs commit, pull, conflict detection, then push in order", async () => {
+function readGitOperatorSource() {
+	return fs.readFileSync(gitOperatorModulePath, "utf8");
+}
+
+test("sync orchestrator runs pull, conflict detection, commit, then push in order", async () => {
 	const { orchestratorModule, queueModule } = await loadModules();
 	const calls = [];
 	const operator = {
@@ -70,14 +75,14 @@ test("sync orchestrator runs commit, pull, conflict detection, then push in orde
 
 	const result = await orchestrator.sync(createProject());
 
-	assert.deepEqual(calls, ["prepare", "commit", "pull", "detect", "push"]);
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push"]);
 	assert.equal(result.success, true);
 	assert.deepEqual(result.pulledFiles, ["b.md"]);
 	assert.deepEqual(result.pushedFiles, ["a.md"]);
 	assert.deepEqual(result.conflicts, []);
 });
 
-test("sync orchestrator stops before push when conflicts are detected", async () => {
+test("sync orchestrator stops before local commit and push when conflicts are detected after pull", async () => {
 	const { orchestratorModule, queueModule } = await loadModules();
 	const calls = [];
 	const operator = {
@@ -105,10 +110,46 @@ test("sync orchestrator stops before push when conflicts are detected", async ()
 
 	const result = await orchestrator.sync(createProject());
 
-	assert.deepEqual(calls, ["prepare", "commit", "pull", "detect"]);
+	assert.deepEqual(calls, ["prepare", "pull", "detect"]);
 	assert.equal(result.success, false);
 	assert.deepEqual(result.conflicts, ["conflict.md"]);
 	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+});
+
+test("sync orchestrator stops before commit and push when pull fails", async () => {
+	const { orchestratorModule, queueModule } = await loadModules();
+	const calls = [];
+	const operator = {
+		async prepareRepository() {
+			calls.push("prepare");
+		},
+		async commitWorkingTree() {
+			calls.push("commit");
+			return [];
+		},
+		async pull() {
+			calls.push("pull");
+			return { success: false, pulledFiles: [], error: "pull failed" };
+		},
+		async detectConflicts() {
+			calls.push("detect");
+			return { conflicts: [], conflictSnapshots: {} };
+		},
+		async push() {
+			calls.push("push");
+			return { success: true, pushedFiles: [] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.deepEqual(calls, ["prepare", "pull"]);
+	assert.equal(result.success, false);
+	assert.match(result.error ?? "", /pull failed/i);
 });
 
 test("sync orchestrator syncAll includes manual-only projects instead of filtering by autoSync", async () => {
@@ -160,6 +201,13 @@ test("sync service queues conflict resolution actions instead of bypassing the g
 		source,
 		/async resolveConflict\(project: ProjectEntry, filePath: string, strategy: "ours" \| "theirs"\): Promise<void> \{[\s\S]*?this\.queue\.enqueue\(async \(\) => \{/,
 	);
+});
+
+test("simple git operator attempts to attach upstream tracking before skipping pull", async () => {
+	const source = readGitOperatorSource();
+	assert.match(source, /const hasTracking = await this\.ensureTrackingBranchForPull\(project, git\);/);
+	assert.match(source, /await git\.raw\(\["branch", "--set-upstream-to", `origin\/\$\{branchName\}`, branchName\]\);/);
+	assert.match(source, /"ls-remote", "--heads", "origin", branchName/);
 });
 
 test("sync orchestrator emits recovery-failed event when stash pop restoration fails", async () => {
