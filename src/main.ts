@@ -225,7 +225,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					this.projectBoundaryService,
 					this.workbenchStateStore,
 					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
-					this.executionEventRouter,
 					() => this.settings,
 				);
 				this.executionOrchestrator = new ExecutionOrchestrator(

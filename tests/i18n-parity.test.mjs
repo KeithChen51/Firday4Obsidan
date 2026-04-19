@@ -25,4 +25,7 @@ test("zh-CN and en-US locale keys stay in parity", async () => {
 	const zhKeys = Object.keys(zh).sort();
 	const enKeys = Object.keys(en).sort();
 	assert.deepEqual(zhKeys, enKeys);
+	assert.equal("settings.agent.enableSubagent.name" in zh, false);
+	assert.equal("settings.agent.maxSubagentDepth.name" in zh, false);
+	assert.equal("ai.runtime.execution.subagentLabel" in zh, false);
 });

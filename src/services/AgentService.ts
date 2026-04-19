@@ -219,14 +219,6 @@ export class AgentService {
 			DEFAULT_LESSONS_TEMPLATE,
 		);
 		await this.upsertTextFile(
-			normalizePath(`${this.getAgentMemoryRoot(agent.id)}/facts.md`),
-			"# 事实记忆\n",
-		);
-		await this.upsertTextFile(
-			normalizePath(`${this.getAgentMemoryRoot(agent.id)}/preferences.md`),
-			"# 偏好记忆\n",
-		);
-		await this.upsertTextFile(
 			this.getAgentToolApprovalPath(agent.id),
 			`${JSON.stringify(DEFAULT_TOOL_APPROVAL_STORE, null, 2)}\n`,
 		);

@@ -21,10 +21,10 @@ function loadBuiltinReviewNotes() {
 	return jiti.import(builtinReviewNotesModulePath);
 }
 
-test("builtin skill pack exports eight builtin skills", async () => {
+test("builtin skill pack exports seven builtin skills", async () => {
 	const mod = await loadBuiltinPack();
 	assert.equal(Array.isArray(mod.BUILTIN_SKILL_DEFINITIONS), true);
-	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 8);
+	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 7);
 });
 
 test("builtin skill pack contains required commands", async () => {
@@ -35,7 +35,6 @@ test("builtin skill pack contains required commands", async () => {
 		[
 			"compile-wiki",
 			"lookup-wiki",
-			"maintain-memory",
 			"resolve-conflict",
 			"obsidian-cli",
 			"obsidian-markdown",

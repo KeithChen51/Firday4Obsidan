@@ -350,11 +350,11 @@ test("compile button routes through planner and orchestrator", async () => {
 	assert.match(block, /executionOrchestrator\.execute\(/);
 });
 
-test("runtime memory extraction now routes through standardized runtime events", async () => {
+test("runtime now loads memory directly from the memory v1 store", async () => {
 	const source = readRuntimeSource();
-	assert.match(source, /memory\.extraction_requested/);
-	assert.match(source, /dispatchRuntimeEvent\(/);
-	assert.match(source, /eventRouter\.route\(/);
+	assert.match(source, /memoryStore\.readPromptContext\(/);
+	assert.match(source, /toolMemory\(/);
+	assert.doesNotMatch(source, /memory\.extraction_requested/);
 });
 
 test("policy page groups builtin tools and separates builtin and personal skills", async () => {

@@ -9,8 +9,6 @@ const PHASE_TO_STEP_EVENT: Record<RuntimeProgressEvent["phase"], StepEventName> 
 	tool_approval: "STEP_TOOL_APPROVAL",
 	tool_call: "STEP_TOOL_CALL",
 	tool_result: "STEP_TOOL_RESULT",
-	subagent_start: "STEP_SUBAGENT_START",
-	subagent_result: "STEP_SUBAGENT_RESULT",
 	fallback: "STEP_FALLBACK",
 	done: "STEP_DONE",
 	error: "STEP_ERROR",

@@ -3,7 +3,6 @@ import type { CapabilityDefinition, InternalCapabilityDefinition, ToolCapability
 
 const INTERNAL_CAPABILITIES: InternalCapabilityDefinition[] = [
 	{ id: "knowledge.lookup", kind: "internal", userVisible: false },
-	{ id: "memory.persist", kind: "internal", userVisible: false },
 	{ id: "git.conflict.inspect", kind: "internal", userVisible: false },
 	{ id: "git.conflict.propose", kind: "internal", userVisible: false },
 	{ id: "project.compileWiki", kind: "internal", userVisible: false },

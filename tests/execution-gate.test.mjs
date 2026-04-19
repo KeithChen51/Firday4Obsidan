@@ -22,7 +22,6 @@ function createSettings(overrides = {}) {
 			disabledSkills: [],
 			disabledTools: [],
 			enableExecTool: true,
-			enableSubagent: true,
 			...overrides,
 		},
 	};
@@ -37,7 +36,6 @@ function createRuntimeProfile(overrides = {}) {
 		capabilities: {
 			supportsExecTool: true,
 			supportsExternalRead: true,
-			supportsSubagent: true,
 		},
 		...overrides,
 	};
@@ -128,30 +126,12 @@ test("execution gate denies exec capability when exec tool is turned off", async
 	assert.equal(decision.code, "exec_disabled");
 });
 
-test("execution gate denies subagent capability when runtime profile does not support it", async () => {
+test("execution gate source no longer references subagent toggles or gate codes", async () => {
 	const mod = await loadGateModule();
-	const gate = new mod.ExecutionGate(() => createSettings());
-	const decision = gate.evaluate(
-		createInvocation({
-			request: { source: "chat_prompt", intentType: "tool", prompt: "delegate task" },
-			resolvedType: "tool",
-			resolvedId: "subagent",
-			requiredCapabilities: ["subagent"],
-		}),
-		createRuntimeProfile({
-			id: "unsupported",
-			platform: "linux",
-			supported: false,
-			shell: "unknown",
-			capabilities: {
-				supportsExecTool: false,
-				supportsExternalRead: false,
-				supportsSubagent: false,
-			},
-		}),
-	);
-	assert.equal(decision.allow, false);
-	assert.equal(decision.code, "subagent_unsupported");
+	const source = mod.ExecutionGate.toString();
+	assert.doesNotMatch(source, /enableSubagent/);
+	assert.doesNotMatch(source, /subagent_disabled/);
+	assert.doesNotMatch(source, /subagent_unsupported/);
 });
 
 test("execution gate allows enabled runtime skill invocation", async () => {

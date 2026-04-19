@@ -29,3 +29,9 @@ test("agent service bootstrap provisions the studio structure under F.R.I.D.A.Y 
 	assert.doesNotMatch(source, /getStudioStartHerePath\(/);
 	assert.doesNotMatch(source, /getStudioLogPath\(/);
 });
+
+test("agent service no longer provisions legacy agent memory files", async () => {
+	const source = readSource();
+	assert.doesNotMatch(source, /getAgentMemoryRoot\(agent\.id\)\/facts\.md/);
+	assert.doesNotMatch(source, /getAgentMemoryRoot\(agent\.id\)\/preferences\.md/);
+});

@@ -19,14 +19,13 @@ test("slash suggestions include builtin skills and system commands", async () =>
 	const items = mod.buildSlashSuggestions("/", {
 		skills: [
 			{ command: "lookup-wiki", description: "Lookup project knowledge" },
-			{ command: "maintain-memory", description: "Persist memory" },
 		],
 		slashCommands: [],
 	});
 	const values = items.map((item) => item.value);
 	assert.equal(values.includes("/skills"), true);
 	assert.equal(values.includes("/skill lookup-wiki "), true);
-	assert.equal(values.includes("/skill maintain-memory "), true);
+	assert.equal(values.includes("/skill maintain-memory "), false);
 });
 
 test("slash suggestions filter by typed prefix", async () => {

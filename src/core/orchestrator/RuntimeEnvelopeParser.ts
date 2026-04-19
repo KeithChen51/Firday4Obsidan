@@ -3,16 +3,10 @@ export interface ParsedRuntimeToolCall {
 	args?: Record<string, unknown>;
 }
 
-export interface ParsedRuntimeSubagentCall {
-	goal: string;
-	model?: string;
-}
-
 export interface ParsedRuntimeEnvelope {
 	type?: string;
 	assistant?: string;
 	tool?: ParsedRuntimeToolCall;
-	subagent?: ParsedRuntimeSubagentCall;
 }
 
 export function parseRuntimeEnvelopeText(raw: string, codeFence = "friday-runtime"): ParsedRuntimeEnvelope | null {
@@ -64,11 +58,6 @@ function parseLooseRuntimeEnvelope(raw: string): ParsedRuntimeEnvelope | null {
 		const tool = toolObject ? parseLooseToolObject(toolObject) : undefined;
 		return tool?.name ? { type, assistant, tool } : null;
 	}
-	if (type === "subagent") {
-		const subagentObject = extractObjectField(raw, "subagent");
-		const subagent = subagentObject ? parseLooseSubagentObject(subagentObject) : undefined;
-		return subagent?.goal ? { type, assistant, subagent } : null;
-	}
 	return assistant ? { type, assistant } : { type };
 }
 
@@ -91,17 +80,6 @@ function parseLooseToolObject(raw: string): ParsedRuntimeToolCall | undefined {
 			}
 		}
 		return name ? { name, args } : undefined;
-	}
-}
-
-function parseLooseSubagentObject(raw: string): ParsedRuntimeSubagentCall | undefined {
-	try {
-		const parsed = JSON.parse(raw) as ParsedRuntimeSubagentCall;
-		return parsed && typeof parsed.goal === "string" ? parsed : undefined;
-	} catch {
-		const goal = extractLooseQuotedField(raw, "goal")?.trim() ?? "";
-		const model = extractLooseQuotedField(raw, "model")?.trim() || undefined;
-		return goal ? { goal, model } : undefined;
 	}
 }
 

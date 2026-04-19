@@ -44,21 +44,17 @@ test("event router maps conflict proposal requests to runtime resolve-conflict s
 	assert.equal(route.resolution.invocation.request.targetId, "sync.conflict_proposal_requested");
 });
 
-test("event router maps memory extraction requests to capability execution", async () => {
+test("event router rejects legacy memory extraction requests", async () => {
 	const mod = await loadEventRouterModule();
 	const router = new mod.EventRouter();
-	const route = router.route({
-		type: "memory.extraction_requested",
-		source: "system_event",
-		prompt: "remember this preference",
-		payload: { turnId: "turn-123" },
-	});
-	assert.deepEqual(route, {
-		kind: "capability",
-		capabilityId: "memory.persist",
-		payload: {
-			userPrompt: "remember this preference",
-			turnId: "turn-123",
-		},
-	});
+	assert.throws(
+		() =>
+			router.route({
+				type: "memory.extraction_requested",
+				source: "system_event",
+				prompt: "remember this preference",
+				payload: { turnId: "turn-123" },
+			}),
+		/Unsupported runtime event/,
+	);
 });

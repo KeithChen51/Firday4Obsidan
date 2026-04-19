@@ -52,17 +52,6 @@ export class ExecutionGate {
 					);
 				}
 			}
-			if (normalizedCapability === "subagent") {
-				if (!settings.enableSubagent) {
-					return this.deny("subagent_disabled", "Subagent capability is disabled in settings.");
-				}
-				if (!runtimeProfile.capabilities.supportsSubagent) {
-					return this.deny(
-						"subagent_unsupported",
-						`Subagent capability is unsupported on runtime profile ${runtimeProfile.id}.`,
-					);
-				}
-			}
 		}
 
 		return {

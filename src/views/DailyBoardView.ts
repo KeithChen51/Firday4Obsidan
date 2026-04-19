@@ -54,7 +54,7 @@ type TranslateParams = Record<string, string | number | boolean | null | undefin
 
 type RuntimeExecutionStatus = "pending" | "running" | "ok" | "failed";
 type RuntimeExecutionStageKey = "context" | "analysis" | "tools" | "finalize";
-type RuntimeExecutionEntryKind = "context" | "model" | "tool" | "subagent" | "system";
+type RuntimeExecutionEntryKind = "context" | "model" | "tool" | "system";
 
 interface RuntimeExecutionStage {
 	key: RuntimeExecutionStageKey;
@@ -1403,7 +1403,6 @@ export class DailyBoardView extends ItemView {
 			edit: "Apply targeted patches to existing files.",
 			delete: "Remove files that are explicitly approved for deletion.",
 			exec: "Run shell commands in the current runtime environment.",
-			subagent: "Delegate a bounded subtask to another agent execution.",
 		};
 		return this.t(`policy.tools.desc.${tool.name}`, fallbackMap[tool.name] ?? tool.capability);
 	}
@@ -3424,35 +3423,6 @@ export class DailyBoardView extends ItemView {
 					: event.summary || event.message || this.t("ai.runtime.execution.adjustingSummary", "刚刚跳过一次无效尝试，正在换路径继续检索。");
 				break;
 			}
-			case "subagent_start":
-				this.setRuntimeStageStatus(next, "tools", "running");
-				this.upsertRuntimeEntry(next, {
-					key: `subagent:${event.step ?? 0}`,
-					kind: "subagent",
-					label: this.t("ai.runtime.execution.subagentLabel", "子代理 {step}", {
-						step: event.step ?? 0,
-					}),
-					detail: event.message,
-					status: "running",
-					step: event.step,
-				});
-				next.heading = this.t("ai.runtime.execution.subagentStart", "正在委托子代理");
-				next.summary = event.message;
-				break;
-			case "subagent_result":
-				this.upsertRuntimeEntry(next, {
-					key: `subagent:${event.step ?? 0}`,
-					kind: "subagent",
-					label: this.t("ai.runtime.execution.subagentLabel", "子代理 {step}", {
-						step: event.step ?? 0,
-					}),
-					detail: event.message,
-					status: "ok",
-					step: event.step,
-				});
-				next.heading = this.t("ai.runtime.execution.subagentDone", "子代理已返回");
-				next.summary = event.message;
-				break;
 			case "fallback":
 				this.upsertRuntimeEntry(next, {
 					key: `system:fallback:${next.entries.length}`,
@@ -3558,7 +3528,7 @@ export class DailyBoardView extends ItemView {
 			case "analysis":
 				return state.entries.some((entry) => entry.kind === "model");
 			case "tools":
-				return state.entries.some((entry) => entry.kind === "tool" || entry.kind === "subagent");
+				return state.entries.some((entry) => entry.kind === "tool");
 			case "finalize":
 				return state.entries.some((entry) => entry.key === "system:done");
 			default:
@@ -3567,7 +3537,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private hasSuccessfulToolEntry(state: RuntimeExecutionState): boolean {
-		return state.entries.some((entry) => (entry.kind === "tool" || entry.kind === "subagent") && entry.status === "ok");
+		return state.entries.some((entry) => entry.kind === "tool" && entry.status === "ok");
 	}
 
 	private buildRuntimeEntryKey(event: RuntimeProgressEvent): string {

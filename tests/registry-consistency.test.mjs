@@ -31,9 +31,10 @@ test("capability registry exposes user-visible tools and internal capabilities",
 	const userVisible = registry.listUserVisibleTools();
 	const internal = registry.listInternalCapabilities();
 	assert.ok(userVisible.some((item) => item.name === "compile_wiki"));
-	assert.ok(userVisible.some((item) => item.name === "subagent"));
+	assert.ok(userVisible.some((item) => item.name === "memory"));
+	assert.ok(!userVisible.some((item) => item.name === "subagent"));
 	assert.ok(internal.some((item) => item.id === "knowledge.lookup"));
-	assert.ok(internal.some((item) => item.id === "memory.persist"));
+	assert.ok(!internal.some((item) => item.id === "memory.persist"));
 });
 
 test("skill registry groups builtin and personal skills consistently", async () => {

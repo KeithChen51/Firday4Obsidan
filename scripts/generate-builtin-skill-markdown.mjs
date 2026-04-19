@@ -9,7 +9,6 @@ const outputPath = path.join(builtinRoot, "markdown.ts");
 const markdownSources = [
 	["BUILTIN_COMPILE_WIKI_MARKDOWN", path.join(builtinRoot, "compile-wiki", "SKILL.md")],
 	["BUILTIN_LOOKUP_WIKI_MARKDOWN", path.join(builtinRoot, "lookup-wiki", "SKILL.md")],
-	["BUILTIN_MAINTAIN_MEMORY_MARKDOWN", path.join(builtinRoot, "maintain-memory", "SKILL.md")],
 	["BUILTIN_RESOLVE_CONFLICT_MARKDOWN", path.join(builtinRoot, "resolve-conflict", "SKILL.md")],
 	["BUILTIN_OBSIDIAN_CLI_MARKDOWN", path.join(builtinRoot, "obsidian-cli", "SKILL.md")],
 	["BUILTIN_OBSIDIAN_MARKDOWN_MARKDOWN", path.join(builtinRoot, "obsidian-markdown", "SKILL.md")],

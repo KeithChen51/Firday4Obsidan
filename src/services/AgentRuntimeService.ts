@@ -27,19 +27,17 @@ import { buildPolicyMatrix, PolicyMatrixRow } from "../core/security/policy-reso
 import { PolicyEffect, PolicyRule } from "../core/security/policy-resolver/types";
 import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
-import { FileMemoryStore } from "../core/memory/FileMemoryStore";
+import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
+import type { MemoryWriteInput } from "../core/memory/MemoryTypes";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
 import { ExecutionGate } from "../core/execution/ExecutionGate";
-import { EventRouter } from "../core/execution/EventRouter";
 import type { InvocationRequest } from "../core/execution/InvocationRequest";
 import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
-import type { RuntimeEvent } from "../core/execution/RuntimeEvent";
 import { GitConflictCapability } from "../platform/capability/GitConflictCapability";
-import { MemoryPersistCapability } from "../platform/capability/MemoryPersistCapability";
 import { WikiCompileCapability } from "../platform/capability/WikiCompileCapability";
 import { WikiLookupCapability } from "../platform/capability/WikiLookupCapability";
 import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/RuntimeProfile";
@@ -57,16 +55,10 @@ interface RuntimeToolCall {
 	args?: Record<string, unknown>;
 }
 
-interface RuntimeSubagentCall {
-	goal: string;
-	model?: string;
-}
-
 interface RuntimeEnvelope {
 	type?: string;
 	assistant?: string;
 	tool?: RuntimeToolCall;
-	subagent?: RuntimeSubagentCall;
 }
 
 interface RuntimeToolResultPayload {
@@ -146,8 +138,6 @@ export interface RuntimeProgressEvent {
 		| "tool_approval"
 		| "tool_call"
 		| "tool_result"
-		| "subagent_start"
-		| "subagent_result"
 		| "fallback"
 		| "done"
 		| "error";
@@ -210,12 +200,11 @@ export class AgentRuntimeService {
 	private readonly stepTraceStore: StepTraceStore;
 	private readonly historyCompactor: HistoryCompactor;
 	private readonly promptContextEngine: PromptContextEngine;
-	private readonly fileMemoryStore: FileMemoryStore;
+	private readonly memoryStore: MemoryStoreV1;
 	private readonly wikiKnowledgeProvider: WikiKnowledgeProvider;
 	private readonly executionGate: ExecutionGate;
 	private readonly wikiCompileCapability: WikiCompileCapability;
 	private readonly wikiLookupCapability: WikiLookupCapability;
-	private readonly memoryPersistCapability: MemoryPersistCapability;
 	private readonly gitConflictCapability: GitConflictCapability;
 	private activeTurnId = "";
 	private activeTurnStateMachine: TurnStateMachine | null = null;
@@ -238,7 +227,6 @@ export class AgentRuntimeService {
 			rawPaths?: string[],
 			forceRebuild?: boolean,
 		) => Promise<RuntimeWikiCompileSummary>,
-		private readonly eventRouter: EventRouter,
 		private readonly getSettings: () => FridaySettings,
 	) {
 		this.turnOrchestrator = new TurnOrchestrator();
@@ -248,7 +236,7 @@ export class AgentRuntimeService {
 		this.stepTraceStore = new StepTraceStore(this.vault);
 		this.historyCompactor = new HistoryCompactor();
 		this.promptContextEngine = new PromptContextEngine();
-		this.fileMemoryStore = new FileMemoryStore(this.vault);
+		this.memoryStore = new MemoryStoreV1({ vault: this.vault });
 		this.wikiKnowledgeProvider = new WikiKnowledgeProvider();
 		this.executionGate = new ExecutionGate(this.getSettings);
 		this.wikiCompileCapability = new WikiCompileCapability(this.compileWikiForActiveProject);
@@ -257,7 +245,6 @@ export class AgentRuntimeService {
 			this.projectBoundaryService,
 			this.wikiKnowledgeProvider,
 		);
-		this.memoryPersistCapability = new MemoryPersistCapability(this.fileMemoryStore, this.projectBoundaryService);
 		this.gitConflictCapability = new GitConflictCapability(
 			this.vault,
 			() => this.projectBoundaryService.getActiveProject(),
@@ -436,9 +423,6 @@ export class AgentRuntimeService {
 				assistantText = wikiKnowledgeContext
 					? `Skill used: lookup-wiki\n\n${wikiKnowledgeContext}`
 					: "Skill used: lookup-wiki\n\nNo related knowledge found.";
-			} else if (input.skillName === "maintain-memory") {
-				await this.memoryPersistCapability.persistSignals(input.taskPrompt, turnId);
-				assistantText = `Skill used: maintain-memory\n\nMemory extraction attempted for turn ${turnId}.`;
 			} else if (input.skillName === "resolve-conflict") {
 				const conflictResult = await this.gitConflictCapability.generateProposal(input.taskPrompt);
 				assistantText = conflictResult.markdown;
@@ -586,16 +570,7 @@ export class AgentRuntimeService {
 		} catch {
 			// Keep runtime response available even if trace persistence fails.
 		}
-		try {
-			await this.dispatchRuntimeEvent({
-				type: "memory.extraction_requested",
-				source: "system_event",
-				prompt: userPrompt,
-				payload: { turnId },
-			});
-		} catch {
-			// Memory persistence is best-effort and must not break the turn.
-		}
+		void userPrompt;
 		return {
 			...result,
 			turnId,
@@ -603,19 +578,6 @@ export class AgentRuntimeService {
 			runtimeProfile: this.activeRuntimeProfile,
 			contextSummary: this.lastContextSummary ?? undefined,
 		};
-	}
-
-	private async dispatchRuntimeEvent(event: RuntimeEvent): Promise<void> {
-		const route = this.eventRouter.route(event);
-		if (route.kind !== "capability") {
-			return;
-		}
-		if (route.capabilityId === "memory.persist") {
-			await this.memoryPersistCapability.persistSignals(
-				String(route.payload["userPrompt"] ?? event.prompt ?? ""),
-				String(route.payload["turnId"] ?? ""),
-			);
-		}
 	}
 
 	setSessionToolPolicyOverride(action: string, effect: PolicyEffect): void {
@@ -715,11 +677,11 @@ export class AgentRuntimeService {
 			{ action: "tool:search_text", effect: resolveEffect("search_text", readEffect), source: "global" },
 			{ action: "tool:glob", effect: resolveEffect("glob", readEffect), source: "global" },
 			{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", writeEffect), source: "global" },
+			{ action: "tool:memory", effect: resolveEffect("memory", "allow"), source: "global" },
 			{ action: "tool:write", effect: resolveEffect("write", writeEffect), source: "global" },
 			{ action: "tool:edit", effect: resolveEffect("edit", writeEffect), source: "global" },
 			{ action: "tool:delete", effect: resolveEffect("delete", writeEffect), source: "global" },
 			{ action: "tool:exec", effect: resolveEffect("exec", execEffect), source: "global" },
-			{ action: "tool:subagent", effect: resolveEffect("subagent", execEffect), source: "global" },
 		];
 	}
 
@@ -782,36 +744,12 @@ export class AgentRuntimeService {
 				};
 			}
 
-			if (parsed.type === "response" || (!parsed.type && !parsed.tool && !parsed.subagent)) {
+			if (parsed.type === "response" || (!parsed.type && !parsed.tool)) {
 				return {
 					assistantText: (parsed.assistant ?? finalReply).trim() || "(Model returned no usable content)",
 					traces,
 					rawFinalReply: finalReply,
 				};
-			}
-
-			if (parsed.type === "subagent" || parsed.subagent) {
-				const subGoal = parsed.subagent?.goal?.trim() || "(empty goal)";
-				this.reportProgress(input, {
-					phase: "subagent_start",
-					depth,
-					step,
-					message: `Step ${step}: starting subagent - ${this.truncateText(subGoal, 120)}`,
-				});
-				const subResult = await this.executeSubagent(step, input, parsed.subagent);
-				traces.push(subResult.trace);
-				this.reportProgress(input, {
-					phase: "subagent_result",
-					depth,
-					step,
-					message: `Step ${step}: subagent completed - ${subResult.trace.summary}`,
-				});
-				modelMessages.push({ role: "assistant", content: finalReply });
-				modelMessages.push({
-					role: "user",
-					content: this.formatToolResultForModel(subResult.payload),
-				});
-				continue;
 			}
 
 			if (parsed.type === "tool_call" || parsed.tool) {
@@ -932,39 +870,12 @@ export class AgentRuntimeService {
 				}
 				const parsed = this.parseRuntimeEnvelope(assistantPayload);
 				if (parsed) {
-					if (parsed.type === "response" || (!parsed.type && !parsed.tool && !parsed.subagent)) {
+					if (parsed.type === "response" || (!parsed.type && !parsed.tool)) {
 						return {
 							assistantText: (parsed.assistant ?? assistantPayload).trim() || "(Model returned no usable content)",
 							traces,
 							rawFinalReply: assistantPayload || finalReply,
 						};
-					}
-
-					if (parsed.type === "subagent" || parsed.subagent) {
-						const subGoal = parsed.subagent?.goal?.trim() || "(empty goal)";
-						this.reportProgress(input, {
-							phase: "subagent_start",
-							depth,
-							step,
-							message: `Step ${step}: starting subagent - ${this.truncateText(subGoal, 120)}`,
-						});
-						const subResult = await this.executeSubagent(step, input, parsed.subagent);
-						traces.push(subResult.trace);
-						this.reportProgress(input, {
-							phase: "subagent_result",
-							depth,
-							step,
-							message: `Step ${step}: subagent completed - ${subResult.trace.summary}`,
-						});
-						modelMessages.push({
-							role: "assistant",
-							content: assistantPayload || "Subagent call generated from JSON envelope.",
-						});
-						modelMessages.push({
-							role: "user",
-							content: this.formatToolResultForModel(subResult.payload),
-						});
-						continue;
 					}
 
 					if (parsed.type === "tool_call" || parsed.tool) {
@@ -1158,28 +1069,9 @@ export class AgentRuntimeService {
 	}
 
 	private async loadMemoryContext(): Promise<string> {
-		const paths: string[] = ["F.R.I.D.A.Y/memory/global_user_memory.md"];
 		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		if (activeProjectRoot) {
-			paths.push(`${activeProjectRoot}/memory/project_behavior_memory.md`);
-		}
-
-		const sections: string[] = [];
-		for (const rawPath of paths) {
-			const normalized = normalizePath(rawPath);
-			const file = this.vault.getAbstractFileByPath(normalized);
-			if (!(file instanceof TFile)) {
-				continue;
-			}
-			const content = (await this.vault.cachedRead(file)).trim();
-			if (!content) {
-				continue;
-			}
-			sections.push(`[memory:${normalized}]`);
-			sections.push(this.truncateText(content, 1200));
-		}
-
-		return sections.join("\n\n");
+		const context = await this.memoryStore.readPromptContext(activeProjectRoot || undefined);
+		return context ? this.truncateText(context, 1600) : "";
 	}
 
 	private async loadFridayMd(): Promise<string | null> {
@@ -1200,130 +1092,6 @@ export class AgentRuntimeService {
 	private parseRuntimeEnvelope(raw: string): RuntimeEnvelope | null {
 		const parsed = parseRuntimeEnvelopeText(raw, RUNTIME_CODE_FENCE);
 		return parsed as RuntimeEnvelope | null;
-	}
-
-	private async executeSubagent(
-		step: number,
-		input: RuntimeTurnInput,
-		subagent: RuntimeSubagentCall | undefined,
-	): Promise<{ trace: RuntimeToolTrace; payload: RuntimeToolResultPayload }> {
-		const startedAt = new Date().toISOString();
-		const runId = this.toolGovernor.createRunId("subagent", step);
-		const settings = this.getSettings();
-		const depth = input.depth ?? 0;
-		const goal = subagent?.goal?.trim() ?? "";
-		if (!this.activeRuntimeProfile.capabilities.supportsSubagent) {
-			const trace = this.traceFromError(
-				step,
-				"subagent",
-				"vault",
-				"",
-				"Subagent is not supported on current runtime profile",
-				runId,
-				"dependency_unavailable",
-			);
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: "subagent", error: "subagent unsupported on runtime profile" },
-			};
-		}
-		if (!goal) {
-			const trace = this.traceFromError(step, "subagent", "vault", "", "子代理调用缺少 goal", runId, "invalid_input");
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: "subagent", error: "missing goal" },
-			};
-		}
-
-		if (!settings.agentRuntime.enableSubagent) {
-			const trace = this.traceFromError(step, "subagent", "vault", "", "子代理功能未启用", runId, "dependency_unavailable");
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: "subagent", error: "subagent disabled" },
-			};
-		}
-
-		if (depth >= settings.agentRuntime.maxSubagentDepth) {
-			const trace = this.traceFromError(step, "subagent", "vault", "", "Subagent depth limit reached", runId, "invalid_input");
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: "subagent", error: "subagent depth limit reached" },
-			};
-		}
-
-		const approval = await this.approvalService.requestApproval({
-			agentId: input.agentId,
-			tool: "subagent",
-			scope: "vault",
-			description: `Run subagent task: ${this.truncateText(goal, 160)}`,
-		});
-
-		if (!approval.allowed) {
-			const trace: RuntimeToolTrace = {
-				runId,
-				step,
-				tool: "subagent",
-				scope: "vault",
-				targetPath: "",
-				approved: false,
-				approvalReason: approval.reason,
-				persistedRule: approval.persisted,
-				viaRule: approval.viaRule,
-				status: "denied",
-				failureClass: "dependency_unavailable",
-				ok: false,
-				summary: "子代理执行被拒绝",
-				error: approval.reason,
-			};
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: "subagent", error: approval.reason },
-			};
-		}
-
-		const result = await this.runTurn({
-			agentId: input.agentId,
-			conversation: [],
-			userPrompt: goal,
-			modelOverride: subagent?.model?.trim() || input.modelOverride,
-			depth: depth + 1,
-			currentFilePath: input.currentFilePath,
-			extraSystemContext: input.extraSystemContext,
-			allowedTools: input.allowedTools,
-			onProgress: input.onProgress,
-		});
-
-		const trace: RuntimeToolTrace = {
-			runId,
-			step,
-			tool: "subagent",
-			scope: "vault",
-			targetPath: "",
-			approved: true,
-			approvalReason: approval.reason,
-			persistedRule: approval.persisted,
-			viaRule: approval.viaRule,
-			status: "ok",
-			ok: true,
-			summary: `子代理完成：${this.truncateText(result.assistantText, 120)}`,
-		};
-		await this.persistToolRun(trace, startedAt, new Date().toISOString());
-		return {
-			trace,
-			payload: {
-				ok: true,
-				tool: "subagent",
-				data: {
-					assistantText: result.assistantText,
-					traceCount: result.traces.length,
-				},
-			},
-		};
 	}
 
 	private async executeTool(
@@ -1571,6 +1339,7 @@ export class AgentRuntimeService {
 			search_text: async (payload) => this.toolSearchText(payload),
 			glob: async (payload) => this.toolGlob(payload),
 			compile_wiki: async (payload) => this.toolCompileWiki(payload),
+			memory: async (payload) => this.toolMemory(payload),
 			write: async (payload) => this.toolWrite(payload, agentId),
 			edit: async (payload) => this.toolEdit(payload, agentId),
 			delete: async (payload) => this.toolDelete(payload, agentId),
@@ -1599,6 +1368,22 @@ export class AgentRuntimeService {
 			summary: `Loaded skill ${skillContext.skill.command}`,
 			systemContext: skillContext.systemContext,
 		};
+	}
+
+	private async toolMemory(args: Record<string, unknown>): Promise<unknown> {
+		const action = this.getRequiredStringArg(args, "action") as MemoryWriteInput["action"];
+		const scope = this.getRequiredStringArg(args, "scope") as MemoryWriteInput["scope"];
+		const content = this.getStringArg(args, "content");
+		const oldText = this.getStringArg(args, "old_text");
+		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+		const result = await this.memoryStore.write({
+			action,
+			scope,
+			content,
+			oldText,
+			projectRoot: scope === "project" ? activeProjectRoot || undefined : undefined,
+		});
+		return result;
 	}
 
 	private async toolList(args: Record<string, unknown>): Promise<unknown> {
@@ -2239,6 +2024,17 @@ export class AgentRuntimeService {
 			const value = this.getStringArg(args, key);
 			if (value) return value;
 		}
+		if (name === "memory") {
+			const scope = this.getStringArg(args, "scope");
+			const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+			if (scope === "project" && activeProjectRoot) {
+				return this.memoryStore.resolvePath("project", activeProjectRoot);
+			}
+			if (scope === "global") {
+				return this.memoryStore.resolvePath("global");
+			}
+			return scope || "";
+		}
 		if (name === "ls" || name === "grep" || name === "search_text" || name === "glob") {
 			return this.resolveDefaultVaultSearchPath("");
 		}
@@ -2409,6 +2205,19 @@ export class AgentRuntimeService {
 			const summary = data?.summary?.trim() || `Loaded skill ${data?.command ?? ""}`.trim();
 			return `TOOL_RESULT ${JSON.stringify({ ok: true, tool: "use_skill", data: { command: data?.command, summary } })}`;
 		}
+		if (payload.tool === "memory" && payload.data && typeof payload.data === "object") {
+			const data = payload.data as { ok?: boolean; scope?: string; summary?: string; code?: string; reason?: string };
+			return `TOOL_RESULT ${JSON.stringify({
+				ok: Boolean(data.ok),
+				tool: "memory",
+				data: {
+					scope: data.scope,
+					summary: data.summary,
+					code: data.code,
+					reason: data.reason,
+				},
+			})}`;
+		}
 		const compact = this.safeStringify(payload, MAX_MODEL_RESULT_CHARS);
 		return `TOOL_RESULT ${compact}`;
 	}
@@ -2421,6 +2230,10 @@ export class AgentRuntimeService {
 		if (tool === "read") {
 			const payload = data as { path?: string; truncated?: boolean };
 			return `Read ${payload.path ?? ""}${payload.truncated ? " (truncated)" : ""}`.trim();
+		}
+		if (tool === "memory") {
+			const payload = data as { summary?: string } | undefined;
+			return payload?.summary?.trim() || "Memory updated";
 		}
 		if (tool === "ls") {
 			const payload = data as { items?: unknown[] };
@@ -2764,6 +2577,21 @@ export class AgentRuntimeService {
 							description: "Optional raw path list to compile.",
 						},
 					},
+					additionalProperties: false,
+				},
+			},
+			{
+				name: "memory",
+				description: "Persist a durable fact to global or active-project memory. Writes apply on the next turn, not the current turn.",
+				parameters: {
+					type: "object",
+					properties: {
+						action: { type: "string", enum: ["add", "replace", "remove"] },
+						scope: { type: "string", enum: ["global", "project"] },
+						content: { type: "string" },
+						old_text: { type: "string" },
+					},
+					required: ["action", "scope"],
 					additionalProperties: false,
 				},
 			},

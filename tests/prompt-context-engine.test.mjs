@@ -35,6 +35,8 @@ test("prompt context engine builds runtime prompt envelope with context summary 
 	assert.match(result.prompt, /You are F\.R\.I\.D\.A\.Y Agent Runtime\./);
 	assert.match(result.prompt, /Current agent\.md excerpt:/);
 	assert.match(result.prompt, /--- Compact context package ---/);
+	assert.match(result.prompt, /memory: \{"action":"add\|replace\|remove","scope":"global\|project"/);
+	assert.doesNotMatch(result.prompt, /"type":"subagent"/);
 	assert.equal(result.summary.hasWikiContext, true);
 	assert.equal(result.summary.hasMemoryContext, true);
 	assert.equal(result.summary.hasAutoSkillContext, true);

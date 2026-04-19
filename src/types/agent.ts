@@ -20,9 +20,7 @@ export type RuntimeExecutionGateCode =
 	| "tool_disabled"
 	| "capability_disabled"
 	| "exec_disabled"
-	| "exec_unsupported"
-	| "subagent_disabled"
-	| "subagent_unsupported";
+	| "exec_unsupported";
 
 export interface RuntimeToolPolicyRule {
 	action: string;
@@ -44,8 +42,6 @@ export interface AgentRuntimeSettings {
 	excludedTags: string[];
 	toolRuntimeEnabled: boolean;
 	maxToolIterations: number;
-	enableSubagent: boolean;
-	maxSubagentDepth: number;
 	blockedCommands: string[];
 	toolCallingMode: ToolCallingMode;
 	projectToolPolicyRules: Record<string, RuntimeToolPolicyRule[]>;

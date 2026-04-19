@@ -31,6 +31,15 @@ test("tool manifest catalog includes search_text as read-only retrieval tool", a
 	assert.equal(item?.readOnly, true);
 });
 
+test("tool manifest catalog exposes memory and no longer exposes subagent", async () => {
+	const { manifest } = await loadModules();
+	const memory = manifest.findToolManifest("memory");
+	const subagent = manifest.findToolManifest("subagent");
+	assert.equal(memory?.capability, "memory.write");
+	assert.equal(memory?.readOnly, false);
+	assert.equal(subagent, null);
+});
+
 test("capability resolver returns mapped handler", async () => {
 	const { resolver } = await loadModules();
 	const map = new resolver.CapabilityResolver({

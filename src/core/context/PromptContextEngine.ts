@@ -21,7 +21,6 @@ export interface PromptContextBuildInput {
 	runtimeCapabilities?: {
 		supportsExecTool?: boolean;
 		supportsExternalRead?: boolean;
-		supportsSubagent?: boolean;
 	};
 	focusPaths?: string;
 	externalPaths?: string;
@@ -73,14 +72,14 @@ export class PromptContextEngine {
 			"",
 			"Allowed response schema (choose one):",
 			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|compile_wiki|write|edit|delete","args":{...}}}',
-			'{"type":"subagent","assistant":"optional note","subagent":{"goal":"task goal","model":"optional"}}',
+			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|compile_wiki|memory|write|edit|delete","args":{...}}}',
 			"",
 			"Rules:",
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
 			"- Call at most one tool each step, then reason with TOOL_RESULT.",
 			"- SkillCatalog is summary-only metadata. If a skill clearly helps, call use_skill first to load its full instructions.",
 			"- use_skill only loads skill instructions; after TOOL_RESULT from use_skill, continue execution with the loaded skill context.",
+			"- Use memory only for durable facts that should survive future turns.",
 			"- When an active project root is available, prefer scoping ls/grep/search_text/glob to that root.",
 			"- For ls/grep/search_text/glob, an empty path auto-scopes to the active project root when one is selected.",
 			"- Never use '/' or '\\' as the path for Vault discovery tools; use the active project root instead.",
@@ -103,6 +102,7 @@ export class PromptContextEngine {
 			'- search_text: {"path":"optional directory or file path","query":"plain text query","maxMatches":40}',
 			'- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
 			'- compile_wiki: {"mode":"all|changed(optional)","path":"optional raw path","paths":["optional raw paths"]}',
+			'- memory: {"action":"add|replace|remove","scope":"global|project","content":"durable fact","old_text":"existing fragment"}',
 			'- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
 			'- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',
 			'- delete: {"path":"Vault-relative path"}',
@@ -130,7 +130,7 @@ export class PromptContextEngine {
 			`Vault focus paths: ${input.focusPaths?.trim() || "(none)"}`,
 			`External read-only paths: ${input.externalPaths?.trim() || "(none)"}`,
 			`Runtime profile: ${input.runtimeProfileId} (supported=${input.runtimeSupported ?? true})`,
-			`Runtime capabilities: exec=${input.runtimeCapabilities?.supportsExecTool ?? false}, externalRead=${input.runtimeCapabilities?.supportsExternalRead ?? false}, subagent=${input.runtimeCapabilities?.supportsSubagent ?? false}`,
+			`Runtime capabilities: exec=${input.runtimeCapabilities?.supportsExecTool ?? false}, externalRead=${input.runtimeCapabilities?.supportsExternalRead ?? false}`,
 		];
 
 		if (input.fridayMd) {

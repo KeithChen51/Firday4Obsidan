@@ -13,11 +13,11 @@ export const TOOL_MANIFESTS: ToolManifest[] = [
 	{ name: "search_text", capability: "filesystem.search_text", readOnly: true, primary: true },
 	{ name: "glob", capability: "filesystem.glob", readOnly: true, primary: true },
 	{ name: "compile_wiki", capability: "knowledge.compile", readOnly: false, primary: true, relatedSkillCommand: "compile-wiki" },
+	{ name: "memory", capability: "memory.write", readOnly: false, primary: true },
 	{ name: "write", capability: "filesystem.write", readOnly: false, primary: true },
 	{ name: "edit", capability: "filesystem.patch", readOnly: false, primary: true },
 	{ name: "delete", capability: "filesystem.delete", readOnly: false, primary: false },
 	{ name: "exec", capability: "system.exec", readOnly: false, primary: false },
-	{ name: "subagent", capability: "orchestration.subagent", readOnly: false, primary: false },
 ];
 
 export function findToolManifest(name: string): ToolManifest | null {

@@ -145,8 +145,6 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		excludedTags: [],
 		toolRuntimeEnabled: true,
 		maxToolIterations: 6,
-		enableSubagent: true,
-		maxSubagentDepth: 1,
 		blockedCommands: [
 			"rm\\s+-rf\\s+/",
 			"rmdir\\s+/s",

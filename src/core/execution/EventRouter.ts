@@ -2,15 +2,10 @@ import type { InvocationResolution } from "./InvocationResolver";
 import type { RuntimeEvent } from "./RuntimeEvent";
 
 export type RuntimeEventRoute =
-	| {
-			kind: "runtime";
-			resolution: Extract<InvocationResolution, { type: "runtime" }>;
-	  }
-	| {
-			kind: "capability";
-			capabilityId: "memory.persist";
-			payload: Record<string, unknown>;
-	  };
+	{
+		kind: "runtime";
+		resolution: Extract<InvocationResolution, { type: "runtime" }>;
+	};
 
 export class EventRouter {
 	route(event: RuntimeEvent): RuntimeEventRoute {
@@ -33,15 +28,6 @@ export class EventRouter {
 						"resolve-conflict",
 					),
 				};
-			case "memory.extraction_requested":
-				return {
-					kind: "capability",
-					capabilityId: "memory.persist",
-					payload: {
-						userPrompt: event.prompt ?? "",
-						turnId: String(event.payload?.["turnId"] ?? ""),
-					},
-				};
 			default: {
 				throw new Error("Unsupported runtime event.");
 			}
@@ -49,11 +35,7 @@ export class EventRouter {
 	}
 
 	routeToRuntime(event: RuntimeEvent): Extract<InvocationResolution, { type: "runtime" }> {
-		const route = this.route(event);
-		if (route.kind !== "runtime") {
-			throw new Error(`Runtime event ${event.type} does not route to agent runtime.`);
-		}
-		return route.resolution;
+		return this.route(event).resolution;
 	}
 
 	private buildSkillRuntimeResolution(

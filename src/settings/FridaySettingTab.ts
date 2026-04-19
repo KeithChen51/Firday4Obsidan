@@ -872,7 +872,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.runtime.name", "启用 Agent 工具运行时"))
-			.setDesc(this.t("settings.agent.runtime.desc", "开启后，AI 将按需调用 read/grep/glob/ls/write/delete/subagent。"))
+			.setDesc(this.t("settings.agent.runtime.desc", "开启后，AI 将按需调用 read/grep/glob/ls/memory/write/delete。"))
 			.addToggle((toggle) =>
 				toggle.setValue(this.host.settings.agentRuntime.toolRuntimeEnabled).onChange(async (value) => {
 					this.host.settings.agentRuntime.toolRuntimeEnabled = value;
@@ -946,16 +946,6 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 
 		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.enableSubagent.name", "启用子代理"))
-			.setDesc(this.t("settings.agent.enableSubagent.desc", "允许 Agent 将子任务委托给子代理执行。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.agentRuntime.enableSubagent).onChange(async (value) => {
-					this.host.settings.agentRuntime.enableSubagent = value;
-					await this.host.saveSettings();
-				}),
-			);
-
-		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.enableExec.name", "启用命令执行 (exec)"))
 			.setDesc(this.t("settings.agent.enableExec.desc", "⚠️ 允许 Agent 在系统中执行 shell 命令（spawn 模式）。"))
 			.addToggle((toggle) =>
@@ -983,22 +973,6 @@ export class FridaySettingTab extends PluginSettingTab {
 						}),
 				);
 		}
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.maxSubagentDepth.name", "子代理最大深度"))
-			.setDesc(this.t("settings.agent.maxSubagentDepth.desc", "避免无限递归。默认 1 表示仅允许一层子代理。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("1")
-					.setValue(String(this.host.settings.agentRuntime.maxSubagentDepth))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.agentRuntime.maxSubagentDepth = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
 
 		this.renderPathListSetting(
 			pathGroup,
