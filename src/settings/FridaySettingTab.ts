@@ -7,6 +7,7 @@ import {
 	buildDefaultProjectRootPath,
 	buildRemoteBootstrapDefaults,
 	detectProjectGitState,
+	isFridayManagedProjectRoot,
 	type ProjectEditorDraft,
 	submitProjectDraft,
 } from "../features/workbench/ProjectEditorService";
@@ -2074,6 +2075,10 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (draft.mode === "remote_bootstrap") {
 			this.renderRemoteBootstrapDirectoryPicker(fields, draft);
 		} else {
+			const directoryOptions = this.listVaultDirectoryOptions(false);
+			if (draft.boundaryPath.trim() && !directoryOptions.includes(draft.boundaryPath.trim())) {
+				directoryOptions.unshift(draft.boundaryPath.trim());
+			}
 			this.renderProjectEditorDropdownSetting(
 				card,
 				this.t("projects.editor.vaultDir", "Obsidian local path"),
@@ -2093,7 +2098,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						value: "",
 						label: this.t("settings.project.editor.vaultDir.placeholder", "请选择 Obsidian 本地路径"),
 					},
-					...this.listVaultDirectoryOptions(false).map((option) => ({ value: option, label: option })),
+					...directoryOptions.map((option) => ({ value: option, label: option })),
 				],
 			);
 		}
@@ -2251,7 +2256,12 @@ export class FridaySettingTab extends PluginSettingTab {
 		setting.settingEl.addClass("friday-project-editor-setting");
 		setting.addDropdown((dropdown) => {
 			dropdown.addOption("", this.t("settings.project.editor.vaultDir.placeholder", "请选择 Obsidian 本地路径"));
-			for (const optionValue of this.listVaultDirectoryOptions(true)) {
+			const directoryOptions = this.listVaultDirectoryOptions(true);
+			const currentSelection = this.normalizeVaultDirectorySelectionValue(this.projectEditorRemoteBootstrapBasePath);
+			if (currentSelection && !directoryOptions.includes(currentSelection)) {
+				directoryOptions.push(currentSelection);
+			}
+			for (const optionValue of directoryOptions) {
 				dropdown.addOption(optionValue, optionValue);
 			}
 			dropdown.setValue(this.normalizeVaultDirectorySelectionValue(this.projectEditorRemoteBootstrapBasePath));
@@ -2312,6 +2322,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			.filter((item): item is TFolder => item instanceof TFolder)
 			.map((folder) => folder.path.trim())
 			.filter(Boolean)
+			.filter((folderPath) => !isFridayManagedProjectRoot(folderPath, this.host.dataService.getFridayRoot()))
 			.sort((left, right) => left.localeCompare(right, "en"));
 		const options = [...new Set(folders)];
 		return includeVaultRoot ? ["/", ...options] : options;
@@ -2737,7 +2748,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		message.className = "friday-plugin-update-notice-text";
 		message.textContent = this.t(
 			"settings.user.update.notice.applied",
-			"更新已写入，Friday Update 更新日志已同步。点击下方按钮即可立即重启 Obsidian 并加载新版本。",
+			"更新已写入。点击下方按钮立即重启 Obsidian，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
 		);
 		wrapper.appendChild(message);
 
@@ -2772,7 +2783,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getProjectKey(project: ProjectEntry): string {
-		return project.projectId || project.slug;
+		return project.projectId;
 	}
 
 	private getProjectLabel(project: ProjectEntry): string {

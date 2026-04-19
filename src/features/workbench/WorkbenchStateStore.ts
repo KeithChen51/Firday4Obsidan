@@ -8,7 +8,7 @@ export interface SyncReportRecord {
 }
 
 export interface ConflictProposalRecord {
-	projectSlug: string;
+	projectId: string;
 	filePath: string;
 	markdown: string;
 	recommendedStrategy: "ours" | "theirs" | "manual";
@@ -90,7 +90,7 @@ export class WorkbenchStateStore {
 		this.syncConflicts = [
 			record,
 			...this.syncConflicts.filter(
-				(item) => !(item.projectSlug === record.projectSlug && item.filePath === record.filePath),
+				(item) => !(item.projectId === record.projectId && item.filePath === record.filePath),
 			),
 		];
 	}
@@ -107,7 +107,7 @@ export class WorkbenchStateStore {
 		this.conflictProposals = [
 			record,
 			...this.conflictProposals.filter(
-				(item) => !(item.projectSlug === record.projectSlug && item.filePath === record.filePath),
+				(item) => !(item.projectId === record.projectId && item.filePath === record.filePath),
 			),
 		].slice(0, 20);
 	}

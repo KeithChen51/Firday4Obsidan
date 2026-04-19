@@ -3,7 +3,6 @@ export type SyncConflictStatus = "pending" | "deferred";
 
 export interface SyncConflictRecord {
 	projectId: string;
-	projectSlug: string;
 	filePath: string;
 	conflictType: "content";
 	localSnippet: string;

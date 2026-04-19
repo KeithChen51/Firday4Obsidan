@@ -162,7 +162,7 @@ export interface RuntimeProgressEvent {
 }
 
 export interface RuntimeWikiCompileSummary {
-	projectSlug: string;
+	projectId: string;
 	projectRoot: string;
 	requested: number;
 	processed: number;
@@ -325,13 +325,18 @@ export class AgentRuntimeService {
 				return this.finalizeTurnResult(turnId, result, input.userPrompt);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error ?? "");
+				if (this.toolGovernor.isRetryableTransportFailure(message)) {
+					throw new Error(
+						`内网网关暂时不可用，已停止自动切换兼容模式，避免从当前步骤重新请求一次模型并产生额外消耗。${message}`,
+					);
+				}
 				if (!this.toolGovernor.shouldFallbackToPrompt(message)) {
 					throw error;
 				}
 				this.reportProgress(input, {
 					phase: "fallback",
 					depth,
-					message: `Native tool calling failed, fallback to prompt mode: ${this.truncateText(message, 180)}`,
+					message: `Native tool calling incompatible, fallback to prompt mode (replays current step once): ${this.truncateText(message, 180)}`,
 				});
 				const result = await this.runTurnPrompt(input);
 				if (result.parseError) {
@@ -517,7 +522,7 @@ export class AgentRuntimeService {
 			source: input.depth && input.depth > 0 ? "service_call" : "chat_prompt",
 			intentType: "runtime",
 			prompt: input.userPrompt,
-			projectSlug: this.projectBoundaryService.getActiveProject()?.slug,
+			projectId: this.projectBoundaryService.getActiveProject()?.projectId,
 			sessionId: this.activeTurnId,
 		};
 		return {
@@ -536,7 +541,7 @@ export class AgentRuntimeService {
 			intentType: "skill",
 			targetId: skillName,
 			prompt: input.taskPrompt,
-			projectSlug: this.projectBoundaryService.getActiveProject()?.slug,
+			projectId: this.projectBoundaryService.getActiveProject()?.projectId,
 			sessionId: this.activeTurnId,
 		};
 		const requiredCapabilities: Record<string, string[]> = {
@@ -2435,7 +2440,7 @@ export class AgentRuntimeService {
 		}
 		if (tool === "compile_wiki") {
 			const payload = data as {
-				projectSlug?: string;
+				projectId?: string;
 				requested?: number;
 				processed?: number;
 				succeeded?: number;
@@ -2447,7 +2452,7 @@ export class AgentRuntimeService {
 			const updatedDocs = Array.isArray(payload.updatedDocs) ? payload.updatedDocs.length : 0;
 			const indexState = payload.updatedIndex ? "index updated" : "index unchanged";
 			const logState = payload.updatedLog ? "log updated" : "log unchanged";
-			return `Wiki compile ${payload.projectSlug ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
+			return `Wiki compile ${payload.projectId ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
 		}
 		if (tool === "write") {
 			const payload = data as { path?: string };

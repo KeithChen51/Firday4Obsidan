@@ -47,7 +47,7 @@ import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySett
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 type WikiCompileResult = {
-	projectSlug: string;
+	projectId: string;
 	projectRoot: string;
 	requested: number;
 	processed: number;
@@ -157,11 +157,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
 			});
-			try {
-				await this.pluginUpdateService.syncBundledUpdateLog();
-			} catch (error) {
-				console.warn("[Friday] Failed to sync bundled plugin changelog:", error);
-			}
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
@@ -205,9 +200,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.slashCommandService = new SlashCommandService(() => this.settings);
 			this.workbenchStateStore = new WorkbenchStateStore();
 			this.syncEventBus.subscribe((event) => {
-				if (!("projectSlug" in event)) {
-					return;
-				}
 				if (event.type === "sync_stage_changed" || event.type === "sync_completed") {
 					this.workbenchStateStore.recordSyncStatusSnapshot({
 						projectId: event.projectId,
@@ -377,7 +369,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	async setProjectAutoSync(projectId: string, enabled: boolean): Promise<void> {
-		const project = this.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
+		const project = this.settings.projects.find((item) => item.projectId === projectId);
 		if (!project) {
 			throw new Error(`未找到项目: ${projectId}`);
 		}
@@ -459,7 +451,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	async setActiveProject(projectId: string): Promise<void> {
-		const target = this.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
+		const target = this.settings.projects.find((item) => item.projectId === projectId);
 		if (!target) {
 			throw new Error(`未找到项目: ${projectId}`);
 		}
@@ -709,7 +701,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		projects: ProjectEntry[],
 	): string {
 		const requestedId = (activeProjectId ?? "").trim();
-		if (requestedId && projects.some((item) => item.projectId === requestedId || item.slug === requestedId)) {
+		if (requestedId && projects.some((item) => item.projectId === requestedId)) {
 			return requestedId;
 		}
 		return projects[0]?.projectId ?? "";
@@ -991,7 +983,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				throw new Error(`No valid raw files found in active project: ${activeProject.slug}`);
 			}
 			return {
-				projectSlug: activeProject.slug,
+				projectId: activeProject.projectId,
 				projectRoot,
 				requested: 0,
 				processed: 0,
@@ -1014,7 +1006,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			forceRebuild,
 		);
 		return {
-			projectSlug: activeProject.slug,
+			projectId: activeProject.projectId,
 			projectRoot,
 			requested: scopedRawPaths.length,
 			processed: summary.processed,
@@ -1142,11 +1134,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				if (this.settings.sync.mode !== "continuous_auto") {
 					return;
 				}
-				const projectSlug = this.dataService.getProjectSlugFromPath(file.path);
-				if (!projectSlug) {
+				const projectId = this.dataService.getProjectIdFromPath(file.path);
+				if (!projectId) {
 					return;
 				}
-				const project = this.settings.projects.find((item) => (item.projectId || item.slug) === projectSlug || item.slug === projectSlug);
+				const project = this.settings.projects.find((item) => item.projectId === projectId);
 				if (!project) {
 					return;
 				}

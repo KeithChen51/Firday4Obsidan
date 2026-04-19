@@ -1,4 +1,5 @@
 import { Node as ProseMirrorNode, Schema, type NodeSpec } from "prosemirror-model";
+import { Selection, TextSelection } from "prosemirror-state";
 import type { MentionDocumentSnapshot, MentionToken, MentionTokenType } from "../../context/mention/MentionResolver";
 
 interface MentionNodeAttrs {
@@ -9,6 +10,8 @@ interface MentionNodeAttrs {
 
 export interface MentionComposerSnapshot extends MentionDocumentSnapshot {
 	doc: Record<string, unknown> | null;
+	selectionAnchor?: number;
+	selectionHead?: number;
 }
 
 export type MentionComposerPart =
@@ -116,6 +119,23 @@ export function restoreMentionComposerDoc(snapshot?: Partial<MentionComposerSnap
 	return createMentionComposerDoc(parts);
 }
 
+export function restoreMentionComposerSelection(
+	snapshot: Partial<MentionComposerSnapshot> | null | undefined,
+	doc: ProseMirrorNode,
+): Selection | null {
+	if (typeof snapshot?.selectionAnchor !== "number" || typeof snapshot?.selectionHead !== "number") {
+		return null;
+	}
+	const maxPosition = Math.max(1, doc.content.size - 1);
+	const anchor = clampSelectionPosition(snapshot.selectionAnchor, maxPosition);
+	const head = clampSelectionPosition(snapshot.selectionHead, maxPosition);
+	try {
+		return TextSelection.create(doc, anchor, head);
+	} catch {
+		return TextSelection.atEnd(doc);
+	}
+}
+
 export function serializeMentionComposerDoc(doc: ProseMirrorNode): MentionComposerSnapshot {
 	const tokens: MentionToken[] = [];
 	const textSegments: string[] = [];
@@ -165,4 +185,11 @@ function formatMentionLabel(attrs: MentionNodeAttrs): string {
 
 function normalizeInlineText(text: string): string {
 	return text.replace(/\s+/g, " ").trim();
+}
+
+function clampSelectionPosition(value: number, maxPosition: number): number {
+	if (!Number.isFinite(value)) {
+		return maxPosition;
+	}
+	return Math.min(Math.max(1, Math.trunc(value)), maxPosition);
 }

@@ -1,18 +1,28 @@
-export type ToolFailureClass = "invalid_input" | "dependency_unavailable" | "tool_runtime_error";
+export type ToolFailureClass =
+	| "invalid_input"
+	| "dependency_unavailable"
+	| "transport_unstable"
+	| "tool_runtime_error";
 
 const FALLBACK_PATTERNS: RegExp[] = [
 	/400/i,
 	/404/i,
 	/405/i,
+	/tool/i,
+	/function/i,
+	/responses/i,
+	/unsupported/i,
+	/invalid json/i,
+	/no usable message content/i,
+	/tool_calls/i,
+];
+
+const TRANSPORT_PATTERNS: RegExp[] = [
 	/429/i,
 	/500/i,
 	/502/i,
 	/503/i,
 	/504/i,
-	/tool/i,
-	/function/i,
-	/responses/i,
-	/unsupported/i,
 	/timeout/i,
 	/timed out/i,
 	/gateway/i,
@@ -20,6 +30,7 @@ const FALLBACK_PATTERNS: RegExp[] = [
 	/err_connection_reset/i,
 	/fetch failed/i,
 	/network/i,
+	/socket hang up/i,
 ];
 
 const INVALID_INPUT_PATTERNS: RegExp[] = [
@@ -46,6 +57,14 @@ export class ToolGovernor {
 		return FALLBACK_PATTERNS.some((pattern) => pattern.test(message));
 	}
 
+	isRetryableTransportFailure(rawMessage: string): boolean {
+		const message = rawMessage.trim();
+		if (!message) {
+			return false;
+		}
+		return TRANSPORT_PATTERNS.some((pattern) => pattern.test(message));
+	}
+
 	classifyFailure(rawMessage: string): ToolFailureClass {
 		const message = rawMessage.trim();
 		if (!message) {
@@ -56,6 +75,9 @@ export class ToolGovernor {
 		}
 		if (DEPENDENCY_PATTERNS.some((pattern) => pattern.test(message))) {
 			return "dependency_unavailable";
+		}
+		if (this.isRetryableTransportFailure(message)) {
+			return "transport_unstable";
 		}
 		return "tool_runtime_error";
 	}

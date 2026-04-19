@@ -195,7 +195,7 @@ test("plugin update service applies update files into the live plugin directory"
 	assert.match(adapter.files.get(".obsidian/plugins/friday-obsidian-plugin/manifest.json"), /0\.2\.0/);
 });
 
-test("plugin update service mirrors changelog into F.R.I.D.A.Y runtime after applying an update", async () => {
+test("plugin update service does not write studio runtime content during applyUpdate", async () => {
 	const mod = await loadModule();
 	const adapter = createMemoryAdapter({
 		".obsidian/plugins/friday-obsidian-plugin/main.js": "console.log('old build');",
@@ -219,42 +219,8 @@ test("plugin update service mirrors changelog into F.R.I.D.A.Y runtime after app
 
 	const result = await service.applyUpdate();
 	assert.equal(result.success, true);
-	assert.match(result.updatedFiles.join("\n"), /Friday Update 更新日志\.md/);
-	assert.match(adapter.files.get("F.R.I.D.A.Y/Friday Update 更新日志.md"), /## 0\.2\.0/);
-	assert.match(adapter.files.get("F.R.I.D.A.Y/Friday Update 更新日志.md"), /Initial release/);
-});
-
-test("plugin update service can backfill runtime changelog from bundled plugin changelog", async () => {
-	const mod = await loadModule();
-	const adapter = createMemoryAdapter({
-		".obsidian/plugins/friday-obsidian-plugin/CHANGELOG.md": [
-			"# Changelog",
-			"",
-			"## 0.2.4",
-			"",
-			"- Added startup backfill for user-facing changelog.",
-			"",
-			"## 0.2.3",
-			"",
-			"- Previous release.",
-			"",
-		].join("\n"),
-	});
-	const service = new mod.PluginUpdateService({
-		pluginId: "friday-obsidian-plugin",
-		currentVersion: "0.2.4",
-		adapter,
-		gitClientFactory: async () => createGitClient(),
-		getGitRuntimeStatus: async () => ({ available: true, version: "2.47.1", error: "" }),
-		getUserCredential: async () => ({ username: "alice", token: "token" }),
-		getUserGitEmail: () => "alice@example.com",
-		supportsMinAppVersion: () => true,
-	});
-
-	const written = await service.syncBundledUpdateLog();
-	assert.equal(written, true);
-	assert.match(adapter.files.get("F.R.I.D.A.Y/Friday Update 更新日志.md"), /## 0\.2\.4/);
-	assert.match(adapter.files.get("F.R.I.D.A.Y/Friday Update 更新日志.md"), /Previous release/);
+	assert.doesNotMatch(result.updatedFiles.join("\n"), /F\.R\.I\.D\.A\.Y\/来自制作组/);
+	assert.equal(adapter.files.get("F.R.I.D.A.Y/来自制作组/迭代手记.md"), undefined);
 });
 
 test("plugin update service removes staged update directories with rmdir on filesystem adapters", async () => {

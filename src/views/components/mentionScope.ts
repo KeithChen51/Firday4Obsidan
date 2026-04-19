@@ -1,29 +1,21 @@
 export interface MentionScopeProjectInput {
 	boundaryPath?: string;
-	projectRootPath?: string;
-	localPath?: string;
 }
 
 export function resolveMentionScopePrefixes(
 	project: MentionScopeProjectInput | null | undefined,
 	vaultPaths: string[],
 ): string[] {
-	const candidates = [
-		normalizeScopePath(project?.boundaryPath),
-		normalizeScopePath(project?.projectRootPath),
-		normalizeScopePath(extractVaultRelativeFromLocalPath(project?.localPath)),
-	].filter(Boolean);
-	if (candidates.length === 0) {
+	const boundaryPath = normalizeScopePath(project?.boundaryPath);
+	if (!boundaryPath) {
 		return [];
 	}
 
-	const matching = candidates.filter((candidate) => hasScopedMatch(candidate, vaultPaths));
-	if (matching.length > 0) {
-		return unique(matching);
+	if (hasScopedMatch(boundaryPath, vaultPaths)) {
+		return [boundaryPath];
 	}
 
-	const fallback = candidates.find(Boolean);
-	return fallback ? [fallback] : [];
+	return [];
 }
 
 export function isPathWithinMentionScope(pathValue: string, scopePrefixes: string[]): boolean {
@@ -38,15 +30,6 @@ function hasScopedMatch(prefix: string, vaultPaths: string[]): boolean {
 	return vaultPaths.some((pathValue) => isPathWithinMentionScope(pathValue, [prefix]));
 }
 
-function extractVaultRelativeFromLocalPath(localPath: string | undefined): string {
-	const normalized = normalizeScopePath(localPath);
-	if (!normalized) {
-		return "";
-	}
-	const parts = normalized.split("/").filter(Boolean);
-	return parts[parts.length - 1] ?? "";
-}
-
 function normalizeScopePath(value: string | undefined): string {
 	return String(value ?? "")
 		.trim()
@@ -56,6 +39,3 @@ function normalizeScopePath(value: string | undefined): string {
 		.replace(/\/+$/, "");
 }
 
-function unique(values: string[]): string[] {
-	return [...new Set(values)];
-}

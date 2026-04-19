@@ -14,23 +14,25 @@ async function loadModule() {
 	return jiti.import(modulePath);
 }
 
-test("mention scope resolver falls back to localPath basename when projectRootPath has no matching vault files", async () => {
+test("mention scope resolver prefers boundaryPath and ignores legacy runtime path fields", async () => {
 	const mod = await loadModule();
 	const prefixes = mod.resolveMentionScopePrefixes(
 		{
-			projectRootPath: "F.R.I.D.A.Y/项目/1",
-			localPath: "C:\\Own Docm\\Coding\\Friday - Ob\\Friday-beta-evm\\00_02_哲学",
+			boundaryPath: "Projects/alpha",
+			projectRootPath: "Legacy/root",
+			localPath: "C:\\repo\\alpha",
 		},
 		[
-			"00_02_哲学/raw/a.md",
-			"00_02_哲学/wiki/index.md",
+			"Projects/alpha/raw/a.md",
+			"Projects/alpha/wiki/index.md",
+			"Legacy/root/raw/old.md",
 		],
 	);
 
-	assert.deepEqual(prefixes, ["00_02_哲学"]);
+	assert.deepEqual(prefixes, ["Projects/alpha"]);
 });
 
-test("mention scope resolver keeps projectRootPath when it already matches vault paths", async () => {
+test("mention scope resolver returns no scope when boundaryPath is absent", async () => {
 	const mod = await loadModule();
 	const prefixes = mod.resolveMentionScopePrefixes(
 		{
@@ -43,5 +45,5 @@ test("mention scope resolver keeps projectRootPath when it already matches vault
 		],
 	);
 
-	assert.deepEqual(prefixes, ["Projects/demo"]);
+	assert.deepEqual(prefixes, []);
 });

@@ -126,7 +126,6 @@ export interface WikiIndexFile {
 export interface SyncResult {
 	projectId?: string;
 	success: boolean;
-	projectSlug: string;
 	pulledFiles: string[];
 	pushedFiles: string[];
 	conflicts: string[];
@@ -137,7 +136,6 @@ export interface SyncResult {
 
 export interface SyncStatus {
 	projectId?: string;
-	projectSlug: string;
 	branch: string;
 	connected: boolean;
 	ahead: number;

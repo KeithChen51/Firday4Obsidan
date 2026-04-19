@@ -48,16 +48,20 @@ export function extractHttpStatus(error: unknown): number | null {
 	return matched ? Number.parseInt(matched[1]!, 10) : null;
 }
 
-export function shouldRetryLlmRequest(error: unknown, attempt: number, maxRetries: number): boolean {
-	if (attempt >= maxRetries) {
-		return false;
-	}
+export function isRetryableLlmFailure(error: unknown): boolean {
 	const status = extractHttpStatus(error);
 	if (status != null) {
 		return RETRYABLE_STATUS.has(status);
 	}
 	const raw = String(error ?? "");
 	return RETRYABLE_PATTERNS.some((pattern) => pattern.test(raw));
+}
+
+export function shouldRetryLlmRequest(error: unknown, attempt: number, maxRetries: number): boolean {
+	if (attempt >= maxRetries) {
+		return false;
+	}
+	return isRetryableLlmFailure(error);
 }
 
 export function getLlmRetryDelayMs(attempt: number): number {

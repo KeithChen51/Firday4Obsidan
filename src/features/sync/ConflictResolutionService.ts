@@ -35,7 +35,6 @@ export class ConflictResolutionService {
 				const previous = previousByPath.get(conflict.filePath);
 				return {
 					projectId: input.project.projectId,
-					projectSlug: input.project.slug,
 					filePath: conflict.filePath,
 					conflictType: "content",
 					localSnippet: conflict.localSnippet,

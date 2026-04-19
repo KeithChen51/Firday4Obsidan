@@ -9,7 +9,7 @@ export interface RuntimeEvent {
 	type: RuntimeEventType;
 	source: InvocationSource;
 	prompt?: string;
-	projectSlug?: string;
+	projectId?: string;
 	currentFilePath?: string;
 	payload?: Record<string, unknown>;
 }

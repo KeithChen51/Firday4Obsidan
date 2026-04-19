@@ -251,6 +251,30 @@ test("project editor service rejects Vault-external absolute paths for local and
 	}
 });
 
+test("project editor service rejects new project roots inside the Friday workspace", async () => {
+	const mod = await loadModule();
+	for (const mode of ["local_only", "remote_bootstrap"]) {
+		for (const boundaryPath of ["F.R.I.D.A.Y", "F.R.I.D.A.Y/项目/alpha", "Friday/Projects/alpha"]) {
+			assert.throws(() => {
+				mod.validateProjectDraft(
+					{
+						groupId: "default-group",
+						mode,
+						projectId: "alpha",
+						projectName: "Alpha",
+						boundaryPath,
+						gitRemote: mode === "remote_bootstrap" ? "https://example.com/demo.git" : "",
+						autoSync: false,
+					},
+					new Set(),
+					"",
+					"F.R.I.D.A.Y",
+				);
+			}, /F\.R\.I\.D\.A\.Y|Friday workspace|Friday-managed/i);
+		}
+	}
+});
+
 test("project editor service fills git remote from an existing local repository root", async () => {
 	const mod = await loadModule();
 	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-existing-local-repo-"));

@@ -211,7 +211,6 @@ export class SimpleGitOperator implements GitOperator {
 			const connected = project.gitRemote ? await this.canReachRemote(project, git) : false;
 
 			return {
-				projectSlug: project.slug,
 				projectId: project.projectId,
 				branch: status.current?.trim() || "",
 				connected,
@@ -242,10 +241,10 @@ export class SimpleGitOperator implements GitOperator {
 		}
 	}
 
-	makeErrorResult(projectSlug: string, error: unknown): SyncResult {
+	makeErrorResult(projectId: string, error: unknown): SyncResult {
 		return {
 			success: false,
-			projectSlug,
+			projectId,
 			pulledFiles: [],
 			pushedFiles: [],
 			conflicts: [],
@@ -580,7 +579,6 @@ export class SimpleGitOperator implements GitOperator {
 
 	private makeDefaultStatus(project: ProjectEntry, connected: boolean): SyncStatus {
 		return {
-			projectSlug: project.slug,
 			projectId: project.projectId,
 			branch: "",
 			connected,

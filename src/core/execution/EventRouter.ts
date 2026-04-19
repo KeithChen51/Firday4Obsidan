@@ -70,7 +70,7 @@ export class EventRouter {
 					targetId: event.type,
 					prompt: runtimePrompt,
 					payload: event.payload,
-					projectSlug: event.projectSlug,
+					projectId: event.projectId,
 				},
 				resolvedType: "runtime",
 				resolvedId: "agent-runtime-turn",

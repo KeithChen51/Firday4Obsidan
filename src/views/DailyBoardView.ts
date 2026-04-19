@@ -14,6 +14,7 @@ import { PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
+import { parseAgentModelChoice, serializeAgentModelChoice } from "../core/llm/AgentModelCatalog";
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
@@ -89,7 +90,7 @@ export class DailyBoardView extends ItemView {
 	private activePage: "chat" | "sync" | "tools" = "chat";
 	private readonly approvalQueue = new ApprovalQueue();
 	private pendingProjectRemoval: ProjectEntry | null = null;
-	private memberEditorProjectSlug = "";
+	private memberEditorProjectId = "";
 	private memberEditorMembers: ProjectMember[] = [];
 	private memberEditorNewUserId = "";
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
@@ -106,6 +107,7 @@ export class DailyBoardView extends ItemView {
 	private aiSessionSearchQuery = "";
 	private aiDraft = "";
 	private aiComposerSnapshot: MentionComposerSnapshot = createEmptyMentionComposerSnapshot();
+	private aiQueuedPrompts: MentionComposerSnapshot[] = [];
 	private aiBusy = false;
 	private aiLastError = "";
 	private aiStreamingPreview = "";
@@ -117,8 +119,6 @@ export class DailyBoardView extends ItemView {
 	private aiForceScrollToBottomOnce = false;
 	private aiRuntimeLastRenderAt = 0;
 	private aiSendAbortController: AbortController | null = null;
-	private aiSessionModelOverride = "";
-	private aiSessionPermissionOverride: ToolPermissionMode | "" = "";
 	private aiSessionManageMode = false;
 	private aiSessionSelection = new Set<string>();
 	private aiSessionRenameId = "";
@@ -206,6 +206,7 @@ export class DailyBoardView extends ItemView {
 
 	private renderBoard(): void {
 		this.captureAiMessageListScrollState();
+		const shouldRestoreComposerFocus = this.composer?.hasFocus() ?? false;
 		this.composer?.destroy();
 		this.composer = null;
 		this.contentEl.empty();
@@ -229,6 +230,9 @@ export class DailyBoardView extends ItemView {
 		}
 		if (this.plugin.settings.projects.length > 0 && !this.aiSessionNavCollapsed) {
 			this.renderAiSessionDrawer(shell);
+		}
+		if (shouldRestoreComposerFocus) {
+			(this.composer as MentionComposer | null)?.focus();
 		}
 	}
 
@@ -407,7 +411,7 @@ export class DailyBoardView extends ItemView {
 	private renderMemberEditorCard(containerEl: HTMLElement): void {
 		const card = containerEl.createDiv({ cls: "friday-ai-chat-panel" });
 		card.createEl("h4", {
-			text: this.t("members.title", "Project members: {slug}", { slug: this.memberEditorProjectSlug }),
+			text: this.t("members.title", "Project members: {slug}", { slug: this.memberEditorProjectId }),
 		});
 
 		if (this.memberEditorMembers.length === 0) {
@@ -470,13 +474,13 @@ export class DailyBoardView extends ItemView {
 
 		const footer = card.createDiv({ cls: "friday-approval-actions" });
 		this.addPageButton(footer, this.t("members.save", "Save members"), async () => {
-			await this.plugin.dataService.setProjectMembers(this.memberEditorProjectSlug, this.memberEditorMembers);
-			this.memberEditorProjectSlug = "";
+			await this.plugin.dataService.setProjectMembers(this.memberEditorProjectId, this.memberEditorMembers);
+			this.memberEditorProjectId = "";
 			this.memberEditorMembers = [];
 			this.renderBoard();
 		});
 		this.addPageButton(footer, this.t("members.cancel", "Cancel"), async () => {
-			this.memberEditorProjectSlug = "";
+			this.memberEditorProjectId = "";
 			this.memberEditorMembers = [];
 			this.renderBoard();
 		});
@@ -516,7 +520,7 @@ export class DailyBoardView extends ItemView {
 		filePath: string,
 		strategy: "ours" | "theirs",
 	): Promise<void> {
-		const project = this.plugin.settings.projects.find((item) => item.projectId === projectId || item.slug === projectId);
+		const project = this.plugin.settings.projects.find((item) => item.projectId === projectId);
 		if (!project) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
@@ -533,7 +537,6 @@ export class DailyBoardView extends ItemView {
 			recordedAt,
 			result: {
 				success: conflictRecords.length === 0,
-				projectSlug: project.slug,
 				projectId: project.projectId,
 				pulledFiles: [],
 				pushedFiles: [],
@@ -560,7 +563,7 @@ export class DailyBoardView extends ItemView {
 		const resolution = this.plugin.executionEventRouter.routeToRuntime({
 			type: "sync.conflict_proposal_requested",
 			source: "project_action",
-			projectSlug: projectId,
+			projectId,
 			prompt: filePath,
 			currentFilePath: filePath,
 			payload: { filePath },
@@ -607,7 +610,7 @@ export class DailyBoardView extends ItemView {
 		if (!project) {
 			return "";
 		}
-		return project.projectId || project.slug;
+		return project.projectId;
 	}
 
 	private getProjectLabel(project: ProjectEntry | null | undefined): string {
@@ -1221,6 +1224,7 @@ export class DailyBoardView extends ItemView {
 			});
 		}
 
+		this.renderAiQueueHint(chatShellEl);
 		this.renderAiOverrideBar(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
@@ -1232,7 +1236,7 @@ export class DailyBoardView extends ItemView {
 				"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
 			),
 			initialSnapshot: this.getComposerSnapshot(),
-			disabled: this.aiBusy,
+			disabled: false,
 			onChange: (snapshot) => {
 				this.aiComposerSnapshot = snapshot;
 				this.aiDraft = snapshot.text;
@@ -1244,33 +1248,46 @@ export class DailyBoardView extends ItemView {
 		});
 
 		const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });
+		const modelOptions = this.buildModelOptions(activeAgent);
+		const selectedModelValue = this.resolveSelectedModelOptionValue(activeAgent, modelOptions);
 		const modelSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
-		modelSelect.setAttribute("aria-label", this.t("ai.model.override", "选择临时模型"));
-		for (const optionValue of this.buildModelOptions(activeAgent)) {
+		modelSelect.setAttribute("aria-label", this.t("ai.model.override", "选择当前 Agent 模型"));
+		for (const optionValue of modelOptions) {
 			const option = modelSelect.createEl("option", {
-				text: optionValue.value
-					? optionValue.label
-					: this.t("ai.model.follow", "模型 · 跟随默认"),
+				text: optionValue.label,
 			});
 			option.value = optionValue.value;
-			option.selected = optionValue.value === this.aiSessionModelOverride;
+			option.selected = optionValue.value === selectedModelValue;
 		}
-		modelSelect.disabled = this.aiBusy;
-		modelSelect.onchange = () => {
-			this.aiSessionModelOverride = modelSelect.value;
+		modelSelect.disabled = this.aiBusy || !activeAgent;
+		modelSelect.onchange = async () => {
+			if (!activeAgent) {
+				return;
+			}
+			const parsed = parseAgentModelChoice(modelSelect.value);
+			if (!parsed) {
+				return;
+			}
+			activeAgent.model = parsed.model;
+			activeAgent.modelMode = parsed.mode;
+			activeAgent.updatedAt = new Date().toISOString();
+			await this.plugin.agentService.writeAgentProfile(activeAgent);
+			await this.plugin.saveSettings();
 			this.renderBoard();
 		};
 
 		const permissionSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
-		permissionSelect.setAttribute("aria-label", this.t("ai.permission.override", "选择临时权限模式"));
+		permissionSelect.setAttribute("aria-label", this.t("ai.permission.override", "选择当前工具权限模式"));
 		for (const mode of this.buildPermissionModeOptions()) {
 			const option = permissionSelect.createEl("option", { text: mode.label });
 			option.value = mode.value;
-			option.selected = mode.value === this.aiSessionPermissionOverride;
+			option.selected = mode.value === this.plugin.settings.agentRuntime.toolPermissionMode;
 		}
 		permissionSelect.disabled = this.aiBusy;
-		permissionSelect.onchange = () => {
-			this.aiSessionPermissionOverride = permissionSelect.value as ToolPermissionMode | "";
+		permissionSelect.onchange = async () => {
+			const value = permissionSelect.value;
+			this.plugin.settings.agentRuntime.toolPermissionMode = value as ToolPermissionMode;
+			await this.plugin.saveSettings();
 			this.renderBoard();
 		};
 
@@ -1279,7 +1296,7 @@ export class DailyBoardView extends ItemView {
 			text: this.t("ai.skill.button", "+Skill"),
 		});
 		skillButton.type = "button";
-		skillButton.disabled = this.aiBusy;
+		skillButton.disabled = false;
 		skillButton.onmousedown = (event) => {
 			event.preventDefault();
 		};
@@ -1295,7 +1312,7 @@ export class DailyBoardView extends ItemView {
 		attachButton.type = "button";
 		attachButton.setAttribute("aria-label", this.t("ai.attach.contextButton", "@ Add context"));
 		attachButton.title = this.t("ai.attach.contextButton", "@ Add context");
-		attachButton.disabled = this.aiBusy;
+		attachButton.disabled = false;
 		attachButton.onmousedown = (event) => {
 			event.preventDefault();
 		};
@@ -1305,10 +1322,10 @@ export class DailyBoardView extends ItemView {
 
 		const sendButton = toolbarEl.createEl("button", {
 			cls: "friday-ai-send-button",
-			text: this.aiBusy ? this.plugin.t("ai.sending") : this.plugin.t("ai.send"),
+			text: this.getSendButtonLabel(),
 		});
 		sendButton.type = "button";
-		sendButton.disabled = this.aiBusy;
+		sendButton.disabled = this.isComposerDraftEmpty();
 		sendButton.onclick = () => {
 			void this.submitAiPrompt();
 		};
@@ -1742,13 +1759,56 @@ export class DailyBoardView extends ItemView {
 			groupEl.createDiv({ cls: "friday-ai-session-group-label", text: group.label });
 			const groupList = groupEl.createDiv({ cls: "friday-ai-session-group-list" });
 			for (const session of group.sessions) {
+				const sessionTitle = this.buildSessionTitle(session);
 				const itemEl = groupList.createDiv({ cls: "friday-ai-session-item" });
+				itemEl.setAttribute("role", "button");
+				itemEl.setAttribute("aria-label", this.t("ai.sessions.open", "打开对话：{title}", {
+					title: sessionTitle,
+				}));
+				itemEl.tabIndex = 0;
 				if (session.sessionId === this.aiSessionId) {
 					itemEl.addClass("is-active");
 				}
 				if (this.aiSessionSelection.has(session.sessionId)) {
 					itemEl.addClass("is-selected");
 				}
+				itemEl.onclick = () => {
+					if (this.aiSessionRenameId === session.sessionId) {
+						return;
+					}
+					if (this.aiSessionManageMode) {
+						this.toggleSessionSelection(session.sessionId);
+						return;
+					}
+					void this.switchAiSession(session.sessionId);
+				};
+				itemEl.onkeydown = (event) => {
+					if (this.aiSessionRenameId === session.sessionId) {
+						return;
+					}
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						itemEl.click();
+						return;
+					}
+					if (event.key === "F2" && !this.aiSessionManageMode) {
+						event.preventDefault();
+						this.beginSessionRename(session);
+					}
+				};
+				itemEl.ondblclick = () => {
+					if (!this.aiSessionManageMode) {
+						this.beginSessionRename(session);
+					}
+				};
+				itemEl.oncontextmenu = (event) => {
+					if (this.aiSessionManageMode) {
+						return;
+					}
+					event.preventDefault();
+					event.stopPropagation();
+					this.openSessionActionsMenu(session, event);
+				};
 				const rowEl = itemEl.createDiv({ cls: "friday-ai-session-item-row" });
 				if (this.aiSessionManageMode) {
 					const checkbox = rowEl.createEl("input", { attr: { type: "checkbox" }, cls: "friday-ai-session-checkbox" });
@@ -1760,36 +1820,15 @@ export class DailyBoardView extends ItemView {
 						this.toggleSessionSelection(session.sessionId);
 					};
 				}
-				const bodyButton = rowEl.createEl("button", { cls: "friday-ai-session-item-body" });
-				bodyButton.type = "button";
+				const bodyButton = rowEl.createDiv({ cls: "friday-ai-session-item-body" });
 				bodyButton.createDiv({
 					cls: "friday-ai-session-item-title",
-					text: this.buildSessionTitle(session),
+					text: sessionTitle,
 				});
 				bodyButton.createDiv({
 					cls: "friday-ai-session-item-meta",
 					text: this.formatSessionUpdatedAt(session.updatedAt),
 				});
-				bodyButton.onclick = () => {
-					if (this.aiSessionManageMode) {
-						this.toggleSessionSelection(session.sessionId);
-						return;
-					}
-					void this.switchAiSession(session.sessionId);
-				};
-				bodyButton.ondblclick = () => {
-					if (!this.aiSessionManageMode) {
-						this.beginSessionRename(session);
-					}
-				};
-				bodyButton.oncontextmenu = (event) => {
-					if (this.aiSessionManageMode) {
-						return;
-					}
-					event.preventDefault();
-					event.stopPropagation();
-					this.openSessionActionsMenu(session, event);
-				};
 				if (!this.aiSessionManageMode) {
 					const utility = rowEl.createDiv({ cls: "friday-ai-session-item-actions" });
 					const menuButton = utility.createEl("button", {
@@ -1874,6 +1913,7 @@ export class DailyBoardView extends ItemView {
 		this.aiConversation = [];
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
+		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
@@ -1881,8 +1921,6 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimePreviewExpanded = false;
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiSessionSearchQuery = "";
-		this.aiSessionModelOverride = "";
-		this.aiSessionPermissionOverride = "";
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
 		this.aiSessionSelection.clear();
@@ -1911,13 +1949,12 @@ export class DailyBoardView extends ItemView {
 		this.aiConversation = [...target.messages];
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
+		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
 		this.aiLastCompletedRuntimeExecutionState = null;
 		this.aiRuntimePreviewExpanded = false;
-		this.aiSessionModelOverride = "";
-		this.aiSessionPermissionOverride = "";
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
 		this.aiSessionSelection.clear();
@@ -2346,10 +2383,17 @@ export class DailyBoardView extends ItemView {
 		};
 	}
 
-	private async submitAiPrompt(): Promise<void> {
-		const draftDocument = this.getStructuredPromptDocument();
+	private async submitAiPrompt(snapshotOverride?: MentionComposerSnapshot): Promise<void> {
+		const draftSnapshot = snapshotOverride ? this.cloneComposerSnapshot(snapshotOverride) : this.getComposerSnapshot();
+		const draftDocument = this.getStructuredPromptDocument(draftSnapshot);
 		const rawPrompt = draftDocument.text.trim();
-		if ((!rawPrompt && draftDocument.tokens.length === 0) || this.aiBusy) {
+		if (this.isPromptDocumentEmpty(draftDocument)) {
+			return;
+		}
+		if (this.aiBusy) {
+			if (!snapshotOverride) {
+				this.enqueueAiPrompt(draftSnapshot);
+			}
 			return;
 		}
 
@@ -2410,7 +2454,7 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 
 		try {
-			let modelOverride = this.aiSessionModelOverride.trim() || activeAgent.model?.trim() || undefined;
+			let modelOverride = this.resolveEffectiveModel(activeAgent) || undefined;
 			let runtimePrompt = rawPrompt;
 			let extraSystemContext = "";
 			let allowedTools: string[] | undefined;
@@ -2462,44 +2506,36 @@ export class DailyBoardView extends ItemView {
 
 			runtimePrompt = runtimePrompt.trim() || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
 
-			const previousPermissionMode = this.plugin.settings.agentRuntime.toolPermissionMode;
-			if (this.aiSessionPermissionOverride) {
-				this.plugin.settings.agentRuntime.toolPermissionMode = this.aiSessionPermissionOverride;
-			}
-			try {
-				if (!assistantText) {
-					const modelMessages: ChatMessage[] = [
-						...history,
-						...(extraSystemContext
-							? [{ role: "system" as const, content: extraSystemContext }]
-							: []),
-						{
-							role: "user",
-							content: runtimePrompt,
+			if (!assistantText) {
+				const modelMessages: ChatMessage[] = [
+					...history,
+					...(extraSystemContext
+						? [{ role: "system" as const, content: extraSystemContext }]
+						: []),
+					{
+						role: "user",
+						content: runtimePrompt,
+					},
+				];
+				if (this.plugin.settings.llm.enableStreaming) {
+					this.aiSendAbortController?.abort();
+					this.aiSendAbortController = new AbortController();
+					assistantText = await this.plugin.aiService.chatStream(modelMessages, {
+						modelOverride,
+						signal: this.aiSendAbortController.signal,
+						onDelta: (delta) => {
+							this.aiStreamingPreview += delta;
+							const now = Date.now();
+							if (now - this.aiRuntimeLastRenderAt >= 120) {
+								this.aiRuntimeLastRenderAt = now;
+								this.aiForceScrollToBottomOnce = true;
+								this.renderBoard();
+							}
 						},
-					];
-					if (this.plugin.settings.llm.enableStreaming) {
-						this.aiSendAbortController?.abort();
-						this.aiSendAbortController = new AbortController();
-						assistantText = await this.plugin.aiService.chatStream(modelMessages, {
-							modelOverride,
-							signal: this.aiSendAbortController.signal,
-							onDelta: (delta) => {
-								this.aiStreamingPreview += delta;
-								const now = Date.now();
-								if (now - this.aiRuntimeLastRenderAt >= 120) {
-									this.aiRuntimeLastRenderAt = now;
-									this.aiForceScrollToBottomOnce = true;
-									this.renderBoard();
-								}
-							},
-						});
-					} else {
-						assistantText = await this.plugin.aiService.chat(modelMessages, { modelOverride });
-					}
+					});
+				} else {
+					assistantText = await this.plugin.aiService.chat(modelMessages, { modelOverride });
 				}
-			} finally {
-				this.plugin.settings.agentRuntime.toolPermissionMode = previousPermissionMode;
 			}
 
 			const normalizedAssistantText = assistantText.trim() || this.t("ai.runtime.emptyResponse", "(No valid model response)");
@@ -2532,6 +2568,7 @@ export class DailyBoardView extends ItemView {
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
 			this.renderBoard();
+			await this.flushQueuedAiPrompt();
 		}
 	}
 
@@ -2564,7 +2601,7 @@ export class DailyBoardView extends ItemView {
 			const resolution = this.plugin.executionEventRouter.routeToRuntime({
 				type: "knowledge.compile_requested",
 				source: "project_action",
-				projectSlug: this.getActiveProjectEntry()?.slug,
+				projectId: this.getActiveProjectEntry()?.projectId,
 				prompt: "Compile the active project wiki now.",
 				currentFilePath: this.app.workspace.getActiveFile()?.path,
 			});
@@ -2614,6 +2651,7 @@ export class DailyBoardView extends ItemView {
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
 			this.renderBoard();
+			await this.flushQueuedAiPrompt();
 		}
 	}
 
@@ -2644,7 +2682,7 @@ export class DailyBoardView extends ItemView {
 		const parts: string[] = [
 			this.t("ai.compile.summary.header", "Wiki 编译完成"),
 			"",
-			this.t("ai.compile.summary.project", "项目：{project}", { project: summary.projectSlug }),
+			this.t("ai.compile.summary.project", "项目：{project}", { project: summary.projectId }),
 			this.t("ai.compile.summary.requested", "请求文件：{value}", { value: summary.requested }),
 			this.t("ai.compile.summary.processed", "实际处理：{value}", { value: summary.processed }),
 			this.t("ai.compile.summary.succeeded", "成功：{value}", { value: summary.succeeded }),
@@ -2834,15 +2872,66 @@ export class DailyBoardView extends ItemView {
 		};
 	}
 
-	private getStructuredPromptDocument(): MentionDocumentSnapshot {
-		const snapshot = this.getComposerSnapshot();
+	private getStructuredPromptDocument(snapshot: MentionComposerSnapshot = this.getComposerSnapshot()): MentionDocumentSnapshot {
 		if (snapshot.tokens.length > 0 || snapshot.doc) {
 			return {
 				text: snapshot.text,
 				tokens: snapshot.tokens,
 			};
 		}
-		return parseLegacyMentionMarkup(this.aiDraft);
+		return parseLegacyMentionMarkup(snapshot.text || this.aiDraft);
+	}
+
+	private cloneComposerSnapshot(snapshot: MentionComposerSnapshot): MentionComposerSnapshot {
+		return {
+			doc: snapshot.doc
+				? JSON.parse(JSON.stringify(snapshot.doc)) as Record<string, unknown>
+				: null,
+			text: snapshot.text,
+			tokens: snapshot.tokens.map((token) => ({ ...token })),
+			selectionAnchor: snapshot.selectionAnchor,
+			selectionHead: snapshot.selectionHead,
+		};
+	}
+
+	private isPromptDocumentEmpty(document: MentionDocumentSnapshot): boolean {
+		return document.text.trim().length === 0 && document.tokens.length === 0;
+	}
+
+	private isComposerDraftEmpty(): boolean {
+		return this.isPromptDocumentEmpty(this.getStructuredPromptDocument());
+	}
+
+	private enqueueAiPrompt(snapshot: MentionComposerSnapshot): void {
+		const queuedSnapshot = this.cloneComposerSnapshot(snapshot);
+		if (this.isPromptDocumentEmpty(this.getStructuredPromptDocument(queuedSnapshot))) {
+			return;
+		}
+		this.aiQueuedPrompts.push(queuedSnapshot);
+		this.aiDraft = "";
+		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
+		this.aiForceScrollToBottomOnce = true;
+		this.renderBoard();
+	}
+
+	private async flushQueuedAiPrompt(): Promise<void> {
+		if (this.aiBusy) {
+			return;
+		}
+		const nextPrompt = this.aiQueuedPrompts.shift();
+		if (!nextPrompt) {
+			return;
+		}
+		await this.submitAiPrompt(nextPrompt);
+	}
+
+	private getSendButtonLabel(): string {
+		if (!this.aiBusy) {
+			return this.plugin.t("ai.send");
+		}
+		return this.isComposerDraftEmpty()
+			? this.t("ai.working", "工作中")
+			: this.t("ai.queue.submit", "加入队列");
 	}
 
 	private buildPromptMentionContext(mentionResolution: MentionResolutionResult) {
@@ -3038,38 +3127,74 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private resolveEffectiveModel(activeAgent: { model: string } | null): string {
-		return this.aiSessionModelOverride.trim() || activeAgent?.model?.trim() || this.plugin.settings.llm.model?.trim() || "";
+		return activeAgent?.model?.trim() || this.plugin.settings.llm.model?.trim() || "";
 	}
 
 	private buildModelOptions(
-		activeAgent: { model: string } | null,
+		activeAgent: { model: string; modelMode?: "openai" | "group" } | null,
 	): Array<{ value: string; label: string }> {
-		const values = new Set<string>();
-		const effectiveModel = this.resolveEffectiveModel(activeAgent);
-		if (effectiveModel) values.add(effectiveModel);
-		if (this.plugin.settings.llm.model?.trim()) values.add(this.plugin.settings.llm.model.trim());
-		if (activeAgent?.model?.trim()) values.add(activeAgent.model.trim());
+		const options = new Map<string, { value: string; label: string }>();
+		const addOption = (mode: "openai" | "group", model: string) => {
+			const trimmed = model.trim();
+			if (!trimmed) {
+				return;
+			}
+			const value = serializeAgentModelChoice(mode, trimmed);
+			if (options.has(value)) {
+				return;
+			}
+			const prefix = mode === "group" ? "集团" : "OpenAI";
+			options.set(value, {
+				value,
+				label: `${prefix} · ${trimmed}`,
+			});
+		};
+
+		addOption("openai", this.plugin.settings.llm.openaiConfig.model);
+		addOption("group", this.plugin.settings.llm.groupConfig.model);
+		addOption(this.plugin.settings.llm.mode, this.plugin.settings.llm.model);
+		if (activeAgent?.model?.trim()) {
+			addOption(activeAgent.modelMode ?? this.plugin.settings.llm.mode, activeAgent.model);
+		}
 		for (const agent of this.plugin.settings.agents) {
 			if (agent.model?.trim()) {
-				values.add(agent.model.trim());
+				addOption(agent.modelMode ?? this.plugin.settings.llm.mode, agent.model);
 			}
 		}
-		for (const slashCommand of this.plugin.settings.slashCommands) {
-			for (const model of slashCommand.allowedModels ?? []) {
-				if (model?.trim()) {
-					values.add(model.trim());
-				}
-			}
-		}
-		return [
-			{ value: "", label: this.t("ai.model.follow", "模型 · 跟随默认") },
-			...[...values].map((value) => ({ value, label: value })),
-		];
+		const selectedValue = this.resolveSelectedModelOptionValue(activeAgent, [...options.values()]);
+		return [...options.values()].sort((left, right) => {
+			if (left.value === selectedValue) return -1;
+			if (right.value === selectedValue) return 1;
+			return left.label.localeCompare(right.label, "zh-CN");
+		});
 	}
 
-	private buildPermissionModeOptions(): Array<{ value: "" | ToolPermissionMode; label: string }> {
+	private resolveSelectedModelOptionValue(
+		activeAgent: { model: string; modelMode?: "openai" | "group" } | null,
+		options: Array<{ value: string; label: string }>,
+	): string {
+		const findValue = (mode: "openai" | "group", model: string): string => {
+			const trimmed = model.trim();
+			if (!trimmed) {
+				return "";
+			}
+			const exactValue = serializeAgentModelChoice(mode, trimmed);
+			if (options.some((item) => item.value === exactValue)) {
+				return exactValue;
+			}
+			return options.find((item) => item.value.endsWith(`::${trimmed}`))?.value ?? "";
+		};
+		if (activeAgent?.model?.trim()) {
+			const activeValue = findValue(activeAgent.modelMode ?? this.plugin.settings.llm.mode, activeAgent.model);
+			if (activeValue) {
+				return activeValue;
+			}
+		}
+		return findValue(this.plugin.settings.llm.mode, this.plugin.settings.llm.model) || options[0]?.value || "";
+	}
+
+	private buildPermissionModeOptions(): Array<{ value: ToolPermissionMode; label: string }> {
 		return [
-			{ value: "", label: this.t("ai.permission.follow", "权限 · 跟随默认") },
 			{ value: "auto", label: this.t("settings.agent.permissionMode.auto", "🚀 全自动") },
 			{ value: "standard", label: this.t("settings.agent.permissionMode.standard", "🛡️ 标准") },
 			{ value: "strict", label: this.t("settings.agent.permissionMode.strict", "🔒 严格") },
@@ -3087,16 +3212,29 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
+	private renderAiQueueHint(containerEl: HTMLElement): void {
+		if (!this.aiBusy && this.aiQueuedPrompts.length === 0) {
+			return;
+		}
+		const hint = containerEl.createDiv({ cls: "friday-ai-queue-hint" });
+		hint.createSpan({
+			cls: "friday-ai-queue-hint-copy",
+			text: this.aiQueuedPrompts.length > 0
+				? this.t("ai.queue.helper.pending", "当前任务仍在执行，已排队 {count} 条，完成后会自动继续。", {
+					count: this.aiQueuedPrompts.length,
+				})
+				: this.t("ai.queue.helper.busy", "当前任务仍在执行。你可以继续输入下一条指令，按 Enter 会自动加入队列。"),
+		});
+		if (this.aiQueuedPrompts.length > 0) {
+			hint.createSpan({
+				cls: "friday-ai-queue-pill",
+				text: this.t("ai.queue.badge", "待发送 {count}", { count: this.aiQueuedPrompts.length }),
+			});
+		}
+	}
+
 	private renderAiOverrideBar(containerEl: HTMLElement): void {
 		const parts: string[] = [];
-		if (this.aiSessionModelOverride) {
-			parts.push(this.t("ai.override.model", "模型={value}", { value: this.aiSessionModelOverride }));
-		}
-		if (this.aiSessionPermissionOverride) {
-			parts.push(this.t("ai.override.permission", "权限={value}", {
-				value: this.resolvePermissionModeLabel(this.aiSessionPermissionOverride),
-			}));
-		}
 		const sessionPolicyOverrides = Object.keys(this.plugin.agentRuntimeService.listSessionToolPolicyOverrides()).length;
 		if (sessionPolicyOverrides > 0) {
 			parts.push(this.t("ai.override.policy", "策略覆写={count}", { count: sessionPolicyOverrides }));
@@ -3116,8 +3254,6 @@ export class DailyBoardView extends ItemView {
 		});
 		clearButton.type = "button";
 		clearButton.onclick = () => {
-			this.aiSessionModelOverride = "";
-			this.aiSessionPermissionOverride = "";
 			this.plugin.agentRuntimeService.clearAllSessionToolPolicyOverrides();
 			this.plugin.toolApprovalService.clearSessionRules();
 			this.renderBoard();
@@ -3513,6 +3649,7 @@ export class DailyBoardView extends ItemView {
 		try {
 			await this.plugin.setActiveAgent(agentId);
 			this.aiSessionId = "";
+			this.aiQueuedPrompts = [];
 			await this.ensureAiSessionLoaded();
 			this.aiForceScrollToBottomOnce = true;
 			this.renderBoard();
@@ -3525,9 +3662,9 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
-	private async openMemberEditor(projectSlug: string): Promise<void> {
-		this.memberEditorProjectSlug = projectSlug;
-		this.memberEditorMembers = await this.plugin.dataService.getProjectMembers(projectSlug);
+	private async openMemberEditor(projectId: string): Promise<void> {
+		this.memberEditorProjectId = projectId;
+		this.memberEditorMembers = await this.plugin.dataService.getProjectMembers(projectId);
 		this.memberEditorNewUserId = "";
 		this.memberEditorNewRole = "editor";
 		this.activePage = "sync";
@@ -3540,6 +3677,7 @@ export class DailyBoardView extends ItemView {
 			this.aiConversation = [];
 			this.aiSessions = [];
 			this.aiSessionId = "";
+			this.aiQueuedPrompts = [];
 			return;
 		}
 
@@ -3629,7 +3767,6 @@ export class DailyBoardView extends ItemView {
 				projectId: project.projectId,
 				result: results.get(project.projectId) ?? {
 					success: false,
-					projectSlug: project.slug,
 					projectId: project.projectId,
 					pulledFiles: [],
 					pushedFiles: [],

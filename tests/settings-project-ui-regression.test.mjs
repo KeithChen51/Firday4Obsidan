@@ -115,6 +115,15 @@ test("settings project editor keeps remote mode on the vault folder picker flow"
 	assert.match(source, /settings\.project\.editor\.vaultDir\.remoteDesc/);
 });
 
+test("settings project editor filters Friday-managed folders out of vault directory choices", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /isFridayManagedProjectRoot/);
+	assert.match(
+		source,
+		/listVaultDirectoryOptions\([\s\S]*?filter\(\(folderPath\) => !isFridayManagedProjectRoot\(folderPath,\s*this\.host\.dataService\.getFridayRoot\(\)\)\)/,
+	);
+});
+
 test("settings project editor surfaces detected parent repository hints for nested git folders", async () => {
 	const source = readSettingsSource();
 	assert.match(source, /detectedParentRepository/);

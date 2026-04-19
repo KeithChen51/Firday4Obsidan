@@ -43,6 +43,43 @@ function runNpmScript(cwd, scriptName) {
 	runCommand("npm", ["run", scriptName], cwd);
 }
 
+function formatPublishedDate(publishedAt) {
+	const directMatch = String(publishedAt).match(/^(\d{4}-\d{2}-\d{2})/);
+	if (directMatch) {
+		return directMatch[1];
+	}
+	return new Date(publishedAt).toISOString().slice(0, 10);
+}
+
+export function upsertReleaseDate(changelogText, version, publishedAt) {
+	const normalized = changelogText.replace(/\r\n?/g, "\n");
+	const versionPattern = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const headingPattern = new RegExp(`^##\\s+\\[?${versionPattern}\\]?(?:\\s+-.*)?$`);
+	const lines = normalized.split("\n");
+	const headingIndex = lines.findIndex((line) => headingPattern.test(line.trim()));
+	if (headingIndex === -1) {
+		return normalized;
+	}
+
+	const dateLine = `发布日期：${formatPublishedDate(publishedAt)}`;
+	let insertIndex = headingIndex + 1;
+
+	while (lines[insertIndex] === "") {
+		lines.splice(insertIndex, 1);
+	}
+
+	if (/^(发布日期：|Published on: )/.test(lines[insertIndex] ?? "")) {
+		lines[insertIndex] = dateLine;
+		if (lines[insertIndex + 1] !== "") {
+			lines.splice(insertIndex + 1, 0, "");
+		}
+	} else {
+		lines.splice(insertIndex, 0, dateLine, "");
+	}
+
+	return lines.join("\n");
+}
+
 export function extractReleaseNotes(changelogText, version) {
 	const normalized = changelogText.replace(/\r\n?/g, "\n");
 	const versionPattern = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -65,6 +102,16 @@ export function extractReleaseNotes(changelogText, version) {
 		captured.push(line);
 	}
 
+	while (captured[0]?.trim() === "") {
+		captured.shift();
+	}
+	if (/^(发布日期：|Published on: )/.test(captured[0]?.trim() ?? "")) {
+		captured.shift();
+	}
+	while (captured[0]?.trim() === "") {
+		captured.shift();
+	}
+
 	return captured.join("\n").trim();
 }
 
@@ -74,6 +121,19 @@ function readReleaseNotes(projectRoot, version) {
 		return "";
 	}
 	return extractReleaseNotes(fs.readFileSync(changelogPath, "utf8"), version);
+}
+
+function syncChangelogPublishDate(projectRoot, version, publishedAt) {
+	const changelogPath = path.join(projectRoot, CHANGELOG_FILE);
+	if (!fs.existsSync(changelogPath)) {
+		return "";
+	}
+	const original = fs.readFileSync(changelogPath, "utf8");
+	const next = upsertReleaseDate(original, version, publishedAt);
+	if (next !== original) {
+		fs.writeFileSync(changelogPath, next, "utf8");
+	}
+	return next;
 }
 
 export function buildReleaseFeed(manifest, publishedAt = new Date().toISOString(), releaseNotes = "") {
@@ -127,6 +187,8 @@ export function syncReleaseArtifacts({
 	if (!manifest?.id || !manifest?.version || !manifest?.minAppVersion) {
 		throw new Error("manifest.json is missing required release fields");
 	}
+
+	syncChangelogPublishDate(projectRoot, manifest.version, publishedAt);
 
 	const releaseRoot = path.join(projectRoot, RELEASE_DIR);
 	const artifactDir = path.join(releaseRoot, RELEASE_ARTIFACT_DIRNAME);

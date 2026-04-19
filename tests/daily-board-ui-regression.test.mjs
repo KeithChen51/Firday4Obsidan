@@ -61,6 +61,13 @@ test("session drawer supports search and date-grouped browsing", async () => {
 	assert.match(source, /ai\.sessions\.search\.placeholder/);
 });
 
+test("session drawer search input reserves dedicated inline space for the search icon", async () => {
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-ai-session-search-icon\s*\{[\s\S]*left:\s*10px;/);
+	assert.match(styles, /\.friday-ai-session-search\s*\{[\s\S]*padding-left:\s*40px;/);
+	assert.match(styles, /\.friday-ai-session-search\s*\{[\s\S]*padding-inline-start:\s*40px;/);
+});
+
 test("session drawer uses context-menu actions instead of always-visible text pills", async () => {
 	const source = readViewSource();
 	const styles = readStylesSource();
@@ -79,9 +86,22 @@ test("session drawer styles favor native list rows over floating cards", async (
 	assert.match(styles, /\.friday-ai-session-item:hover \.friday-ai-session-item-actions\s*\{[\s\S]*opacity:\s*1/);
 });
 
+test("session drawer uses the entire row as the interactive target", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	assert.match(source, /itemEl\.setAttribute\("role", "button"\)/);
+	assert.match(source, /itemEl\.tabIndex = 0/);
+	assert.match(source, /itemEl\.onclick = \(\) => \{/);
+	assert.match(source, /itemEl\.onkeydown = \(event\) => \{/);
+	assert.match(source, /const bodyButton = rowEl\.createDiv\(\{ cls: "friday-ai-session-item-body" \}\)/);
+	assert.doesNotMatch(source, /createEl\("button", \{ cls: "friday-ai-session-item-body" \}\)/);
+	assert.match(styles, /\.friday-ai-session-item\s*\{[\s\S]*cursor:\s*pointer;/);
+	assert.match(styles, /\.friday-ai-session-item:focus-visible\b/);
+});
+
 test("explicit skill invocation stays on runtime path instead of builtin shortcut", async () => {
 	const source = readViewSource();
-	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
+	const match = source.match(/private async submitAiPrompt\([^)]*\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
 	assert.ok(match, "submitAiPrompt block should exist");
 	const block = match[1] ?? "";
 	assert.match(block, /executionPlanner\.plan\(/);
@@ -92,7 +112,7 @@ test("explicit skill invocation stays on runtime path instead of builtin shortcu
 
 test("compile intent stays on runtime path instead of calling compile helper directly from submitAiPrompt", async () => {
 	const source = readViewSource();
-	const match = source.match(/private async submitAiPrompt\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
+	const match = source.match(/private async submitAiPrompt\([^)]*\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
 	assert.ok(match, "submitAiPrompt block should exist");
 	const block = match[1] ?? "";
 	assert.doesNotMatch(block, /compileWikiWithStatus\(/);

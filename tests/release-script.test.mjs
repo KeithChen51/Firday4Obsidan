@@ -36,6 +36,7 @@ test("release script builds latest feed and release folder from current artifact
 		"# Changelog",
 		"",
 		"## 0.2.0",
+		"发布日期：2026-04-15",
 		"",
 		"- Added user-facing plugin update history sync.",
 		"- Exported release notes into the release feed.",
@@ -98,5 +99,8 @@ test("release script builds latest feed and release folder from current artifact
 	);
 	assert.equal(fs.readFileSync(releaseMainPath, "utf8"), "console.log('release');\n");
 	assert.equal(fs.readFileSync(releaseStylesPath, "utf8"), ".demo { color: red; }\n");
-	assert.equal(fs.readFileSync(releaseChangelogPath, "utf8"), changelog);
+	assert.equal(
+		fs.readFileSync(releaseChangelogPath, "utf8"),
+		changelog.replace("发布日期：2026-04-15", "发布日期：2026-04-16"),
+	);
 });

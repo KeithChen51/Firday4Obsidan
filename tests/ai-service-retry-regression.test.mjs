@@ -17,5 +17,11 @@ test("ai service uses shared llm transport policy for headers and retries", () =
 	const source = readAiServiceSource();
 	assert.match(source, /buildLlmHeaders/);
 	assert.match(source, /shouldRetryLlmRequest/);
+	assert.match(source, /isRetryableLlmFailure/);
 	assert.match(source, /await this\.delay\(/);
+});
+
+test("ai service does not silently replay stream requests on retryable transport failures", () => {
+	const source = readAiServiceSource();
+	assert.match(source, /if \(isRetryableLlmFailure\(error\)\)/);
 });

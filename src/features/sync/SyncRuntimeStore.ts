@@ -3,7 +3,6 @@ import { SyncEventBus, type SyncRuntimeEvent, type SyncRuntimeStage } from "./Sy
 
 export interface SyncRuntimeState {
 	projectId: string;
-	projectSlug: string;
 	stage: SyncRuntimeStage;
 	message: string;
 	branch: string;
@@ -58,7 +57,6 @@ export class SyncRuntimeStore {
 			case "sync_started":
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: "checking",
 					message: "",
 					branch: "",
@@ -71,7 +69,6 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: event.stage,
 					message: event.message ?? current?.message ?? "",
 					branch: current?.branch ?? "",
@@ -85,7 +82,6 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: current?.stage ?? "pulling",
 					message: event.pulledFiles.length > 0 ? `Pulled ${event.pulledFiles.length} file(s).` : "",
 					branch: current?.branch ?? "",
@@ -101,7 +97,6 @@ export class SyncRuntimeStore {
 					!event.connected ? "offline" : event.conflicts > 0 ? "blocked" : current?.stage ?? "idle";
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: nextStage,
 					message: current?.message ?? "",
 					branch: event.branch,
@@ -115,7 +110,6 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: "resolving",
 					message: current?.message ?? "",
 					branch: current?.branch ?? "",
@@ -129,7 +123,6 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: "blocked",
 					message: event.message,
 					branch: current?.branch ?? "",
@@ -143,7 +136,6 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: "resolving",
 					message: `Wrote ${event.strategy} resolution for ${event.filePath}.`,
 					branch: current?.branch ?? "",
@@ -158,7 +150,6 @@ export class SyncRuntimeStore {
 				if (event.success) {
 					this.setProjectState({
 						projectId: event.projectId,
-						projectSlug: event.projectSlug,
 						stage: "succeeded",
 						message: "",
 						branch: current?.branch ?? "",
@@ -171,7 +162,6 @@ export class SyncRuntimeStore {
 				const classified = classifyGitError(event.error ?? "");
 				this.setProjectState({
 					projectId: event.projectId,
-					projectSlug: event.projectSlug,
 					stage: classified.kind,
 					message: classified.message,
 					branch: current?.branch ?? "",

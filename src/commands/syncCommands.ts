@@ -21,7 +21,6 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 					projectId: project.projectId,
 					result: results.get(project.projectId) ?? {
 						success: false,
-						projectSlug: project.slug,
 						projectId: project.projectId,
 						pulledFiles: [],
 						pushedFiles: [],
@@ -83,12 +82,12 @@ function getCurrentProject(plugin: FridayPluginApi) {
 		return null;
 	}
 
-	const slug = plugin.dataService.getProjectSlugFromPath(activeFile.path);
-	if (!slug || slug === PERSONAL_SLUG) {
+	const projectId = plugin.dataService.getProjectIdFromPath(activeFile.path);
+	if (!projectId || projectId === PERSONAL_SLUG) {
 		return null;
 	}
 
-	return plugin.settings.projects.find((project) => project.projectId === slug || project.slug === slug) ?? null;
+	return plugin.settings.projects.find((project) => project.projectId === projectId) ?? null;
 }
 
 function updateProjectSyncTimestamps(

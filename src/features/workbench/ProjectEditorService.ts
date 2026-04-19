@@ -2,7 +2,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { App } from "obsidian";
 import simpleGit from "simple-git";
-import { PRIMARY_PATHS } from "../../constants/paths";
+import { getRootCandidates, PRIMARY_PATHS } from "../../constants/paths";
 import { SyncService } from "../../services/SyncService";
 import { ProjectEntry, ProjectGitCredential, ProjectGitState } from "../../types/project";
 import { getVaultBasePath } from "../../utils/vaultPath";
@@ -72,10 +72,26 @@ export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: stri
 	};
 }
 
+export function isFridayManagedProjectRoot(projectRootPath: string, fridayRoot: string): boolean {
+	const normalizedProjectRoot = normalizeVaultPath(projectRootPath);
+	if (!normalizedProjectRoot || !fridayRoot.trim()) {
+		return false;
+	}
+	return getRootCandidates(fridayRoot).some((rootCandidate) => {
+		const normalizedRootCandidate = normalizeVaultPath(rootCandidate);
+		return Boolean(
+			normalizedRootCandidate &&
+			(normalizedProjectRoot === normalizedRootCandidate || normalizedProjectRoot.startsWith(`${normalizedRootCandidate}/`)),
+		);
+	});
+}
+
 export function validateProjectDraft(
 	draft: ProjectEditorDraft | NormalizedProjectDraft,
 	existingProjectIds: Set<string>,
 	initialProjectId = "",
+	fridayRoot = "",
+	initialBoundaryPath = "",
 ): void {
 	const normalizedDraft =
 		"localPath" in draft || "projectRootPath" in draft || "slug" in draft
@@ -108,6 +124,13 @@ export function validateProjectDraft(
 	if (!normalizedRoot || normalizedRoot === "." || normalizedRoot.startsWith("/")) {
 		throw new Error("Project root must be a Vault-relative path.");
 	}
+	const normalizedInitialBoundaryPath = normalizeVaultPath(initialBoundaryPath);
+	if (
+		isFridayManagedProjectRoot(normalizedRoot, fridayRoot) &&
+		normalizedInitialBoundaryPath !== normalizedRoot
+	) {
+		throw new Error("Project root cannot point to the Friday workspace. Choose a folder outside F.R.I.D.A.Y.");
+	}
 }
 
 export async function submitProjectDraft(options: SubmitOptions): Promise<ProjectEntry> {
@@ -123,7 +146,13 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 			projectId: generateProjectId(preferredProjectIdSource, options.existingProjectIds),
 		};
 	}
-	validateProjectDraft(normalizedDraft, options.existingProjectIds, initial?.projectId ?? initial?.slug ?? "");
+	validateProjectDraft(
+		normalizedDraft,
+		options.existingProjectIds,
+		initial?.projectId ?? initial?.slug ?? "",
+		options.fridayRoot,
+		initial?.boundaryPath ?? "",
+	);
 
 	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
 	const resolvedPath = await resolveProjectPath(app, normalizedDraft.mode, normalizedRoot);
@@ -275,12 +304,15 @@ function applyRemoteBootstrapDraftDefaults(draft: ProjectEditorDraft, fridayRoot
 	}
 	const defaults = buildRemoteBootstrapDefaults(fridayRoot, draft.gitRemote);
 	const sanitizedProjectId = normalizeProjectIdCandidate(draft.projectId ?? "");
+	const safeDefaultBoundaryPath = isFridayManagedProjectRoot(defaults.boundaryPath, fridayRoot)
+		? ""
+		: defaults.boundaryPath;
 	return {
 		...draft,
 		projectId: sanitizedProjectId || defaults.projectId,
 		projectName: draft.projectName?.trim() || defaults.projectName,
-		boundaryPath: draft.boundaryPath?.trim() || defaults.boundaryPath,
-		projectRootPath: draft.projectRootPath?.trim() || defaults.boundaryPath,
+		boundaryPath: draft.boundaryPath?.trim() || safeDefaultBoundaryPath,
+		projectRootPath: draft.projectRootPath?.trim() || safeDefaultBoundaryPath,
 	};
 }
 

@@ -16,7 +16,6 @@ export class SyncOrchestrator {
 			this.eventBus?.emit({
 				type: "sync_started",
 				projectId: project.projectId,
-				projectSlug: project.slug,
 				recordedAt,
 			});
 			try {
@@ -27,12 +26,11 @@ export class SyncOrchestrator {
 				if (!pulled.success) {
 					this.emitRecoveryFailedIfNeeded(project, pulled.error);
 					this.emitCompleted(project, false, pulled.error);
-					return this.operator.makeErrorResult(project.slug, pulled.error ?? "Pull failed");
+					return this.operator.makeErrorResult(project.projectId, pulled.error ?? "Pull failed");
 				}
 				this.eventBus?.emit({
 					type: "sync_pull_completed",
 					projectId: project.projectId,
-					projectSlug: project.slug,
 					pulledFiles: pulled.pulledFiles,
 					recordedAt: new Date().toISOString(),
 				});
@@ -42,13 +40,11 @@ export class SyncOrchestrator {
 					this.eventBus?.emit({
 						type: "sync_conflict_detected",
 						projectId: project.projectId,
-						projectSlug: project.slug,
 						conflicts: conflictState.conflicts,
 						recordedAt: new Date().toISOString(),
 					});
 					return {
 						success: false,
-						projectSlug: project.slug,
 						projectId: project.projectId,
 						pulledFiles: pulled.pulledFiles,
 						pushedFiles: [],
@@ -63,13 +59,12 @@ export class SyncOrchestrator {
 				const pushed = await this.push(project);
 				if (!pushed.success) {
 					this.emitCompleted(project, false, pushed.error);
-					return this.operator.makeErrorResult(project.slug, pushed.error ?? "Push failed");
+					return this.operator.makeErrorResult(project.projectId, pushed.error ?? "Push failed");
 				}
 
 				this.emitCompleted(project, true);
 				return {
 					success: true,
-					projectSlug: project.slug,
 					projectId: project.projectId,
 					pulledFiles: pulled.pulledFiles,
 					pushedFiles: pushed.pushedFiles,
@@ -77,7 +72,7 @@ export class SyncOrchestrator {
 					conflictSnapshots: {},
 				};
 			} catch (error) {
-				return this.operator.makeErrorResult(project.slug, error);
+				return this.operator.makeErrorResult(project.projectId, error);
 			}
 		});
 	}
@@ -110,7 +105,6 @@ export class SyncOrchestrator {
 		this.eventBus?.emit({
 			type: "sync_stage_changed",
 			projectId: project.projectId,
-			projectSlug: project.slug,
 			stage,
 			recordedAt: new Date().toISOString(),
 		});
@@ -120,7 +114,6 @@ export class SyncOrchestrator {
 		this.eventBus?.emit({
 			type: "sync_completed",
 			projectId: project.projectId,
-			projectSlug: project.slug,
 			success,
 			error,
 			recordedAt: new Date().toISOString(),
@@ -135,7 +128,6 @@ export class SyncOrchestrator {
 		this.eventBus?.emit({
 			type: "sync_recovery_failed",
 			projectId: project.projectId,
-			projectSlug: project.slug,
 			message,
 			recordedAt: new Date().toISOString(),
 		});

@@ -15,6 +15,6 @@ export interface InvocationRequest {
 	targetId?: string;
 	prompt?: string;
 	payload?: Record<string, unknown>;
-	projectSlug?: string;
+	projectId?: string;
 	sessionId?: string;
 }

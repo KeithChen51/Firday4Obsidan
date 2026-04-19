@@ -57,13 +57,12 @@ export class SyncService {
 		return result.success
 			? {
 				success: true,
-				projectSlug: project.slug,
 				projectId: project.projectId,
 				pulledFiles: result.pulledFiles,
 				pushedFiles: [],
 				conflicts: [],
 			}
-			: this.operator.makeErrorResult(project.slug, result.error ?? "Pull failed");
+			: this.operator.makeErrorResult(project.projectId, result.error ?? "Pull failed");
 	}
 
 	async push(project: ProjectEntry): Promise<SyncResult> {
@@ -71,13 +70,12 @@ export class SyncService {
 		return result.success
 			? {
 				success: true,
-				projectSlug: project.slug,
 				projectId: project.projectId,
 				pulledFiles: [],
 				pushedFiles: result.pushedFiles,
 				conflicts: [],
 			}
-			: this.operator.makeErrorResult(project.slug, result.error ?? "Push failed");
+			: this.operator.makeErrorResult(project.projectId, result.error ?? "Push failed");
 	}
 
 	async sync(project: ProjectEntry): Promise<SyncResult> {
@@ -104,7 +102,6 @@ export class SyncService {
 		this.eventBus?.emit({
 			type: "sync_status_observed",
 			projectId: project.projectId,
-			projectSlug: project.slug,
 			branch: status.branch,
 			connected: status.connected,
 			conflicts: status.conflicts,
@@ -132,7 +129,6 @@ export class SyncService {
 			this.eventBus?.emit({
 				type: "sync_conflict_resolved_written_back",
 				projectId: project.projectId,
-				projectSlug: project.slug,
 				filePath,
 				strategy,
 				recordedAt: new Date().toISOString(),

@@ -39,5 +39,5 @@ export interface GitOperator {
 	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
 	getUserGitCredential(): Promise<ProjectGitCredential | null>;
 	setUserGitCredential(credential: ProjectGitCredential | null): Promise<void>;
-	makeErrorResult(projectSlug: string, error: unknown): SyncResult;
+	makeErrorResult(projectId: string, error: unknown): SyncResult;
 }

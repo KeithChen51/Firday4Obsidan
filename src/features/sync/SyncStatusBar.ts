@@ -42,7 +42,7 @@ export class SyncStatusBar {
 			this.applyStageAppearance("idle");
 			return;
 		}
-		this.item.setText(`Sync ${this.getStageLabel(state.stage)}: ${state.projectSlug}`);
+		this.item.setText(`Sync ${this.getStageLabel(state.stage)}: ${state.projectId}`);
 		this.applyStageAppearance(state.stage);
 	}
 

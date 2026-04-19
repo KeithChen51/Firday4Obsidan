@@ -5,6 +5,7 @@ import {
 	buildLlmHeaders,
 	extractHttpStatus,
 	getLlmRetryDelayMs,
+	isRetryableLlmFailure,
 	shouldRetryLlmRequest,
 } from "../core/llm/LlmTransportPolicy";
 
@@ -302,8 +303,8 @@ export class AIService {
 
 		if (lower.includes("llm response has no usable message content")) {
 			return (
-				"LLM 已返回响应，但响应体里没有可用的文本内容。" +
-				"这通常表示接口已经连通，但返回格式与当前解析规则不一致；" +
+				"LLM 已返回响应，但返回体字段里没有可用的文本内容。" +
+				"这通常表示接口已经连通，但返回体字段或协议与当前解析规则不兼容；" +
 				"请检查网关是否返回 choices[0].message.content、output_text 或 output[].content[].text。"
 			);
 		}
@@ -319,12 +320,20 @@ export class AIService {
 
 		if (lower.includes("err_connection_reset") || lower.includes("econnreset")) {
 			return new Error(
-				`连接被重置（ERR_CONNECTION_RESET）。请检查企业网络、代理、VPN 或证书策略。已尝试地址：${triedText}`,
+				`连接被重置（ERR_CONNECTION_RESET）。这通常是企业网络、代理、VPN 或证书链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+			);
+		}
+
+		if (lower.includes("504") || lower.includes("gateway timeout")) {
+			return new Error(
+				`企业网关超时（504）。这通常是网关或上游模型排队超时，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
 			);
 		}
 
 		if (lower.includes("timed out") || lower.includes("timeout")) {
-			return new Error(`连接超时。请检查网络或代理配置。已尝试地址：${triedText}`);
+			return new Error(
+				`请求超时。通常是企业网关、代理或网络链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+			);
 		}
 
 		if (lower.includes("401") || lower.includes("unauthorized")) {
@@ -336,15 +345,33 @@ export class AIService {
 		}
 
 		if (lower.includes("404")) {
-			return new Error(`接口不存在（404）。请确认网关要求的请求路径。已尝试地址：${triedText}`);
+			return new Error(`接口不存在（404）。这更像是网关路径不兼容，而不是模型本身故障。请确认网关要求的请求路径。已尝试地址：${triedText}`);
+		}
+
+		if (lower.includes("405")) {
+			return new Error(`请求方法不被允许（405）。这通常表示当前网关端点与 OpenAI 协议路径不兼容。已尝试地址：${triedText}`);
 		}
 
 		if (lower.includes("429")) {
-			return new Error("请求过于频繁（429）或额度不足，请稍后重试。");
+			return new Error("请求过于频繁（429）或额度不足。当前请求未成功完成；若重试，需要重新发送本次模型请求。");
 		}
 
-		if (lower.includes("500") || lower.includes("502") || lower.includes("503") || lower.includes("504")) {
-			return new Error(`模型服务暂时不可用，请稍后重试。原始错误：${raw}`);
+		if (
+			lower.includes("unsupported tool") ||
+			lower.includes("tool schema") ||
+			lower.includes("tool_calls") ||
+			lower.includes("function.name") ||
+			lower.includes("合法 json")
+		) {
+			return new Error(
+				"当前模型或网关与 Friday 的 native tool calling 协议不兼容。可以改用兼容模式继续执行，但会从当前步骤重新请求一次模型。",
+			);
+		}
+
+		if (lower.includes("500") || lower.includes("502") || lower.includes("503")) {
+			return new Error(
+				`模型服务或企业网关暂时不可用（${extractHttpStatus(error) ?? "5xx"}）。这通常是临时性网络/网关故障，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。原始错误：${raw}`,
+			);
 		}
 
 		return new Error(this.localizeKnownErrorMessage(raw) || "未知网络错误");
@@ -769,6 +796,9 @@ export class AIService {
 					if (status != null) {
 						throw this.normalizeError(error, endpoint, triedEndpoints);
 					}
+					if (isRetryableLlmFailure(error)) {
+						throw this.normalizeError(error, endpoint, triedEndpoints);
+					}
 
 					try {
 						return await this.chat(messages, options);
@@ -790,7 +820,7 @@ export class AIService {
 		const first = toolCalls[0];
 		const fnName = first?.function?.name?.trim() ?? "";
 		if (!fnName) {
-			throw new Error("工具调用缺少 function.name。");
+			throw new Error("工具调用协议不兼容：返回的 tool_calls 缺少 function.name。");
 		}
 
 		const rawArgs = first?.function?.arguments?.trim() ?? "";
@@ -806,7 +836,7 @@ export class AIService {
 		try {
 			parsed = JSON.parse(rawArgs);
 		} catch (error) {
-			throw new Error(`工具参数不是合法 JSON: ${String(error)}`);
+			throw new Error(`工具调用协议不兼容：function.arguments 不是合法 JSON: ${String(error)}`);
 		}
 
 		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -878,7 +908,7 @@ export class AIService {
 
 		const endpoints = this.resolveEndpointCandidates(config.apiUrl).filter((endpoint) => !this.isResponsesEndpoint(endpoint));
 		if (endpoints.length === 0) {
-			throw new Error("当前 API 地址仅命中 responses 端点，无法执行 native tool calling。");
+			throw new Error("当前 API 地址仅命中 responses 端点，无法执行 native tool calling。这属于协议兼容性限制，不是网络故障。");
 		}
 
 		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);

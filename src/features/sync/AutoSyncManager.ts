@@ -52,7 +52,7 @@ export class AutoSyncManager {
 		if (this.deps.getSettings().sync.mode !== "continuous_auto" || !project.autoSync) {
 			return;
 		}
-		const key = project.projectId || project.slug;
+		const key = project.projectId;
 		const existing = this.pendingTimers.get(key);
 		if (typeof existing === "number") {
 			this.clearTimeoutFn(existing);
@@ -107,7 +107,6 @@ export class AutoSyncManager {
 		this.deps.eventBus?.emit({
 			type: "sync_stage_changed",
 			projectId: project.projectId,
-			projectSlug: project.slug,
 			stage,
 			message,
 			recordedAt: new Date().toISOString(),

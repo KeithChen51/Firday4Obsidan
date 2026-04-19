@@ -38,3 +38,13 @@ test("slash suggestions filter by typed prefix", async () => {
 	assert.equal(items.some((item) => item.value === "/skills"), true);
 	assert.equal(items.some((item) => item.value === "/ship "), false);
 });
+
+test("skill suggestions render a friendly skill label instead of raw slash syntax", async () => {
+	const mod = await loadModule();
+	const items = mod.buildSlashSuggestions("/skill", {
+		skills: [{ command: "lookup-wiki", description: "Lookup project knowledge" }],
+		slashCommands: [],
+	});
+	const skillItem = items.find((item) => item.value === "/skill lookup-wiki ");
+	assert.equal(skillItem?.label, "技能：lookup-wiki");
+});

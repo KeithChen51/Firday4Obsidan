@@ -6,6 +6,7 @@ import {
 	createEmptyMentionComposerSnapshot,
 	createMentionNode,
 	mentionComposerSchema,
+	restoreMentionComposerSelection,
 	restoreMentionComposerDoc,
 	serializeMentionComposerDoc,
 	type MentionComposerSnapshot,
@@ -55,11 +56,13 @@ export class MentionComposer {
 		});
 		this.dropdown = new MentionDropdown(this.rootEl);
 		const initialDoc = restoreMentionComposerDoc(options.initialSnapshot ?? createEmptyMentionComposerSnapshot());
+		const initialSelection = restoreMentionComposerSelection(options.initialSnapshot, initialDoc);
 		this.snapshot = serializeMentionComposerDoc(initialDoc);
 		this.view = new EditorView(this.editorEl, {
 			state: EditorState.create({
 				doc: initialDoc,
 				schema: mentionComposerSchema,
+				selection: initialSelection ?? undefined,
 				plugins: [keymap(baseKeymap)],
 			}),
 			editable: () => !this.options.disabled,
@@ -94,6 +97,10 @@ export class MentionComposer {
 		return this.snapshot;
 	}
 
+	hasFocus(): boolean {
+		return this.view.hasFocus();
+	}
+
 	insertText(text: string): void {
 		const { from, to } = this.view.state.selection;
 		const transaction = this.view.state.tr.insertText(text, from, to);
@@ -123,7 +130,12 @@ export class MentionComposer {
 	}
 
 	private syncSnapshot(initial = false): void {
-		this.snapshot = serializeMentionComposerDoc(this.view.state.doc);
+		const { anchor, head } = this.view.state.selection;
+		this.snapshot = {
+			...serializeMentionComposerDoc(this.view.state.doc),
+			selectionAnchor: anchor,
+			selectionHead: head,
+		};
 		this.editorEl.toggleClass("is-empty", this.snapshot.text.length === 0 && this.snapshot.tokens.length === 0);
 		if (!initial) {
 			this.options.onChange?.(this.snapshot);

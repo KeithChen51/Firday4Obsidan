@@ -55,7 +55,7 @@ export class DataService {
 		await this.upsertTextFile(filePath, content);
 	}
 
-	getProjectSlugFromPath(filePath: string): string | null {
+	getProjectIdFromPath(filePath: string): string | null {
 		const normalizedPath = normalizePath(filePath);
 
 		for (const root of getRootCandidates(this.fridayRoot)) {

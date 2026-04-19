@@ -28,9 +28,9 @@ test("startup update check is gated by startup toggle, git runtime, and credenti
 	assert.doesNotMatch(source, /this\.settings\.update\.enabled && this\.settings\.update\.checkOnStartup/);
 });
 
-test("main backfills runtime changelog from bundled plugin changelog during startup", () => {
+test("main leaves studio publication to agent bootstrap instead of running a startup changelog backfill", () => {
 	const source = read(mainPath);
-	assert.match(source, /pluginUpdateService\.syncBundledUpdateLog\(\)/);
+	assert.doesNotMatch(source, /pluginUpdateService\.syncBundledUpdateLog\(\)/);
 });
 
 test("main exposes a reload helper that prefers Obsidian's reload command and falls back to window reload", () => {

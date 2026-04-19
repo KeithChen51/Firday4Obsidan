@@ -29,7 +29,7 @@ export function buildSlashSuggestions(
 	for (const skill of input.skills) {
 		items.push({
 			value: `/skill ${skill.command} `,
-			label: `/skill ${skill.command}`,
+			label: `技能：${skill.command}`,
 			description: skill.description,
 		});
 	}
