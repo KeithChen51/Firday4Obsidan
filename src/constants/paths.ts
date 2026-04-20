@@ -23,7 +23,7 @@ export const PRIMARY_PATHS: PathPreset = {
 	studioNotes: "幕后笔记 · Behind the Build",
 	studioReadmeFile: "README.md",
 	studioStartHereFile: "从这里开始 · Start Here/从这里开始.md",
-	studioLogFile: "迭代手记.md",
+	studioLogFile: "迭代手记 · Changelog.md",
 	configFile: "_配置.md",
 	projectMetaFile: "_项目.md",
 	projectMembersFile: "_成员.md",

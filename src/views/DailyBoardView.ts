@@ -34,6 +34,10 @@ import { SkillRegistry } from "../core/execution/SkillRegistry";
 import { resolveBuiltinSkillReviewNote, type ResolvedBuiltinSkillReviewNote } from "../skills/packs/builtin/reviewNotes";
 import type { MentionSuggestion } from "./components/MentionDropdown";
 import {
+	computeSkillReviewNotePopoverLayout,
+	computeSkillReviewNotePopoverPosition,
+} from "./skillReviewNotePopoverPlacement";
+import {
 	MentionResolver,
 	parseLegacyMentionMarkup,
 	type MentionDocumentSnapshot,
@@ -126,6 +130,7 @@ export class DailyBoardView extends ItemView {
 	private composer: MentionComposer | null = null;
 	private readonly mentionResolver = new MentionResolver();
 	private readonly gitIgnoreService: GitIgnoreService;
+	private skillReviewNotePopoverCleanups: Array<() => void> = [];
 
 	constructor(leaf: WorkspaceLeaf, private readonly plugin: FridayPluginApi) {
 		super(leaf);
@@ -172,6 +177,7 @@ export class DailyBoardView extends ItemView {
 			window.clearTimeout(this.refreshTimer);
 			this.refreshTimer = null;
 		}
+		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
 		this.approvalQueue.clearWithDecision("deny");
@@ -207,6 +213,7 @@ export class DailyBoardView extends ItemView {
 	private renderBoard(): void {
 		this.captureAiMessageListScrollState();
 		const shouldRestoreComposerFocus = this.composer?.hasFocus() ?? false;
+		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
 		this.contentEl.empty();
@@ -233,6 +240,13 @@ export class DailyBoardView extends ItemView {
 		}
 		if (shouldRestoreComposerFocus) {
 			(this.composer as MentionComposer | null)?.focus();
+		}
+	}
+
+	private cleanupSkillReviewNotePopovers(): void {
+		const cleanups = this.skillReviewNotePopoverCleanups.splice(0);
+		for (const cleanup of cleanups) {
+			cleanup();
 		}
 	}
 
@@ -1531,9 +1545,16 @@ export class DailyBoardView extends ItemView {
 			"aria-label",
 			this.t("policy.skills.reviewNote.button", "查看此 Skill 的改动说明"),
 		);
+		noteButton.setAttribute("aria-haspopup", "dialog");
+		noteButton.setAttribute("aria-expanded", "false");
 		setIcon(noteButton, "info");
 
-		const popover = host.createDiv({ cls: "friday-control-center-item-note-popover" });
+		const ownerDocument = containerEl.ownerDocument;
+		const ownerWindow = ownerDocument.defaultView ?? window;
+		const popover = ownerDocument.createElement("div");
+		popover.className = "friday-control-center-item-note-popover";
+		popover.dataset.placement = "bottom";
+		ownerDocument.body.appendChild(popover);
 		popover.createDiv({
 			cls: "friday-control-center-item-note-version",
 			text: this.t("policy.skills.reviewNote.version", "更新于 {version}", { version: note.version }),
@@ -1558,34 +1579,180 @@ export class DailyBoardView extends ItemView {
 			note.changes,
 		);
 
-		let pinned = false;
-		const setOpen = (open: boolean) => {
-			popover.toggleClass("is-open", open);
+			let open = false;
+			let pinned = false;
+			let closeTimer: number | null = null;
+			let rafId: number | null = null;
+			let frozenGeometry:
+				| {
+						anchor: { left: number; top: number; width: number; height: number };
+						viewport: { width: number; height: number };
+				  }
+				| null = null;
+
+			const clearCloseTimer = () => {
+				if (closeTimer != null) {
+					ownerWindow.clearTimeout(closeTimer);
+					closeTimer = null;
+			}
 		};
+			const cancelScheduledPositioning = () => {
+				if (rafId != null) {
+					ownerWindow.cancelAnimationFrame(rafId);
+					rafId = null;
+				}
+			};
+			const freezePopoverGeometry = () => {
+				const frozenAnchor = noteButton.getBoundingClientRect();
+				const frozenViewport = {
+					width: ownerWindow.innerWidth,
+					height: ownerWindow.innerHeight,
+				};
+				frozenGeometry = {
+					anchor: {
+						left: frozenAnchor.left,
+						top: frozenAnchor.top,
+						width: frozenAnchor.width,
+						height: frozenAnchor.height,
+					},
+					viewport: frozenViewport,
+				};
+			};
+			const updatePopoverLayout = () => {
+				if (!open) {
+					return;
+				}
+				if (!frozenGeometry) {
+					freezePopoverGeometry();
+				}
+				if (!frozenGeometry) {
+					return;
+				}
+				const { anchor, viewport } = frozenGeometry;
+				const layout = computeSkillReviewNotePopoverLayout(anchor, viewport);
+				popover.style.width = `${layout.width}px`;
+				popover.style.maxHeight = `${layout.maxHeight}px`;
+				popover.style.minWidth = `${Math.min(layout.width, 280)}px`;
+				popover.dataset.placement = layout.placement;
+				popover.classList.add("is-measuring");
+				const popoverRect = popover.getBoundingClientRect();
+				const position = computeSkillReviewNotePopoverPosition(
+					anchor,
+					{
+						width: popoverRect.width,
+						height: popoverRect.height,
+					},
+					viewport,
+					layout.placement,
+				);
+				popover.style.left = `${position.left}px`;
+				popover.style.top = `${position.top}px`;
+				popover.classList.remove("is-measuring");
+			};
+			const schedulePopoverLayout = () => {
+				if (!open) {
+					return;
+				}
+				cancelScheduledPositioning();
+				rafId = ownerWindow.requestAnimationFrame(() => {
+					rafId = null;
+					updatePopoverLayout();
+				});
+			};
+			const setOpen = (nextOpen: boolean) => {
+				clearCloseTimer();
+				if (open === nextOpen) {
+					if (nextOpen) {
+						schedulePopoverLayout();
+					}
+					return;
+				}
+				open = nextOpen;
+				popover.classList.toggle("is-open", open);
+				noteButton.setAttribute("aria-expanded", open ? "true" : "false");
+				if (open) {
+					freezePopoverGeometry();
+					updatePopoverLayout();
+					schedulePopoverLayout();
+					return;
+				}
+				frozenGeometry = null;
+				cancelScheduledPositioning();
+				popover.classList.remove("is-measuring");
+			};
 		const closeIfNotPinned = () => {
 			if (!pinned) {
 				setOpen(false);
 			}
 		};
-
-		noteButton.onmouseenter = () => setOpen(true);
-		host.onmouseleave = () => closeIfNotPinned();
-		noteButton.onfocus = () => setOpen(true);
-		host.addEventListener("focusout", (event: FocusEvent) => {
-			const next = event.relatedTarget;
-			if (next instanceof Node && host.contains(next)) {
+		const scheduleCloseIfNotPinned = () => {
+			if (pinned) {
 				return;
 			}
-			pinned = false;
-			setOpen(false);
-		});
-		noteButton.onclick = (event) => {
-			event.preventDefault();
-			event.stopPropagation();
-			pinned = !pinned;
-			setOpen(pinned);
+			clearCloseTimer();
+			closeTimer = ownerWindow.setTimeout(() => {
+				closeTimer = null;
+				closeIfNotPinned();
+			}, 80);
 		};
-	}
+			const handleDocumentPointerDown = (event: Event) => {
+				if (!open && !pinned) {
+					return;
+				}
+			const target = event.target;
+			if (!(target instanceof Node)) {
+				return;
+			}
+			if (host.contains(target) || popover.contains(target)) {
+				return;
+			}
+				pinned = false;
+				setOpen(false);
+			};
+			const handleWindowResize = () => {
+				if (!open) {
+					return;
+				}
+				if (frozenGeometry) {
+					frozenGeometry = {
+						...frozenGeometry,
+						viewport: {
+							width: ownerWindow.innerWidth,
+							height: ownerWindow.innerHeight,
+						},
+					};
+				}
+				updatePopoverLayout();
+			};
+
+			noteButton.addEventListener("mouseenter", () => setOpen(true));
+		noteButton.addEventListener("mouseleave", () => scheduleCloseIfNotPinned());
+		noteButton.addEventListener("focus", () => setOpen(true));
+		noteButton.addEventListener("blur", (event: FocusEvent) => {
+			const next = event.relatedTarget;
+			if (next instanceof Node && popover.contains(next)) {
+				return;
+			}
+			scheduleCloseIfNotPinned();
+		});
+		popover.addEventListener("mouseenter", () => clearCloseTimer());
+		popover.addEventListener("mouseleave", () => scheduleCloseIfNotPinned());
+		noteButton.onclick = (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				pinned = !pinned;
+				setOpen(pinned);
+			};
+			ownerWindow.addEventListener("resize", handleWindowResize);
+			ownerDocument.addEventListener("pointerdown", handleDocumentPointerDown, true);
+			this.skillReviewNotePopoverCleanups.push(() => {
+				clearCloseTimer();
+				cancelScheduledPositioning();
+				ownerWindow.removeEventListener("resize", handleWindowResize);
+				ownerDocument.removeEventListener("pointerdown", handleDocumentPointerDown, true);
+				popover.remove();
+			});
+		}
 
 	private renderSkillReviewNoteSection(containerEl: HTMLElement, title: string, items: string[]): void {
 		const section = containerEl.createDiv({ cls: "friday-control-center-item-note-section" });
@@ -1688,7 +1855,7 @@ export class DailyBoardView extends ItemView {
 		const searchInput = searchWrap.createEl("input", {
 			cls: "friday-ai-session-search",
 			attr: {
-				type: "search",
+				type: "text",
 				placeholder: this.t("ai.sessions.search.placeholder", "搜索对话…"),
 			},
 		});

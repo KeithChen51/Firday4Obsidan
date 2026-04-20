@@ -46,6 +46,8 @@ import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
+const ROOT_INDEX_RECOVERY_STORAGE_KEY = "friday:root-index-recovery";
+const ROOT_INDEX_RECOVERY_WINDOW_MS = 12 * 60 * 60 * 1000;
 type WikiCompileResult = {
 	projectId: string;
 	projectRoot: string;
@@ -160,6 +162,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
+			const triggeredRootIndexRecovery = await this.recoverMissingFridayRootIndex();
+			if (triggeredRootIndexRecovery) {
+				return;
+			}
 
 				this.conversationService = new ConversationService(this.app.vault, this.agentService);
 				this.projectContentService = new ProjectContentService(this.app.vault);
@@ -563,6 +569,58 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			console.warn("[Friday] Failed to invoke Obsidian reload command, falling back to window reload.", error);
 		}
 		window.location.reload();
+	}
+
+	private async recoverMissingFridayRootIndex(): Promise<boolean> {
+		const fridayRoot = this.dataService.getFridayRoot();
+		const storageKey = `${ROOT_INDEX_RECOVERY_STORAGE_KEY}:${this.app.vault.getName()}:${fridayRoot.toLowerCase()}`;
+		const indexedRoot = this.app.vault.getAbstractFileByPath(fridayRoot);
+		if (indexedRoot) {
+			window.localStorage.removeItem(storageKey);
+			return false;
+		}
+
+		const adapter = this.app.vault.adapter as typeof this.app.vault.adapter & {
+			exists?: (path: string, sensitive?: boolean) => Promise<boolean>;
+		};
+		if (typeof adapter.exists !== "function") {
+			return false;
+		}
+
+		let existsOnDisk = false;
+		try {
+			existsOnDisk = await adapter.exists(fridayRoot, false);
+		} catch (error) {
+			console.warn("[Friday] Failed to probe friday root on disk.", error);
+			return false;
+		}
+		if (!existsOnDisk) {
+			window.localStorage.removeItem(storageKey);
+			return false;
+		}
+
+		const lastAttemptAt = Number(window.localStorage.getItem(storageKey) ?? "0");
+		if (Number.isFinite(lastAttemptAt) && Date.now() - lastAttemptAt < ROOT_INDEX_RECOVERY_WINDOW_MS) {
+			console.warn("[Friday] Friday root exists on disk but is still missing from the vault index.", { fridayRoot });
+			new Notice(
+				"检测到 F.R.I.D.A.Y 目录已存在于磁盘，但当前 Vault 没有收录它。请重新打开这个 Vault；如果持续复现，请反馈 Obsidian 版本与 .obsidian/app.json。",
+				10000,
+			);
+			return false;
+		}
+
+		window.localStorage.setItem(storageKey, String(Date.now()));
+		console.warn("[Friday] Friday root exists on disk but is missing from the current vault index. Reloading once.", {
+			fridayRoot,
+		});
+		new Notice(
+			"检测到 F.R.I.D.A.Y 目录已存在于磁盘，但当前文件树没有收录；正在自动重载一次 Obsidian 以恢复索引。",
+			8000,
+		);
+		window.setTimeout(() => {
+			this.reloadObsidianApp();
+		}, 250);
+		return true;
 	}
 
 	private getEffectiveLlmSettings(): FridaySettings["llm"] {

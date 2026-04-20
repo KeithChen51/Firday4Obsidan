@@ -61,11 +61,19 @@ test("session drawer supports search and date-grouped browsing", async () => {
 	assert.match(source, /ai\.sessions\.search\.placeholder/);
 });
 
-test("session drawer search input reserves dedicated inline space for the search icon", async () => {
+test("session drawer search input lays out the icon beside the text instead of overlaying it", async () => {
 	const styles = readStylesSource();
-	assert.match(styles, /\.friday-ai-session-search-icon\s*\{[\s\S]*left:\s*10px;/);
-	assert.match(styles, /\.friday-ai-session-search\s*\{[\s\S]*padding-left:\s*40px;/);
-	assert.match(styles, /\.friday-ai-session-search\s*\{[\s\S]*padding-inline-start:\s*40px;/);
+	assert.match(styles, /\.friday-ai-session-search-wrap\s*\{[^}]*grid-template-columns:\s*14px minmax\(0,\s*1fr\);/);
+	assert.match(styles, /\.friday-ai-session-search-wrap\s*\{[^}]*column-gap:\s*8px;/);
+	assert.doesNotMatch(styles, /\.friday-ai-session-search-icon\s*\{[^}]*position:\s*absolute;/);
+	assert.doesNotMatch(styles, /\.friday-ai-session-search\s*\{[^}]*padding-left:\s*40px;/);
+});
+
+test("session drawer search input avoids native search chrome when rendering a custom icon", async () => {
+	const source = readViewSource();
+	const match = source.match(/const searchInput = searchWrap\.createEl\("input", \{[\s\S]*?attr:\s*\{([\s\S]*?)\}\s*,?[\s\S]*?\}\);/);
+	assert.ok(match, "session search input definition should exist");
+	assert.doesNotMatch(match[1] ?? "", /type:\s*"search"/);
 });
 
 test("session drawer uses context-menu actions instead of always-visible text pills", async () => {
@@ -406,6 +414,22 @@ test("skill cards render review note icons and popovers for builtin skills with 
 	assert.match(styles, /\.friday-control-center-item-note-button\b/);
 	assert.match(styles, /\.friday-control-center-item-note-popover\b/);
 	assert.match(styles, /\.friday-control-center-item-note-popover\.is-open\b/);
+});
+
+test("skill review note popovers float at viewport level and track dynamic placement", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	assert.match(source, /computeSkillReviewNotePopoverLayout/);
+	assert.match(source, /ownerDocument\.body\.appendChild\(popover\)/);
+	assert.match(source, /popover\.dataset\.placement/);
+	assert.match(source, /const frozenAnchor = noteButton\.getBoundingClientRect\(\)/);
+	assert.match(source, /const frozenViewport = \{/);
+	assert.doesNotMatch(source, /ownerDocument\.addEventListener\("scroll", updatePopoverPosition, true\)/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\s*\{[\s\S]*position:\s*fixed;/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\s*\{[\s\S]*overflow-y:\s*auto;/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\[data-placement="top"\]\s*\{/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\[data-placement="right"\]\s*\{/);
+	assert.match(styles, /\.friday-control-center-item-note-popover\[data-placement="left"\]\s*\{/);
 });
 
 test("skill descriptions can prefer chinese localized metadata", async () => {

@@ -6,7 +6,7 @@ const repoRoot = process.cwd();
 const sourceRoot = path.join(repoRoot, "src", "content", "studio");
 const outputPath = path.join(sourceRoot, "generated.ts");
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
-const studioLogFile = "迭代手记.md";
+const studioLogFile = "迭代手记 · Changelog.md";
 
 function toPosix(relativePath) {
 	return relativePath.split(path.sep).join("/");

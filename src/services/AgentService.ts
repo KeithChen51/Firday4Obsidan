@@ -471,6 +471,10 @@ export class AgentService {
 				if (!message.includes("already exists")) {
 					throw error;
 				}
+				const existing = this.vault.getAbstractFileByPath(current);
+				if (existing instanceof TFile) {
+					throw new Error(`Path occupied by file: ${current}`);
+				}
 			}
 		}
 	}
@@ -506,7 +510,7 @@ export class AgentService {
 		if (parentDir) {
 			await this.ensureFolderRecursive(parentDir);
 		}
-		const abstractFile = this.vault.getAbstractFileByPath(normalized);
+		const abstractFile = this.getLoadedFileByPathRelaxed(normalized) ?? this.vault.getAbstractFileByPath(normalized);
 		if (abstractFile instanceof TFolder) {
 			throw new Error(`File path occupied by folder: ${normalized}`);
 		}
@@ -518,7 +522,50 @@ export class AgentService {
 			await this.vault.modify(abstractFile, content);
 			return;
 		}
-		await this.vault.create(normalized, content);
+		try {
+			await this.vault.create(normalized, content);
+			return;
+		} catch (error) {
+			if (!this.isAlreadyExistsError(error)) {
+				throw error;
+			}
+		}
+
+		const existing = this.getLoadedFileByPathRelaxed(normalized) ?? this.vault.getAbstractFileByPath(normalized);
+		if (existing instanceof TFile) {
+			const current = await this.vault.cachedRead(existing);
+			if (current !== content) {
+				await this.vault.modify(existing, content);
+			}
+			return;
+		}
+
+		const adapter = (this.vault as Vault & {
+			adapter?: {
+				write?: (normalizedPath: string, data: string) => Promise<void>;
+			};
+		}).adapter;
+		if (typeof adapter?.write === "function") {
+			await adapter.write(normalized, content);
+			return;
+		}
+
+		throw new Error(`Managed file already exists but could not be recovered from vault cache: ${normalized}`);
+	}
+
+	private getLoadedFileByPathRelaxed(pathValue: string): TFile | null {
+		const normalized = normalizePath(pathValue);
+		const normalizedLower = normalized.toLowerCase();
+		return (
+			this.vault
+				.getAllLoadedFiles()
+				.find((item): item is TFile => item instanceof TFile && normalizePath(item.path).toLowerCase() === normalizedLower) ?? null
+		);
+	}
+
+	private isAlreadyExistsError(error: unknown): boolean {
+		const message = String((error as { message?: unknown })?.message ?? error ?? "").toLowerCase();
+		return message.includes("file already exists") || message.includes("already exists");
 	}
 
 	private getParentDirectory(pathValue: string): string {
