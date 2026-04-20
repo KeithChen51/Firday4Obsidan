@@ -36,6 +36,13 @@ test("agent service no longer provisions legacy agent memory files", async () =>
 	assert.doesNotMatch(source, /getAgentMemoryRoot\(agent\.id\)\/preferences\.md/);
 });
 
+test("agent service is no longer the canonical runtime root once soul migration lands", async () => {
+	const source = readSource();
+	assert.doesNotMatch(source, /getAgentsRoot\(/);
+	assert.doesNotMatch(source, /getAgentSessionsRoot\(/);
+	assert.doesNotMatch(source, /getAgentToolApprovalPath\(/);
+});
+
 test("agent service tolerates startup file-create races when managed files already exist on disk", async () => {
 	const source = readSource();
 	const match = source.match(/private async writeManagedTextFile\(filePath: string, content: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);

@@ -52,6 +52,14 @@ test("daily board view supports collapsible session nav", async () => {
 	assert.match(source, /toggleAiSessionNavCollapsed/);
 });
 
+test("daily board view switches souls instead of agent identities", async () => {
+	const source = readViewSource();
+	assert.match(source, /private async switchSoul\(soulId: string\): Promise<void>/);
+	assert.doesNotMatch(source, /private async switchAgent\(agentId: string\): Promise<void>/);
+	assert.match(source, /this\.plugin\.settings\.activeSoulId/);
+	assert.doesNotMatch(source, /this\.plugin\.settings\.activeAgentId/);
+});
+
 test("session drawer supports search and date-grouped browsing", async () => {
 	const source = readViewSource();
 	assert.match(source, /aiSessionSearchQuery/);

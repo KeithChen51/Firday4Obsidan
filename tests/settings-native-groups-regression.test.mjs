@@ -29,6 +29,14 @@ test("sync llm and agent sections render settings inside native groups", () => {
 	assert.match(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{[\s\S]*?createNativeSettingsGroup\(containerEl/);
 });
 
+test("settings tab is ready to rename the agent section to soul", () => {
+	const source = read(settingsPath);
+	assert.match(source, /private renderSoulSection\(containerEl: HTMLElement\): void \{/);
+	assert.doesNotMatch(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{/);
+	assert.match(source, /settings\.section\.soul/);
+	assert.doesNotMatch(source, /settings\.section\.agent/);
+});
+
 test("tab content sections no longer repeat the selected tab title as an extra h3 header", () => {
 	const source = read(settingsPath);
 	assert.doesNotMatch(source, /renderUserSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.user"\) \}\)/);

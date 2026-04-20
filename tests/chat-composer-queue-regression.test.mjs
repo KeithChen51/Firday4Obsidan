@@ -21,7 +21,8 @@ test("chat toolbar persists model and permission choices instead of session foll
 	assert.doesNotMatch(source, /aiSessionPermissionOverride/);
 	assert.doesNotMatch(source, /ai\.model\.follow/);
 	assert.doesNotMatch(source, /ai\.permission\.follow/);
-	assert.match(source, /await this\.plugin\.agentService\.writeAgentProfile\(activeAgent\)/);
+	assert.match(source, /await this\.plugin\.soulStore\.updateSoul\(/);
+	assert.doesNotMatch(source, /await this\.plugin\.agentService\.writeAgentProfile\(activeAgent\)/);
 	assert.match(source, /this\.plugin\.settings\.agentRuntime\.toolPermissionMode = value as ToolPermissionMode/);
 });
 
