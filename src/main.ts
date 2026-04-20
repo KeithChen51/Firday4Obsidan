@@ -30,6 +30,7 @@ import { LocalStateRootService } from "./services/LocalStateRootService";
 import { RuntimeStateStore } from "./services/RuntimeStateStore";
 import { SoulStore } from "./services/SoulStore";
 import { LegacyAgentMigrationService } from "./services/LegacyAgentMigrationService";
+import { LegacyAgentCleanupService } from "./services/LegacyAgentCleanupService";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
 import { AutoSyncManager } from "./features/sync/AutoSyncManager";
@@ -101,6 +102,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	runtimeStateStore!: RuntimeStateStore;
 	soulStore!: SoulStore;
 	legacyAgentMigrationService!: LegacyAgentMigrationService;
+	legacyAgentCleanupService!: LegacyAgentCleanupService;
 	private readonly rawIngestTimers = new Map<string, number>();
 	private idleAutoSyncInterval: number | null = null;
 	private continuousAutoSyncListenerRegistered = false;
@@ -214,6 +216,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.runtimeStateStore,
 				this.agentService,
 				() => this.saveSettings(),
+			);
+			this.legacyAgentCleanupService = new LegacyAgentCleanupService(
+				this.app.vault,
+				this.agentService,
+				this.runtimeStateStore,
 			);
 			await this.legacyAgentMigrationService.migrateIfNeeded();
 			this.commandExecService = new CommandExecService(
@@ -449,6 +456,18 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			summary: input.summary,
 			description: input.description,
 		});
+		if (!this.settings.agents.some((item) => item.id === created.id)) {
+			this.settings.agents.push({
+				id: created.id,
+				name: created.name,
+				description: created.description,
+				model: "",
+				agentFilePath: "",
+				createdAt: created.createdAt,
+				updatedAt: created.updatedAt,
+			});
+		}
+		this.settings.activeAgentId = created.id;
 		this.settings.activeSoulId = created.id;
 		await this.soulStore.setActiveSoul(created.id);
 		await this.saveSettings();

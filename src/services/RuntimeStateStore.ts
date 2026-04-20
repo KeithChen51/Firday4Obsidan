@@ -25,6 +25,10 @@ export class RuntimeStateStore {
 		return this.localStateRootService.resolve("runtime");
 	}
 
+	getBackupsRoot(): string {
+		return this.localStateRootService.resolve("backups");
+	}
+
 	getSessionFilePath(sessionId: string): string {
 		return path.join(this.getSessionsRoot(), `${sessionId}.jsonl`);
 	}
@@ -37,6 +41,10 @@ export class RuntimeStateStore {
 		return path.join(this.getRuntimeRoot(), "migration.json");
 	}
 
+	getLegacyAgentBackupRoot(): string {
+		return path.join(this.getBackupsRoot(), "legacy-agents");
+	}
+
 	async ensureBaseLayout(): Promise<void> {
 		await this.localStateRootService.ensureBaseLayout();
 		for (const directory of [
@@ -45,6 +53,7 @@ export class RuntimeStateStore {
 			this.getApprovalsRoot(),
 			this.getSnapshotsRoot(),
 			this.getRuntimeRoot(),
+			this.getBackupsRoot(),
 		]) {
 			await mkdir(directory, { recursive: true });
 		}

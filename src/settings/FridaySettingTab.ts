@@ -108,6 +108,9 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	focusSection(section: SettingsSection): void {
+		if (section === "agent") {
+			section = "soul";
+		}
 		if (this.activeSection === section) {
 			return;
 		}
@@ -132,8 +135,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.renderLlmSection(containerEl);
 			return;
 		}
-		if (this.activeSection === "agent") {
-			this.renderAgentSection(containerEl);
+		if (this.activeSection === "agent" || this.activeSection === "soul") {
+			this.renderSoulSection(containerEl);
 			return;
 		}
 		if (this.activeSection === "slash") {
@@ -150,7 +153,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			{ id: "project", label: this.host.t("settings.section.project") },
 			{ id: "sync", label: this.host.t("settings.section.sync") },
 			{ id: "llm", label: this.host.t("settings.section.llm") },
-			{ id: "agent", label: this.host.t("settings.section.agent") },
+			{ id: "soul", label: this.host.t("settings.section.soul") },
 			{ id: "slash", label: this.host.t("settings.section.slash") },
 		];
 		for (const item of items) {
@@ -802,47 +805,48 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 	}
 
-	private renderAgentSection(containerEl: HTMLElement): void {
+	private renderSoulSection(containerEl: HTMLElement): void {
 		const agents = this.host.settings.agents;
 		const activeAgent = this.host.getActiveAgent();
+		const activeSoul = this.host.getActiveSoul();
 		const identityGroup = this.createNativeSettingsGroup(containerEl);
 		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
 		const pathGroup = this.createNativeSettingsGroup(containerEl);
 
 		new Setting(identityGroup)
-			.setName(this.t("settings.agent.current.name", "当前 Agent"))
-			.setDesc(this.t("settings.agent.current.desc", "切换后，模型、对话、记忆和知识都会隔离。"))
+			.setName(this.t("settings.soul.current.name", "当前 Soul"))
+			.setDesc(this.t("settings.soul.current.desc", "切换后，Friday 会以不同的角色设定、语气和行为约束协作。"))
 			.addDropdown((dropdown) => {
 				for (const agent of agents) {
 					dropdown.addOption(agent.id, `${agent.name} (${agent.id})`);
 				}
 				if (agents.length > 0) {
-					dropdown.setValue(this.host.settings.activeAgentId || agents[0]!.id);
+					dropdown.setValue(this.host.settings.activeSoulId || this.host.settings.activeAgentId || agents[0]!.id);
 				}
 				dropdown.onChange(async (value) => {
-					await this.host.setActiveAgent(value);
+					await this.host.setActiveSoul(value);
 					this.display();
 				});
 			})
 			.addText((text) =>
 				text
-					.setPlaceholder(this.t("settings.agent.create.placeholder", "新 Agent 名称"))
+					.setPlaceholder(this.t("settings.soul.create.placeholder", "新 Soul 名称"))
 					.setValue(this.newAgentDraft)
 					.onChange((value) => {
 						this.newAgentDraft = value.trim();
 					}),
 			)
 			.addButton((button) =>
-				button.setButtonText(this.t("settings.agent.create.button", "新建 Agent")).setCta().onClick(async () => {
-					const suggestedName = `Agent-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
+				button.setButtonText(this.t("settings.soul.create.button", "新建 Soul")).setCta().onClick(async () => {
+					const suggestedName = `Soul-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
 					const nextName = this.newAgentDraft || suggestedName;
-					const created = await this.host.createAgent({
+					const created = await this.host.createSoul({
 						name: nextName,
-						description: this.t("settings.agent.create.manualDesc", "手动创建"),
-						model: "",
+						summary: this.t("settings.soul.create.manualDesc", "手动创建"),
+						description: this.t("settings.soul.create.manualDesc", "手动创建"),
 					});
 					this.newAgentDraft = "";
-					new Notice(this.t("settings.agent.create.success", "已创建 Agent: {name}", { name: created.name }), 3000);
+					new Notice(this.t("settings.soul.create.success", "已创建 Soul: {name}", { name: created.name }), 3000);
 					this.display();
 				}),
 			);
@@ -851,10 +855,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			const agentModelOptions = this.getAvailableAgentModelOptions();
 			const selectedModelValue = resolveSelectedAgentModelValue(activeAgent, agentModelOptions);
 			new Setting(identityGroup)
-				.setName(this.t("settings.agent.model.name", "当前 Agent 模型"))
-				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
+				.setName(this.t("settings.soul.model.name", "当前 Soul 模型"))
+				.setDesc(this.t("settings.soul.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
 				.addDropdown((dropdown) => {
-					dropdown.addOption("", this.t("settings.agent.model.followGlobal", "跟随全局默认"));
+					dropdown.addOption("", this.t("settings.soul.model.followGlobal", "跟随全局默认"));
 					for (const option of agentModelOptions) {
 						dropdown.addOption(option.value, option.label);
 					}
@@ -864,7 +868,9 @@ export class FridaySettingTab extends PluginSettingTab {
 						activeAgent.model = parsed?.model ?? "";
 						activeAgent.modelMode = parsed?.mode;
 						activeAgent.updatedAt = new Date().toISOString();
-						await this.host.agentService.writeAgentProfile(activeAgent);
+						await this.host.soulStore.updateSoul(activeSoul?.id || activeAgent.id, {
+							preferredModel: parsed?.model ?? "",
+						});
 						await this.host.saveSettings();
 					});
 				});
@@ -936,9 +942,9 @@ export class FridaySettingTab extends PluginSettingTab {
 
 		if (this.host.settings.projects.length > 0) {
 			const policyGroup = this.createNativeSettingsGroup(containerEl, {
-				title: this.t("settings.agent.policy.title", "项目工具策略"),
+				title: this.t("settings.soul.policy.title", "项目工具策略"),
 				description: this.t(
-					"settings.agent.policy.desc",
+					"settings.soul.policy.desc",
 					"持久化层按 project > global 合并；session 级临时覆写在工作台对话页设置，只影响当前会话。",
 				),
 			});
@@ -1006,6 +1012,47 @@ export class FridaySettingTab extends PluginSettingTab {
 				await this.host.saveSettings();
 			},
 		);
+
+		if (this.host.legacyAgentCleanupService.hasLegacyAgentData()) {
+			const cleanupGroup = this.createNativeSettingsGroup(containerEl, {
+				title: this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"),
+				description: this.t(
+					"settings.soul.cleanup.desc",
+					"自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；模糊归属文件会先备份到本地状态层。",
+				),
+			});
+			new Setting(cleanupGroup)
+				.setName(this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"))
+				.setDesc(this.t("settings.soul.cleanup.desc", "自动迁移完成后，可清理旧运行数据。"))
+				.addButton((button) =>
+					button
+						.setButtonText(this.t("settings.soul.cleanup.button", "清理旧 Agent 数据"))
+						.setWarning()
+						.onClick(async () => {
+							try {
+								const result = await this.host.legacyAgentCleanupService.cleanupLegacyAgentData();
+								if (result.removedCount === 0 && result.backedUpCount === 0) {
+									new Notice(this.t("settings.soul.cleanup.noop", "没有检测到可清理的旧 Agent 数据。"), 3000);
+								} else {
+									new Notice(
+										this.t("settings.soul.cleanup.success", "旧 Agent 数据已清理，已备份 {count} 个文件。", {
+											count: result.backedUpCount,
+										}),
+										4000,
+									);
+								}
+								this.display();
+							} catch (error) {
+								new Notice(
+									this.t("settings.soul.cleanup.failed", "清理旧 Agent 数据失败：{error}", {
+										error: error instanceof Error ? error.message : String(error ?? ""),
+									}),
+									6000,
+								);
+							}
+						}),
+				);
+		}
 
 	}
 
@@ -2768,6 +2815,6 @@ export class FridaySettingTab extends PluginSettingTab {
 type SettingsSection = FridaySettingsSection;
 
 export function isFridaySettingsSection(value: string | undefined): value is FridaySettingsSection {
-	return value === "user" || value === "project" || value === "sync" || value === "llm" || value === "agent" || value === "slash";
+	return value === "user" || value === "project" || value === "sync" || value === "llm" || value === "soul" || value === "agent" || value === "slash";
 }
 

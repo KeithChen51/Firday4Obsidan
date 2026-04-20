@@ -23,17 +23,26 @@ test("settings tab exposes a shared native settings group helper", () => {
 	assert.match(source, /friday-native-settings-group-description/);
 });
 
-test("sync llm and agent sections render settings inside native groups", () => {
+test("sync llm and soul sections render settings inside native groups", () => {
 	const source = read(settingsPath);
 	assert.match(source, /private renderSyncSection\(containerEl: HTMLElement\): void \{[\s\S]*?const group = this\.createNativeSettingsGroup\(containerEl\);[\s\S]*?new Setting\(group\)/);
 	assert.match(source, /private renderLlmSection\(containerEl: HTMLElement\): void \{[\s\S]*?createNativeSettingsGroup\(containerEl/);
-	assert.match(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{[\s\S]*?createNativeSettingsGroup\(containerEl/);
+	assert.match(source, /private renderSoulSection\(containerEl: HTMLElement\): void \{[\s\S]*?createNativeSettingsGroup\(containerEl/);
 });
 
 test("settings model exposes activeSoulId before the full soul UI switch", () => {
 	const source = read(settingsModelPath);
 	assert.match(source, /activeSoulId: string;/);
 	assert.match(source, /activeSoulId: "",/);
+});
+
+test("settings tab renames the agent section to soul and exposes legacy cleanup action", () => {
+	const source = read(settingsPath);
+	assert.match(source, /settings\.section\.soul/);
+	assert.match(source, /private renderSoulSection\(containerEl: HTMLElement\): void \{/);
+	assert.doesNotMatch(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{/);
+	assert.match(source, /legacyAgentCleanupService/);
+	assert.match(source, /settings\.soul\.cleanup/);
 });
 
 test("tab content sections no longer repeat the selected tab title as an extra h3 header", () => {
