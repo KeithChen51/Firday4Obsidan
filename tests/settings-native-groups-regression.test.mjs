@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const settingsModelPath = path.join(projectRoot, "src/types/settings.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
 
 function read(filePath) {
@@ -29,12 +30,10 @@ test("sync llm and agent sections render settings inside native groups", () => {
 	assert.match(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{[\s\S]*?createNativeSettingsGroup\(containerEl/);
 });
 
-test("settings tab is ready to rename the agent section to soul", () => {
-	const source = read(settingsPath);
-	assert.match(source, /private renderSoulSection\(containerEl: HTMLElement\): void \{/);
-	assert.doesNotMatch(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{/);
-	assert.match(source, /settings\.section\.soul/);
-	assert.doesNotMatch(source, /settings\.section\.agent/);
+test("settings model exposes activeSoulId before the full soul UI switch", () => {
+	const source = read(settingsModelPath);
+	assert.match(source, /activeSoulId: string;/);
+	assert.match(source, /activeSoulId: "",/);
 });
 
 test("tab content sections no longer repeat the selected tab title as an extra h3 header", () => {

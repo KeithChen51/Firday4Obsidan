@@ -22,10 +22,14 @@ import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
 import { AgentProfile } from "./agent";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
+import { SoulSummary } from "./soul";
 import { I18nParams, LocaleCode } from "../i18n/types";
 import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 import type { PluginUpdateService } from "../services/PluginUpdateService";
+import type { LocalStateRootService } from "../services/LocalStateRootService";
+import type { SoulStore } from "../services/SoulStore";
+import type { RuntimeStateStore } from "../services/RuntimeStateStore";
 
 export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "agent" | "slash";
 
@@ -55,6 +59,9 @@ export interface FridayPluginApi {
 	syncRuntimeStore: SyncRuntimeStore;
 	projectBoundaryService: ProjectBoundaryService;
 	pluginUpdateService: PluginUpdateService;
+	localStateRootService: LocalStateRootService;
+	soulStore: SoulStore;
+	runtimeStateStore: RuntimeStateStore;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];
 	addRibbonIcon: Plugin["addRibbonIcon"];
@@ -80,6 +87,9 @@ export interface FridayPluginApi {
 	getGitRuntimeStatus(): Promise<GitRuntimeStatus>;
 	getPrimaryUserId(): string;
 	getDetectedUserId(): string;
+	getActiveSoul(): SoulSummary | null;
+	setActiveSoul(soulId: string): Promise<void>;
+	createSoul(input: { name: string; summary: string; description?: string }): Promise<SoulSummary>;
 	getActiveAgent(): AgentProfile | null;
 	setActiveAgent(agentId: string): Promise<void>;
 	createAgent(input: { name: string; description: string; model?: string; modelMode?: "openai" | "group" }): Promise<AgentProfile>;

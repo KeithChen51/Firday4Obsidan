@@ -26,6 +26,9 @@ import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
 import { IngestEventStore } from "./services/IngestEventStore";
+import { LocalStateRootService } from "./services/LocalStateRootService";
+import { RuntimeStateStore } from "./services/RuntimeStateStore";
+import { SoulStore } from "./services/SoulStore";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
 import { AutoSyncManager } from "./features/sync/AutoSyncManager";
@@ -42,6 +45,7 @@ import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
+import { SoulSummary } from "./types/soul";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
 
@@ -92,6 +96,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	syncStatusBar!: SyncStatusBar;
 	fridaySettingTab!: FridaySettingTab;
 	pluginUpdateService!: PluginUpdateService;
+	localStateRootService!: LocalStateRootService;
+	runtimeStateStore!: RuntimeStateStore;
+	soulStore!: SoulStore;
 	private readonly rawIngestTimers = new Map<string, number>();
 	private idleAutoSyncInterval: number | null = null;
 	private continuousAutoSyncListenerRegistered = false;
@@ -117,6 +124,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				console.warn("[Friday] System secure credential storage unavailable. Falling back to local plugin storage.");
 				new Notice("Friday 未检测到系统安全存储，Git 凭据将仅保存在当前设备的本地插件存储中。", 8000);
 			}
+			this.localStateRootService = new LocalStateRootService(
+				(this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+				this.manifest.id,
+			);
+			await this.localStateRootService.ensureBaseLayout();
+			this.runtimeStateStore = new RuntimeStateStore(this.localStateRootService);
+			await this.runtimeStateStore.ensureBaseLayout();
+			this.soulStore = new SoulStore(this.localStateRootService);
 			this.syncEventBus = new SyncEventBus();
 			this.syncRuntimeStore = new SyncRuntimeStore(this.syncEventBus);
 			const migratedLegacyCredentials = await this.migrateLegacyGitCredentials();
@@ -341,6 +356,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			projectGroups: migrated.projectGroups ?? [],
 			projects: migrated.projects ?? [],
 			activeProjectId: migrated.activeProjectId ?? "",
+			activeSoulId: migrated.activeSoulId ?? migrated.activeAgentId ?? "",
 			agents: migrated.agents ?? [],
 			activeAgentId: migrated.activeAgentId ?? "",
 			slashCommands: migrated.slashCommands ?? [],
@@ -391,6 +407,45 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return this.detectedUserId || detectUserId();
 	}
 
+	getActiveSoul(): SoulSummary | null {
+		const activeAgent = this.getActiveAgent();
+		if (!activeAgent) {
+			return null;
+		}
+		return {
+			id: activeAgent.id,
+			name: activeAgent.name,
+			summary: activeAgent.description,
+			description: activeAgent.description,
+			presetRefs: [],
+			builtIn: activeAgent.id === "default",
+			editable: true,
+			archived: false,
+			createdAt: activeAgent.createdAt,
+			updatedAt: activeAgent.updatedAt,
+		};
+	}
+
+	async setActiveSoul(soulId: string): Promise<void> {
+		this.settings.activeSoulId = soulId;
+		if (this.settings.agents.some((item) => item.id === soulId)) {
+			this.settings.activeAgentId = soulId;
+		}
+		await this.saveSettings();
+	}
+
+	async createSoul(input: { name: string; summary: string; description?: string }): Promise<SoulSummary> {
+		const created = await this.soulStore.createSoul({
+			name: input.name,
+			summary: input.summary,
+			description: input.description,
+		});
+		this.settings.activeSoulId = created.id;
+		await this.soulStore.setActiveSoul(created.id);
+		await this.saveSettings();
+		return created;
+	}
+
 	getActiveAgent(): AgentProfile | null {
 		return this.settings.agents.find((item) => item.id === this.settings.activeAgentId) ?? null;
 	}
@@ -401,6 +456,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			throw new Error(`未找到 Agent: ${agentId}`);
 		}
 		this.settings.activeAgentId = target.id;
+		this.settings.activeSoulId = target.id;
 		await this.saveSettings();
 	}
 
@@ -408,6 +464,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const created = await this.agentService.createAgent(input);
 		this.settings.agents.push(created);
 		this.settings.activeAgentId = created.id;
+		this.settings.activeSoulId = created.id;
 		await this.saveSettings();
 		return created;
 	}

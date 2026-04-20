@@ -229,7 +229,7 @@ export class ToolApprovalService {
 	}
 
 	private async readStore(agentId: string): Promise<ToolApprovalStore> {
-		const filePath = this.agentService.getAgentToolApprovalPath(agentId);
+		const filePath = this.agentService.getLegacyToolApprovalStorePath(agentId);
 		const abstractFile = this.vault.getAbstractFileByPath(filePath);
 		if (!(abstractFile instanceof TFile)) {
 			return {
@@ -270,7 +270,7 @@ export class ToolApprovalService {
 	}
 
 	private async writeStore(agentId: string, store: ToolApprovalStore): Promise<void> {
-		const filePath = this.agentService.getAgentToolApprovalPath(agentId);
+		const filePath = this.agentService.getLegacyToolApprovalStorePath(agentId);
 		const payload = `${JSON.stringify(store, null, 2)}\n`;
 		const abstractFile = this.vault.getAbstractFileByPath(filePath);
 		if (abstractFile instanceof TFile) {

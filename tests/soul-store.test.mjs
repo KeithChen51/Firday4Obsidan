@@ -18,7 +18,7 @@ test("soul store persists soul definitions under dedicated local-state files", (
 	const source = readSource();
 	assert.match(source, /registry\.json/);
 	assert.match(source, /state\.json/);
-	assert.match(source, /definitions\//);
+	assert.match(source, /"definitions"/);
 	assert.doesNotMatch(source, /F\.R\.I\.D\.A\.Y\/Agents/);
 });
 

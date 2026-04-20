@@ -62,6 +62,7 @@ export interface FridaySettings {
 	projectGroups: ProjectGroupEntry[];
 	projects: ProjectEntry[];
 	activeProjectId: string;
+	activeSoulId: string;
 	agents: AgentProfile[];
 	activeAgentId: string;
 	agentRuntime: AgentRuntimeSettings;
@@ -128,6 +129,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 	projectGroups: [],
 	projects: [],
 	activeProjectId: "",
+	activeSoulId: "",
 	agents: [],
 	activeAgentId: "",
 	agentRuntime: {

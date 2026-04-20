@@ -82,12 +82,12 @@ export class AgentService {
 		private readonly fridayRoot: string,
 	) {}
 
-	getAgentsRoot(): string {
+	getLegacyAgentsRoot(): string {
 		return normalizePath(`${this.fridayRoot}/${AGENTS_FOLDER}`);
 	}
 
 	getGlobalRoot(): string {
-		return normalizePath(`${this.getAgentsRoot()}/${GLOBAL_FOLDER}`);
+		return normalizePath(`${this.getLegacyAgentsRoot()}/${GLOBAL_FOLDER}`);
 	}
 
 	getGlobalKnowledgeRoot(): string {
@@ -99,11 +99,11 @@ export class AgentService {
 	}
 
 	getPresetsRoot(): string {
-		return normalizePath(`${this.getAgentsRoot()}/${PRESETS_FOLDER}`);
+		return normalizePath(`${this.getLegacyAgentsRoot()}/${PRESETS_FOLDER}`);
 	}
 
 	getAgentRoot(agentId: string): string {
-		return normalizePath(`${this.getAgentsRoot()}/${agentId}`);
+		return normalizePath(`${this.getLegacyAgentsRoot()}/${agentId}`);
 	}
 
 	getAgentKnowledgeRoot(agentId: string): string {
@@ -114,7 +114,7 @@ export class AgentService {
 		return normalizePath(`${this.getAgentRoot(agentId)}/${MEMORY_FOLDER}`);
 	}
 
-	getAgentSessionsRoot(agentId: string): string {
+	getLegacyAgentSessionsRoot(agentId: string): string {
 		return normalizePath(`${this.getAgentRoot(agentId)}/${SESSIONS_FOLDER}`);
 	}
 
@@ -122,7 +122,7 @@ export class AgentService {
 		return normalizePath(`${this.getAgentRoot(agentId)}/${SNAPSHOTS_FOLDER}`);
 	}
 
-	getAgentToolApprovalPath(agentId: string): string {
+	getLegacyToolApprovalStorePath(agentId: string): string {
 		return normalizePath(`${this.getAgentMemoryRoot(agentId)}/${TOOL_APPROVAL_FILE}`);
 	}
 
@@ -202,7 +202,7 @@ export class AgentService {
 		await this.ensureFolderRecursive(this.getAgentRoot(agent.id));
 		await this.ensureFolderRecursive(this.getAgentKnowledgeRoot(agent.id));
 		await this.ensureFolderRecursive(this.getAgentMemoryRoot(agent.id));
-		await this.ensureFolderRecursive(this.getAgentSessionsRoot(agent.id));
+		await this.ensureFolderRecursive(this.getLegacyAgentSessionsRoot(agent.id));
 		await this.ensureFolderRecursive(this.getAgentSnapshotsRoot(agent.id));
 
 		await this.upsertTextFile(this.getAgentFilePath(agent.id), DEFAULT_AGENT_TEMPLATE);
@@ -219,7 +219,7 @@ export class AgentService {
 			DEFAULT_LESSONS_TEMPLATE,
 		);
 		await this.upsertTextFile(
-			this.getAgentToolApprovalPath(agent.id),
+			this.getLegacyToolApprovalStorePath(agent.id),
 			`${JSON.stringify(DEFAULT_TOOL_APPROVAL_STORE, null, 2)}\n`,
 		);
 	}
@@ -236,7 +236,7 @@ export class AgentService {
 	}
 
 	private async ensureBaseFolders(): Promise<void> {
-		await this.ensureFolderRecursive(this.getAgentsRoot());
+		await this.ensureFolderRecursive(this.getLegacyAgentsRoot());
 		await this.ensureFolderRecursive(this.getPresetsRoot());
 		await this.ensureFolderRecursive(this.getGlobalRoot());
 		await this.ensureFolderRecursive(this.getGlobalKnowledgeRoot());

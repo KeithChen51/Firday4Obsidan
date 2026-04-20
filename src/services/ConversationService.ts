@@ -43,7 +43,7 @@ export class ConversationService {
 	}
 
 	async loadLatestSession(agentId: string): Promise<ConversationSession | null> {
-		const folderPath = this.agentService.getAgentSessionsRoot(agentId);
+		const folderPath = this.agentService.getLegacyAgentSessionsRoot(agentId);
 		const files = this.vault
 			.getFiles()
 			.filter((file) => normalizePath(file.path).startsWith(`${folderPath}/`) && file.extension === "jsonl")
@@ -62,7 +62,7 @@ export class ConversationService {
 		messages: ChatMessage[],
 		title?: string,
 	): Promise<ConversationSession> {
-		const targetPath = normalizePath(`${this.agentService.getAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
+		const targetPath = normalizePath(`${this.agentService.getLegacyAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
 		const now = new Date().toISOString();
 		const existingFile = await this.resolveFileConflict(targetPath);
 		let effectiveTitle = title;
@@ -120,7 +120,7 @@ export class ConversationService {
 	}
 
 	async listSessions(agentId: string, limit = 100): Promise<ConversationSession[]> {
-		const folderPath = this.agentService.getAgentSessionsRoot(agentId);
+		const folderPath = this.agentService.getLegacyAgentSessionsRoot(agentId);
 		const files = this.vault
 			.getFiles()
 			.filter((file) => normalizePath(file.path).startsWith(`${folderPath}/`) && file.extension === "jsonl")
@@ -213,12 +213,12 @@ export class ConversationService {
 	}
 
 	private async findSessionFile(agentId: string, sessionId: string): Promise<TFile | null> {
-		const directPath = normalizePath(`${this.agentService.getAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
+		const directPath = normalizePath(`${this.agentService.getLegacyAgentSessionsRoot(agentId)}/${sessionId}.jsonl`);
 		const direct = this.getFileByPathRelaxed(directPath);
 		if (direct instanceof TFile) {
 			return direct;
 		}
-		const folderPath = this.agentService.getAgentSessionsRoot(agentId);
+		const folderPath = this.agentService.getLegacyAgentSessionsRoot(agentId);
 		return this.vault
 			.getFiles()
 			.find((file) =>
