@@ -1,4 +1,5 @@
-import { readFile, writeFile } from "fs/promises";
+import path from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { TFile, Vault } from "obsidian";
 import { FridaySettings } from "../types/settings";
 import { AgentService } from "./AgentService";
@@ -6,6 +7,7 @@ import { ConversationService } from "./ConversationService";
 import { RuntimeStateStore } from "./RuntimeStateStore";
 import { SoulStore } from "./SoulStore";
 import { ToolApprovalRule, ToolApprovalService } from "./ToolApprovalService";
+import { GLOBAL_MEMORY_PATH, LEGACY_GLOBAL_MEMORY_PATH } from "../core/memory/MemoryStoreV1";
 
 interface MigrationStateRecord {
 	completed: boolean;
@@ -34,6 +36,9 @@ export class LegacyAgentMigrationService {
 		}
 
 		let migrated = false;
+		if (await this.importLegacyGlobalMemory()) {
+			migrated = true;
+		}
 		for (const agent of this.settings.agents) {
 			const existingSoul = await this.soulStore.getSoul(agent.id);
 			if (!existingSoul) {
@@ -73,6 +78,27 @@ export class LegacyAgentMigrationService {
 			version: MIGRATION_VERSION,
 		});
 		return migrated;
+	}
+
+	private async importLegacyGlobalMemory(): Promise<boolean> {
+		const legacyFile = this.vault.getAbstractFileByPath(LEGACY_GLOBAL_MEMORY_PATH);
+		if (!(legacyFile instanceof TFile)) {
+			return false;
+		}
+		try {
+			await readFile(GLOBAL_MEMORY_PATH, "utf8");
+			return false;
+		} catch {
+			// fall through
+		}
+		const raw = await this.vault.cachedRead(legacyFile);
+		if (!raw.trim()) {
+			return false;
+		}
+		await this.runtimeStateStore.ensureBaseLayout();
+		await mkdir(path.dirname(GLOBAL_MEMORY_PATH), { recursive: true });
+		await writeFile(GLOBAL_MEMORY_PATH, raw, "utf8");
+		return true;
 	}
 
 	private async readLegacyApprovalRules(agentId: string): Promise<ToolApprovalRule[]> {

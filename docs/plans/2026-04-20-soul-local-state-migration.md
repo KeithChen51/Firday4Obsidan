@@ -4,7 +4,7 @@
 
 **Goal:** Replace Friday's legacy `Agent`-centered vault state with a `Soul` concept layer plus a dedicated local state store for soul definitions, sessions, approvals, and other runtime-only state.
 
-**Architecture:** Treat this as a staged migration, not a rename. First, lock the target contract with failing tests. Then introduce `Soul` types and a compatibility layer in settings/main. Next, create new local state stores (`SoulStore` and `RuntimeStateStore`) and move approvals and sessions off `AgentService`. After that, add a one-time automatic migration on upgrade, then switch the settings UI and DailyBoard from `Agent` language to `Soul`. Finish with a user-visible cleanup action that removes legacy Agent runtime data from `F.R.I.D.A.Y` after migration has succeeded.
+**Architecture:** Treat this as a staged migration, not a rename. First, lock the target contract with failing tests. Then introduce `Soul` types and a compatibility layer in settings/main. Next, create new local state stores (`SoulStore` and `RuntimeStateStore`) and move approvals and sessions off `AgentService`. After that, add a one-time automatic migration on upgrade, then switch the settings UI and DailyBoard from `Agent` language to `Soul`. Finish with a user-visible cleanup action that removes legacy Agent runtime data from `F.R.I.D.A.Y` after migration has succeeded. Memory follows a hybrid final layout: user-global memory lives under AppData, while project memory stays in the vault's hidden `.friday/` directory.
 
 **Tech Stack:** TypeScript, Obsidian API, Node built-in test runner (`node --test`), npm, local JSON/JSONL file storage.
 
@@ -273,6 +273,60 @@ Expected:
 ```bash
 git add src/services/ToolApprovalService.ts src/services/AgentRuntimeService.ts src/main.ts tests/approval-queue.test.mjs tests/runtime-state-store.test.mjs
 git commit -m "refactor: move tool approvals to runtime state store"
+```
+
+### Task 4.5: Move Memory To Its Final Hybrid Layout
+
+**Files:**
+- Modify: `src/core/memory/MemoryStoreV1.ts`
+- Modify: `src/services/AgentRuntimeService.ts`
+- Modify: `src/services/LocalStateRootService.ts`
+- Modify: `src/services/LegacyAgentMigrationService.ts`
+- Modify: `tests/memory-v1-store.test.mjs`
+- Modify: `tests/memory-tool-runtime-regression.test.mjs`
+
+**Step 1: Change memory path resolution**
+
+Move:
+- `global memory` to a user-level local path such as `AppData\\Roaming\\friday\\memory\\global.md`
+- `project memory` to `<vaultRoot>/.friday/memory/project.md`
+
+Do not keep `F.R.I.D.A.Y/_runtime/memory/global.md` as the canonical path.
+
+**Step 2: Keep the 2-layer memory semantics**
+
+Preserve:
+- `global`
+- `project`
+
+but update storage so:
+- global follows the user across vaults
+- project memory follows the vault/project itself
+
+**Step 3: Extend migration**
+
+During legacy migration:
+- import old global memory into the new AppData-backed global memory file
+- import old project memory into the vault's `.friday/memory/project.md`
+
+**Step 4: Run the focused tests**
+
+Run:
+
+```bash
+node --test tests/memory-v1-store.test.mjs tests/memory-tool-runtime-regression.test.mjs
+```
+
+Expected:
+- global memory resolves outside the vault
+- project memory resolves under `.friday/memory/project.md`
+- memory read/write behavior remains unchanged from the model's perspective
+
+**Step 5: Commit**
+
+```bash
+git add src/core/memory/MemoryStoreV1.ts src/services/AgentRuntimeService.ts src/services/LocalStateRootService.ts src/services/LegacyAgentMigrationService.ts tests/memory-v1-store.test.mjs tests/memory-tool-runtime-regression.test.mjs
+git commit -m "refactor: move memory to hybrid local and project storage"
 ```
 
 ### Task 5: Migrate Conversations To Unified Sessions With `soulId` Metadata

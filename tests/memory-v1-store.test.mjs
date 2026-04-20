@@ -16,7 +16,7 @@ async function loadModule() {
 
 test("memory v1 exposes canonical global and project memory paths", async () => {
 	const mod = await loadModule();
-	assert.equal(mod.GLOBAL_MEMORY_PATH, "F.R.I.D.A.Y/_runtime/memory/global.md");
+	assert.match(mod.GLOBAL_MEMORY_PATH, /AppData\\Roaming\\friday\\memory\\global\.md$/);
 	assert.equal(mod.getProjectMemoryPath("Projects/demo"), "Projects/demo/.friday/memory/project.md");
 });
 

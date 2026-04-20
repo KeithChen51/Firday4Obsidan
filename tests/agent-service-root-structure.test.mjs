@@ -45,9 +45,9 @@ test("agent service is no longer the canonical runtime root once soul migration 
 
 test("agent service tolerates startup file-create races when managed files already exist on disk", async () => {
 	const source = readSource();
-	const match = source.match(/private async writeManagedTextFile\(filePath: string, content: string\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate /);
-	assert.ok(match, "writeManagedTextFile block should exist");
-	const block = match[1] ?? "";
+	const start = source.indexOf("private async writeManagedTextFile(filePath: string, content: string): Promise<void> {");
+	assert.ok(start >= 0, "writeManagedTextFile block should exist");
+	const block = source.slice(start, start + 1600);
 	assert.match(block, /try\s*\{[\s\S]*await this\.vault\.create\(normalized, content\);/);
 	assert.match(block, /this\.isAlreadyExistsError\(error\)/);
 	assert.match(block, /getLoadedFileByPathRelaxed\(normalized\)/);

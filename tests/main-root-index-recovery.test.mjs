@@ -25,9 +25,9 @@ test("plugin startup reloads once when friday root exists on disk but is missing
 
 test("plugin root-index recovery clears stale throttles once the friday root is visible again", async () => {
 	const source = readSource();
-	const match = source.match(/private async recoverMissingFridayRootIndex\(\): Promise<boolean> \{([\s\S]*?)\n\t\}\n\n\tprivate getEffectiveLlmSettings/);
-	assert.ok(match, "recoverMissingFridayRootIndex block should exist");
-	const block = match[1] ?? "";
+	const start = source.indexOf("private async recoverMissingFridayRootIndex(): Promise<boolean> {");
+	assert.ok(start >= 0, "recoverMissingFridayRootIndex block should exist");
+	const block = source.slice(start, start + 2200);
 	assert.match(block, /const indexedRoot = this\.app\.vault\.getAbstractFileByPath\(fridayRoot\);/);
 	assert.match(block, /if \(indexedRoot\) \{/);
 	assert.match(block, /window\.localStorage\.removeItem\(storageKey\);/);

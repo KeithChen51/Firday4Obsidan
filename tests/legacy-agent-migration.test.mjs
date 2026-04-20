@@ -30,3 +30,10 @@ test("legacy agent migration service reads legacy agent profiles before writing 
 	assert.match(source, /createSoul|updateSoul/);
 	assert.match(source, /activeSoulId/);
 });
+
+test("legacy agent migration service imports legacy global memory into the new user-level path", () => {
+	const source = readSource();
+	assert.match(source, /GLOBAL_MEMORY_PATH|LEGACY_GLOBAL_MEMORY_PATH|getGlobalMemoryPath/);
+	assert.match(source, /readFile|writeFile/);
+	assert.match(source, /importLegacyGlobalMemory/);
+});

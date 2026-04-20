@@ -1,7 +1,14 @@
+import path from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
 import { normalizePath, TFile, TFolder, Vault } from "obsidian";
 import type { MemoryScope, MemoryWriteInput, MemoryWriteResult } from "./MemoryTypes";
+import { getFridayUserRoot } from "../../services/LocalStateRootService";
 
-export const GLOBAL_MEMORY_PATH = "F.R.I.D.A.Y/_runtime/memory/global.md";
+export const LEGACY_GLOBAL_MEMORY_PATH = "F.R.I.D.A.Y/_runtime/memory/global.md";
+export function getGlobalMemoryPath(userRoot = getFridayUserRoot()): string {
+	return path.join(userRoot, "memory", "global.md");
+}
+export const GLOBAL_MEMORY_PATH = getGlobalMemoryPath();
 const PROJECT_MEMORY_RELATIVE_PATH = ".friday/memory/project.md";
 const GLOBAL_MEMORY_HEADER = "# Global Memory";
 const PROJECT_MEMORY_HEADER = "# Project Memory";
@@ -25,6 +32,8 @@ interface MemoryFileAdapter {
 interface MemoryStoreV1Options {
 	vault?: Vault;
 	fileAdapter?: MemoryFileAdapter;
+	globalFileAdapter?: MemoryFileAdapter;
+	projectFileAdapter?: MemoryFileAdapter;
 	matchResolver?: (records: string[], query: string) => Promise<string[]>;
 	globalLimit?: number;
 	projectLimit?: number;
@@ -39,16 +48,23 @@ export function formatMemoryRecord(text: string): string {
 }
 
 export class MemoryStoreV1 {
-	private readonly fileAdapter: MemoryFileAdapter;
+	private readonly globalFileAdapter: MemoryFileAdapter;
+	private readonly projectFileAdapter: MemoryFileAdapter;
 	private readonly matchResolver: (records: string[], query: string) => Promise<string[]>;
 	private readonly globalLimit: number;
 	private readonly projectLimit: number;
 
 	constructor(options: MemoryStoreV1Options = {}) {
-		this.fileAdapter = options.fileAdapter ?? this.createVaultAdapter(options.vault);
+		const sharedAdapter = options.fileAdapter;
+		this.globalFileAdapter = options.globalFileAdapter ?? sharedAdapter ?? this.createFsAdapter();
+		this.projectFileAdapter = options.projectFileAdapter ?? sharedAdapter ?? this.createVaultAdapter(options.vault);
 		this.matchResolver = options.matchResolver ?? this.defaultMatchResolver;
 		this.globalLimit = Math.max(16, options.globalLimit ?? 1400);
 		this.projectLimit = Math.max(16, options.projectLimit ?? 2200);
+	}
+
+	private getAdapter(scope: MemoryScope): MemoryFileAdapter {
+		return scope === "global" ? this.globalFileAdapter : this.projectFileAdapter;
 	}
 
 	resolvePath(scope: MemoryScope, projectRoot?: string): string {
@@ -68,10 +84,11 @@ export class MemoryStoreV1 {
 			if (!path) {
 				continue;
 			}
-			if (!(await this.fileAdapter.exists(path))) {
+			const adapter = this.getAdapter(scope);
+			if (!(await adapter.exists(path))) {
 				continue;
 			}
-			const content = (await this.fileAdapter.read(path)).trim();
+			const content = (await adapter.read(path)).trim();
 			if (!content) {
 				continue;
 			}
@@ -105,9 +122,10 @@ export class MemoryStoreV1 {
 			}
 		}
 
-		await this.fileAdapter.ensureParent(path);
-		const raw = (await this.fileAdapter.exists(path))
-			? await this.fileAdapter.read(path)
+		const adapter = this.getAdapter(input.scope);
+		await adapter.ensureParent(path);
+		const raw = (await adapter.exists(path))
+			? await adapter.read(path)
 			: this.renderFile(input.scope, []);
 		const records = this.extractRecords(raw);
 		const limit = input.scope === "global" ? this.globalLimit : this.projectLimit;
@@ -165,7 +183,7 @@ export class MemoryStoreV1 {
 
 		if (input.action === "remove") {
 			const nextRecords = records.filter((item) => item !== matched);
-			await this.fileAdapter.write(path, this.renderFile(input.scope, nextRecords));
+			await adapter.write(path, this.renderFile(input.scope, nextRecords));
 			return {
 				ok: true,
 				code: "written",
@@ -201,7 +219,7 @@ export class MemoryStoreV1 {
 				limit,
 			};
 		}
-		await this.fileAdapter.write(path, rendered);
+		await this.getAdapter(scope).write(path, rendered);
 		return {
 			ok: true,
 			code: "written",
@@ -251,7 +269,7 @@ export class MemoryStoreV1 {
 
 	private createVaultAdapter(vault?: Vault): MemoryFileAdapter {
 		if (!vault) {
-			throw new Error("MemoryStoreV1 requires either a vault or a fileAdapter.");
+			throw new Error("MemoryStoreV1 requires either a vault or a projectFileAdapter.");
 		}
 		return {
 			read: async (filePath: string) => {
@@ -291,6 +309,32 @@ export class MemoryStoreV1 {
 						await vault.createFolder(current);
 					}
 				}
+			},
+		};
+	}
+
+	private createFsAdapter(): MemoryFileAdapter {
+		return {
+			read: async (filePath: string) => {
+				try {
+					return await readFile(filePath, "utf8");
+				} catch {
+					return "";
+				}
+			},
+			write: async (filePath: string, content: string) => {
+				await writeFile(filePath, content, "utf8");
+			},
+			exists: async (filePath: string) => {
+				try {
+					await readFile(filePath, "utf8");
+					return true;
+				} catch {
+					return false;
+				}
+			},
+			ensureParent: async (filePath: string) => {
+				await mkdir(path.dirname(filePath), { recursive: true });
 			},
 		};
 	}
