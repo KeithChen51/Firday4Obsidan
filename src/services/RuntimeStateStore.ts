@@ -21,13 +21,31 @@ export class RuntimeStateStore {
 		return this.localStateRootService.resolve("snapshots");
 	}
 
+	getRuntimeRoot(): string {
+		return this.localStateRootService.resolve("runtime");
+	}
+
 	getSessionFilePath(sessionId: string): string {
 		return path.join(this.getSessionsRoot(), `${sessionId}.jsonl`);
 	}
 
+	getApprovalStorePath(scopeKey = "global"): string {
+		return path.join(this.getApprovalsRoot(), `${scopeKey}.json`);
+	}
+
+	getMigrationStatePath(): string {
+		return path.join(this.getRuntimeRoot(), "migration.json");
+	}
+
 	async ensureBaseLayout(): Promise<void> {
 		await this.localStateRootService.ensureBaseLayout();
-		for (const directory of [this.getSoulsRoot(), this.getSessionsRoot(), this.getApprovalsRoot(), this.getSnapshotsRoot()]) {
+		for (const directory of [
+			this.getSoulsRoot(),
+			this.getSessionsRoot(),
+			this.getApprovalsRoot(),
+			this.getSnapshotsRoot(),
+			this.getRuntimeRoot(),
+		]) {
 			await mkdir(directory, { recursive: true });
 		}
 	}

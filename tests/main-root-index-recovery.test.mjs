@@ -33,3 +33,9 @@ test("plugin root-index recovery clears stale throttles once the friday root is 
 	assert.match(block, /window\.localStorage\.removeItem\(storageKey\);/);
 	assert.match(block, /ROOT_INDEX_RECOVERY_WINDOW_MS/);
 });
+
+test("plugin startup wires the legacy agent migration flow before the board becomes interactive", async () => {
+	const source = readSource();
+	assert.match(source, /LegacyAgentMigrationService/);
+	assert.match(source, /await this\.legacyAgentMigrationService\.migrateIfNeeded\(\);/);
+});

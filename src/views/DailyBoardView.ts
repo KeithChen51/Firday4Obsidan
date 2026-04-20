@@ -1148,6 +1148,7 @@ export class DailyBoardView extends ItemView {
 	private renderAiPage(containerEl: HTMLElement): void {
 		const llmConfigured = this.plugin.aiService.isConfigured();
 		const activeAgent = this.plugin.getActiveAgent();
+		const activeSoul = this.plugin.getActiveSoul();
 		const effectiveModel = this.resolveEffectiveModel(activeAgent);
 		const modelCapability = this.plugin.aiService.getModelCapability(effectiveModel || undefined);
 		const currentSession = this.aiSessions.find((session) => session.sessionId === this.aiSessionId) ?? null;
@@ -1164,7 +1165,7 @@ export class DailyBoardView extends ItemView {
 		metaCopy.createEl("p", {
 			cls: "friday-ai-focus-caption",
 			text: this.t("ai.focus.caption", "{agent} · {vision}", {
-				agent: activeAgent?.name ?? this.t("common.notSet", "Not set"),
+				agent: activeSoul?.name ?? activeAgent?.name ?? this.t("common.notSet", "Not set"),
 				vision: this.resolveVisionLabel(modelCapability),
 			}),
 		});
@@ -1179,15 +1180,16 @@ export class DailyBoardView extends ItemView {
 		});
 		const agentSelectWrap = metaActions.createDiv({ cls: "friday-ai-agent-select-wrap" });
 		const agentSelectEl = agentSelectWrap.createEl("select", { cls: "friday-ai-agent-select" });
-		agentSelectEl.setAttribute("aria-label", this.t("ai.agent.switch", "切换 Agent"));
+		agentSelectEl.setAttribute("aria-label", this.t("ai.agent.switch", "切换 Soul"));
+		const selectedSoulId = this.plugin.settings.activeSoulId || activeSoul?.id || "";
 		for (const agent of this.plugin.settings.agents) {
 			const option = agentSelectEl.createEl("option", { text: agent.name });
 			option.value = agent.id;
-			option.selected = agent.id === this.plugin.settings.activeAgentId;
+			option.selected = agent.id === selectedSoulId;
 		}
 		agentSelectEl.disabled = this.aiBusy;
 		agentSelectEl.onchange = () => {
-			void this.switchAgent(agentSelectEl.value);
+			void this.switchSoul(agentSelectEl.value);
 		};
 		this.createIconButton(
 			metaActions,
@@ -1285,7 +1287,10 @@ export class DailyBoardView extends ItemView {
 			activeAgent.model = parsed.model;
 			activeAgent.modelMode = parsed.mode;
 			activeAgent.updatedAt = new Date().toISOString();
-			await this.plugin.agentService.writeAgentProfile(activeAgent);
+			const soulId = activeSoul?.id || activeAgent.id;
+			await this.plugin.soulStore.updateSoul(soulId, {
+				preferredModel: parsed.model,
+			});
 			await this.plugin.saveSettings();
 			this.renderBoard();
 		};
@@ -2179,8 +2184,8 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async commitSessionRename(sessionId: string): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
 			return;
 		}
 		const nextTitle = this.aiSessionRenameDraft.trim();
@@ -2188,7 +2193,12 @@ export class DailyBoardView extends ItemView {
 			new Notice(this.t("ai.sessions.rename.empty", "对话标题不能为空。"), 3000);
 			return;
 		}
-		const updated = await this.plugin.conversationService.renameSession(activeAgent.id, sessionId, nextTitle);
+		const updated = await this.plugin.conversationService.renameSession(
+			activeSoul.id,
+			sessionId,
+			nextTitle,
+			this.plugin.settings.activeProjectId || undefined,
+		);
 		this.aiSessions = this.aiSessions.map((session) => session.sessionId === sessionId ? updated : session);
 		if (this.aiSessionId === sessionId) {
 			this.aiConversation = [...updated.messages];
@@ -2198,11 +2208,15 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async deleteSingleSession(sessionId: string): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent || this.aiBusy) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul || this.aiBusy) {
 			return;
 		}
-		await this.plugin.conversationService.deleteSession(activeAgent.id, sessionId);
+		await this.plugin.conversationService.deleteSession(
+			activeSoul.id,
+			sessionId,
+			this.plugin.settings.activeProjectId || undefined,
+		);
 		this.aiSessions = this.aiSessions.filter((session) => session.sessionId !== sessionId);
 		this.aiSessionSelection.delete(sessionId);
 		if (this.aiSessionRenameId === sessionId) {
@@ -2217,13 +2231,17 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async deleteSelectedSessions(): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent || this.aiSessionSelection.size === 0 || this.aiBusy) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul || this.aiSessionSelection.size === 0 || this.aiBusy) {
 			return;
 		}
 		const ids = [...this.aiSessionSelection];
 		for (const sessionId of ids) {
-			await this.plugin.conversationService.deleteSession(activeAgent.id, sessionId);
+			await this.plugin.conversationService.deleteSession(
+				activeSoul.id,
+				sessionId,
+				this.plugin.settings.activeProjectId || undefined,
+			);
 		}
 		const activeDeleted = ids.includes(this.aiSessionId);
 		this.aiSessions = this.aiSessions.filter((session) => !this.aiSessionSelection.has(session.sessionId));
@@ -3778,13 +3796,13 @@ export class DailyBoardView extends ItemView {
 		return ["ls", "read", "grep", "search_text", "glob"].includes(tool ?? "");
 	}
 
-	private async switchAgent(agentId: string): Promise<void> {
-		if (!agentId || this.aiBusy || agentId === this.plugin.settings.activeAgentId) {
+	private async switchSoul(soulId: string): Promise<void> {
+		if (!soulId || this.aiBusy || soulId === this.plugin.settings.activeSoulId) {
 			return;
 		}
 
 		try {
-			await this.plugin.setActiveAgent(agentId);
+			await this.plugin.setActiveSoul(soulId);
 			this.aiSessionId = "";
 			this.aiQueuedPrompts = [];
 			await this.ensureAiSessionLoaded();
@@ -3809,8 +3827,8 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async ensureAiSessionLoaded(): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
 			this.aiConversation = [];
 			this.aiSessions = [];
 			this.aiSessionId = "";
@@ -3818,7 +3836,11 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 
-		const sessions = await this.plugin.conversationService.listSessions(activeAgent.id, 80);
+		const sessions = await this.plugin.conversationService.listSessions(
+			activeSoul.id,
+			80,
+			this.plugin.settings.activeProjectId || undefined,
+		);
 		this.aiSessions = sessions;
 		if (this.aiSessionId) {
 			const matched = sessions.find((session) => session.sessionId === this.aiSessionId);
@@ -3840,14 +3862,19 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async persistConversation(): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent || this.aiConversation.length === 0) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul || this.aiConversation.length === 0) {
 			return;
 		}
 		if (!this.aiSessionId) {
 			this.aiSessionId = this.plugin.conversationService.createSessionId();
 		}
-		const saved = await this.plugin.conversationService.saveSession(activeAgent.id, this.aiSessionId, this.aiConversation);
+		const saved = await this.plugin.conversationService.saveSession({
+			soulId: activeSoul.id,
+			projectId: this.plugin.settings.activeProjectId || undefined,
+			sessionId: this.aiSessionId,
+			messages: this.aiConversation,
+		});
 		this.aiSessions = [saved, ...this.aiSessions.filter((session) => session.sessionId !== saved.sessionId)]
 			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 			.slice(0, 80);

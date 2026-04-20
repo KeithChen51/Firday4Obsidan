@@ -1,5 +1,6 @@
-import { normalizePath, TFile, Vault } from "obsidian";
-import { AgentService } from "./AgentService";
+import { readFile, writeFile } from "fs/promises";
+import { normalizePath } from "obsidian";
+import { RuntimeStateStore } from "./RuntimeStateStore";
 
 export type ToolApprovalScope = "vault" | "external" | "any";
 
@@ -42,8 +43,7 @@ export class ToolApprovalService {
 	private readonly sessionRules = new Map<string, true>();
 
 	constructor(
-		private readonly vault: Vault,
-		private readonly agentService: AgentService,
+		private readonly runtimeStateStore: RuntimeStateStore,
 		private readonly getSettings: () => { agentRuntime: { toolPermissionMode: string } },
 	) {}
 
@@ -125,7 +125,6 @@ export class ToolApprovalService {
 		}
 		if (decision === "allow_always") {
 			const rule = await this.persistAllowAlwaysRule({
-				agentId: input.agentId,
 				tool: input.tool,
 				scope: input.scope,
 				targetPath: normalizedTarget,
@@ -158,18 +157,17 @@ export class ToolApprovalService {
 		return `${tool}:${parts.join("/")}`;
 	}
 
-	async listRules(agentId: string): Promise<ToolApprovalRule[]> {
-		const store = await this.readStore(agentId);
+	async listRules(scopeKey = "global"): Promise<ToolApprovalRule[]> {
+		const store = await this.readStore(scopeKey);
 		return store.rules;
 	}
 
 	private async persistAllowAlwaysRule(input: {
-		agentId: string;
 		tool: string;
 		scope: ToolApprovalScope;
 		targetPath: string;
 	}): Promise<ToolApprovalRule> {
-		const store = await this.readStore(input.agentId);
+		const store = await this.readStore("global");
 		const rule: ToolApprovalRule = {
 			id: this.createRuleId(),
 			tool: input.tool,
@@ -182,8 +180,35 @@ export class ToolApprovalService {
 			return !(item.tool === rule.tool && item.scope === rule.scope && item.pathPrefix === rule.pathPrefix);
 		});
 		deduped.push(rule);
-		await this.writeStore(input.agentId, { version: STORE_VERSION, rules: deduped });
+		await this.writeStore("global", { version: STORE_VERSION, rules: deduped });
 		return rule;
+	}
+
+	async mergeLegacyRules(rules: ToolApprovalRule[], scopeKey = "global"): Promise<void> {
+		const store = await this.readStore(scopeKey);
+		const merged = [...store.rules];
+		for (const rule of rules) {
+			const normalized: ToolApprovalRule = {
+				id: String(rule.id ?? this.createRuleId()),
+				tool: String(rule.tool ?? "*"),
+				scope: this.normalizeScope(rule.scope),
+				pathPrefix: this.normalizeTargetPath(rule.pathPrefix),
+				createdAt: String(rule.createdAt ?? new Date().toISOString()),
+			};
+			const exists = merged.some(
+				(item) =>
+					item.tool === normalized.tool &&
+					item.scope === normalized.scope &&
+					item.pathPrefix === normalized.pathPrefix,
+			);
+			if (!exists) {
+				merged.push(normalized);
+			}
+		}
+		await this.writeStore(scopeKey, {
+			version: STORE_VERSION,
+			rules: merged,
+		});
 	}
 
 	private findMatchedRule(
@@ -228,18 +253,10 @@ export class ToolApprovalService {
 		return normalizePath(pathValue.trim());
 	}
 
-	private async readStore(agentId: string): Promise<ToolApprovalStore> {
-		const filePath = this.agentService.getLegacyToolApprovalStorePath(agentId);
-		const abstractFile = this.vault.getAbstractFileByPath(filePath);
-		if (!(abstractFile instanceof TFile)) {
-			return {
-				version: STORE_VERSION,
-				rules: [],
-			};
-		}
-
+	private async readStore(scopeKey: string): Promise<ToolApprovalStore> {
+		const filePath = this.runtimeStateStore.getApprovalStorePath(scopeKey);
 		try {
-			const raw = await this.vault.cachedRead(abstractFile);
+			const raw = await readFile(filePath, "utf8");
 			const parsed = JSON.parse(raw) as Partial<ToolApprovalStore>;
 			if (!Array.isArray(parsed.rules)) {
 				return { version: STORE_VERSION, rules: [] };
@@ -269,15 +286,11 @@ export class ToolApprovalService {
 		return "any";
 	}
 
-	private async writeStore(agentId: string, store: ToolApprovalStore): Promise<void> {
-		const filePath = this.agentService.getLegacyToolApprovalStorePath(agentId);
+	private async writeStore(scopeKey: string, store: ToolApprovalStore): Promise<void> {
+		await this.runtimeStateStore.ensureBaseLayout();
+		const filePath = this.runtimeStateStore.getApprovalStorePath(scopeKey);
 		const payload = `${JSON.stringify(store, null, 2)}\n`;
-		const abstractFile = this.vault.getAbstractFileByPath(filePath);
-		if (abstractFile instanceof TFile) {
-			await this.vault.modify(abstractFile, payload);
-			return;
-		}
-		await this.vault.create(filePath, payload);
+		await writeFile(filePath, payload, "utf8");
 	}
 
 	private createRuleId(): string {

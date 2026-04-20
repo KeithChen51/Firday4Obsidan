@@ -29,6 +29,7 @@ import { IngestEventStore } from "./services/IngestEventStore";
 import { LocalStateRootService } from "./services/LocalStateRootService";
 import { RuntimeStateStore } from "./services/RuntimeStateStore";
 import { SoulStore } from "./services/SoulStore";
+import { LegacyAgentMigrationService } from "./services/LegacyAgentMigrationService";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
 import { WorkbenchStateStore } from "./features/workbench/WorkbenchStateStore";
 import { AutoSyncManager } from "./features/sync/AutoSyncManager";
@@ -99,6 +100,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	localStateRootService!: LocalStateRootService;
 	runtimeStateStore!: RuntimeStateStore;
 	soulStore!: SoulStore;
+	legacyAgentMigrationService!: LegacyAgentMigrationService;
 	private readonly rawIngestTimers = new Map<string, number>();
 	private idleAutoSyncInterval: number | null = null;
 	private continuousAutoSyncListenerRegistered = false;
@@ -182,7 +184,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				return;
 			}
 
-				this.conversationService = new ConversationService(this.app.vault, this.agentService);
+				this.conversationService = new ConversationService(this.app.vault, this.runtimeStateStore, this.agentService);
 				this.projectContentService = new ProjectContentService(this.app.vault);
 				this.ingestEventStore = new IngestEventStore(this.app.vault);
 				this.wikiIngestService = new WikiIngestService(
@@ -202,11 +204,18 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.canvasService,
 				this.projectBoundaryService,
 			);
-			this.toolApprovalService = new ToolApprovalService(
+			this.toolApprovalService = new ToolApprovalService(this.runtimeStateStore, () => this.settings);
+			this.legacyAgentMigrationService = new LegacyAgentMigrationService(
 				this.app.vault,
+				this.settings,
+				this.soulStore,
+				this.conversationService,
+				this.toolApprovalService,
+				this.runtimeStateStore,
 				this.agentService,
-				() => this.settings,
+				() => this.saveSettings(),
 			);
+			await this.legacyAgentMigrationService.migrateIfNeeded();
 			this.commandExecService = new CommandExecService(
 				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
 				() => this.settings,
