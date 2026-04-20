@@ -45,4 +45,6 @@ test("tool approval service persists rules through runtime state storage instead
 	assert.doesNotMatch(source, /getLegacyToolApprovalStorePath/);
 	assert.match(source, /RuntimeStateStore/);
 	assert.match(source, /getApprovalStorePath\(/);
+	assert.doesNotMatch(source, /readStore\(input\.agentId\)/);
+	assert.match(source, /readStore\("global"\)/);
 });

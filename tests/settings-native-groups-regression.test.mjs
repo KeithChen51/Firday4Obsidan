@@ -43,6 +43,9 @@ test("settings tab renames the agent section to soul and exposes legacy cleanup 
 	assert.doesNotMatch(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{/);
 	assert.match(source, /legacyAgentCleanupService/);
 	assert.match(source, /settings\.soul\.cleanup/);
+	assert.match(source, /pendingSoulCleanupConfirm/);
+	assert.match(source, /settings\.soul\.cleanup\.confirm/);
+	assert.match(source, /settings\.soul\.cleanup\.danger/);
 });
 
 test("tab content sections no longer repeat the selected tab title as an extra h3 header", () => {

@@ -66,6 +66,8 @@ export const zhCNMessages: I18nMessages = {
 	"settings.soul.cleanup.name": "迁移并清理旧 Agent 数据",
 	"settings.soul.cleanup.desc": "自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；模糊归属文件会先备份到本地状态层。",
 	"settings.soul.cleanup.button": "清理旧 Agent 数据",
+	"settings.soul.cleanup.confirm": "确认删除旧 Agent 目录",
+	"settings.soul.cleanup.danger": "这会强制删除旧 Agent 目录中的 preset、global knowledge 与 agent knowledge，仅部分文件会先备份。",
 	"settings.soul.cleanup.success": "旧 Agent 数据已清理，已备份 {count} 个文件。",
 	"settings.soul.cleanup.noop": "没有检测到可清理的旧 Agent 数据。",
 	"settings.soul.cleanup.failed": "清理旧 Agent 数据失败：{error}",

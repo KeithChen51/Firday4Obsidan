@@ -66,6 +66,8 @@ export const enUSMessages: I18nMessages = {
 	"settings.soul.cleanup.name": "Migrate and clean legacy Agent data",
 	"settings.soul.cleanup.desc": "After automatic migration finishes, remove old runtime data under F.R.I.D.A.Y/Agents. Ambiguous files are backed up into local state first.",
 	"settings.soul.cleanup.button": "Clean legacy Agent data",
+	"settings.soul.cleanup.confirm": "Confirm deleting legacy Agent directory",
+	"settings.soul.cleanup.danger": "This is a destructive cleanup. It removes old presets and knowledge files from the legacy Agent directory, and only part of that content is backed up first.",
 	"settings.soul.cleanup.success": "Legacy Agent data cleaned. Backed up {count} file(s).",
 	"settings.soul.cleanup.noop": "No legacy Agent data detected for cleanup.",
 	"settings.soul.cleanup.failed": "Failed to clean legacy Agent data: {error}",

@@ -81,7 +81,7 @@ export class ToolApprovalService {
 		}
 
 		const normalizedTarget = this.normalizeTargetPath(input.targetPath);
-		const store = await this.readStore(input.agentId);
+		const store = await this.readStore("global");
 		const matchedRule = this.findMatchedRule(store.rules, input.tool, input.scope, normalizedTarget);
 		if (matchedRule) {
 			return {

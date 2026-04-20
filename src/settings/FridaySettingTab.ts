@@ -76,6 +76,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private modelPresetResult: ModelPresetResult | null = null;
 	private activeSection: SettingsSection = "user";
 	private newAgentDraft = "";
+	private pendingSoulCleanupConfirm = false;
 	private newProjectGroupDraft = "";
 	private pendingDeleteGroupId = "";
 	private policyEditorProjectSlug = "";
@@ -1017,20 +1018,44 @@ export class FridaySettingTab extends PluginSettingTab {
 			const cleanupGroup = this.createNativeSettingsGroup(containerEl, {
 				title: this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"),
 				description: this.t(
-					"settings.soul.cleanup.desc",
-					"自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；模糊归属文件会先备份到本地状态层。",
+					this.pendingSoulCleanupConfirm
+						? "settings.soul.cleanup.danger"
+						: "settings.soul.cleanup.desc",
+					this.pendingSoulCleanupConfirm
+						? "这会强制删除 F.R.I.D.A.Y/Agents 下的旧会话、快照、memory、preset、global knowledge 与 agent knowledge。仅部分文件会先备份到本地状态层，备份内容不会继续出现在 Obsidian 正常编辑流里。再次点击按钮才会真正执行。"
+						: "自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作，会删除旧 preset 与知识文件。",
 				),
 			});
 			new Setting(cleanupGroup)
 				.setName(this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"))
-				.setDesc(this.t("settings.soul.cleanup.desc", "自动迁移完成后，可清理旧运行数据。"))
+				.setDesc(
+					this.pendingSoulCleanupConfirm
+						? this.t(
+								"settings.soul.cleanup.danger",
+								"这会强制删除旧 Agent 目录中的可见资产。再次点击按钮才会真正执行。",
+						  )
+						: this.t(
+								"settings.soul.cleanup.desc",
+								"自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作。",
+						  ),
+				)
 				.addButton((button) =>
 					button
-						.setButtonText(this.t("settings.soul.cleanup.button", "清理旧 Agent 数据"))
+						.setButtonText(
+							this.pendingSoulCleanupConfirm
+								? this.t("settings.soul.cleanup.confirm", "确认删除旧 Agent 目录")
+								: this.t("settings.soul.cleanup.button", "清理旧 Agent 数据"),
+						)
 						.setWarning()
 						.onClick(async () => {
+							if (!this.pendingSoulCleanupConfirm) {
+								this.pendingSoulCleanupConfirm = true;
+								this.display();
+								return;
+							}
 							try {
 								const result = await this.host.legacyAgentCleanupService.cleanupLegacyAgentData();
+								this.pendingSoulCleanupConfirm = false;
 								if (result.removedCount === 0 && result.backedUpCount === 0) {
 									new Notice(this.t("settings.soul.cleanup.noop", "没有检测到可清理的旧 Agent 数据。"), 3000);
 								} else {
@@ -1043,6 +1068,7 @@ export class FridaySettingTab extends PluginSettingTab {
 								}
 								this.display();
 							} catch (error) {
+								this.pendingSoulCleanupConfirm = false;
 								new Notice(
 									this.t("settings.soul.cleanup.failed", "清理旧 Agent 数据失败：{error}", {
 										error: error instanceof Error ? error.message : String(error ?? ""),
