@@ -32,6 +32,7 @@ import type { ModelCapabilityInfo } from "../services/AIService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
+import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
@@ -76,6 +77,12 @@ export class FridaySettingTab extends PluginSettingTab {
 	private modelPresetResult: ModelPresetResult | null = null;
 	private activeSection: SettingsSection = "user";
 	private newAgentDraft = "";
+	private soulEditorDraftId = "";
+	private soulEditorNameDraft = "";
+	private soulEditorSummaryDraft = "";
+	private soulEditorDefinitionDraft = "";
+	private soulEditorTonePresetDraft: SoulTonePreset = "balanced";
+	private soulEditorToneDraft = "";
 	private pendingSoulCleanupConfirm = false;
 	private newProjectGroupDraft = "";
 	private pendingDeleteGroupId = "";
@@ -109,8 +116,8 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	focusSection(section: SettingsSection): void {
-		if (section === "agent") {
-			section = "soul";
+		if (section === "soul") {
+			section = "agent";
 		}
 		if (this.activeSection === section) {
 			return;
@@ -121,7 +128,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl("h2", { text: this.host.t("settings.title") });
+		this.renderSettingsTitle(containerEl);
 		this.renderSectionTabs(containerEl);
 
 		if (this.activeSection === "user") {
@@ -147,6 +154,32 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.renderProjectSection(containerEl);
 	}
 
+	private renderSettingsTitle(containerEl: HTMLElement): void {
+		const titleText = this.host.t("settings.title");
+		const brandText = this.t("nav.friday", "F.R.I.D.A.Y");
+		const brandIndex = titleText.indexOf(brandText);
+		if (brandIndex < 0) {
+			containerEl.createEl("h2", { text: titleText });
+			return;
+		}
+
+		const titleEl = containerEl.createEl("h2", { cls: "friday-settings-title" });
+		const prefixText = titleText.slice(0, brandIndex).trim();
+		const suffixText = titleText.slice(brandIndex + brandText.length).trim();
+
+		if (prefixText) {
+			titleEl.createSpan({ cls: "friday-settings-title-prefix", text: prefixText });
+		}
+		const brandEl = titleEl.createSpan({
+			cls: "friday-settings-title-brand friday-wordmark",
+			text: brandText,
+		});
+		brandEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+		if (suffixText) {
+			titleEl.createSpan({ cls: "friday-settings-title-suffix", text: suffixText });
+		}
+	}
+
 	private renderSectionTabs(containerEl: HTMLElement): void {
 		const nav = containerEl.createDiv({ cls: "friday-top-nav" });
 		const items: Array<{ id: SettingsSection; label: string }> = [
@@ -154,7 +187,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			{ id: "project", label: this.host.t("settings.section.project") },
 			{ id: "sync", label: this.host.t("settings.section.sync") },
 			{ id: "llm", label: this.host.t("settings.section.llm") },
-			{ id: "soul", label: this.host.t("settings.section.soul") },
+			{ id: "agent", label: this.host.t("settings.section.agent") },
 			{ id: "slash", label: this.host.t("settings.section.slash") },
 		];
 		for (const item of items) {
@@ -345,6 +378,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		const prereqDetails = this.getPluginUpdatePrereqDetails(gitAvailable);
 		const availableVersion = this.host.settings.update.availableVersion.trim();
 		const hasAvailableUpdate = Boolean(availableVersion);
+		const needsPluginReload = this.host.settings.update.lastResult === "applied";
 
 		new Setting(card)
 			.setName(
@@ -352,21 +386,34 @@ export class FridaySettingTab extends PluginSettingTab {
 					version: this.host.manifest.version,
 				}),
 			)
-			.setDesc(this.getPluginUpdateStatusDesc())
+			.setDesc(
+				needsPluginReload
+					? this.t(
+						"settings.user.update.notice.applied",
+						"更新已写入。点击下方按钮重新加载 F.R.I.D.A.Y 插件，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
+					)
+					: this.getPluginUpdateStatusDesc(),
+			)
 			.addButton((button) => {
 				button
 					.setButtonText(
-						hasAvailableUpdate
+						needsPluginReload
+							? this.t("settings.user.update.notice.restart", "重新加载 F.R.I.D.A.Y 插件")
+							: hasAvailableUpdate
 							? this.t("settings.user.update.currentVersion.apply", "应用更新")
 							: this.t("settings.user.update.currentVersion.check", "检查更新"),
 					)
 					.setDisabled(!prerequisitesReady || this.pluginUpdateActionPending);
-				if (hasAvailableUpdate) {
+				if (needsPluginReload || hasAvailableUpdate) {
 					button.setCta();
 				} else {
 					button.removeCta();
 				}
 				button.onClick(async () => {
+					if (needsPluginReload) {
+						await this.runPluginUpdateReload();
+						return;
+					}
 					if (hasAvailableUpdate) {
 						await this.runPluginUpdateApply();
 						return;
@@ -403,10 +450,6 @@ export class FridaySettingTab extends PluginSettingTab {
 							await this.host.saveSettings();
 						}),
 				);
-
-			new Setting(card)
-				.setName(this.t("settings.user.update.status.name", "更新状态"))
-				.setDesc(this.getPluginUpdateStatusDesc());
 		}
 	}
 
@@ -807,74 +850,224 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSoulSection(containerEl: HTMLElement): void {
-		const agents = this.host.settings.agents;
-		const activeAgent = this.host.getActiveAgent();
+		const souls = this.host.listSouls();
 		const activeSoul = this.host.getActiveSoul();
+		const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
 		const identityGroup = this.createNativeSettingsGroup(containerEl);
+		const managementGroup = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.agent.manage.title", "Soul 管理"),
+			description: this.t(
+				"settings.agent.manage.desc",
+				"先看当前有哪些已配置的 Soul，再决定切换、编辑或删除。下面的定义编辑区用于修改当前选中的 Soul。",
+			),
+		});
+		const profileGroup = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.agent.profile.title", "当前 Soul 定义"),
+			description: this.t(
+				"settings.agent.profile.desc",
+				"这里配置当前 Soul，也就是 Friday 的人格、风格和行为方式。",
+			),
+		});
 		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
 		const pathGroup = this.createNativeSettingsGroup(containerEl);
 
 		new Setting(identityGroup)
-			.setName(this.t("settings.soul.current.name", "当前 Soul"))
-			.setDesc(this.t("settings.soul.current.desc", "切换后，Friday 会以不同的角色设定、语气和行为约束协作。"))
+			.setName(this.t("settings.agent.currentSoul.name", "当前 Friday Soul"))
+			.setDesc(
+				this.t(
+					"settings.agent.currentSoul.desc",
+					"Soul 是对 Friday 的人格、风格的定义，可灵活调整。",
+				),
+			)
 			.addDropdown((dropdown) => {
-				for (const agent of agents) {
-					dropdown.addOption(agent.id, `${agent.name} (${agent.id})`);
+				for (const soul of souls) {
+					dropdown.addOption(soul.id, this.resolveSoulDisplayName(soul));
 				}
-				if (agents.length > 0) {
-					dropdown.setValue(this.host.settings.activeSoulId || this.host.settings.activeAgentId || agents[0]!.id);
+				if (souls.length > 0) {
+					dropdown.setValue(activeSoul?.id || souls[0]!.id);
 				}
 				dropdown.onChange(async (value) => {
 					await this.host.setActiveSoul(value);
 					this.display();
 				});
-			})
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.soul.create.placeholder", "新 Soul 名称"))
-					.setValue(this.newAgentDraft)
-					.onChange((value) => {
-						this.newAgentDraft = value.trim();
-					}),
-			)
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.soul.create.button", "新建 Soul")).setCta().onClick(async () => {
-					const suggestedName = `Soul-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
-					const nextName = this.newAgentDraft || suggestedName;
-					const created = await this.host.createSoul({
-						name: nextName,
-						summary: this.t("settings.soul.create.manualDesc", "手动创建"),
-						description: this.t("settings.soul.create.manualDesc", "手动创建"),
-					});
-					this.newAgentDraft = "";
-					new Notice(this.t("settings.soul.create.success", "已创建 Soul: {name}", { name: created.name }), 3000);
-					this.display();
-				}),
-			);
+			});
 
-		if (activeAgent) {
-			const agentModelOptions = this.getAvailableAgentModelOptions();
-			const selectedModelValue = resolveSelectedAgentModelValue(activeAgent, agentModelOptions);
+		if (activeSoulDefinition) {
+			this.ensureSoulEditorDraft(activeSoulDefinition);
 			new Setting(identityGroup)
-				.setName(this.t("settings.soul.model.name", "当前 Soul 模型"))
-				.setDesc(this.t("settings.soul.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
+				.setName(this.t("settings.agent.currentModel.name", "当前 Friday Model"))
+				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
 				.addDropdown((dropdown) => {
-					dropdown.addOption("", this.t("settings.soul.model.followGlobal", "跟随全局默认"));
+					const agentModelOptions = this.getAvailableAgentModelOptions();
+					const selectedModelValue = resolveSelectedAgentModelValue({
+						model: activeSoulDefinition.preferredModel ?? "",
+						modelMode: activeSoulDefinition.preferredModelMode,
+					}, agentModelOptions);
+					dropdown.addOption("", this.t("settings.agent.model.followGlobal", "跟随全局默认"));
 					for (const option of agentModelOptions) {
 						dropdown.addOption(option.value, option.label);
 					}
 					dropdown.setValue(selectedModelValue);
 					dropdown.onChange(async (value) => {
 						const parsed = parseAgentModelChoice(value);
-						activeAgent.model = parsed?.model ?? "";
-						activeAgent.modelMode = parsed?.mode;
-						activeAgent.updatedAt = new Date().toISOString();
-						await this.host.soulStore.updateSoul(activeSoul?.id || activeAgent.id, {
+						await this.host.soulStore.updateSoul(activeSoulDefinition.id, {
 							preferredModel: parsed?.model ?? "",
+							preferredModelMode: parsed?.mode,
 						});
 						await this.host.saveSettings();
+						this.display();
 					});
 				});
+
+			new Setting(managementGroup)
+				.setName(this.t("settings.agent.create.name", "新建 Soul"))
+				.setDesc(this.t("settings.agent.create.desc", "先创建一个新的 Soul，再补充它的定义。"))
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.agent.create.placeholder", "新 Soul 名称"))
+						.setValue(this.newAgentDraft)
+						.onChange((value) => {
+							this.newAgentDraft = value.trim();
+						}),
+				)
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.agent.create.button", "新建 Soul")).setCta().onClick(async () => {
+						const suggestedName = `Soul-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
+						const nextName = this.newAgentDraft || suggestedName;
+						const created = await this.host.createSoul({
+							name: nextName,
+							summary: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
+							description: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
+						});
+						this.newAgentDraft = "";
+						const createdDefinition = this.host.soulStore.getSoulSync(created.id);
+						if (createdDefinition) {
+							this.setSoulEditorDraft(createdDefinition);
+						}
+						new Notice(this.t("settings.agent.create.success", "已创建 Soul: {name}", { name: created.name }), 3000);
+						this.display();
+					}),
+				);
+
+			for (const soul of souls) {
+				const summary = soul.summary?.trim() || this.t("settings.agent.manage.emptySummary", "尚未补充简介");
+				const row = new Setting(managementGroup)
+					.setName(this.resolveSoulDisplayName(soul))
+					.setDesc(
+						soul.id === activeSoulDefinition.id
+							? this.t("settings.agent.manage.currentBadge", "当前使用中 · {summary}", { summary })
+							: summary,
+					);
+				if (soul.id !== activeSoulDefinition.id) {
+					row.addButton((button) =>
+						button.setButtonText(this.t("settings.agent.manage.setCurrent", "设为当前")).onClick(async () => {
+							await this.openSoulProfileEditor(soul.id);
+						}),
+					);
+				}
+				row.addButton((button) =>
+					button.setButtonText(this.t("settings.agent.manage.edit", "编辑")).onClick(async () => {
+						await this.openSoulProfileEditor(soul.id);
+					}),
+				);
+				row.addButton((button) => {
+					button.setButtonText(this.t("settings.agent.manage.delete", "删除"));
+					if (!this.canDeleteSoul(soul, souls.length)) {
+						button.setDisabled(true);
+						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "原生 F.R.I.D.A.Y 或最后一个 Soul 不能删除。"));
+						return;
+					}
+					button.onClick(async () => {
+						await this.deleteSoulFromSettings(soul.id);
+					});
+					});
+			}
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.name", "Soul 名称"))
+				.setDesc(this.t("settings.agent.profile.nameDesc", "这是这个 Soul 的显示名称。"))
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.agent.defaultName", "原生F.R.I.D.A.Y"))
+						.setValue(this.soulEditorNameDraft)
+						.onChange((value) => {
+							this.soulEditorNameDraft = value;
+						}),
+				);
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.summary", "一句话简介"))
+				.setDesc(this.t("settings.agent.profile.summaryDesc", "用于快速说明这个 Soul 的定位和特点。"))
+				.addText((text) =>
+					text
+						.setPlaceholder(this.t("settings.agent.profile.summaryPlaceholder", "例如：偏研究和结构化表达"))
+						.setValue(this.soulEditorSummaryDraft)
+						.onChange((value) => {
+							this.soulEditorSummaryDraft = value;
+						}),
+				);
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.definition", "人格与风格定义"))
+				.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 Friday 的人格、风格和行为方式。"))
+				.addTextArea((textArea) => {
+					textArea
+						.setPlaceholder(this.t("settings.agent.profile.definitionPlaceholder", "例如：先给结论，再展开；语气克制、清晰，少说空话。"))
+						.setValue(this.soulEditorDefinitionDraft)
+						.onChange((value) => {
+							this.soulEditorDefinitionDraft = value;
+						});
+					textArea.inputEl.rows = 4;
+					textArea.inputEl.style.width = "100%";
+				});
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.tonePreset", "语气风格"))
+				.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 Friday 默认的表达气质。"))
+				.addDropdown((dropdown) => {
+					dropdown.addOption("balanced", this.t("settings.agent.profile.tonePreset.balanced", "平衡"));
+					dropdown.addOption("calm", this.t("settings.agent.profile.tonePreset.calm", "冷静"));
+					dropdown.addOption("warm", this.t("settings.agent.profile.tonePreset.warm", "亲和"));
+					dropdown.setValue(this.soulEditorTonePresetDraft);
+					dropdown.onChange((value) => {
+						this.soulEditorTonePresetDraft = (value as SoulTonePreset) ?? "balanced";
+					});
+				});
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.toneNote", "补充说明（可选）"))
+				.setDesc(this.t("settings.agent.profile.toneNoteDesc", "只补一句微调要求，例如先给结论、少用术语。"))
+				.addTextArea((textArea) => {
+					textArea
+						.setPlaceholder(this.t("settings.agent.profile.toneNotePlaceholder", "例如：先给结论，少用术语。"))
+						.setValue(this.soulEditorToneDraft)
+						.onChange((value) => {
+							this.soulEditorToneDraft = value;
+						});
+					textArea.inputEl.rows = 2;
+					textArea.inputEl.style.width = "100%";
+				});
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
+				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置原生 F.R.I.D.A.Y 可用，会用最新默认参数覆盖当前 Soul 定义。"))
+				.addButton((button) =>
+					button
+						.setButtonText(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
+						.setDisabled(!(activeSoulDefinition.builtIn && activeSoulDefinition.id.startsWith("default")))
+						.onClick(async () => {
+							await this.resetActiveSoulToBuiltInPreset(activeSoulDefinition.id);
+						}),
+				);
+
+			new Setting(profileGroup)
+				.setName(this.t("settings.agent.profile.save", "保存 Soul 定义"))
+				.setDesc(this.t("settings.agent.profile.saveDesc", "会保存当前 Soul 的显示信息和背后的定义。"))
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.agent.profile.save", "保存 Soul 定义")).setCta().onClick(async () => {
+						await this.saveActiveSoulProfile(activeSoulDefinition.id);
+					}),
+				);
 		}
 
 		new Setting(runtimeGroup)
@@ -1968,10 +2161,146 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getCurrentVisionModelKey(): string {
-		const activeAgent = this.host.getActiveAgent();
-		const mode = activeAgent?.modelMode || this.host.settings.llm.mode;
-		const model = activeAgent?.model?.trim() || this.host.settings.llm.model.trim();
+		const activeSoul = this.host.getActiveSoul();
+		const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
+		const mode = activeSoulDefinition?.preferredModelMode || this.host.settings.llm.mode;
+		const model = activeSoulDefinition?.preferredModel?.trim() || this.host.settings.llm.model.trim();
 		return `${mode}::${model}`;
+	}
+
+	private resolveSoulDisplayName(soul: { id: string; name: string }): string {
+		const name = soul.name.trim();
+		if (soul.id.startsWith("default") && (!name || name === "默认 Soul" || name === "默认 Agent" || name === "原生F.R.I.D.A.Y")) {
+			return this.t("settings.agent.defaultName", "原生F.R.I.D.A.Y");
+		}
+		return name || soul.id;
+	}
+
+	private canDeleteSoul(
+		soul: { id: string; builtIn?: boolean; editable?: boolean },
+		totalSouls: number,
+	): boolean {
+		if (totalSouls <= 1) {
+			return false;
+		}
+		if (soul.builtIn || soul.editable === false || soul.id.startsWith("default")) {
+			return false;
+		}
+		return true;
+	}
+
+	private async openSoulProfileEditor(soulId: string): Promise<void> {
+		const target = this.host.soulStore.getSoulSync(soulId);
+		if (!target) {
+			throw new Error(this.t("settings.agent.profile.missing", "当前 Agent 不存在或已被移除。"));
+		}
+		await this.host.setActiveSoul(soulId);
+		this.setSoulEditorDraft(target);
+		this.display();
+	}
+
+	private async deleteSoulFromSettings(soulId: string): Promise<void> {
+		const souls = this.host.listSouls();
+		const target = souls.find((item) => item.id === soulId);
+		if (!target || !this.canDeleteSoul(target, souls.length)) {
+			throw new Error(this.t("settings.agent.manage.deleteBlocked", "原生 F.R.I.D.A.Y 或最后一个 Soul 不能删除。"));
+		}
+		const fallback = souls.find((item) => item.id !== soulId);
+		await this.host.soulStore.deleteSoul(soulId);
+		if (this.host.settings.activeSoulId === soulId && fallback) {
+			await this.host.setActiveSoul(fallback.id);
+		}
+		if (this.soulEditorDraftId === soulId) {
+			const nextTarget = fallback ? this.host.soulStore.getSoulSync(fallback.id) : null;
+			if (nextTarget) {
+				this.setSoulEditorDraft(nextTarget);
+			} else {
+				this.soulEditorDraftId = "";
+				this.soulEditorNameDraft = "";
+				this.soulEditorSummaryDraft = "";
+				this.soulEditorDefinitionDraft = "";
+				this.soulEditorTonePresetDraft = "balanced";
+				this.soulEditorToneDraft = "";
+			}
+		}
+		await this.host.saveSettings();
+		new Notice(this.t("settings.agent.manage.deleteSuccess", "已删除 Soul: {name}", { name: this.resolveSoulDisplayName(target) }), 3000);
+		this.display();
+	}
+
+	private ensureSoulEditorDraft(activeSoulDefinition: {
+		id: string;
+		name: string;
+		summary: string;
+		description: string;
+		tonePreset?: SoulTonePreset;
+		tonePrompt?: string;
+	}): void {
+		if (this.soulEditorDraftId === activeSoulDefinition.id) {
+			return;
+		}
+		this.setSoulEditorDraft(activeSoulDefinition);
+	}
+
+	private setSoulEditorDraft(activeSoulDefinition: {
+		id: string;
+		name: string;
+		summary: string;
+		description: string;
+		tonePreset?: SoulTonePreset;
+		tonePrompt?: string;
+	}): void {
+		this.soulEditorDraftId = activeSoulDefinition.id;
+		this.soulEditorNameDraft = activeSoulDefinition.name ?? "";
+		this.soulEditorSummaryDraft = activeSoulDefinition.summary ?? "";
+		this.soulEditorDefinitionDraft = activeSoulDefinition.description ?? "";
+		this.soulEditorTonePresetDraft = activeSoulDefinition.tonePreset ?? "balanced";
+		this.soulEditorToneDraft = activeSoulDefinition.tonePrompt ?? "";
+	}
+
+	private async saveActiveSoulProfile(soulId: string): Promise<void> {
+		const existing = this.host.soulStore.getSoulSync(soulId);
+		if (!existing) {
+			throw new Error(this.t("settings.agent.profile.missing", "当前 Agent 不存在或已被移除。"));
+		}
+		const nextName = this.soulEditorNameDraft.trim() || this.resolveSoulDisplayName(existing);
+		const nextSummary = this.soulEditorSummaryDraft.trim() || this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义");
+		const nextDefinition = this.soulEditorDefinitionDraft.trim() || nextSummary;
+		const nextTonePreset = this.soulEditorTonePresetDraft ?? "balanced";
+		const nextTone = this.soulEditorToneDraft.trim();
+		const updated = await this.host.soulStore.updateSoul(soulId, {
+			name: nextName,
+			summary: nextSummary,
+			description: nextDefinition,
+			rolePrompt: nextDefinition,
+			tonePreset: nextTonePreset,
+			tonePrompt: nextTone,
+		});
+		this.setSoulEditorDraft({
+			id: updated.id,
+			name: updated.name,
+			summary: updated.summary,
+			description: updated.description,
+			tonePreset: updated.tonePreset,
+			tonePrompt: this.soulEditorToneDraft,
+		});
+		await this.host.saveSettings();
+		new Notice(this.t("settings.agent.profile.saveSuccess", "已保存 Soul 定义：{name}", { name: updated.name }), 3000);
+		this.display();
+	}
+
+	private async resetActiveSoulToBuiltInPreset(soulId: string): Promise<void> {
+		const updated = await this.host.resetBuiltInSoulPreset(soulId);
+		this.setSoulEditorDraft({
+			id: updated.id,
+			name: updated.name,
+			summary: updated.summary,
+			description: updated.description,
+			tonePreset: (updated as typeof updated & { tonePreset?: SoulTonePreset }).tonePreset,
+			tonePrompt: (updated as typeof updated & { tonePrompt?: string }).tonePrompt,
+		});
+		new Notice(this.t("settings.agent.profile.resetSuccess", "已恢复最新原生 Soul 默认配置：{name}", { name: updated.name }), 3000);
+		this.display();
 	}
 
 	private async openRegisterProjectModal(initial?: ProjectEntry): Promise<void> {
@@ -2764,6 +3093,24 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 	}
 
+	private async runPluginUpdateReload(): Promise<void> {
+		this.pluginUpdateActionPending = true;
+		try {
+			await this.host.reloadFridayPlugin();
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error ?? "");
+			new Notice(
+				this.t("settings.user.update.notice.applyFailed", "应用更新失败：{error}", {
+					error: message || this.t("common.unknownError", "未知错误"),
+				}),
+				6000,
+			);
+		} finally {
+			this.pluginUpdateActionPending = false;
+			this.display();
+		}
+	}
+
 	private async runPluginUpdateApply(): Promise<void> {
 		this.pluginUpdateActionPending = true;
 		try {
@@ -2779,41 +3126,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.host.settings.update.lastResult = "applied";
 			this.host.settings.update.availableVersion = "";
 			await this.host.saveSettings();
-			this.showPluginUpdateRestartNotice();
 		} finally {
 			this.pluginUpdateActionPending = false;
 			this.display();
 		}
-	}
-
-	private showPluginUpdateRestartNotice(): void {
-		const fragment = document.createDocumentFragment();
-		const wrapper = document.createElement("div");
-		wrapper.className = "friday-plugin-update-notice";
-
-		const message = document.createElement("div");
-		message.className = "friday-plugin-update-notice-text";
-		message.textContent = this.t(
-			"settings.user.update.notice.applied",
-			"更新已写入。点击下方按钮立即重启 Obsidian，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
-		);
-		wrapper.appendChild(message);
-
-		const actions = document.createElement("div");
-		actions.className = "friday-plugin-update-notice-actions";
-		const restartButton = document.createElement("button");
-		restartButton.type = "button";
-		restartButton.classList.add("mod-cta");
-		restartButton.textContent = this.t("settings.user.update.notice.restart", "立即重启 Obsidian");
-		let notice: Notice | null = null;
-		restartButton.addEventListener("click", () => {
-			notice?.hide();
-			this.host.reloadObsidianApp();
-		});
-		actions.appendChild(restartButton);
-		wrapper.appendChild(actions);
-		fragment.appendChild(wrapper);
-		notice = new Notice(fragment, 0);
 	}
 
 	private buildProjectDescription(project: ProjectEntry): string {

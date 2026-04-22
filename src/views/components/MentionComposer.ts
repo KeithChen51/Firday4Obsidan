@@ -55,16 +55,8 @@ export class MentionComposer {
 			attr: { "data-placeholder": options.placeholder },
 		});
 		this.dropdown = new MentionDropdown(this.rootEl);
-		const initialDoc = restoreMentionComposerDoc(options.initialSnapshot ?? createEmptyMentionComposerSnapshot());
-		const initialSelection = restoreMentionComposerSelection(options.initialSnapshot, initialDoc);
-		this.snapshot = serializeMentionComposerDoc(initialDoc);
 		this.view = new EditorView(this.editorEl, {
-			state: EditorState.create({
-				doc: initialDoc,
-				schema: mentionComposerSchema,
-				selection: initialSelection ?? undefined,
-				plugins: [keymap(baseKeymap)],
-			}),
+			state: this.createEditorState(options.initialSnapshot ?? createEmptyMentionComposerSnapshot()),
 			editable: () => !this.options.disabled,
 			dispatchTransaction: (transaction) => {
 				this.applyTransaction(transaction);
@@ -95,6 +87,13 @@ export class MentionComposer {
 
 	getSnapshot(): MentionComposerSnapshot {
 		return this.snapshot;
+	}
+
+	replaceSnapshot(snapshot: MentionComposerSnapshot): void {
+		this.activeTrigger = null;
+		this.dropdown.hide();
+		this.view.updateState(this.createEditorState(snapshot));
+		this.syncSnapshot(true);
 	}
 
 	hasFocus(): boolean {
@@ -140,6 +139,18 @@ export class MentionComposer {
 		if (!initial) {
 			this.options.onChange?.(this.snapshot);
 		}
+	}
+
+	private createEditorState(snapshot: MentionComposerSnapshot): EditorState {
+		const doc = restoreMentionComposerDoc(snapshot);
+		const selection = restoreMentionComposerSelection(snapshot, doc);
+		this.snapshot = serializeMentionComposerDoc(doc);
+		return EditorState.create({
+			doc,
+			schema: mentionComposerSchema,
+			selection: selection ?? undefined,
+			plugins: [keymap(baseKeymap)],
+		});
 	}
 
 	private async refreshSuggestions(): Promise<void> {
@@ -287,7 +298,7 @@ export class MentionComposer {
 			}
 			return;
 		}
-		if (item.trigger === "/" && item.replacementText) {
+		if (item.kind === "slash" && item.trigger === "/" && item.replacementText) {
 			this.replaceActiveTriggerWithText(item.replacementText);
 			return;
 		}

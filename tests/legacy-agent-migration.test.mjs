@@ -25,10 +25,11 @@ test("legacy agent migration service imports souls sessions and approvals once",
 
 test("legacy agent migration service reads legacy agent profiles before writing new soul state", () => {
 	const source = readSource();
-	assert.match(source, /settings\.agents/);
-	assert.match(source, /activeAgentId/);
+	assert.match(source, /legacyAgents/);
+	assert.match(source, /legacyActiveAgentId/);
 	assert.match(source, /createSoul|updateSoul/);
 	assert.match(source, /activeSoulId/);
+	assert.match(source, /preferredModel|preferredModelMode/);
 });
 
 test("legacy agent migration service imports legacy global memory into the new user-level path", () => {

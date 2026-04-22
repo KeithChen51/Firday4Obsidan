@@ -1,3 +1,5 @@
+export type SoulTonePreset = "balanced" | "calm" | "warm";
+
 export interface SoulSummary {
 	id: string;
 	name: string;
@@ -13,10 +15,13 @@ export interface SoulSummary {
 
 export interface SoulDefinition extends SoulSummary {
 	rolePrompt: string;
+	tonePreset: SoulTonePreset;
 	tonePrompt: string;
 	behaviorRules: string[];
 	antiPatterns: string[];
+	builtInPresetVersion?: number;
 	preferredModel?: string;
+	preferredModelMode?: "openai" | "group";
 	tags: string[];
 }
 

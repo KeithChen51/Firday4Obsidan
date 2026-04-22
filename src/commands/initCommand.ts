@@ -48,7 +48,7 @@ export async function runInitCommand(
 ): Promise<InitCommandResult> {
 	const confirmOverwrite = options.confirmOverwrite ?? true;
 	const openFile = options.openFile ?? true;
-	const targetPath = normalizePath(`${plugin.agentService.getGlobalRoot()}/FRIDAY.md`);
+	const targetPath = normalizePath(`${plugin.dataService.getFridayRoot()}/Agents/_global/FRIDAY.md`);
 
 	await ensureParentFolders(plugin, plugin.app.vault, targetPath);
 

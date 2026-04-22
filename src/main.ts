@@ -6,6 +6,7 @@ import { registerSyncCommands } from "./commands/syncCommands";
 import { PROJECT_STATE_CHANGED_EVENT } from "./constants/events";
 import { FRIDAY_ICON_ID } from "./constants/icon";
 import { PRIMARY_PATHS } from "./constants/paths";
+import { FRIDAY_WORDMARK_FONT_TTF_BASE64 } from "./constants/wordmarkFont";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
 import { AgentActionService } from "./services/AgentActionService";
@@ -47,13 +48,135 @@ import { AgentProfile } from "./types/agent";
 import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
-import { SoulSummary } from "./types/soul";
+import { SoulDefinition, SoulSummary } from "./types/soul";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 const ROOT_INDEX_RECOVERY_STORAGE_KEY = "friday:root-index-recovery";
 const ROOT_INDEX_RECOVERY_WINDOW_MS = 12 * 60 * 60 * 1000;
+const NATIVE_FRIDAY_SOUL_PRESET_VERSION = 2;
+const LEGACY_NATIVE_FRIDAY_SOUL_PRESET: Pick<
+	SoulDefinition,
+	| "name"
+	| "summary"
+	| "description"
+	| "rolePrompt"
+	| "tonePreset"
+	| "tonePrompt"
+	| "behaviorRules"
+	| "antiPatterns"
+	| "builtIn"
+	| "editable"
+> = {
+	name: "原生F.R.I.D.A.Y",
+	summary: "低摩擦、安静、以你为主导的本地 AI 工作伙伴。",
+	description: "原生 F.R.I.D.A.Y 是一个低摩擦、以用户为主导的本地 AI 工作伙伴。它以 Obsidian 为中心、以本地知识为基础，尽量隐藏工具复杂性，让思考自然发生在工作流中。",
+	rolePrompt: "你是原生 F.R.I.D.A.Y。你的核心目标是 Make Every Day Friday：让 AI 尽量消失在工作流中，让用户把注意力放回思考与创造本身。你优先降低认知负担和操作摩擦，先帮用户理清上下文，再给出清晰、可执行、可解释的建议。你不会喧宾夺主，也不会替用户做关键决策。你是一个安静、可靠、长期在场的协作者，重视本地知识、低摩擦工作流、隐形 Git、透明可解释与用户主导。",
+	tonePreset: "balanced",
+	tonePrompt: "简洁、冷静、克制，像资深合作者。少空话，不夸张，不过度鼓励。",
+	behaviorRules: [
+		"优先降低认知负担和操作摩擦。",
+		"优先整理上下文，再给出建议与下一步。",
+		"关键决策交给用户确认，不擅自越权。",
+		"尽量解释依据，让行为可理解、可追踪。",
+		"优先利用本地知识、项目上下文与已有内容协作。",
+		"尽量隐藏工具复杂性，让工作流保持自然。",
+	],
+	antiPatterns: [
+		"不要喧宾夺主。",
+		"不要替用户做关键决策。",
+		"不要为了显得聪明而复杂化问题。",
+		"不要使用过度鼓励或营销式语气。",
+	],
+	builtIn: true,
+	editable: true,
+};
+const NATIVE_FRIDAY_SOUL_PRESET: Pick<
+	SoulDefinition,
+	| "name"
+	| "summary"
+	| "description"
+	| "rolePrompt"
+	| "tonePreset"
+	| "tonePrompt"
+	| "behaviorRules"
+	| "antiPatterns"
+	| "builtInPresetVersion"
+	| "builtIn"
+	| "editable"
+> = {
+	name: "原生F.R.I.D.A.Y",
+	summary: "温和、清晰、可靠的本地工作伙伴。",
+	description: "原生 F.R.I.D.A.Y 以自然、低压的方式陪用户推进工作。它帮助用户理顺信息、明确下一步，并在保持专业的同时尽量减少压迫感和操作摩擦。",
+	rolePrompt: "你是原生 F.R.I.D.A.Y。你是一个有温度但不黏人的协作者。你的职责不是喧宾夺主，而是帮助用户把事情理顺、把任务说清、把下一步变得容易开始。你应当先理解上下文，再给出清晰、可信、可执行的回应。你保持礼貌、自然和分寸感，不过度热情，也不使用夸张或表演式表达。你尊重用户主导，不替用户做未经确认的关键决定；当信息不足、风险存在或边界不清时，应直接指出。",
+	tonePreset: "warm",
+	tonePrompt: "亲和、自然、有分寸。表达温和，但不要过度热情、讨好或像客服。",
+	behaviorRules: [
+		"先帮用户理清问题，再推进下一步。",
+		"保持礼貌和温度，但回答要简洁。",
+		"优先降低理解成本和行动门槛。",
+		"信息不足时明确指出缺口或假设。",
+		"在需要时提供低门槛、可直接开始的下一步建议。",
+	],
+	antiPatterns: [
+		"不要过度热情或过度鼓励。",
+		"不要使用客服式、营销式或讨好式表达。",
+		"不要把简单问题说得很重。",
+		"不要替用户做未经确认的关键决策。",
+	],
+	builtInPresetVersion: NATIVE_FRIDAY_SOUL_PRESET_VERSION,
+	builtIn: true,
+	editable: true,
+};
+
+function builtInSoulPresetFingerprint(
+	preset: Pick<
+		SoulDefinition,
+		| "summary"
+		| "description"
+		| "rolePrompt"
+		| "tonePreset"
+		| "tonePrompt"
+		| "behaviorRules"
+		| "antiPatterns"
+	>,
+): string {
+	return JSON.stringify({
+		summary: preset.summary,
+		description: preset.description,
+		rolePrompt: preset.rolePrompt,
+		tonePreset: preset.tonePreset,
+		tonePrompt: preset.tonePrompt,
+		behaviorRules: preset.behaviorRules,
+		antiPatterns: preset.antiPatterns,
+	});
+}
+
+function matchesBuiltInSoulPreset(
+	soul: Pick<
+		SoulDefinition,
+		| "summary"
+		| "description"
+		| "rolePrompt"
+		| "tonePreset"
+		| "tonePrompt"
+		| "behaviorRules"
+		| "antiPatterns"
+	>,
+	preset: Pick<
+		SoulDefinition,
+		| "summary"
+		| "description"
+		| "rolePrompt"
+		| "tonePreset"
+		| "tonePrompt"
+		| "behaviorRules"
+		| "antiPatterns"
+	>,
+): boolean {
+	return builtInSoulPresetFingerprint(soul) === builtInSoulPresetFingerprint(preset);
+}
 type WikiCompileResult = {
 	projectId: string;
 	projectRoot: string;
@@ -103,15 +226,19 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	soulStore!: SoulStore;
 	legacyAgentMigrationService!: LegacyAgentMigrationService;
 	legacyAgentCleanupService!: LegacyAgentCleanupService;
+	private legacyAgentProfiles: AgentProfile[] = [];
+	private legacyActiveAgentId = "";
 	private readonly rawIngestTimers = new Map<string, number>();
 	private idleAutoSyncInterval: number | null = null;
 	private continuousAutoSyncListenerRegistered = false;
 	private compileWikiInFlight: Promise<WikiCompileResult> | null = null;
 	private detectedUserId = "";
 	private pendingLegacyGitCredentials: ProjectGitCredential | null = null;
+	private wordmarkFontLoadPromise: Promise<void> | null = null;
 
 	async onload(): Promise<void> {
 		try {
+			await this.ensureWordmarkFontLoaded();
 			const runtimeProfile = detectRuntimeProfile();
 			if (!runtimeProfile.supported) {
 				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
@@ -180,13 +307,13 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			});
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
-			const changedByBootstrap = await this.agentService.bootstrap(this.settings);
+			const changedByBootstrap = await this.agentService.bootstrap();
 			const triggeredRootIndexRecovery = await this.recoverMissingFridayRootIndex();
 			if (triggeredRootIndexRecovery) {
 				return;
 			}
 
-				this.conversationService = new ConversationService(this.app.vault, this.runtimeStateStore, this.agentService);
+				this.conversationService = new ConversationService(this.runtimeStateStore);
 				this.projectContentService = new ProjectContentService(this.app.vault);
 				this.ingestEventStore = new IngestEventStore(this.app.vault);
 				this.wikiIngestService = new WikiIngestService(
@@ -201,7 +328,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.canvasService = new CanvasService();
 			this.agentActionService = new AgentActionService(
 				this.app.vault,
-				this.agentService,
+				this.runtimeStateStore,
 				this.workspaceAccessService,
 				this.canvasService,
 				this.projectBoundaryService,
@@ -215,6 +342,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.toolApprovalService,
 				this.runtimeStateStore,
 				this.agentService,
+				this.legacyAgentProfiles,
+				this.legacyActiveAgentId,
 				() => this.saveSettings(),
 			);
 			this.legacyAgentCleanupService = new LegacyAgentCleanupService(
@@ -222,7 +351,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.agentService,
 				this.runtimeStateStore,
 			);
-			await this.legacyAgentMigrationService.migrateIfNeeded();
+			const migratedLegacyState = await this.legacyAgentMigrationService.migrateIfNeeded();
 			this.commandExecService = new CommandExecService(
 				() => (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
 				() => this.settings,
@@ -252,7 +381,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.agentRuntimeService = new AgentRuntimeService(
 					this.app.vault,
 					this.aiService,
-					this.agentService,
+					this.soulStore,
 				this.workspaceAccessService,
 				this.agentActionService,
 				this.toolApprovalService,
@@ -282,7 +411,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					}),
 				);
 
-				if (changedByBootstrap || migratedLegacyCredentials) {
+				const changedBySoulBootstrap = await this.ensureSoulBootstrap();
+				if (changedByBootstrap || migratedLegacyCredentials || migratedLegacyState || changedBySoulBootstrap) {
 					await this.saveSettings();
 				}
 
@@ -336,6 +466,29 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_BOARD);
 	}
 
+	private ensureWordmarkFontLoaded(): Promise<void> {
+		if (this.wordmarkFontLoadPromise) {
+			return this.wordmarkFontLoadPromise;
+		}
+		this.wordmarkFontLoadPromise = this.loadWordmarkFont();
+		return this.wordmarkFontLoadPromise;
+	}
+
+	private async loadWordmarkFont(): Promise<void> {
+		if (typeof document === "undefined" || !("fonts" in document)) {
+			return;
+		}
+		try {
+			const fontBytes = Uint8Array.from(Buffer.from(FRIDAY_WORDMARK_FONT_TTF_BASE64, "base64"));
+			const fontFace = new FontFace("FridayAirbeat", fontBytes);
+			await fontFace.load();
+			const fontSet = document.fonts as FontFaceSet & { add(font: FontFace): void };
+			fontSet.add(fontFace);
+		} catch (error) {
+			console.warn("[Friday] Failed to load wordmark font.", error);
+		}
+	}
+
 	async loadSettings(): Promise<void> {
 		const raw = (await this.loadData()) as Partial<FridaySettings> | null;
 		const migrated = this.migrateSettings(raw);
@@ -372,9 +525,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			projectGroups: migrated.projectGroups ?? [],
 			projects: migrated.projects ?? [],
 			activeProjectId: migrated.activeProjectId ?? "",
-			activeSoulId: migrated.activeSoulId ?? migrated.activeAgentId ?? "",
-			agents: migrated.agents ?? [],
-			activeAgentId: migrated.activeAgentId ?? "",
+			activeSoulId: migrated.activeSoulId ?? this.legacyActiveAgentId ?? "",
 			slashCommands: migrated.slashCommands ?? [],
 		};
 
@@ -423,30 +574,28 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return this.detectedUserId || detectUserId();
 	}
 
+	listSouls(): SoulSummary[] {
+		return this.soulStore.listSoulsSync().filter((item) => !item.archived);
+	}
+
 	getActiveSoul(): SoulSummary | null {
-		const activeAgent = this.getActiveAgent();
-		if (!activeAgent) {
-			return null;
+		const activeSoulId = this.settings.activeSoulId.trim();
+		if (activeSoulId) {
+			const activeSoul = this.soulStore.getSoulSync(activeSoulId);
+			if (activeSoul && !activeSoul.archived) {
+				return activeSoul;
+			}
 		}
-		return {
-			id: activeAgent.id,
-			name: activeAgent.name,
-			summary: activeAgent.description,
-			description: activeAgent.description,
-			presetRefs: [],
-			builtIn: activeAgent.id === "default",
-			editable: true,
-			archived: false,
-			createdAt: activeAgent.createdAt,
-			updatedAt: activeAgent.updatedAt,
-		};
+		return this.listSouls()[0] ?? null;
 	}
 
 	async setActiveSoul(soulId: string): Promise<void> {
-		this.settings.activeSoulId = soulId;
-		if (this.settings.agents.some((item) => item.id === soulId)) {
-			this.settings.activeAgentId = soulId;
+		const target = this.soulStore.getSoulSync(soulId);
+		if (!target || target.archived) {
+			throw new Error(`未找到 Soul: ${soulId}`);
 		}
+		this.settings.activeSoulId = soulId;
+		await this.soulStore.setActiveSoul(soulId);
 		await this.saveSettings();
 	}
 
@@ -456,45 +605,23 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			summary: input.summary,
 			description: input.description,
 		});
-		if (!this.settings.agents.some((item) => item.id === created.id)) {
-			this.settings.agents.push({
-				id: created.id,
-				name: created.name,
-				description: created.description,
-				model: "",
-				agentFilePath: "",
-				createdAt: created.createdAt,
-				updatedAt: created.updatedAt,
-			});
-		}
-		this.settings.activeAgentId = created.id;
 		this.settings.activeSoulId = created.id;
 		await this.soulStore.setActiveSoul(created.id);
 		await this.saveSettings();
 		return created;
 	}
 
-	getActiveAgent(): AgentProfile | null {
-		return this.settings.agents.find((item) => item.id === this.settings.activeAgentId) ?? null;
-	}
-
-	async setActiveAgent(agentId: string): Promise<void> {
-		const target = this.settings.agents.find((item) => item.id === agentId);
-		if (!target) {
-			throw new Error(`未找到 Agent: ${agentId}`);
+	async resetBuiltInSoulPreset(soulId: string): Promise<SoulSummary> {
+		const existing = this.soulStore.getSoulSync(soulId);
+		if (!existing || !this.isBuiltInSoulResettable(existing)) {
+			throw new Error(`Built-in Soul preset not found: ${soulId}`);
 		}
-		this.settings.activeAgentId = target.id;
-		this.settings.activeSoulId = target.id;
+		const updated = await this.applyBuiltInSoulPreset(soulId);
+		if (this.settings.activeSoulId === soulId) {
+			this.settings.activeSoulId = soulId;
+		}
 		await this.saveSettings();
-	}
-
-	async createAgent(input: { name: string; description: string; model?: string; modelMode?: "openai" | "group" }): Promise<AgentProfile> {
-		const created = await this.agentService.createAgent(input);
-		this.settings.agents.push(created);
-		this.settings.activeAgentId = created.id;
-		this.settings.activeSoulId = created.id;
-		await this.saveSettings();
-		return created;
+		return updated;
 	}
 
 	async upsertProject(project: ProjectEntry): Promise<void> {
@@ -636,6 +763,33 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		this.app.workspace.revealLeaf(leaf);
 	}
 
+	async reloadFridayPlugin(): Promise<void> {
+		const appWithPlugins = this.app as typeof this.app & {
+			plugins?: {
+				disablePlugin?: (pluginId: string) => Promise<void> | void;
+				enablePlugin?: (pluginId: string) => Promise<void> | void;
+			};
+		};
+		const pluginId = this.manifest.id;
+		const disablePlugin = appWithPlugins.plugins?.disablePlugin;
+		const enablePlugin = appWithPlugins.plugins?.enablePlugin;
+		if (typeof disablePlugin === "function" && typeof enablePlugin === "function") {
+			try {
+				await Promise.resolve(disablePlugin.call(appWithPlugins.plugins, pluginId));
+				window.setTimeout(() => {
+					void Promise.resolve(enablePlugin.call(appWithPlugins.plugins, pluginId)).catch((error) => {
+						console.warn("[Friday] Failed to re-enable plugin after disable; falling back to app reload.", error);
+						this.reloadObsidianApp();
+					});
+				}, 0);
+				return;
+			} catch (error) {
+				console.warn("[Friday] Failed to reload plugin in place, falling back to app reload.", error);
+			}
+		}
+		this.reloadObsidianApp();
+	}
+
 	reloadObsidianApp(): void {
 		const appWithCommands = this.app as typeof this.app & {
 			commands?: {
@@ -709,18 +863,134 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	private getEffectiveLlmSettings(): FridaySettings["llm"] {
-		const activeAgent = this.getActiveAgent();
-		const baseSettings = activeAgent?.modelMode
-			? switchLlmMode(this.settings.llm, activeAgent.modelMode)
+		const activeSoul = this.getActiveSoulDefinition();
+		const baseSettings = activeSoul?.preferredModelMode
+			? switchLlmMode(this.settings.llm, activeSoul.preferredModelMode)
 			: this.settings.llm;
 		return {
 			...baseSettings,
-			model: activeAgent?.model?.trim() || baseSettings.model,
+			model: activeSoul?.preferredModel?.trim() || baseSettings.model,
 		};
+	}
+
+	private getActiveSoulDefinition(): SoulDefinition | null {
+		const activeSoulId = this.settings.activeSoulId.trim();
+		if (activeSoulId) {
+			const activeSoul = this.soulStore.getSoulSync(activeSoulId);
+			if (activeSoul && !activeSoul.archived) {
+				return activeSoul as SoulDefinition;
+			}
+		}
+		const fallback = this.listSouls()[0];
+		if (!fallback) {
+			return null;
+		}
+		return this.soulStore.getSoulSync(fallback.id) as SoulDefinition | null;
+	}
+
+	private async ensureSoulBootstrap(): Promise<boolean> {
+		let souls = await this.soulStore.listSouls();
+		let changed = false;
+		if (souls.length === 0) {
+			await this.soulStore.createSoul({
+				id: "default",
+				name: NATIVE_FRIDAY_SOUL_PRESET.name,
+				summary: NATIVE_FRIDAY_SOUL_PRESET.summary,
+				description: NATIVE_FRIDAY_SOUL_PRESET.description,
+			});
+			await this.applyBuiltInSoulPreset("default");
+			souls = await this.soulStore.listSouls();
+			changed = true;
+		}
+
+		for (const soul of souls) {
+			if (!soul.id.startsWith("default")) {
+				continue;
+			}
+			const soulDefinition = this.soulStore.getSoulSync(soul.id);
+			const shouldRefreshPreset = soulDefinition ? this.shouldRefreshBuiltInSoulPreset(soulDefinition) : true;
+			if (!shouldRefreshPreset) {
+				continue;
+			}
+			await this.applyBuiltInSoulPreset(soul.id);
+			changed = true;
+		}
+		if (changed) {
+			souls = await this.soulStore.listSouls();
+		}
+
+		const requestedSoulId = this.settings.activeSoulId.trim();
+		const resolvedSoulId =
+			(requestedSoulId && souls.some((item) => item.id === requestedSoulId) ? requestedSoulId : "") ||
+			souls[0]?.id ||
+			"";
+		if (resolvedSoulId && resolvedSoulId !== this.settings.activeSoulId) {
+			this.settings.activeSoulId = resolvedSoulId;
+			changed = true;
+		}
+		if (resolvedSoulId) {
+			await this.soulStore.setActiveSoul(resolvedSoulId);
+		}
+		return changed;
+	}
+
+	private isBuiltInSoulResettable(soul: Pick<SoulDefinition, "id" | "builtIn">): boolean {
+		return soul.builtIn && soul.id.startsWith("default");
+	}
+
+	private shouldRefreshBuiltInSoulPreset(
+		soul: Pick<
+			SoulDefinition,
+			| "id"
+			| "name"
+			| "summary"
+			| "description"
+			| "rolePrompt"
+			| "tonePreset"
+			| "tonePrompt"
+			| "behaviorRules"
+			| "antiPatterns"
+			| "builtIn"
+			| "builtInPresetVersion"
+		>,
+	): boolean {
+		const nextName = soul.name?.trim() ?? "";
+		const nextSummary = soul.summary?.trim() ?? "";
+		if (
+			!nextName ||
+			nextName === "默认 Soul" ||
+			nextName === "默认 Agent" ||
+			nextSummary === "系统默认通用助手" ||
+			!soul.rolePrompt?.trim()
+		) {
+			return true;
+		}
+		if (!this.isBuiltInSoulResettable(soul)) {
+			return false;
+		}
+		const currentVersion = soul.builtInPresetVersion ?? 0;
+		if (currentVersion >= NATIVE_FRIDAY_SOUL_PRESET_VERSION) {
+			return false;
+		}
+		return (
+			matchesBuiltInSoulPreset(soul, LEGACY_NATIVE_FRIDAY_SOUL_PRESET) ||
+			matchesBuiltInSoulPreset(soul, NATIVE_FRIDAY_SOUL_PRESET)
+		);
+	}
+
+	private async applyBuiltInSoulPreset(soulId: string): Promise<SoulDefinition> {
+		return this.soulStore.updateSoul(soulId, {
+			...NATIVE_FRIDAY_SOUL_PRESET,
+			description: NATIVE_FRIDAY_SOUL_PRESET.description,
+			rolePrompt: NATIVE_FRIDAY_SOUL_PRESET.rolePrompt,
+			builtInPresetVersion: NATIVE_FRIDAY_SOUL_PRESET_VERSION,
+		});
 	}
 
 	private migrateSettings(raw: Partial<FridaySettings> | null): Partial<FridaySettings> {
 		if (!raw) {
+			this.legacyAgentProfiles = [];
+			this.legacyActiveAgentId = "";
 			return {
 				version: SETTINGS_VERSION,
 				user: { ...DEFAULT_SETTINGS.user },
@@ -729,6 +999,29 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				activeProjectId: "",
 			};
 		}
+
+		const rawWithLegacy = raw as Partial<FridaySettings> & {
+			agents?: AgentProfile[];
+			activeAgentId?: string;
+		};
+		this.legacyAgentProfiles = Array.isArray(rawWithLegacy.agents)
+			? rawWithLegacy.agents
+				.filter((item): item is AgentProfile => Boolean(item?.id?.trim()))
+				.map((item) => ({
+					...item,
+					id: item.id.trim(),
+					name: item.name?.trim() || item.id.trim(),
+					description: item.description?.trim() || "",
+					model: item.model?.trim() || "",
+					modelMode: item.model?.trim() ? item.modelMode : undefined,
+					agentFilePath: item.agentFilePath?.trim() || "",
+					createdAt: item.createdAt || new Date().toISOString(),
+					updatedAt: item.updatedAt || new Date().toISOString(),
+				}))
+			: [];
+		this.legacyActiveAgentId = typeof rawWithLegacy.activeAgentId === "string"
+			? rawWithLegacy.activeAgentId.trim()
+			: "";
 
 		const rawProjects = Array.isArray(raw.projects) ? raw.projects : [];
 		const rawUser = (raw.user ?? {}) as Partial<FridaySettings["user"]> & {
@@ -790,6 +1083,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
 			activeProjectId,
+			activeSoulId: raw.activeSoulId?.trim() || this.legacyActiveAgentId || "",
 		};
 	}
 

@@ -14,6 +14,7 @@ const capabilityRegistryPath = path.join(projectRoot, "src/core/capability/Capab
 const skillRegistryPath = path.join(projectRoot, "src/core/execution/SkillRegistry.ts");
 const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const settingsTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
 
 async function loadRegistries() {
 	const capability = await jiti.import(capabilityRegistryPath);
@@ -77,4 +78,12 @@ test("daily board and settings consume capability registry instead of raw tool m
 	assert.doesNotMatch(settingsSource, /import\s+\{\s*TOOL_MANIFESTS/);
 	assert.doesNotMatch(dailyBoardSource, /for\s*\(const tool of TOOL_MANIFESTS\)/);
 	assert.doesNotMatch(settingsSource, /for\s*\(const tool of TOOL_MANIFESTS\)/);
+});
+
+test("plugin typing no longer advertises legacy agent identity apis", () => {
+	const source = readSource(pluginTypePath);
+	assert.doesNotMatch(source, /agentService: AgentService;/);
+	assert.doesNotMatch(source, /getActiveAgent\(/);
+	assert.doesNotMatch(source, /setActiveAgent\(/);
+	assert.doesNotMatch(source, /createAgent\(/);
 });

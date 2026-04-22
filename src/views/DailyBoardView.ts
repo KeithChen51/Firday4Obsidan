@@ -1,4 +1,7 @@
-﻿import {
+﻿import { existsSync, readFileSync } from "fs";
+import { homedir } from "os";
+import path from "path";
+import {
 	ItemView,
 	MarkdownRenderer,
 	Menu,
@@ -14,7 +17,13 @@ import { PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
-import { parseAgentModelChoice, serializeAgentModelChoice } from "../core/llm/AgentModelCatalog";
+import {
+	buildAgentModelCatalogFromSettings,
+	parseAgentModelChoice,
+	serializeAgentModelChoice,
+} from "../core/llm/AgentModelCatalog";
+import { patchLlmModeConfig, switchLlmMode } from "../core/llm/LlmSettingsResolver";
+import { parseOpencodeConfig, selectOpencodeProvider } from "../core/llm/OpencodeConfigResolver";
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
@@ -23,7 +32,12 @@ import {
 	RuntimeTurnResult,
 	RuntimeWikiCompileSummary,
 } from "../services/AgentRuntimeService";
-import { ChatMessage } from "../services/AIService";
+import {
+	ChatMessage,
+	type ChatMessageUiMeta,
+	type ChatMessageUiSegment,
+	type ChatMessageUiToken,
+} from "../services/AIService";
 import type { SkillDescriptor } from "../services/SkillCommandService";
 import type { ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
@@ -47,6 +61,9 @@ import {
 } from "../core/context/mention/MentionResolver";
 import {
 	createEmptyMentionComposerSnapshot,
+	formatMentionTokenLabel,
+	listMentionComposerParts,
+	restoreMentionComposerDoc,
 	type MentionComposerSnapshot,
 } from "../core/editor/mention/MentionComposerDocument";
 import { MentionComposer, type MentionComposerQuery } from "./components/MentionComposer";
@@ -128,6 +145,12 @@ export class DailyBoardView extends ItemView {
 	private aiSessionRenameId = "";
 	private aiSessionRenameDraft = "";
 	private composer: MentionComposer | null = null;
+	private aiMessageListEl: HTMLElement | null = null;
+	private aiQueueHintEl: HTMLElement | null = null;
+	private aiErrorEl: HTMLElement | null = null;
+	private aiSendButtonEl: HTMLButtonElement | null = null;
+	private aiModelSelectEl: HTMLSelectElement | null = null;
+	private aiPermissionSelectEl: HTMLSelectElement | null = null;
 	private readonly mentionResolver = new MentionResolver();
 	private readonly gitIgnoreService: GitIgnoreService;
 	private skillReviewNotePopoverCleanups: Array<() => void> = [];
@@ -180,6 +203,7 @@ export class DailyBoardView extends ItemView {
 		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
+		this.resetAiChatShellRefs();
 		this.approvalQueue.clearWithDecision("deny");
 		this.plugin.toolApprovalService.clearPromptHandler();
 		this.aiSendAbortController?.abort();
@@ -216,6 +240,7 @@ export class DailyBoardView extends ItemView {
 		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
+		this.resetAiChatShellRefs();
 		this.contentEl.empty();
 
 		const shell = this.contentEl.createDiv({ cls: "friday-shell" });
@@ -243,6 +268,15 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
+	private resetAiChatShellRefs(): void {
+		this.aiMessageListEl = null;
+		this.aiQueueHintEl = null;
+		this.aiErrorEl = null;
+		this.aiSendButtonEl = null;
+		this.aiModelSelectEl = null;
+		this.aiPermissionSelectEl = null;
+	}
+
 	private cleanupSkillReviewNotePopovers(): void {
 		const cleanups = this.skillReviewNotePopoverCleanups.splice(0);
 		for (const cleanup of cleanups) {
@@ -260,10 +294,11 @@ export class DailyBoardView extends ItemView {
 		});
 
 		const projectSection = left.createDiv({ cls: "friday-shell-project" });
-		projectSection.createSpan({
-			cls: "friday-shell-project-brand",
+		const projectBrandEl = projectSection.createSpan({
+			cls: "friday-shell-project-brand friday-wordmark",
 			text: this.t("nav.friday", "F.R.I.D.A.Y"),
 		});
+		projectBrandEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
 		projectSection.createSpan({
 			cls: "friday-shell-project-subtitle",
 			text: this.t("shell.subtitle", "对话工作台"),
@@ -570,8 +605,8 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async generateConflictProposal(projectId: string, filePath: string): Promise<void> {
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
 		const resolution = this.plugin.executionEventRouter.routeToRuntime({
@@ -587,7 +622,7 @@ export class DailyBoardView extends ItemView {
 		}
 		const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath: filePath });
 		const result = await this.plugin.executionOrchestrator.execute(decision, {
-			agentId: activeAgent.id,
+			agentId: activeSoul.id,
 			conversation: [],
 			currentFilePath: filePath,
 		});
@@ -1147,9 +1182,9 @@ export class DailyBoardView extends ItemView {
 
 	private renderAiPage(containerEl: HTMLElement): void {
 		const llmConfigured = this.plugin.aiService.isConfigured();
-		const activeAgent = this.plugin.getActiveAgent();
 		const activeSoul = this.plugin.getActiveSoul();
-		const effectiveModel = this.resolveEffectiveModel(activeAgent);
+		const activeSoulDefinition = activeSoul ? this.plugin.soulStore.getSoulSync(activeSoul.id) : null;
+		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
 		const modelCapability = this.plugin.aiService.getModelCapability(effectiveModel || undefined);
 		const currentSession = this.aiSessions.find((session) => session.sessionId === this.aiSessionId) ?? null;
 		const panelEl = containerEl.createDiv({ cls: "friday-ai-workbench" });
@@ -1165,7 +1200,7 @@ export class DailyBoardView extends ItemView {
 		metaCopy.createEl("p", {
 			cls: "friday-ai-focus-caption",
 			text: this.t("ai.focus.caption", "{agent} · {vision}", {
-				agent: activeSoul?.name ?? activeAgent?.name ?? this.t("common.notSet", "Not set"),
+				agent: activeSoul?.name ?? this.t("common.notSet", "Not set"),
 				vision: this.resolveVisionLabel(modelCapability),
 			}),
 		});
@@ -1180,12 +1215,13 @@ export class DailyBoardView extends ItemView {
 		});
 		const agentSelectWrap = metaActions.createDiv({ cls: "friday-ai-agent-select-wrap" });
 		const agentSelectEl = agentSelectWrap.createEl("select", { cls: "friday-ai-agent-select" });
-		agentSelectEl.setAttribute("aria-label", this.t("ai.agent.switch", "切换 Soul"));
-		const selectedSoulId = this.plugin.settings.activeSoulId || activeSoul?.id || "";
-		for (const agent of this.plugin.settings.agents) {
-			const option = agentSelectEl.createEl("option", { text: agent.name });
-			option.value = agent.id;
-			option.selected = agent.id === selectedSoulId;
+		agentSelectEl.setAttribute("aria-label", this.t("ai.agent.switch", "切换角色"));
+		const souls = this.plugin.listSouls();
+		const selectedSoulId = activeSoul?.id || this.plugin.settings.activeSoulId || "";
+		for (const soul of souls) {
+			const option = agentSelectEl.createEl("option", { text: soul.name });
+			option.value = soul.id;
+			option.selected = soul.id === selectedSoulId;
 		}
 		agentSelectEl.disabled = this.aiBusy;
 		agentSelectEl.onchange = () => {
@@ -1203,44 +1239,17 @@ export class DailyBoardView extends ItemView {
 
 		const chatShellEl = panelEl.createDiv({ cls: "friday-ai-chat-panel friday-ai-chat-shell" });
 		const messageListEl = chatShellEl.createDiv({ cls: "friday-ai-message-list" });
-		const pendingApprovals = this.approvalQueue.list();
+		this.aiMessageListEl = messageListEl;
+		this.renderAiMessageList(messageListEl);
 
-		if (this.aiConversation.length === 0 && !this.aiStreamingPreview && !this.aiRuntimeExecutionState && pendingApprovals.length === 0) {
-			const emptyEl = messageListEl.createDiv({ cls: "friday-ai-empty" });
-			emptyEl.createEl("h4", { text: this.plugin.t("ai.empty.title") });
-			emptyEl.createEl("p", { text: this.plugin.t("ai.empty.desc") });
-		}
+		const errorEl = chatShellEl.createDiv();
+		this.aiErrorEl = errorEl;
+		this.syncAiErrorRegion();
 
-		for (const message of this.aiConversation) {
-			this.renderAiMessage(messageListEl, message);
-		}
-		if (this.aiRuntimeExecutionState) {
-			this.renderRuntimeExecutionPreview(messageListEl);
-		} else if (this.aiStreamingPreview) {
-			this.renderAiMessage(
-				messageListEl,
-				{
-					role: "assistant",
-					content: this.aiStreamingPreview,
-				},
-				true,
-			);
-		}
-		for (const item of pendingApprovals) {
-			this.renderApprovalMessage(messageListEl, item);
-		}
-		if (!this.aiBusy && this.aiLastCompletedRuntimeExecutionState) {
-			this.renderCompletedRuntimeDisclosure(messageListEl);
-		}
+		const queueHintEl = chatShellEl.createDiv();
+		this.aiQueueHintEl = queueHintEl;
+		this.syncAiQueueHint();
 
-		if (this.aiLastError) {
-			chatShellEl.createDiv({
-				cls: "friday-ai-error",
-				text: this.aiLastError,
-			});
-		}
-
-		this.renderAiQueueHint(chatShellEl);
 		this.renderAiOverrideBar(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
@@ -1256,6 +1265,7 @@ export class DailyBoardView extends ItemView {
 			onChange: (snapshot) => {
 				this.aiComposerSnapshot = snapshot;
 				this.aiDraft = snapshot.text;
+				this.syncAiSendButtonState();
 			},
 			onSubmit: () => {
 				void this.submitAiPrompt();
@@ -1264,33 +1274,39 @@ export class DailyBoardView extends ItemView {
 		});
 
 		const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });
-		const modelOptions = this.buildModelOptions(activeAgent);
-		const selectedModelValue = this.resolveSelectedModelOptionValue(activeAgent, modelOptions);
+		const modelOptions = this.buildModelOptions(activeSoulDefinition);
+		const groupedModelOptions = this.buildGroupedModelOptions(activeSoulDefinition);
+		const selectedModelValue = this.resolveSelectedModelOptionValue(activeSoulDefinition, modelOptions);
 		const modelSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
 		modelSelect.setAttribute("aria-label", this.t("ai.model.override", "选择当前 Agent 模型"));
-		for (const optionValue of modelOptions) {
-			const option = modelSelect.createEl("option", {
-				text: optionValue.label,
-			});
-			option.value = optionValue.value;
-			option.selected = optionValue.value === selectedModelValue;
+		for (const group of groupedModelOptions) {
+			const groupEl = modelSelect.createEl("optgroup", { attr: { label: group.label } });
+			for (const optionValue of group.options) {
+				const option = groupEl.createEl("option");
+				option.textContent = optionValue.label;
+				option.value = optionValue.value;
+				option.selected = optionValue.value === selectedModelValue;
+			}
 		}
-		modelSelect.disabled = this.aiBusy || !activeAgent;
+		this.aiModelSelectEl = modelSelect;
 		modelSelect.onchange = async () => {
-			if (!activeAgent) {
+			if (!activeSoulDefinition) {
 				return;
 			}
 			const parsed = parseAgentModelChoice(modelSelect.value);
 			if (!parsed) {
 				return;
 			}
-			activeAgent.model = parsed.model;
-			activeAgent.modelMode = parsed.mode;
-			activeAgent.updatedAt = new Date().toISOString();
-			const soulId = activeSoul?.id || activeAgent.id;
-			await this.plugin.soulStore.updateSoul(soulId, {
+			await this.plugin.soulStore.updateSoul(activeSoulDefinition.id, {
 				preferredModel: parsed.model,
+				preferredModelMode: parsed.mode,
 			});
+			if (parsed.mode === "group") {
+				const patched = patchLlmModeConfig(this.plugin.settings.llm, "group", {
+					model: parsed.model,
+				});
+				this.plugin.settings.llm = switchLlmMode(patched, "group");
+			}
 			await this.plugin.saveSettings();
 			this.renderBoard();
 		};
@@ -1302,7 +1318,7 @@ export class DailyBoardView extends ItemView {
 			option.value = mode.value;
 			option.selected = mode.value === this.plugin.settings.agentRuntime.toolPermissionMode;
 		}
-		permissionSelect.disabled = this.aiBusy;
+		this.aiPermissionSelectEl = permissionSelect;
 		permissionSelect.onchange = async () => {
 			const value = permissionSelect.value;
 			this.plugin.settings.agentRuntime.toolPermissionMode = value as ToolPermissionMode;
@@ -1344,11 +1360,12 @@ export class DailyBoardView extends ItemView {
 			text: this.getSendButtonLabel(),
 		});
 		sendButton.type = "button";
-		sendButton.disabled = this.isComposerDraftEmpty();
-		sendButton.onclick = () => {
-			void this.submitAiPrompt();
+		this.aiSendButtonEl = sendButton;
+		sendButton.onclick = (event) => {
+			this.handleSendButtonClick(event);
 		};
 
+		this.syncAiComposerControls();
 		this.restoreAiMessageListScrollState(messageListEl);
 	}
 
@@ -2390,14 +2407,191 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message-avatar",
 			text: isUser ? this.resolveUserBadgeLabel() : "F",
 		});
-		metaEl.createSpan({
-			cls: "friday-ai-message-role",
+		const roleEl = metaEl.createSpan({
+			cls: isUser ? "friday-ai-message-role" : "friday-ai-message-role friday-wordmark",
 			text: isUser ? this.plugin.t("ai.role.user") : this.plugin.t("ai.role.assistant"),
 		});
+		if (!isUser) {
+			roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+		}
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content${isStreaming ? " is-streaming" : ""}`,
 		});
-		void MarkdownRenderer.renderMarkdown(message.content, contentEl, "", this);
+		this.renderAiMessageContent(contentEl, message);
+	}
+
+	private renderAiMessageContent(containerEl: HTMLElement, message: ChatMessage): void {
+		if (message.role === "user" && message.uiMeta?.segments?.length) {
+			this.renderStructuredUserMessageBody(containerEl, message.uiMeta.segments);
+			return;
+		}
+		void MarkdownRenderer.renderMarkdown(message.content, containerEl, "", this);
+	}
+
+	private renderStructuredUserMessageBody(containerEl: HTMLElement, segments: ChatMessageUiSegment[]): void {
+		const inlineEl = containerEl.createDiv({ cls: "friday-ai-inline-body" });
+		for (const segment of segments) {
+			if (segment.type === "text") {
+				inlineEl.appendText(segment.text);
+				continue;
+			}
+			this.renderInlineMessageToken(inlineEl, segment.token);
+		}
+	}
+
+	private renderInlineMessageToken(containerEl: HTMLElement, token: ChatMessageUiToken): void {
+		containerEl.createSpan({
+			cls: `friday-ai-message-badge friday-ai-inline-token is-${token.kind}`,
+			text: token.label,
+			attr: {
+				...(token.tokenType ? { "data-token-type": token.tokenType } : {}),
+				...(token.target ? { "data-token-target": token.target } : {}),
+			},
+		});
+	}
+
+	private renderAiMessageList(containerEl: HTMLElement): void {
+		containerEl.empty();
+		const pendingApprovals = this.approvalQueue.list();
+		if (this.aiConversation.length === 0 && !this.aiStreamingPreview && !this.aiRuntimeExecutionState && pendingApprovals.length === 0) {
+			const emptyEl = containerEl.createDiv({ cls: "friday-ai-empty" });
+			emptyEl.createEl("h4", { text: this.plugin.t("ai.empty.title") });
+			emptyEl.createEl("p", { text: this.plugin.t("ai.empty.desc") });
+		}
+		for (const message of this.aiConversation) {
+			this.renderAiMessage(containerEl, message);
+		}
+		if (this.aiRuntimeExecutionState) {
+			this.renderRuntimeExecutionPreview(containerEl);
+		} else if (this.aiStreamingPreview) {
+			this.renderAiMessage(
+				containerEl,
+				{
+					role: "assistant",
+					content: this.aiStreamingPreview,
+				},
+				true,
+			);
+		}
+		for (const item of pendingApprovals) {
+			this.renderApprovalMessage(containerEl, item);
+		}
+		if (!this.aiBusy && this.aiLastCompletedRuntimeExecutionState) {
+			this.renderCompletedRuntimeDisclosure(containerEl);
+		}
+	}
+
+	private syncAiLiveChatShell(): void {
+		if (this.activePage !== "chat" || !this.aiMessageListEl?.isConnected) {
+			return;
+		}
+		this.captureAiMessageListScrollState(this.aiMessageListEl);
+		this.renderAiMessageList(this.aiMessageListEl);
+		this.restoreAiMessageListScrollState(this.aiMessageListEl);
+		this.syncAiErrorRegion();
+		this.syncAiQueueHint();
+		this.syncAiComposerControls();
+	}
+
+	private syncAiErrorRegion(): void {
+		if (!this.aiErrorEl?.isConnected) {
+			return;
+		}
+		this.aiErrorEl.empty();
+		if (!this.aiLastError) {
+			return;
+		}
+		this.aiErrorEl.createDiv({
+			cls: "friday-ai-error",
+			text: this.aiLastError,
+		});
+	}
+
+	private syncAiQueueHint(): void {
+		if (!this.aiQueueHintEl?.isConnected) {
+			return;
+		}
+		this.aiQueueHintEl.empty();
+		if (!this.aiBusy && this.aiQueuedPrompts.length === 0) {
+			return;
+		}
+		const hint = this.aiQueueHintEl.createDiv({ cls: "friday-ai-queue-hint" });
+		hint.createSpan({
+			cls: "friday-ai-queue-hint-copy",
+			text: this.aiQueuedPrompts.length > 0
+				? this.t("ai.queue.helper.pending", "当前任务仍在执行，已排队 {count} 条，完成后会自动继续。", {
+					count: this.aiQueuedPrompts.length,
+				})
+				: this.t("ai.queue.helper.busy", "当前任务仍在执行。你可以继续输入下一条指令，按 Enter 会自动加入队列。"),
+		});
+		if (this.aiQueuedPrompts.length > 0) {
+			hint.createSpan({
+				cls: "friday-ai-queue-pill",
+				text: this.t("ai.queue.badge", "待发送 {count}", { count: this.aiQueuedPrompts.length }),
+			});
+		}
+	}
+
+	private syncAiComposerControls(): void {
+		const activeSoul = this.plugin.getActiveSoul();
+		const activeSoulDefinition = activeSoul ? this.plugin.soulStore.getSoulSync(activeSoul.id) : null;
+		this.syncAiSendButtonState();
+		if (this.aiModelSelectEl?.isConnected) {
+			this.aiModelSelectEl.disabled = this.aiBusy || !activeSoulDefinition;
+		}
+		if (this.aiPermissionSelectEl?.isConnected) {
+			this.aiPermissionSelectEl.disabled = this.aiBusy;
+			this.aiPermissionSelectEl.value = this.plugin.settings.agentRuntime.toolPermissionMode;
+		}
+	}
+
+	private syncAiSendButtonState(): void {
+		if (!this.aiSendButtonEl?.isConnected) {
+			return;
+		}
+		this.aiSendButtonEl.textContent = this.getSendButtonLabel();
+		this.aiSendButtonEl.disabled = this.isComposerDraftEmpty();
+	}
+
+	private handleSendButtonClick(event: MouseEvent): void {
+		if (this.isComposerDraftEmpty()) {
+			return;
+		}
+		if (!this.aiBusy || !this.aiSendAbortController) {
+			void this.submitAiPrompt();
+			return;
+		}
+		const menu = new Menu();
+		menu.addItem((item) =>
+			item
+				.setTitle(this.t("ai.queue.submit", "加入队列"))
+				.setIcon("list-plus")
+				.onClick(() => {
+					void this.submitAiPrompt();
+				}),
+		);
+		menu.addItem((item) =>
+			item
+				.setTitle(this.t("ai.queue.interrupt", "中断当前回复并立即发送"))
+				.setIcon("zap")
+				.onClick(() => {
+					this.interruptAndSubmitAiPrompt();
+				}),
+		);
+		menu.showAtMouseEvent(event);
+	}
+
+	private interruptAndSubmitAiPrompt(): void {
+		if (!this.aiBusy || !this.aiSendAbortController) {
+			void this.submitAiPrompt();
+			return;
+		}
+		const draftSnapshot = this.getComposerSnapshot();
+		if (this.isPromptDocumentEmpty(this.getStructuredPromptDocument(draftSnapshot))) {
+			return;
+		}
+		this.enqueueAiPrompt(draftSnapshot, "front");
+		this.aiSendAbortController.abort();
 	}
 
 	private renderApprovalMessage(containerEl: HTMLElement, item: PendingApproval): void {
@@ -2412,10 +2606,11 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message-avatar",
 			text: "F",
 		});
-		metaEl.createSpan({
-			cls: "friday-ai-message-role",
+		const roleEl = metaEl.createSpan({
+			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
+		roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
 		const contentEl = bubbleEl.createDiv({
 			cls: "friday-ai-message-content friday-ai-approval-content",
 		});
@@ -2472,10 +2667,11 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message-avatar",
 			text: "F",
 		});
-		metaEl.createSpan({
-			cls: "friday-ai-message-role",
+		const roleEl = metaEl.createSpan({
+			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
+		roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content friday-ai-runtime-card-content${this.aiRuntimePreviewExpanded ? "" : " is-streaming"}`,
 		});
@@ -2581,8 +2777,8 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
 			new Notice(this.plugin.t("ai.error.noAgent"), 4000);
 			return;
 		}
@@ -2619,36 +2815,49 @@ export class DailyBoardView extends ItemView {
 		});
 		if (mentionResolution.errors.length > 0) {
 			this.aiLastError = mentionResolution.errors.map((item) => item.message).join(" ");
-			this.renderBoard();
+			this.syncAiLiveChatShell();
 			return;
 		}
 		const promptMentionContext = this.buildPromptMentionContext(mentionResolution);
 		const userFacingPrompt = rawPrompt || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
+		const activeSoulDefinition = this.plugin.soulStore.getSoulSync(activeSoul.id);
+		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
+		const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
+		if (resolution.type === "invalid") {
+			this.aiLastError = resolution.error;
+			this.syncAiLiveChatShell();
+			return;
+		}
 
 		const history = [...this.aiConversation];
-		this.aiConversation.push({ role: "user", content: userFacingPrompt });
+		this.aiConversation.push({
+			role: "user",
+			content: userFacingPrompt,
+			uiMeta: this.buildUserMessageUiMeta({
+				snapshot: draftSnapshot,
+				mentionResolution,
+				resolution,
+			}),
+		});
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
+		this.composer?.replaceSnapshot(this.aiComposerSnapshot);
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
 		this.aiRuntimePreviewExpanded = false;
 		this.aiBusy = true;
 		this.aiForceScrollToBottomOnce = true;
-		this.renderBoard();
+		this.syncAiLiveChatShell();
 
 		try {
-			let modelOverride = this.resolveEffectiveModel(activeAgent) || undefined;
+			let modelOverride = effectiveModel || undefined;
 			let runtimePrompt = rawPrompt;
 			let extraSystemContext = "";
 			let allowedTools: string[] | undefined;
 			let allowedModels: string[] | undefined;
 			let assistantText = "";
 			let shouldStreamFinalText = false;
-			const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
-			if (resolution.type === "invalid") {
-				throw new Error(resolution.error);
-			}
 			if (resolution.type === "catalog") {
 				const skills = await this.plugin.skillCommandService.listSkills();
 				assistantText = this.buildSkillCatalogReply(skills);
@@ -2660,7 +2869,7 @@ export class DailyBoardView extends ItemView {
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
 				if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
 					const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
-						agentId: activeAgent.id,
+						agentId: activeSoul.id,
 						conversation: history,
 						modelOverride,
 						currentFilePath,
@@ -2713,7 +2922,7 @@ export class DailyBoardView extends ItemView {
 							if (now - this.aiRuntimeLastRenderAt >= 120) {
 								this.aiRuntimeLastRenderAt = now;
 								this.aiForceScrollToBottomOnce = true;
-								this.renderBoard();
+								this.syncAiLiveChatShell();
 							}
 						},
 					});
@@ -2751,7 +2960,7 @@ export class DailyBoardView extends ItemView {
 			this.aiSendAbortController = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
-			this.renderBoard();
+			this.syncAiLiveChatShell();
 			await this.flushQueuedAiPrompt();
 		}
 	}
@@ -2760,8 +2969,8 @@ export class DailyBoardView extends ItemView {
 		if (this.aiBusy) {
 			return;
 		}
-		const activeAgent = this.plugin.getActiveAgent();
-		if (!activeAgent) {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
 			new Notice(this.plugin.t("ai.error.noAgent"), 4000);
 			return;
 		}
@@ -2796,7 +3005,7 @@ export class DailyBoardView extends ItemView {
 				currentFilePath: this.app.workspace.getActiveFile()?.path,
 			});
 			const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
-				agentId: activeAgent.id,
+				agentId: activeSoul.id,
 				conversation: [],
 				currentFilePath: this.app.workspace.getActiveFile()?.path,
 				onProgress: (event) => {
@@ -2924,13 +3133,13 @@ export class DailyBoardView extends ItemView {
 			if (now - this.aiRuntimeLastRenderAt >= 50) {
 				this.aiRuntimeLastRenderAt = now;
 				this.aiForceScrollToBottomOnce = true;
-				this.renderBoard();
+				this.syncAiLiveChatShell();
 			}
 			// Yield to UI thread to present progressive text updates.
 			await this.sleep(delay);
 		}
 		this.aiForceScrollToBottomOnce = true;
-		this.renderBoard();
+		this.syncAiLiveChatShell();
 	}
 
 	private sleep(ms: number): Promise<void> {
@@ -2947,7 +3156,7 @@ export class DailyBoardView extends ItemView {
 		if (forceRender || now - this.aiRuntimeLastRenderAt >= 120) {
 			this.aiRuntimeLastRenderAt = now;
 			this.aiForceScrollToBottomOnce = true;
-			this.renderBoard();
+			this.syncAiLiveChatShell();
 		}
 	}
 
@@ -3086,16 +3295,21 @@ export class DailyBoardView extends ItemView {
 		return this.isPromptDocumentEmpty(this.getStructuredPromptDocument());
 	}
 
-	private enqueueAiPrompt(snapshot: MentionComposerSnapshot): void {
+	private enqueueAiPrompt(snapshot: MentionComposerSnapshot, position: "front" | "back" = "back"): void {
 		const queuedSnapshot = this.cloneComposerSnapshot(snapshot);
 		if (this.isPromptDocumentEmpty(this.getStructuredPromptDocument(queuedSnapshot))) {
 			return;
 		}
-		this.aiQueuedPrompts.push(queuedSnapshot);
+		if (position === "front") {
+			this.aiQueuedPrompts.unshift(queuedSnapshot);
+		} else {
+			this.aiQueuedPrompts.push(queuedSnapshot);
+		}
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
+		this.composer?.replaceSnapshot(this.aiComposerSnapshot);
 		this.aiForceScrollToBottomOnce = true;
-		this.renderBoard();
+		this.syncAiLiveChatShell();
 	}
 
 	private async flushQueuedAiPrompt(): Promise<void> {
@@ -3115,7 +3329,9 @@ export class DailyBoardView extends ItemView {
 		}
 		return this.isComposerDraftEmpty()
 			? this.t("ai.working", "工作中")
-			: this.t("ai.queue.submit", "加入队列");
+			: this.aiSendAbortController
+				? this.t("ai.queue.options", "发送选项")
+				: this.t("ai.queue.submit", "加入队列");
 	}
 
 	private buildPromptMentionContext(mentionResolution: MentionResolutionResult) {
@@ -3152,13 +3368,24 @@ export class DailyBoardView extends ItemView {
 			return buildSlashSuggestions(`/${query.query}`, {
 				skills: skills.map((item) => ({ command: item.command, description: item.description })),
 				slashCommands,
-			}).map((item) => ({
-				label: item.label,
-				description: item.description,
-				kind: "slash" as const,
-				trigger: "/" as const,
-				replacementText: item.value,
-			}));
+			}).map((item) => {
+				if (item.kind === "skill" && item.command) {
+					return {
+						label: item.label,
+						description: item.description,
+						kind: "skill" as const,
+						trigger: "/" as const,
+						token: this.createMentionToken("skill", item.command),
+					};
+				}
+				return {
+					label: item.label,
+					description: item.description,
+					kind: "slash" as const,
+					trigger: "/" as const,
+					replacementText: item.value,
+				};
+			});
 		}
 		return this.buildMentionSuggestionItems(query);
 	}
@@ -3310,14 +3537,142 @@ export class DailyBoardView extends ItemView {
 			.slice(0, 12);
 	}
 
-	private resolveEffectiveModel(activeAgent: { model: string } | null): string {
-		return activeAgent?.model?.trim() || this.plugin.settings.llm.model?.trim() || "";
+	private resolveEffectiveModel(activeSoul: { preferredModel?: string } | null): string {
+		return activeSoul?.preferredModel?.trim() || this.plugin.settings.llm.model?.trim() || "";
+	}
+
+	private buildUserMessageUiMeta(input: {
+		snapshot: MentionComposerSnapshot;
+		mentionResolution: MentionResolutionResult;
+		resolution: { type: string; requestedSkillName?: string };
+	}): ChatMessageUiMeta | undefined {
+		const segments = this.buildUserMessageSegments(input.snapshot, input.mentionResolution, input.resolution);
+		if (segments.length === 0) {
+			return undefined;
+		}
+		return {
+			segments,
+		};
+	}
+
+	private buildUserMessageSegments(
+		snapshot: MentionComposerSnapshot,
+		mentionResolution: MentionResolutionResult,
+		resolution: { type: string; requestedSkillName?: string },
+	): ChatMessageUiSegment[] {
+		const contextByTokenId = new Map(
+			mentionResolution.entries.map((entry) => [entry.tokenId, entry] as const),
+		);
+		const parts = listMentionComposerParts(restoreMentionComposerDoc(snapshot));
+		const segments: ChatMessageUiSegment[] = [];
+		for (const part of parts) {
+			if (part.type === "text") {
+				if (part.text) {
+					segments.push({ type: "text", text: part.text });
+				}
+				continue;
+			}
+			const mention = part.mention;
+			if (mention.type === "skill") {
+				const skillName = mention.path?.trim() || resolution.requestedSkillName?.trim() || "skill";
+				segments.push({
+					type: "token",
+					token: {
+						kind: "skill",
+						label: `Skill /${skillName}`,
+						tokenType: "skill",
+						target: skillName,
+					},
+				});
+				continue;
+			}
+			const entry = contextByTokenId.get(mention.id);
+			segments.push({
+				type: "token",
+				token: {
+					kind: "context",
+					label: entry ? this.formatMentionBadgeLabel(entry) : formatMentionTokenLabel(mention),
+					tokenType: mention.type,
+					target: mention.path?.trim() || entry?.target,
+				},
+			});
+		}
+		return this.normalizeUserMessageSegments(segments);
+	}
+
+	private normalizeUserMessageSegments(segments: ChatMessageUiSegment[]): ChatMessageUiSegment[] {
+		const next: ChatMessageUiSegment[] = [];
+		for (const segment of segments) {
+			if (segment.type === "text") {
+				if (!segment.text) {
+					continue;
+				}
+				const previous = next[next.length - 1];
+				if (previous?.type === "text") {
+					previous.text += segment.text;
+				} else {
+					next.push({ ...segment });
+				}
+				continue;
+			}
+			next.push(segment);
+		}
+		return next;
+	}
+
+	private formatMentionBadgeLabel(entry: MentionResolutionResult["entries"][number]): string {
+		const title = entry.title.trim() || entry.target.trim() || this.t("ai.message.badge.contextFallback", "未命名上下文");
+		if (entry.tokenType === "folder") {
+			return `@ ${title}/`;
+		}
+		return `@ ${title}`;
+	}
+
+	private getOpencodeConfigPaths(): string[] {
+		return [
+			path.join(homedir(), ".config", "opencode", "opencode.json"),
+			path.join(homedir(), ".config", "opencode", "config.json"),
+			path.join(homedir(), ".config", "opencode", "config.local.json"),
+		];
+	}
+
+	private readOpencodeSnapshot() {
+		for (const configPath of this.getOpencodeConfigPaths()) {
+			try {
+				if (!existsSync(configPath)) {
+					continue;
+				}
+				const raw = readFileSync(configPath, "utf8");
+				const snapshot = parseOpencodeConfig(raw, configPath);
+				if (snapshot.providers.length > 0) {
+					return snapshot;
+				}
+			} catch (error) {
+				console.warn("[Friday] Failed to read opencode config for chat model selector:", configPath, error);
+			}
+		}
+		return null;
+	}
+
+	private getAvailableAgentModelOptions() {
+		const snapshot = this.readOpencodeSnapshot();
+		const groupProvider = selectOpencodeProvider(snapshot, this.plugin.settings.llm.groupConfig.opencodeProviderId);
+		const fallbackGroupModels = this.plugin.settings.llm.groupConfig.model?.trim()
+			? [{ id: this.plugin.settings.llm.groupConfig.model.trim(), label: this.plugin.settings.llm.groupConfig.model.trim() }]
+			: [];
+		return buildAgentModelCatalogFromSettings(this.plugin.settings.llm, groupProvider?.models ?? fallbackGroupModels);
 	}
 
 	private buildModelOptions(
-		activeAgent: { model: string; modelMode?: "openai" | "group" } | null,
+		activeSoul: { preferredModel?: string; preferredModelMode?: "openai" | "group" } | null,
 	): Array<{ value: string; label: string }> {
 		const options = new Map<string, { value: string; label: string }>();
+		for (const option of this.getAvailableAgentModelOptions()) {
+			options.set(option.value, {
+				value: option.value,
+				label: option.label,
+			});
+		}
 		const addOption = (mode: "openai" | "group", model: string) => {
 			const trimmed = model.trim();
 			if (!trimmed) {
@@ -3337,15 +3692,16 @@ export class DailyBoardView extends ItemView {
 		addOption("openai", this.plugin.settings.llm.openaiConfig.model);
 		addOption("group", this.plugin.settings.llm.groupConfig.model);
 		addOption(this.plugin.settings.llm.mode, this.plugin.settings.llm.model);
-		if (activeAgent?.model?.trim()) {
-			addOption(activeAgent.modelMode ?? this.plugin.settings.llm.mode, activeAgent.model);
+		if (activeSoul?.preferredModel?.trim()) {
+			addOption(activeSoul.preferredModelMode ?? this.plugin.settings.llm.mode, activeSoul.preferredModel);
 		}
-		for (const agent of this.plugin.settings.agents) {
-			if (agent.model?.trim()) {
-				addOption(agent.modelMode ?? this.plugin.settings.llm.mode, agent.model);
+		for (const soul of this.plugin.listSouls()) {
+			const soulDefinition = this.plugin.soulStore.getSoulSync(soul.id);
+			if (soulDefinition?.preferredModel?.trim()) {
+				addOption(soulDefinition.preferredModelMode ?? this.plugin.settings.llm.mode, soulDefinition.preferredModel);
 			}
 		}
-		const selectedValue = this.resolveSelectedModelOptionValue(activeAgent, [...options.values()]);
+		const selectedValue = this.resolveSelectedModelOptionValue(activeSoul, [...options.values()]);
 		return [...options.values()].sort((left, right) => {
 			if (left.value === selectedValue) return -1;
 			if (right.value === selectedValue) return 1;
@@ -3353,8 +3709,55 @@ export class DailyBoardView extends ItemView {
 		});
 	}
 
+	private buildGroupedModelOptions(
+		activeSoul: { preferredModel?: string; preferredModelMode?: "openai" | "group" } | null,
+	): Array<{ label: string; options: Array<{ value: string; label: string }> }> {
+		const flatOptions = this.buildModelOptions(activeSoul);
+		const groups = new Map<"openai" | "group", { label: string; options: Array<{ value: string; label: string }> }>();
+		const ensureGroup = (mode: "openai" | "group") => {
+			const existing = groups.get(mode);
+			if (existing) {
+				return existing;
+			}
+			const created = {
+				label: mode === "openai" ? "OpenAI协议" : "集团集采",
+				options: [] as Array<{ value: string; label: string }>,
+			};
+			groups.set(mode, created);
+			return created;
+		};
+		for (const option of flatOptions) {
+			const parsed = parseAgentModelChoice(option.value);
+			if (!parsed) {
+				continue;
+			}
+			ensureGroup(parsed.mode).options.push({
+				value: option.value,
+				label: this.extractModelOptionShortLabel(option.label, parsed.model),
+			});
+		}
+		return Array.from(groups.entries())
+			.sort(([left], [right]) => {
+				if (left === right) return 0;
+				return left === "openai" ? -1 : 1;
+			})
+			.map(([, group]) => group);
+	}
+
+	private extractModelOptionShortLabel(label: string, fallbackModel: string): string {
+		const trimmed = label.trim();
+		if (!trimmed) {
+			return fallbackModel;
+		}
+		if (!trimmed.includes("·")) {
+			return trimmed;
+		}
+		const lastSegment = trimmed.split("·").pop()?.trim() ?? "";
+		return lastSegment || fallbackModel;
+	}
+
 	private resolveSelectedModelOptionValue(
-		activeAgent: { model: string; modelMode?: "openai" | "group" } | null,
+		activeSoul: { preferredModel?: string; preferredModelMode?: "openai" | "group" } | null,
 		options: Array<{ value: string; label: string }>,
 	): string {
 		const findValue = (mode: "openai" | "group", model: string): string => {
@@ -3368,8 +3771,11 @@ export class DailyBoardView extends ItemView {
 			}
 			return options.find((item) => item.value.endsWith(`::${trimmed}`))?.value ?? "";
 		};
-		if (activeAgent?.model?.trim()) {
-			const activeValue = findValue(activeAgent.modelMode ?? this.plugin.settings.llm.mode, activeAgent.model);
+		if (activeSoul?.preferredModel?.trim()) {
+			const activeValue = findValue(
+				activeSoul.preferredModelMode ?? this.plugin.settings.llm.mode,
+				activeSoul.preferredModel,
+			);
 			if (activeValue) {
 				return activeValue;
 			}
@@ -3811,7 +4217,7 @@ export class DailyBoardView extends ItemView {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error ?? "");
 			new Notice(
-				this.t("ai.notice.switchAgentFailed", "Switch agent failed: {error}", { error: message }),
+				this.t("ai.notice.switchAgentFailed", "Switch Agent failed: {error}", { error: message }),
 				6000,
 			);
 		}
@@ -3974,8 +4380,7 @@ export class DailyBoardView extends ItemView {
 		return this.plugin.t("vision.unknown", { model: modelName.model });
 	}
 
-	private captureAiMessageListScrollState(): void {
-		const listEl = this.contentEl.querySelector(".friday-ai-message-list");
+	private captureAiMessageListScrollState(listEl: HTMLElement | null = this.contentEl.querySelector(".friday-ai-message-list")): void {
 		if (!(listEl instanceof HTMLElement)) {
 			return;
 		}

@@ -28,6 +28,7 @@ test("plugin api exposes plugin update and git runtime accessors", () => {
 	const source = read(pluginTypePath);
 	assert.match(source, /pluginUpdateService:/);
 	assert.match(source, /getGitRuntimeStatus\(\): Promise</);
+	assert.match(source, /reloadFridayPlugin\(\): Promise<void>;/);
 });
 
 test("settings section label renames user section to basic configuration in both locales", () => {
@@ -46,6 +47,8 @@ test("settings section label renames user section to basic configuration in both
 	assert.match(en, /"settings\.user\.update\.currentVersion\.apply":/);
 	assert.match(zh, /"settings\.user\.update\.prerequisites\.name":/);
 	assert.match(en, /"settings\.user\.update\.prerequisites\.name": "Prerequisites"/);
+	assert.match(zh, /"settings\.user\.update\.notice\.applied":/);
+	assert.match(en, /"settings\.user\.update\.notice\.applied":/);
 	assert.match(zh, /"settings\.user\.update\.notice\.restart":/);
 	assert.match(en, /"settings\.user\.update\.notice\.restart":/);
 });
@@ -84,7 +87,6 @@ test("plugin update section uses a native settings group and hides advanced cont
 	assert.doesNotMatch(source, /friday-card friday-plugin-update-card/);
 	assert.match(source, /if \(prerequisitesReady\)/);
 	assert.match(source, /settings\.user\.update\.checkOnStartup\.name/);
-	assert.match(source, /settings\.user\.update\.status\.name/);
 	assert.doesNotMatch(source, /settings\.user\.update\.actions\.name/);
 	assert.doesNotMatch(source, /settings\.user\.update\.enabled\.name/);
 });
@@ -107,21 +109,23 @@ test("plugin update card uses the current-version row as the only check-or-apply
 	assert.doesNotMatch(block, /settings\.user\.update\.actions\.dismiss/);
 	assert.doesNotMatch(block, /dismissedVersion/);
 	assert.match(block, /const hasAvailableUpdate = Boolean\(availableVersion\);/);
-	assert.match(block, /setButtonText\([\s\S]*hasAvailableUpdate[\s\S]*settings\.user\.update\.currentVersion\.apply/);
-	assert.match(block, /if \(hasAvailableUpdate\) \{\s*button\.setCta\(\);\s*\} else \{\s*button\.removeCta\(\);\s*\}/);
+	assert.match(block, /const needsPluginReload = this\.host\.settings\.update\.lastResult === "applied";/);
+	assert.match(block, /setButtonText\([\s\S]*needsPluginReload[\s\S]*settings\.user\.update\.notice\.restart[\s\S]*hasAvailableUpdate[\s\S]*settings\.user\.update\.currentVersion\.apply/);
+	assert.match(block, /if \(needsPluginReload \|\| hasAvailableUpdate\) \{\s*button\.setCta\(\);\s*\} else \{\s*button\.removeCta\(\);\s*\}/);
+	assert.doesNotMatch(block, /settings\.user\.update\.status\.name/);
 });
 
-test("plugin update apply flow shows a persistent restart CTA notice after a successful update", () => {
+test("plugin update apply flow keeps the reload action inside settings instead of spawning a persistent notice", () => {
 	const source = read(settingsPath);
-	assert.match(source, /showPluginUpdateRestartNotice\(\)/);
-	assert.match(source, /new Notice\(fragment,\s*0\)/);
 	assert.match(source, /settings\.user\.update\.notice\.restart/);
-	assert.match(source, /this\.host\.reloadObsidianApp\(\)/);
+	assert.match(source, /private async runPluginUpdateReload\(\): Promise<void> \{/);
+	assert.match(source, /this\.host\.reloadFridayPlugin\(\)/);
+	assert.doesNotMatch(source, /private showPluginUpdateRestartNotice\(\): void \{/);
 
 	const match = source.match(/private async runPluginUpdateApply\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate buildProjectDescription/);
 	assert.ok(match, "runPluginUpdateApply block should exist");
 	const block = match[1] ?? "";
-	assert.match(block, /this\.showPluginUpdateRestartNotice\(\);/);
+	assert.doesNotMatch(block, /showPluginUpdateRestartNotice\(\)/);
 	assert.doesNotMatch(block, /new Notice\(this\.t\("settings\.user\.update\.notice\.applied"/);
 	assert.match(block, /this\.host\.settings\.update\.availableVersion = "";/);
 	assert.doesNotMatch(block, /dismissedVersion/);

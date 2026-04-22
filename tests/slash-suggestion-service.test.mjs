@@ -45,5 +45,6 @@ test("skill suggestions render a friendly skill label instead of raw slash synta
 		slashCommands: [],
 	});
 	const skillItem = items.find((item) => item.value === "/skill lookup-wiki ");
-	assert.equal(skillItem?.label, "技能：lookup-wiki");
+	assert.equal(skillItem?.label, "Skill · /lookup-wiki");
+	assert.equal(skillItem?.kind, "skill");
 });

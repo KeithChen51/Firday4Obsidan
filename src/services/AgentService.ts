@@ -2,7 +2,6 @@ import { normalizePath, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
 import { PRIMARY_PATHS } from "../constants/paths";
 import { STUDIO_CONTENT_SNAPSHOT, type StudioSnapshotEntry } from "../content/studio/generated";
 import { AgentProfile } from "../types/agent";
-import { FridaySettings } from "../types/settings";
 
 const AGENTS_FOLDER = "Agents";
 const GLOBAL_FOLDER = "_global";
@@ -86,6 +85,10 @@ export class AgentService {
 		return normalizePath(`${this.fridayRoot}/${AGENTS_FOLDER}`);
 	}
 
+	hasLegacyAgentsRoot(): boolean {
+		return this.vault.getAbstractFileByPath(this.getLegacyAgentsRoot()) instanceof TFolder;
+	}
+
 	getGlobalRoot(): string {
 		return normalizePath(`${this.getLegacyAgentsRoot()}/${GLOBAL_FOLDER}`);
 	}
@@ -138,39 +141,16 @@ export class AgentService {
 		return normalizePath(`${this.getGlobalRoot()}/curator-config.json`);
 	}
 
-	async bootstrap(settings: FridaySettings): Promise<boolean> {
+	async bootstrap(): Promise<boolean> {
 		await this.removeLegacyStudioRoots();
-		await this.ensureBaseFolders();
-		await this.ensurePresetFiles();
-		await this.ensureGlobalKnowledgeFiles();
-		await this.ensureCuratorConfig();
+		if (this.hasLegacyAgentsRoot()) {
+			await this.ensureBaseFolders();
+			await this.ensurePresetFiles();
+			await this.ensureGlobalKnowledgeFiles();
+			await this.ensureCuratorConfig();
+		}
 		await this.reconcileStudioSnapshot();
-
-		let changed = false;
-
-		if (!settings.agents || settings.agents.length === 0) {
-			const created = await this.createAgent({
-				id: DEFAULT_AGENT_ID,
-				name: "默认 Agent",
-				description: "系统默认通用助手",
-				model: settings.llm.model,
-				modelMode: settings.llm.mode,
-			});
-			settings.agents = [created];
-			settings.activeAgentId = created.id;
-			changed = true;
-		}
-
-		for (const agent of settings.agents) {
-			await this.ensureAgentStorage(agent);
-		}
-
-		if (!settings.activeAgentId || !settings.agents.some((item) => item.id === settings.activeAgentId)) {
-			settings.activeAgentId = settings.agents[0]?.id ?? DEFAULT_AGENT_ID;
-			changed = true;
-		}
-
-		return changed;
+		return false;
 	}
 
 	async createAgent(input: {

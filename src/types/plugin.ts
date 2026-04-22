@@ -1,5 +1,4 @@
 ﻿import { App, Plugin } from "obsidian";
-import { AgentService } from "../services/AgentService";
 import { AgentActionService } from "../services/AgentActionService";
 import { AgentRuntimeService, RuntimeWikiCompileSummary } from "../services/AgentRuntimeService";
 import { AIService } from "../services/AIService";
@@ -19,7 +18,6 @@ import { ExecutionPlanner } from "../core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "../core/execution/ExecutionOrchestrator";
 import { SyncEventBus } from "../features/sync/SyncEventBus";
 import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
-import { AgentProfile } from "./agent";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { SoulSummary } from "./soul";
@@ -41,7 +39,6 @@ export interface FridayPluginApi {
 	dataService: DataService;
 	syncService: SyncService;
 	aiService: AIService;
-	agentService: AgentService;
 	conversationService: ConversationService;
 	canvasService: CanvasService;
 	agentActionService: AgentActionService;
@@ -83,16 +80,16 @@ export interface FridayPluginApi {
 	removeProjectGroup(groupId: string): Promise<void>;
 	openSettingsTab(section?: FridaySettingsSection): void;
 	openWorkspaceView(): Promise<void>;
+	reloadFridayPlugin(): Promise<void>;
 	reloadObsidianApp(): void;
 	getLocale(): LocaleCode;
 	t(key: string, params?: I18nParams): string;
 	getGitRuntimeStatus(): Promise<GitRuntimeStatus>;
 	getPrimaryUserId(): string;
 	getDetectedUserId(): string;
+	listSouls(): SoulSummary[];
 	getActiveSoul(): SoulSummary | null;
 	setActiveSoul(soulId: string): Promise<void>;
 	createSoul(input: { name: string; summary: string; description?: string }): Promise<SoulSummary>;
-	getActiveAgent(): AgentProfile | null;
-	setActiveAgent(agentId: string): Promise<void>;
-	createAgent(input: { name: string; description: string; model?: string; modelMode?: "openai" | "group" }): Promise<AgentProfile>;
+	resetBuiltInSoulPreset(soulId: string): Promise<SoulSummary>;
 }

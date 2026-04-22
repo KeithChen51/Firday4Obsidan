@@ -6,27 +6,31 @@ export class RuntimeStateStore {
 	constructor(private readonly localStateRootService: LocalStateRootService) {}
 
 	getSoulsRoot(): string {
-		return this.localStateRootService.resolve("souls");
+		return this.localStateRootService.resolveVault("souls");
 	}
 
 	getSessionsRoot(): string {
-		return this.localStateRootService.resolve("sessions");
+		return this.localStateRootService.resolveVault("sessions");
 	}
 
 	getApprovalsRoot(): string {
-		return this.localStateRootService.resolve("approvals");
+		return this.localStateRootService.resolveVault("approvals");
 	}
 
 	getSnapshotsRoot(): string {
-		return this.localStateRootService.resolve("snapshots");
+		return this.localStateRootService.resolveVault("snapshots");
+	}
+
+	getSoulSnapshotsRoot(soulId: string): string {
+		return path.join(this.getSnapshotsRoot(), soulId);
 	}
 
 	getRuntimeRoot(): string {
-		return this.localStateRootService.resolve("runtime");
+		return this.localStateRootService.resolveVault("runtime");
 	}
 
 	getBackupsRoot(): string {
-		return this.localStateRootService.resolve("backups");
+		return this.localStateRootService.resolveVault("backups");
 	}
 
 	getSessionFilePath(sessionId: string): string {

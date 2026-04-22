@@ -18,7 +18,10 @@ export class LegacyAgentCleanupService {
 
 	hasLegacyAgentData(): boolean {
 		const root = this.vault.getAbstractFileByPath(this.agentService.getLegacyAgentsRoot());
-		return root instanceof TFolder && root.children.length > 0;
+		if (!(root instanceof TFolder)) {
+			return false;
+		}
+		return root.children.some((child) => child instanceof TFolder && !child.name.startsWith("_"));
 	}
 
 	async cleanupLegacyAgentData(): Promise<CleanupResult> {

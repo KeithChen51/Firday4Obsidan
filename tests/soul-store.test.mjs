@@ -20,6 +20,7 @@ test("soul store persists soul definitions under dedicated local-state files", (
 	assert.match(source, /state\.json/);
 	assert.match(source, /"definitions"/);
 	assert.doesNotMatch(source, /F\.R\.I\.D\.A\.Y\/Agents/);
+	assert.match(source, /resolveVault/);
 });
 
 test("soul store exposes core definition and activation operations", () => {
@@ -28,4 +29,5 @@ test("soul store exposes core definition and activation operations", () => {
 	assert.match(source, /getSoul\(id: string\): Promise</);
 	assert.match(source, /createSoul\(/);
 	assert.match(source, /setActiveSoul\(id: string\): Promise<void>/);
+	assert.match(source, /deleteSoul\(id: string\): Promise<void>/);
 });

@@ -1,8 +1,7 @@
 import { readdir, readFile, rm, writeFile } from "fs/promises";
-import { normalizePath, parseYaml, TFile, TFolder, Vault } from "obsidian";
+import { parseYaml } from "obsidian";
 import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { ChatMessage } from "./AIService";
-import { AgentService } from "./AgentService";
 import { RuntimeStateStore } from "./RuntimeStateStore";
 
 interface SessionLine {
@@ -38,11 +37,7 @@ export interface ConversationSession {
 export class ConversationService {
 	private readonly historyCompactor = new HistoryCompactor();
 
-	constructor(
-		private readonly vault: Vault,
-		private readonly runtimeStateStore: RuntimeStateStore,
-		private readonly agentService: AgentService,
-	) {}
+	constructor(private readonly runtimeStateStore: RuntimeStateStore) {}
 
 	createSessionId(date = new Date()): string {
 		return date.toISOString().replace(/[:.]/g, "-");
@@ -103,11 +98,7 @@ export class ConversationService {
 	}
 
 	async listSessions(soulId: string, limit = 100, projectId?: string): Promise<ConversationSession[]> {
-		const localSessions = await this.listLocalSessions(soulId, limit, projectId);
-		if (localSessions.length > 0) {
-			return localSessions;
-		}
-		return this.listLegacySessions(soulId, limit);
+		return this.listLocalSessions(soulId, limit, projectId);
 	}
 
 	async renameSession(soulId: string, sessionId: string, title: string, projectId?: string): Promise<ConversationSession> {
@@ -129,23 +120,16 @@ export class ConversationService {
 		if (!session) {
 			return;
 		}
-		if (session.filePath.endsWith(".jsonl") && !session.filePath.includes("F.R.I.D.A.Y/Agents")) {
-			try {
-				await rm(session.filePath, { force: true });
-				return;
-			} catch {
-				return;
-			}
-		}
-		const legacyFile = await this.findLegacySessionFile(soulId, sessionId);
-		if (legacyFile instanceof TFile) {
-			await this.vault.delete(legacyFile);
+		try {
+			await rm(session.filePath, { force: true });
+		} catch {
+			return;
 		}
 	}
 
 	async getSession(soulId: string, sessionId: string, projectId?: string): Promise<ConversationSession | null> {
 		const localPath = this.runtimeStateStore.getSessionFilePath(sessionId);
-		const localSession = await this.readSessionFromLocalFile(localPath);
+		const localSession = await this.readSessionFromFile(localPath);
 		if (
 			localSession &&
 			localSession.soulId === soulId &&
@@ -153,31 +137,7 @@ export class ConversationService {
 		) {
 			return localSession;
 		}
-		const legacyFile = await this.findLegacySessionFile(soulId, sessionId);
-		if (!(legacyFile instanceof TFile)) {
-			return null;
-		}
-		return this.readSessionFromLegacyFile(legacyFile, soulId);
-	}
-
-	async importLegacySessions(soulId: string, projectId?: string): Promise<number> {
-		const legacySessions = await this.listLegacySessions(soulId, 500);
-		let imported = 0;
-		for (const legacy of legacySessions) {
-			const existing = await this.readSessionFromLocalFile(this.runtimeStateStore.getSessionFilePath(legacy.sessionId));
-			if (existing) {
-				continue;
-			}
-			await this.saveSession({
-				soulId,
-				projectId: projectId ?? legacy.projectId,
-				sessionId: legacy.sessionId,
-				messages: legacy.messages,
-				title: legacy.title,
-			});
-			imported += 1;
-		}
-		return imported;
+		return null;
 	}
 
 	async collectRecentSessionsAcrossSouls(
@@ -216,7 +176,7 @@ export class ConversationService {
 		const sessions: ConversationSession[] = [];
 		for (const name of names.filter((item) => item.endsWith(".jsonl")).sort((left, right) => right.localeCompare(left))) {
 			const filePath = this.runtimeStateStore.getSessionFilePath(name.replace(/\.jsonl$/i, ""));
-			const session = await this.readSessionFromLocalFile(filePath);
+			const session = await this.readSessionFromFile(filePath);
 			if (!session) {
 				continue;
 			}
@@ -234,24 +194,7 @@ export class ConversationService {
 		return sessions;
 	}
 
-	private async listLegacySessions(soulId: string, limit: number): Promise<ConversationSession[]> {
-		const folderPath = this.agentService.getLegacyAgentSessionsRoot(soulId);
-		const files = this.vault
-			.getFiles()
-			.filter((file) => normalizePath(file.path).startsWith(`${folderPath}/`) && file.extension === "jsonl")
-			.sort((left, right) => right.path.localeCompare(left.path))
-			.slice(0, limit);
-		const sessions: ConversationSession[] = [];
-		for (const file of files) {
-			const session = await this.readSessionFromLegacyFile(file, soulId);
-			if (session) {
-				sessions.push(session);
-			}
-		}
-		return sessions;
-	}
-
-	private async readSessionFromLocalFile(filePath: string): Promise<ConversationSession | null> {
+	private async readSessionFromFile(filePath: string): Promise<ConversationSession | null> {
 		try {
 			const raw = await readFile(filePath, "utf8");
 			return this.readSessionFromRaw(raw, filePath);
@@ -260,41 +203,7 @@ export class ConversationService {
 		}
 	}
 
-	private async findLegacySessionFile(soulId: string, sessionId: string): Promise<TFile | null> {
-		const directPath = normalizePath(`${this.agentService.getLegacyAgentSessionsRoot(soulId)}/${sessionId}.jsonl`);
-		const direct = this.getFileByPathRelaxed(directPath);
-		if (direct instanceof TFile) {
-			return direct;
-		}
-		const folderPath = this.agentService.getLegacyAgentSessionsRoot(soulId);
-		return (
-			this.vault
-				.getFiles()
-				.find(
-					(file) =>
-						normalizePath(file.path).startsWith(`${folderPath}/`) &&
-						file.extension === "jsonl" &&
-						file.basename === sessionId,
-				) ?? null
-		);
-	}
-
-	private getFileByPathRelaxed(filePath: string): TFile | null {
-		const normalized = normalizePath(filePath);
-		const direct = this.vault.getAbstractFileByPath(normalized);
-		if (direct instanceof TFile) {
-			return direct;
-		}
-		const lower = normalized.toLowerCase();
-		return this.vault.getFiles().find((item) => normalizePath(item.path).toLowerCase() === lower) ?? null;
-	}
-
-	private async readSessionFromLegacyFile(file: TFile, soulId: string): Promise<ConversationSession | null> {
-		const raw = await this.vault.cachedRead(file);
-		return this.readSessionFromRaw(raw, file.path, soulId);
-	}
-
-	private readSessionFromRaw(raw: string, filePath: string, fallbackSoulId = ""): ConversationSession | null {
+	private readSessionFromRaw(raw: string, filePath: string): ConversationSession | null {
 		const lines = raw
 			.split(/\r?\n/)
 			.map((line) => line.trim())
@@ -305,7 +214,7 @@ export class ConversationService {
 
 		const messages: ChatMessage[] = [];
 		let sessionId = filePath.split(/[\\/]/).pop()?.replace(/\.jsonl$/i, "") || "";
-		let soulId = fallbackSoulId;
+		let soulId = "";
 		let projectId = "";
 		let updatedAt = new Date().toISOString();
 		let title = "";
@@ -350,13 +259,13 @@ export class ConversationService {
 			}
 		}
 
-		if (messages.length === 0) {
+		if (messages.length === 0 || !soulId) {
 			return null;
 		}
 
 		return {
 			sessionId,
-			soulId: soulId || fallbackSoulId,
+			soulId,
 			projectId: projectId || undefined,
 			updatedAt,
 			filePath,

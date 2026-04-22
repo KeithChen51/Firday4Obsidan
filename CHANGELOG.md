@@ -2,6 +2,14 @@
 
 这里记录 F.R.I.D.A.Y 面向用户的版本变化，按版本倒序排列。
 
+## 0.2.7
+发布日期：2026-04-22
+
+- Soul 现在成为唯一的运行时身份入口：设置模型、当前角色切换、Daily Board 对话工作台和插件 API 全部改为直接读取 `SoulStore`，旧的 `settings.agents`、`activeAgentId` 与 `getActiveAgent` / `createAgent` 兼容接口已从主链路移除。
+- 旧 Agent 数据迁移进一步收口：启动时会把历史 Agent 档案导入为 Soul 定义，并同步迁移旧会话、工具批准规则和模型偏好；日常会话与快照存储不再依赖 `AgentService` 的 legacy 路径。
+- `来自制作组` 栏目完成命名更新：`幕后笔记 · Behind the Build` 统一为 `Study with F.R.I.D.A.Y`，`迭代手记 · Changelog` 简化为 `Changelog`，同时保留旧路径兼容，避免已有 vault 升级后断链。
+- 调整初始化命令的全局 `FRIDAY.md` 写入路径，并补齐 Soul-only 与 studio 路径迁移相关的回归测试，降低后续迭代时的兼容性回退风险。
+
 ## 0.2.6
 发布日期：2026-04-20
 

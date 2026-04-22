@@ -8,9 +8,15 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const sourcePath = path.join(projectRoot, "src/services/AgentService.ts");
+const conversationPath = path.join(projectRoot, "src/services/ConversationService.ts");
+const actionPath = path.join(projectRoot, "src/services/AgentActionService.ts");
 
 function readSource() {
 	return fs.readFileSync(sourcePath, "utf8");
+}
+
+function read(filePath) {
+	return fs.readFileSync(filePath, "utf8");
 }
 
 test("agent service bootstrap provisions the studio structure under F.R.I.D.A.Y root", async () => {
@@ -41,6 +47,22 @@ test("agent service is no longer the canonical runtime root once soul migration 
 	assert.doesNotMatch(source, /getAgentsRoot\(/);
 	assert.doesNotMatch(source, /getAgentSessionsRoot\(/);
 	assert.doesNotMatch(source, /getAgentToolApprovalPath\(/);
+});
+
+test("agent service only rehydrates legacy agent scaffolding when an Agents root already exists", async () => {
+	const source = readSource().replace(/\r\n?/g, "\n");
+	assert.match(source, /hasLegacyAgentsRoot\(\): boolean/);
+	assert.match(source, /if \(this\.hasLegacyAgentsRoot\(\)\) \{/);
+	assert.doesNotMatch(source, /async bootstrap\(\): Promise<boolean> \{\n\t\tawait this\.removeLegacyStudioRoots\(\);\n\t\tawait this\.ensureBaseFolders\(\);/);
+});
+
+test("runtime hot paths no longer depend on agent service for live session or snapshot storage", async () => {
+	const conversationSource = read(conversationPath);
+	const actionSource = read(actionPath);
+	assert.doesNotMatch(conversationSource, /import \{ AgentService \} from "\.\/AgentService"/);
+	assert.doesNotMatch(conversationSource, /getLegacyAgentSessionsRoot/);
+	assert.doesNotMatch(actionSource, /import \{ AgentService \} from "\.\/AgentService"/);
+	assert.doesNotMatch(actionSource, /getAgentSnapshotsRoot/);
 });
 
 test("agent service tolerates startup file-create races when managed files already exist on disk", async () => {

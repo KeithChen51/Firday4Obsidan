@@ -20,6 +20,7 @@ test("runtime state store exposes dedicated souls sessions and approvals areas",
 	assert.match(source, /sessions/);
 	assert.match(source, /approvals/);
 	assert.doesNotMatch(source, /F\.R\.I\.D\.A\.Y\/Agents/);
+	assert.match(source, /resolveVault/);
 });
 
 test("runtime state store owns path helpers for runtime-only state", () => {

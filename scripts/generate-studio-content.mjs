@@ -6,7 +6,7 @@ const repoRoot = process.cwd();
 const sourceRoot = path.join(repoRoot, "src", "content", "studio");
 const outputPath = path.join(sourceRoot, "generated.ts");
 const changelogPath = path.join(repoRoot, "CHANGELOG.md");
-const studioLogFile = "迭代手记 · Changelog.md";
+const studioLogFile = "Changelog.md";
 
 function toPosix(relativePath) {
 	return relativePath.split(path.sep).join("/");
@@ -39,14 +39,14 @@ function normalizeLineEndings(value) {
 function buildStudioChangelog(raw) {
 	const normalized = normalizeLineEndings(raw).trim();
 	if (!normalized) {
-		return "# 迭代手记 · Changelog\n";
+		return "# Changelog\n";
 	}
 	const lines = normalized.split("\n");
 	const headingIndex = lines.findIndex((line) => /^#\s+/.test(line.trim()));
 	if (headingIndex === -1) {
-		return `# 迭代手记 · Changelog\n\n${normalized}\n`;
+		return `# Changelog\n\n${normalized}\n`;
 	}
-	lines[headingIndex] = "# 迭代手记 · Changelog";
+	lines[headingIndex] = "# Changelog";
 	return `${lines.join("\n").trim()}\n`;
 }
 

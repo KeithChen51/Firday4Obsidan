@@ -76,6 +76,27 @@ test("mention resolver reports a structured error when active note token has no 
 	assert.match(result.errors[0].message, /active note/i);
 });
 
+test("mention resolver ignores skill tokens because they are runtime instructions not context attachments", async () => {
+	const mod = await loadMentionResolverModule();
+	const resolver = new mod.MentionResolver();
+	const result = await resolver.resolve({
+		document: {
+			text: "/skill compile-wiki 重建知识库",
+			tokens: [{ id: "skill-1", type: "skill", path: "compile-wiki" }],
+		},
+		currentFilePath: "Projects/demo/raw/active.md",
+		activeProjectRoot: "Projects/demo",
+		readFile: async () => null,
+		listFolderEntries: async () => [],
+	});
+
+	assert.equal(result.errors.length, 0);
+	assert.equal(result.summary.resolvedCount, 0);
+	assert.deepEqual(result.summary.tokenTypes, []);
+	assert.equal(result.channels.mentioned_notes.length, 0);
+	assert.equal(result.channels.folder_structures.length, 0);
+});
+
 test("legacy mention parser extracts note tokens from @[path] syntax for transition compatibility", async () => {
 	const mod = await loadMentionResolverModule();
 	const parsed = mod.parseLegacyMentionMarkup("Summarize @[Projects/demo/raw/spec.md] and @[Projects/demo/raw/plan.md]");

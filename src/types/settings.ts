@@ -1,5 +1,5 @@
 import { ProjectEntry, ProjectGroupEntry } from "./project";
-import { AgentProfile, AgentRuntimeSettings } from "./agent";
+import { AgentRuntimeSettings } from "./agent";
 import { LocaleCode } from "../i18n/types";
 
 export interface SlashCommandTemplate {
@@ -63,8 +63,6 @@ export interface FridaySettings {
 	projects: ProjectEntry[];
 	activeProjectId: string;
 	activeSoulId: string;
-	agents: AgentProfile[];
-	activeAgentId: string;
 	agentRuntime: AgentRuntimeSettings;
 	slashCommands: SlashCommandTemplate[];
 }
@@ -130,8 +128,6 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 	projects: [],
 	activeProjectId: "",
 	activeSoulId: "",
-	agents: [],
-	activeAgentId: "",
 	agentRuntime: {
 		requireWriteConfirmation: true,
 		toolPermissionMode: "standard",

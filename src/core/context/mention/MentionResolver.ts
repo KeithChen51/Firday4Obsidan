@@ -1,6 +1,6 @@
 import { resolveContextZone, type ContextZoneType } from "../../../features/wiki/TagPolicyRuntime";
 
-export type MentionTokenType = "active_note" | "note" | "folder";
+export type MentionTokenType = "active_note" | "note" | "folder" | "skill";
 export type MentionChannel = "mentioned_notes" | "folder_structures";
 
 export interface MentionToken {
@@ -106,6 +106,9 @@ export class MentionResolver {
 		const sourceMap: MentionSourceMapEntry[] = [];
 
 		for (const token of uniqueTokens) {
+			if (token.type === "skill") {
+				continue;
+			}
 			if (token.type === "folder") {
 				const target = normalizePathValue(token.path);
 				if (!target) {
@@ -170,7 +173,7 @@ export class MentionResolver {
 			summary: {
 				resolvedCount: entries.length,
 				errorCount: errors.length,
-				tokenTypes: [...new Set(uniqueTokens.map((token) => token.type))].sort(),
+				tokenTypes: [...new Set(entries.map((entry) => entry.tokenType))].sort(),
 				sourceMap,
 			},
 			channels: {

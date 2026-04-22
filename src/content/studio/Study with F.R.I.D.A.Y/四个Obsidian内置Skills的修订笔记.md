@@ -1,14 +1,27 @@
 ---
-tags:
-  - friday
-  - obsidian
-  - skills
-  - 幕后笔记
+title: 四个Obsidian内置Skills的修订笔记
+series: behind-the-build
+type: retrospective
+status: stable
 author: Keith Lim
 created: 2026-04-19
 updated: 2026-04-19
+summary: 回顾四个 Obsidian 内置 Skills 的修订动机、问题来源和这轮修改背后的设计思路。
+release_scope:
+  - 0.2.5
+tags:
+  - friday
+  - backstage
+  - obsidian
+  - skills
+  - ai-native
+aliases:
+  - Obsidian内置Skills修订笔记
+topics:
+  - obsidian-skills
+  - built-in-skills
+  - skill-revision
 ---
-
 # 四个 Obsidian 内置 Skills 的修订笔记
 
 ## 这篇笔记在说什么

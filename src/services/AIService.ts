@@ -16,6 +16,35 @@ export interface ChatMessage {
 	toolCallId?: string;
 	name?: string;
 	toolCalls?: ToolCall[];
+	uiMeta?: ChatMessageUiMeta;
+}
+
+export interface ChatMessageUiBadge {
+	kind: "skill" | "context" | "model";
+	label: string;
+}
+
+export interface ChatMessageUiToken {
+	kind: "skill" | "context";
+	label: string;
+	tokenType?: "skill" | "active_note" | "note" | "folder";
+	target?: string;
+}
+
+export type ChatMessageUiSegment =
+	| {
+			type: "text";
+			text: string;
+	  }
+	| {
+			type: "token";
+			token: ChatMessageUiToken;
+	  };
+
+export interface ChatMessageUiMeta {
+	badges?: ChatMessageUiBadge[];
+	detail?: string;
+	segments?: ChatMessageUiSegment[];
 }
 
 export type ChatMessagePart =

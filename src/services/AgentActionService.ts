@@ -1,38 +1,40 @@
-﻿import { normalizePath, TFile, TFolder, Vault } from "obsidian";
-import { AgentService } from "./AgentService";
+import { mkdir, writeFile } from "fs/promises";
+import path from "path";
+import { normalizePath, TFile, TFolder, Vault } from "obsidian";
 import { CanvasService } from "./CanvasService";
 import { AgentAction, AgentActionPreview } from "../types/action";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
 import { ProjectBoundaryService } from "./ProjectBoundaryService";
+import { RuntimeStateStore } from "./RuntimeStateStore";
 
 export class AgentActionService {
 	constructor(
 		private readonly vault: Vault,
-		private readonly agentService: AgentService,
+		private readonly runtimeStateStore: RuntimeStateStore,
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly canvasService: CanvasService,
 		private readonly projectBoundaryService: ProjectBoundaryService,
 	) {}
 
 	preview(action: AgentAction): AgentActionPreview {
-		const path = normalizePath(action.path);
+		const pathValue = normalizePath(action.path);
 		let summary = "";
 		if (action.type === "delete") {
-			summary = action.targetType === "folder" ? `删除文件夹 ${path}` : `删除文件 ${path}`;
+			summary = action.targetType === "folder" ? `删除文件夹 ${pathValue}` : `删除文件 ${pathValue}`;
 		} else if (action.type === "create") {
-			summary = `新建文件 ${path}`;
+			summary = `新建文件 ${pathValue}`;
 		} else {
-			summary = `更新文件 ${path}`;
+			summary = `更新文件 ${pathValue}`;
 		}
 		return {
-			path,
+			path: pathValue,
 			type: action.type,
 			targetType: action.targetType,
 			summary,
 		};
 	}
 
-	async execute(action: AgentAction, agentId: string): Promise<void> {
+	async execute(action: AgentAction, soulId: string): Promise<void> {
 		const targetPath = normalizePath(action.path);
 		if (!this.workspaceAccessService.canWriteVaultPath(targetPath)) {
 			throw new Error(this.buildScopeDeniedMessage(targetPath));
@@ -45,7 +47,7 @@ export class AgentActionService {
 			}
 		}
 
-		await this.snapshotBeforeWrite(targetPath, agentId);
+		await this.snapshotBeforeWrite(targetPath, soulId);
 		await this.applyAction(targetPath, action);
 	}
 
@@ -123,27 +125,22 @@ export class AgentActionService {
 		}
 	}
 
-	private async snapshotBeforeWrite(path: string, agentId: string): Promise<void> {
-		const existing = this.vault.getAbstractFileByPath(path);
+	private async snapshotBeforeWrite(targetPath: string, soulId: string): Promise<void> {
+		const existing = this.vault.getAbstractFileByPath(targetPath);
 		if (!(existing instanceof TFile)) {
 			return;
 		}
 		const content = await this.vault.cachedRead(existing);
-		const snapshotPath = normalizePath(
-			`${this.agentService.getAgentSnapshotsRoot(agentId)}/${new Date().toISOString().replace(/[:.]/g, "-")}.patch`,
-		);
+		const snapshotRoot = this.runtimeStateStore.getSoulSnapshotsRoot(soulId);
+		await mkdir(snapshotRoot, { recursive: true });
+		const snapshotPath = path.join(snapshotRoot, `${new Date().toISOString().replace(/[:.]/g, "-")}.patch`);
 		const payload = [
-			`# Snapshot`,
-			`path: ${path}`,
+			"# Snapshot",
+			`path: ${targetPath}`,
 			`createdAt: ${new Date().toISOString()}`,
 			"",
 			content,
 		].join("\n");
-		const snapshotFile = this.vault.getAbstractFileByPath(snapshotPath);
-		if (snapshotFile instanceof TFile) {
-			await this.vault.modify(snapshotFile, payload);
-		} else {
-			await this.vault.create(snapshotPath, payload);
-		}
+		await writeFile(snapshotPath, payload, "utf8");
 	}
 }

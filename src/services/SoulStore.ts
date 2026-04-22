@@ -1,7 +1,8 @@
-import { readFile, writeFile } from "fs/promises";
+import { existsSync, readFileSync } from "fs";
+import { readFile, rm, writeFile } from "fs/promises";
 import path from "path";
 import { LocalStateRootService } from "./LocalStateRootService";
-import { SoulDefinition, SoulState, SoulSummary } from "../types/soul";
+import { SoulDefinition, SoulState, SoulSummary, type SoulTonePreset } from "../types/soul";
 
 interface SoulRegistryEntry {
 	id: string;
@@ -11,6 +12,34 @@ interface SoulRegistryEntry {
 	editable: boolean;
 	archived: boolean;
 	updatedAt: string;
+}
+
+function normalizeTonePreset(value: unknown): SoulTonePreset {
+	if (value === "calm" || value === "warm") {
+		return value;
+	}
+	return "balanced";
+}
+
+function normalizeSoulDefinition(input: SoulDefinition | (Partial<SoulDefinition> & Pick<SoulDefinition, "id" | "name" | "summary" | "description" | "rolePrompt">)): SoulDefinition {
+		return {
+			...input,
+			tonePreset: normalizeTonePreset(input.tonePreset),
+			tonePrompt: input.tonePrompt?.trim() ?? "",
+			behaviorRules: Array.isArray(input.behaviorRules) ? input.behaviorRules : [],
+			antiPatterns: Array.isArray(input.antiPatterns) ? input.antiPatterns : [],
+			builtInPresetVersion:
+				typeof input.builtInPresetVersion === "number" && Number.isFinite(input.builtInPresetVersion)
+					? input.builtInPresetVersion
+					: undefined,
+			presetRefs: Array.isArray(input.presetRefs) ? input.presetRefs : [],
+			tags: Array.isArray(input.tags) ? input.tags : [],
+		builtIn: Boolean(input.builtIn),
+		editable: Boolean(input.editable),
+		archived: Boolean(input.archived),
+		createdAt: input.createdAt ?? new Date().toISOString(),
+		updatedAt: input.updatedAt ?? new Date().toISOString(),
+	};
 }
 
 function slugifySoulName(value: string): string {
@@ -25,19 +54,19 @@ export class SoulStore {
 	constructor(private readonly localStateRootService: LocalStateRootService) {}
 
 	getSoulsRoot(): string {
-		return this.localStateRootService.resolve("souls");
+		return this.localStateRootService.resolveVault("souls");
 	}
 
 	getRegistryPath(): string {
-		return this.localStateRootService.resolve("souls", "registry.json");
+		return this.localStateRootService.resolveVault("souls", "registry.json");
 	}
 
 	getStatePath(): string {
-		return this.localStateRootService.resolve("souls", "state.json");
+		return this.localStateRootService.resolveVault("souls", "state.json");
 	}
 
 	getDefinitionsRoot(): string {
-		return this.localStateRootService.resolve("souls", "definitions");
+		return this.localStateRootService.resolveVault("souls", "definitions");
 	}
 
 	getDefinitionPath(id: string): string {
@@ -47,19 +76,55 @@ export class SoulStore {
 	async listSouls(): Promise<SoulSummary[]> {
 		const registry = await this.readRegistry();
 		const items = await Promise.all(registry.map((entry) => this.getSoul(entry.id)));
-		return items.filter((item): item is SoulSummary => Boolean(item));
+		return items.filter((item): item is SoulDefinition => Boolean(item));
 	}
 
-	async getSoul(id: string): Promise<SoulSummary | null> {
+	listSoulsSync(): SoulSummary[] {
+		const registryPath = this.getRegistryPath();
+		if (!existsSync(registryPath)) {
+			return [];
+		}
+		try {
+			const raw = readFileSync(registryPath, "utf8");
+			const registry = JSON.parse(raw) as SoulRegistryEntry[];
+			return registry
+				.map((entry) => this.getSoulSync(entry.id))
+				.filter((item): item is SoulDefinition => Boolean(item));
+		} catch {
+			return [];
+		}
+	}
+
+	async getSoul(id: string): Promise<SoulDefinition | null> {
 		try {
 			const raw = await readFile(this.getDefinitionPath(id), "utf8");
-			return JSON.parse(raw) as SoulDefinition;
+			return normalizeSoulDefinition(JSON.parse(raw) as SoulDefinition);
 		} catch {
 			return null;
 		}
 	}
 
-	async createSoul(input: { id?: string; name: string; summary: string; description?: string }): Promise<SoulSummary> {
+	getSoulSync(id: string): SoulDefinition | null {
+		const definitionPath = this.getDefinitionPath(id);
+		if (!existsSync(definitionPath)) {
+			return null;
+		}
+		try {
+			const raw = readFileSync(definitionPath, "utf8");
+			return normalizeSoulDefinition(JSON.parse(raw) as SoulDefinition);
+		} catch {
+			return null;
+		}
+	}
+
+	async createSoul(input: {
+		id?: string;
+		name: string;
+		summary: string;
+		description?: string;
+		preferredModel?: string;
+		preferredModelMode?: "openai" | "group";
+	}): Promise<SoulSummary> {
 		await this.ensureBaseLayout();
 		const now = new Date().toISOString();
 		const id = this.ensureUniqueId(input.id || slugifySoulName(input.name));
@@ -69,9 +134,12 @@ export class SoulStore {
 			summary: input.summary.trim(),
 			description: input.description?.trim() || input.summary.trim(),
 			rolePrompt: input.description?.trim() || input.summary.trim(),
+			tonePreset: "balanced",
 			tonePrompt: "",
 			behaviorRules: [],
 			antiPatterns: [],
+			preferredModel: input.preferredModel?.trim() || "",
+			preferredModelMode: input.preferredModel?.trim() ? input.preferredModelMode : undefined,
 			presetRefs: [],
 			tags: [],
 			builtIn: false,
@@ -93,20 +161,41 @@ export class SoulStore {
 		await writeFile(this.getStatePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 	}
 
-	async updateSoul(id: string, updates: Partial<SoulDefinition>): Promise<SoulSummary> {
+	async updateSoul(id: string, updates: Partial<SoulDefinition>): Promise<SoulDefinition> {
 		await this.ensureBaseLayout();
 		const existing = await this.getSoul(id);
 		if (!existing) {
 			throw new Error(`Soul not found: ${id}`);
 		}
-		const next: SoulDefinition = {
+		const next: SoulDefinition = normalizeSoulDefinition({
 			...(existing as SoulDefinition),
 			...updates,
 			id,
 			updatedAt: new Date().toISOString(),
-		};
+		});
 		await this.writeSoul(next);
 		return next;
+	}
+
+	async deleteSoul(id: string): Promise<void> {
+		await this.ensureBaseLayout();
+		const existing = await this.getSoul(id);
+		if (!existing) {
+			return;
+		}
+		await rm(this.getDefinitionPath(id), { force: true });
+		const registry = await this.readRegistry();
+		const nextRegistry = registry.filter((entry) => entry.id !== id);
+		await writeFile(this.getRegistryPath(), `${JSON.stringify(nextRegistry, null, 2)}\n`, "utf8");
+		const state = await this.readState();
+		if (state.activeSoulId === id) {
+			state.activeSoulId = nextRegistry[0]?.id ?? "";
+		}
+		if (state.lastUsedSoulId === id) {
+			state.lastUsedSoulId = state.activeSoulId;
+		}
+		state.recentlyUsedSoulIds = state.recentlyUsedSoulIds.filter((item) => item !== id);
+		await writeFile(this.getStatePath(), `${JSON.stringify(state, null, 2)}\n`, "utf8");
 	}
 
 	private async ensureBaseLayout(): Promise<void> {

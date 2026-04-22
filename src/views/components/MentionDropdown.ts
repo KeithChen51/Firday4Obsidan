@@ -4,7 +4,7 @@ export interface MentionSuggestion {
 	label: string;
 	description?: string;
 	value?: string;
-	kind?: "slash" | "mention_category" | "mention_token";
+	kind?: "slash" | "mention_category" | "mention_token" | "skill";
 	trigger?: "@" | "/";
 	category?: "active_note" | "note" | "folder";
 	replacementText?: string;

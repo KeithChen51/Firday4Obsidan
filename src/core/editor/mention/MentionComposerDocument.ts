@@ -30,26 +30,27 @@ const mentionNodeSpec: NodeSpec = {
 	},
 	toDOM(node) {
 		const attrs = node.attrs as MentionNodeAttrs;
+		const label = formatMentionLabel(attrs);
 		return [
 			"span",
 			{
-				class: "friday-inline-mention-token",
+				class: buildInlineTokenClassName(attrs),
 				"data-mention-id": attrs.id,
 				"data-mention-type": attrs.type,
 				"data-mention-path": attrs.path,
 				contenteditable: "false",
 			},
-			["span", { class: "friday-inline-mention-token-label" }, formatMentionLabel(attrs)],
+			["span", { class: "friday-inline-mention-token-label" }, label],
 			[
 				"button",
 				{
 					type: "button",
 					class: "friday-inline-mention-token-remove",
 					"data-mention-remove": "true",
-					"aria-label": `Remove mention ${formatMentionLabel(attrs)}`,
+					"aria-label": `Remove token ${label}`,
 					tabindex: "-1",
 				},
-				"×",
+				"x",
 			],
 		];
 	},
@@ -136,12 +137,14 @@ export function restoreMentionComposerSelection(
 	}
 }
 
-export function serializeMentionComposerDoc(doc: ProseMirrorNode): MentionComposerSnapshot {
-	const tokens: MentionToken[] = [];
-	const textSegments: string[] = [];
+export function listMentionComposerParts(doc: ProseMirrorNode): MentionComposerPart[] {
+	const parts: MentionComposerPart[] = [];
 	doc.descendants((node) => {
 		if (node.type.name === "text") {
-			textSegments.push(node.text ?? "");
+			const text = node.text ?? "";
+			if (text) {
+				parts.push({ type: "text", text });
+			}
 			return;
 		}
 		if (node.type.name === "mention") {
@@ -153,9 +156,25 @@ export function serializeMentionComposerDoc(doc: ProseMirrorNode): MentionCompos
 			if (attrs.path) {
 				token.path = attrs.path;
 			}
-			tokens.push(token);
+			parts.push({ type: "mention", mention: token });
 		}
 	});
+	return parts;
+}
+
+export function serializeMentionComposerDoc(doc: ProseMirrorNode): MentionComposerSnapshot {
+	const tokens: MentionToken[] = [];
+	const textSegments: string[] = [];
+	for (const part of listMentionComposerParts(doc)) {
+		if (part.type === "text") {
+			textSegments.push(part.text);
+			continue;
+		}
+		if (part.mention.type === "skill" && part.mention.path?.trim()) {
+			textSegments.push(`/skill ${part.mention.path.trim()}`);
+		}
+		tokens.push({ ...part.mention });
+	}
 	return {
 		text: normalizeInlineText(textSegments.join("")),
 		tokens,
@@ -171,16 +190,33 @@ export function createMentionNode(token: MentionToken): ProseMirrorNode {
 	});
 }
 
+export function formatMentionTokenLabel(token: MentionToken): string {
+	return formatMentionLabel({
+		id: token.id,
+		type: token.type,
+		path: token.path ?? "",
+	});
+}
+
 function formatMentionLabel(attrs: MentionNodeAttrs): string {
+	if (attrs.type === "skill") {
+		return `Skill /${(attrs.path ?? "").trim() || "skill"}`;
+	}
 	if (attrs.type === "active_note") {
-		return "Active Note";
+		return "@ Active note";
 	}
 	const pathValue = (attrs.path ?? "").trim();
 	if (!pathValue) {
-		return attrs.type === "folder" ? "Folder" : "Note";
+		return attrs.type === "folder" ? "@ Folder/" : "@ Note";
 	}
 	const parts = pathValue.replace(/\\/g, "/").split("/").filter(Boolean);
-	return parts[parts.length - 1] ?? pathValue;
+	const name = parts[parts.length - 1] ?? pathValue;
+	return attrs.type === "folder" ? `@ ${name}/` : `@ ${name}`;
+}
+
+function buildInlineTokenClassName(attrs: MentionNodeAttrs): string {
+	const kindClass = attrs.type === "skill" ? "is-skill" : "is-context";
+	return `friday-ai-message-badge friday-inline-mention-token ${kindClass} type-${attrs.type}`;
 }
 
 function normalizeInlineText(text: string): string {

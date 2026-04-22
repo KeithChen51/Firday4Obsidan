@@ -11,7 +11,6 @@ import { ChatMessage, AIService } from "./AIService";
 import { AgentAction, AgentActionType } from "../types/action";
 import { FridaySettings } from "../types/settings";
 import { AgentActionService } from "./AgentActionService";
-import { AgentService } from "./AgentService";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
 import { ToolApprovalScope, ToolApprovalService } from "./ToolApprovalService";
 import { CommandExecService } from "./CommandExecService";
@@ -44,6 +43,7 @@ import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/Runtim
 import { StepTraceStore } from "../platform/tools/StepTraceStore";
 import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { ToolRunAuditStore } from "../platform/tools/ToolRunAuditStore";
+import { SoulStore } from "./SoulStore";
 import {
 	isAgentWritableProjectPath,
 	isProjectRawPath,
@@ -214,7 +214,7 @@ export class AgentRuntimeService {
 	constructor(
 		private readonly vault: Vault,
 		private readonly aiService: AIService,
-		private readonly agentService: AgentService,
+		private readonly soulStore: SoulStore,
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly actionService: AgentActionService,
 		private readonly approvalService: ToolApprovalService,
@@ -1007,14 +1007,28 @@ export class AgentRuntimeService {
 			: "(none)";
 		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot() || "(none)";
 
-		// --- Layer merge: FRIDAY.md (project) + agent.md (agent) ---
-		this.reportContextProgress(input, depth, "instructions", "加载项目规则与 Agent 画像");
+		// --- Layer merge: FRIDAY.md (project) + soul definition ---
+		this.reportContextProgress(input, depth, "instructions", "加载项目规则与 Soul 设定");
 		const fridayMd = await this.loadFridayMd();
-		const agentFilePath = this.agentService.getAgentFilePath(agentId);
-		const agentFile = this.vault.getAbstractFileByPath(agentFilePath);
-		const agentProfile = agentFile instanceof TFile
-			? this.truncateText(await this.vault.cachedRead(agentFile), 3000)
-			: "agent.md not found";
+		const soulDefinition = await this.soulStore.getSoul(agentId);
+		const agentProfile = soulDefinition
+			? this.truncateText(
+				[
+					`# ${soulDefinition.name}`,
+					soulDefinition.summary,
+					soulDefinition.description,
+					soulDefinition.rolePrompt,
+					this.resolveSoulTonePrompt(soulDefinition.tonePreset, soulDefinition.tonePrompt),
+					soulDefinition.behaviorRules.length > 0
+						? `Behavior rules:\n- ${soulDefinition.behaviorRules.join("\n- ")}`
+						: "",
+					soulDefinition.antiPatterns.length > 0
+						? `Anti-patterns:\n- ${soulDefinition.antiPatterns.join("\n- ")}`
+						: "",
+				].filter(Boolean).join("\n\n"),
+				3000,
+			)
+			: "soul definition not found";
 
 		const trimmedExtra = extraSystemContext?.trim();
 
@@ -1053,6 +1067,17 @@ export class AgentRuntimeService {
 		});
 		this.lastContextSummary = promptContext.summary;
 		return promptContext.prompt;
+	}
+
+	private resolveSoulTonePrompt(tonePreset: string | undefined, tonePrompt: string | undefined): string {
+		const presetText =
+			tonePreset === "calm"
+				? "语气风格：冷静。表达克制、客观、少情绪化。"
+				: tonePreset === "warm"
+					? "语气风格：亲和。表达有温度、易接近，但不要过度热情。"
+					: "语气风格：平衡。表达清晰自然，不过冷也不过热。";
+		const noteText = tonePrompt?.trim() ? `补充说明：${tonePrompt.trim()}` : "";
+		return [presetText, noteText].filter(Boolean).join("\n");
 	}
 
 	private async buildAutoSkillContext(
@@ -1883,11 +1908,11 @@ export class AgentRuntimeService {
 		if (!(existing instanceof TFile) && !(existing instanceof TFolder)) {
 			return null;
 		}
-		const activeAgentId = this.getSettings().activeAgentId;
-		if (!activeAgentId) {
+		const activeSoulId = this.getSettings().activeSoulId;
+		if (!activeSoulId) {
 			return null;
 		}
-		await this.toolDelete({ path: normalizedTarget }, activeAgentId);
+		await this.toolDelete({ path: normalizedTarget }, activeSoulId);
 		return {
 			routedToDelete: true,
 			path: normalizedTarget,

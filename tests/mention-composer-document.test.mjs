@@ -54,6 +54,21 @@ test("mention composer document restores token nodes from saved snapshot", async
 	assert.deepEqual(roundTrip.tokens, snapshot.tokens);
 });
 
+test("mention composer document keeps skill tokens as inline badges while preserving explicit skill prompt text", async () => {
+	const mod = await loadModule();
+	const doc = mod.createMentionComposerDoc([
+		{ type: "mention", mention: { id: "skill-1", type: "skill", path: "compile-wiki" } },
+		{ type: "text", text: " 重建当前项目知识" },
+	]);
+	const snapshot = mod.serializeMentionComposerDoc(doc);
+
+	assert.equal(snapshot.text, "/skill compile-wiki 重建当前项目知识");
+	assert.deepEqual(snapshot.tokens, [
+		{ id: "skill-1", type: "skill", path: "compile-wiki" },
+	]);
+	assert.ok(snapshot.doc);
+});
+
 test("mention node DOM spec includes a dedicated remove control for mouse interaction", async () => {
 	const mod = await loadModule();
 	const node = mod.createMentionNode({ id: "note-1", type: "note", path: "Projects/demo/raw/spec.md" });

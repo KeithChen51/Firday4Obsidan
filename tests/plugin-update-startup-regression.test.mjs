@@ -40,6 +40,15 @@ test("main exposes a reload helper that prefers Obsidian's reload command and fa
 	assert.match(source, /window\.location\.reload\(\)/);
 });
 
+test("main exposes a plugin-level reload helper that prefers disable-enable before app reload fallback", () => {
+	const source = read(mainPath);
+	assert.match(source, /async reloadFridayPlugin\(\): Promise<void> \{/);
+	assert.match(source, /disablePlugin/);
+	assert.match(source, /enablePlugin/);
+	assert.match(source, /window\.setTimeout/);
+	assert.match(source, /this\.reloadObsidianApp\(\)/);
+});
+
 test("startup plugin update check no longer suppresses notices via dismissed versions", () => {
 	const source = read(mainPath);
 	const match = source.match(/private async runStartupPluginUpdateCheck\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate startAutoSync/);

@@ -58,6 +58,11 @@ test("daily board view switches souls instead of agent identities", async () => 
 	assert.doesNotMatch(source, /private async switchAgent\(agentId: string\): Promise<void>/);
 	assert.match(source, /this\.plugin\.settings\.activeSoulId/);
 	assert.doesNotMatch(source, /this\.plugin\.settings\.activeAgentId/);
+	assert.doesNotMatch(source, /this\.plugin\.getActiveAgent\(/);
+	assert.doesNotMatch(source, /this\.plugin\.settings\.agents/);
+	assert.doesNotMatch(source, /"切换 Soul"/);
+	assert.doesNotMatch(source, /switchSoulFailed/);
+	assert.match(source, /switchAgentFailed/);
 });
 
 test("session drawer supports search and date-grouped browsing", async () => {
@@ -485,6 +490,25 @@ test("chat composer styles include visible keyboard focus and inline mention rem
 	assert.match(styles, /\.friday-mention-item-button:focus-visible\b/);
 	assert.match(styles, /\.friday-ai-toolbar-button:focus-visible\b/);
 	assert.match(styles, /\.friday-inline-mention-token-remove\b/);
+	assert.match(styles, /\.friday-inline-mention-token\.is-skill\b/);
+	assert.match(styles, /\.friday-inline-mention-token\.is-context\b/);
+	assert.match(styles, /\.friday-ai-composer button\.friday-inline-mention-token-remove\s*\{[\s\S]*min-width:\s*12px;/);
+});
+
+test("slash skill suggestions are inserted as removable tokens instead of plain text", async () => {
+	const source = readViewSource();
+	assert.match(source, /kind === "skill"/);
+	assert.match(source, /this\.createMentionToken\("skill", item\.command\)/);
+	assert.match(source, /trigger:\s*"\/"\s+as const,[\s\S]*token:\s*this\.createMentionToken\("skill", item\.command\)/);
+});
+
+test("chat model selector groups openai and group models under source headers instead of repeating long prefixes", async () => {
+	const source = readViewSource();
+	assert.match(source, /private buildGroupedModelOptions\(/);
+	assert.match(source, /createEl\("optgroup", \{ attr: \{ label: group\.label \} \}\)/);
+	assert.match(source, /OpenAI协议/);
+	assert.match(source, /集团集采/);
+	assert.doesNotMatch(source, /text:\s*optionValue\.label/);
 });
 
 test("chat composer layout keeps the editable surface full-width and placeholder bounded inside it", async () => {

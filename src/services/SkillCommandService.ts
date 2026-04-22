@@ -102,7 +102,8 @@ export class SkillCommandService {
 	parseSlashCommand(rawPrompt: string): ParsedSkillSlashCommand {
 		const prompt = rawPrompt.trim();
 		if (!prompt.startsWith("/")) {
-			return { type: "none" };
+			const inlineExplicit = this.parseInlineExplicitSkillCommand(prompt);
+			return inlineExplicit ?? { type: "none" };
 		}
 
 		if (prompt === "/") {
@@ -143,6 +144,25 @@ export class SkillCommandService {
 			};
 		}
 		return { type: "use", skillName: commandName, taskPrompt };
+	}
+
+	private parseInlineExplicitSkillCommand(prompt: string): ParsedSkillSlashCommand | null {
+		const matched = prompt.match(/(^|[\s])\/skill\s+([^\s]+)(?:\s+([\s\S]*))?$/i);
+		if (!matched) {
+			return null;
+		}
+		const skillName = matched[2]?.trim() ?? "";
+		const trailingPrompt = matched[3]?.trim() ?? "";
+		const commandOffset = (matched.index ?? 0) + (matched[1]?.length ?? 0);
+		const leadingPrompt = prompt.slice(0, commandOffset).trim();
+		const taskPrompt = [leadingPrompt, trailingPrompt].filter(Boolean).join(" ").trim();
+		if (!skillName) {
+			return { type: "invalid", error: "命令格式错误，请使用 /skill <技能名> <任务>。" };
+		}
+		if (!taskPrompt) {
+			return { type: "invalid", error: `请补充任务内容，例如：/skill ${skillName} 优化这段文案。` };
+		}
+		return { type: "use", skillName, taskPrompt };
 	}
 
 	async listSkills(limit = MAX_CATALOG_ITEMS, options?: { includeDisabled?: boolean }): Promise<SkillDescriptor[]> {

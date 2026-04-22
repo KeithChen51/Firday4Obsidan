@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"pluginId": "friday-obsidian-plugin",
-	"version": "0.2.6",
+	"version": "0.2.7",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-04-20T11:53:05.337Z",
+	"publishedAt": "2026-04-22T04:34:31.619Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
 		"styles.css": "release/friday-obsidian-plugin/styles.css"
 	},
-	"releaseNotes": "- F.R.I.D.A.Y 运行时回归单代理执行模型，`subagent` 已从工具清单、设置项、运行时提示和活动视图中移除，行为边界更直接也更可解释。\n- 新增长期记忆工具 `memory`，现在可以显式执行 `add`、`replace`、`remove`，把真正需要跨轮保留的信息写入全局或当前项目记忆。\n- 长期记忆统一收口为两层 source of truth：全局记忆固定写入 `F.R.I.D.A.Y/_runtime/memory/global.md`，项目记忆固定写入 `<projectRoot>/.friday/memory/project.md`。\n- 记忆写入现在遵循“下一轮可见”规则，当前回合的上下文快照不会被隐式改写，减少回答过程中的状态漂移。\n- 移除旧的自动记忆提取链路和 `maintain-memory` 特殊路径，长期记忆不再偷偷抽取或分散落盘，排查和维护都更简单。\n- 补齐 memory v1 与 subagent 下线的回归测试，覆盖工具清单、提示协议、事件路由、路径约定和容量限制等关键合同。"
+	"releaseNotes": "- Soul 现在成为唯一的运行时身份入口：设置模型、当前角色切换、Daily Board 对话工作台和插件 API 全部改为直接读取 `SoulStore`，旧的 `settings.agents`、`activeAgentId` 与 `getActiveAgent` / `createAgent` 兼容接口已从主链路移除。\n- 旧 Agent 数据迁移进一步收口：启动时会把历史 Agent 档案导入为 Soul 定义，并同步迁移旧会话、工具批准规则和模型偏好；日常会话与快照存储不再依赖 `AgentService` 的 legacy 路径。\n- `来自制作组` 栏目完成命名更新：`幕后笔记 · Behind the Build` 统一为 `Study with F.R.I.D.A.Y`，`迭代手记 · Changelog` 简化为 `Changelog`，同时保留旧路径兼容，避免已有 vault 升级后断链。\n- 调整初始化命令的全局 `FRIDAY.md` 写入路径，并补齐 Soul-only 与 studio 路径迁移相关的回归测试，降低后续迭代时的兼容性回退风险。"
 }
