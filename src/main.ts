@@ -331,6 +331,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				getGitRuntimeStatus: () => this.getGitRuntimeStatus(),
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
+				inspectDestructiveApplySafety: ({ ownedTopLevelPaths }) =>
+					this.legacyFridayRootMigrationService.inspectDestructiveApplySafety({ ownedTopLevelPaths }),
 			});
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());

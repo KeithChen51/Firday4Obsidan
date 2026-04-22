@@ -100,6 +100,9 @@ export class FridaySettingTab extends PluginSettingTab {
 	private projectEditorRemoteBootstrapChoiceInitialized = false;
 	private legacyFridayRootReport: LegacyFridayRootReport | null = null;
 	private legacyFridayRootReportLoading = false;
+	private officialContentGuardState: Awaited<ReturnType<SettingsHost["legacyFridayRootMigrationService"]["inspectDestructiveApplySafety"]>> | null = null;
+	private officialContentGuardLoading = false;
+	private pendingOfficialContentTakeoverConfirm = false;
 	private userGitCredentialLoaded = false;
 	private userGitUsernameDraft = "";
 	private userGitTokenDraft = "";
@@ -523,6 +526,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSubscriptionsSection(containerEl: HTMLElement): void {
+		void this.ensureOfficialContentGuardStateLoaded();
 		const controls = this.createNativeSettingsGroup(containerEl, {
 			title: this.t("settings.subscriptions.title", "订阅频道"),
 			description: this.t(
@@ -545,6 +549,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						try {
 							await this.host.officialContentService.refreshCatalog();
 							await this.host.officialContentService.applySubscriptions();
+							await this.refreshOfficialContentGuardState();
 							new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
 						} catch (error) {
 							new Notice(
@@ -557,6 +562,63 @@ export class FridaySettingTab extends PluginSettingTab {
 						this.display();
 					}),
 			);
+
+		const blockingPaths = this.officialContentGuardState?.blockingPaths ?? [];
+		if (this.officialContentGuardState?.blocked) {
+			const warningGroup = this.createNativeSettingsGroup(containerEl, {
+				title: this.t("settings.subscriptions.legacy.warning", "检测到 Friday 根目录历史内容"),
+				description: this.t(
+					"settings.subscriptions.legacy.warningDesc",
+					"继续应用订阅会删除这些历史路径。请先迁移、清理，或显式确认由官方频道接管 F.R.I.D.A.Y/。",
+				),
+				extraClass: "friday-project-settings-panel",
+			});
+			warningGroup.createEl("p", {
+				text: this.t("settings.subscriptions.legacy.blockingPaths", "阻断路径：{paths}", {
+					paths: blockingPaths.join(" | "),
+				}),
+			});
+			new Setting(warningGroup)
+				.setName(
+					this.pendingOfficialContentTakeoverConfirm
+						? this.t("settings.subscriptions.legacy.takeoverConfirm", "再次点击，确认接管并删除这些历史路径")
+						: this.t("settings.subscriptions.legacy.takeover", "由官方频道接管 F.R.I.D.A.Y"),
+				)
+				.setDesc(
+					this.pendingOfficialContentTakeoverConfirm
+						? this.t("settings.subscriptions.legacy.takeoverConfirmDesc", "这会删除上面列出的历史路径。")
+						: this.t("settings.subscriptions.legacy.takeoverDesc", "仅当你确认这些历史路径可以被删除时才执行。"),
+				)
+				.addButton((button) =>
+					button
+						.setWarning()
+						.setButtonText(
+							this.pendingOfficialContentTakeoverConfirm
+								? this.t("settings.subscriptions.legacy.takeoverConfirm", "再次点击，确认接管并删除这些历史路径")
+								: this.t("settings.subscriptions.legacy.takeover", "由官方频道接管 F.R.I.D.A.Y"),
+						)
+						.onClick(async () => {
+							if (!this.pendingOfficialContentTakeoverConfirm) {
+								this.pendingOfficialContentTakeoverConfirm = true;
+								this.display();
+								return;
+							}
+							const result = await this.host.legacyFridayRootMigrationService.confirmDestructiveTakeover({
+								ownedTopLevelPaths: this.getOfficialContentOwnedTopLevelPaths(),
+							});
+							this.pendingOfficialContentTakeoverConfirm = false;
+							await this.host.officialContentService.applySubscriptions();
+							await this.refreshOfficialContentGuardState();
+							new Notice(
+								this.t("settings.subscriptions.legacy.takeoverSuccess", "已删除 {count} 个历史路径并接管 F.R.I.D.A.Y。", {
+									count: result.removedPaths.length,
+								}),
+								4000,
+							);
+							this.display();
+						}),
+				);
+		}
 
 		new Setting(controls)
 			.setName(this.t("settings.subscriptions.checkOnStartup.name", "启动时自动检查"))
@@ -621,6 +683,7 @@ export class FridaySettingTab extends PluginSettingTab {
 							}
 							await this.host.saveSettings();
 							await this.host.officialContentService.applySubscriptions();
+							await this.refreshOfficialContentGuardState();
 							this.display();
 						}),
 				);
@@ -2887,6 +2950,31 @@ export class FridaySettingTab extends PluginSettingTab {
 		} finally {
 			this.legacyFridayRootReportLoading = false;
 			this.display();
+		}
+	}
+
+	private getOfficialContentOwnedTopLevelPaths(): string[] {
+		return this.host.settings.officialContent.catalog.map((item) => item.path);
+	}
+
+	private async ensureOfficialContentGuardStateLoaded(): Promise<void> {
+		if (this.officialContentGuardLoading || this.officialContentGuardState) {
+			return;
+		}
+		await this.refreshOfficialContentGuardState();
+	}
+
+	private async refreshOfficialContentGuardState(): Promise<void> {
+		this.officialContentGuardLoading = true;
+		try {
+			this.officialContentGuardState = await this.host.legacyFridayRootMigrationService.inspectDestructiveApplySafety({
+				ownedTopLevelPaths: this.getOfficialContentOwnedTopLevelPaths(),
+			});
+		} finally {
+			this.officialContentGuardLoading = false;
+			if (this.activeSection === "subscriptions") {
+				this.display();
+			}
 		}
 	}
 

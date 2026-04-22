@@ -9,6 +9,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const modulePath = path.join(projectRoot, "src", "services", "LegacyFridayRootMigrationService.ts");
 const officialContentServicePath = path.join(projectRoot, "src", "services", "OfficialContentService.ts");
+const settingsPath = path.join(projectRoot, "src", "settings", "FridaySettingTab.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
@@ -27,9 +28,9 @@ test("legacy safety gate blocks known historical paths while catalog refresh sta
 	const source = read(modulePath);
 	assert.match(source, /runtime/);
 	assert.match(source, /Agents/);
-	assert.match(source, /\\u9879\\u76ee|项目/);
-	assert.match(source, /\\u4e2a\\u4eba|个人/);
-	assert.match(source, /_\\u914d\\u7f6e\.md|_配置\.md/);
+	assert.match(source, /PRIMARY_PATHS\.projects|\\u9879\\u76ee|椤圭洰/);
+	assert.match(source, /PRIMARY_PATHS\.personal|\\u4e2a\\u4eba|涓汉/);
+	assert.match(source, /PRIMARY_PATHS\.configFile|_\\u914d\\u7f6e\.md|_閰嶇疆\.md/);
 	assert.match(source, /canRefreshCatalog:\s*true/);
 });
 
@@ -40,4 +41,13 @@ test("official content service still distinguishes catalog refresh from destruct
 	assert.match(source, /applySubscriptions/);
 	assert.match(source, /blocked/);
 	assert.match(source, /canRefreshCatalog/);
+});
+
+test("subscriptions settings surface a blocking warning and explicit takeover action for legacy root content", () => {
+	const source = read(settingsPath);
+	assert.match(source, /blockingPaths/);
+	assert.match(source, /settings\.subscriptions\.legacy\.warning/);
+	assert.match(source, /settings\.subscriptions\.legacy\.takeover/);
+	assert.match(source, /settings\.subscriptions\.legacy\.takeoverConfirm/);
+	assert.match(source, /officialContentService\.applySubscriptions\(/);
 });

@@ -2,6 +2,7 @@ import { readdir, rm, stat } from "fs/promises";
 import path from "path";
 import simpleGit from "simple-git";
 import { PRIMARY_PATHS } from "../constants/paths";
+import type { OfficialContentLegacyGuardState } from "../types/officialContent";
 import { ProjectEntry, ProjectGitState } from "../types/project";
 import { FridaySettings } from "../types/settings";
 
@@ -28,6 +29,18 @@ export interface LegacyFridayRootReport {
 export interface LegacyFridayCleanupResult {
 	removedPaths: string[];
 }
+
+export interface FridayRootOwnershipInspectionInput {
+	ownedTopLevelPaths: string[];
+}
+
+const KNOWN_ROOT_TAKEOVER_BLOCKERS = new Set([
+	"runtime",
+	"Agents",
+	PRIMARY_PATHS.projects,
+	PRIMARY_PATHS.personal,
+	PRIMARY_PATHS.configFile,
+]);
 
 export class LegacyFridayRootMigrationService {
 	constructor(
@@ -139,6 +152,36 @@ export class LegacyFridayRootMigrationService {
 		return { removedPaths };
 	}
 
+	async inspectDestructiveApplySafety(
+		input: FridayRootOwnershipInspectionInput,
+	): Promise<OfficialContentLegacyGuardState> {
+		const ownedTopLevelPaths = new Set(
+			(input.ownedTopLevelPaths ?? [])
+				.map((item) => normalizeVaultPath(item).split("/")[0] ?? "")
+				.filter(Boolean),
+		);
+		const blockingPaths = (await this.listTopLevelEntries()).filter((entryName) =>
+			!ownedTopLevelPaths.has(entryName),
+		);
+		return {
+			blocked: blockingPaths.length > 0,
+			blockingPaths,
+			canRefreshCatalog: true,
+			takeoverConfirmed: false,
+		};
+	}
+
+	async confirmDestructiveTakeover(input: FridayRootOwnershipInspectionInput): Promise<LegacyFridayCleanupResult> {
+		const inspection = await this.inspectDestructiveApplySafety(input);
+		const removedPaths: string[] = [];
+		for (const entryName of inspection.blockingPaths.sort((left, right) => right.length - left.length)) {
+			const relativePath = normalizeVaultPath(`${this.fridayRoot}/${entryName}`);
+			await rm(this.resolveAbsolutePath(relativePath), { recursive: true, force: true });
+			removedPaths.push(relativePath);
+		}
+		return { removedPaths };
+	}
+
 	hasVisibleCleanupCandidates(report: LegacyFridayRootReport | null | undefined): boolean {
 		return Boolean(report?.cleanupCandidates.length);
 	}
@@ -173,6 +216,19 @@ export class LegacyFridayRootMigrationService {
 			return entries
 				.filter((entry) => entry.isDirectory())
 				.map((entry) => normalizeVaultPath(`${relativeRoot}/${entry.name}`));
+		} catch {
+			return [];
+		}
+	}
+
+	private async listTopLevelEntries(): Promise<string[]> {
+		const absoluteRoot = this.resolveAbsolutePath(this.fridayRoot);
+		try {
+			const entries = await readdir(absoluteRoot, { withFileTypes: true });
+			return entries
+				.map((entry) => entry.name)
+				.filter((entry) => KNOWN_ROOT_TAKEOVER_BLOCKERS.has(entry) || Boolean(entry.trim()))
+				.sort((left, right) => left.localeCompare(right, "zh-CN"));
 		} catch {
 			return [];
 		}
