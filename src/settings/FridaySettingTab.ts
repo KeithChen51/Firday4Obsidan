@@ -258,36 +258,9 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 		});
 
-		new Setting(profileGroup)
-			.setName(this.t("settings.user.autoDetect.name", "自动识别用户 ID"))
-			.setDesc(this.t("settings.user.autoDetect.desc", "若下方用户 ID 为空，则使用当前机器名推断。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.user.autoDetect).onChange(async (value) => {
-					this.host.settings.user.autoDetect = value;
-					if (value && !this.host.settings.user.userId) {
-						this.host.settings.user.userId = this.host.getDetectedUserId();
-					}
-					await this.host.saveSettings();
-					this.display();
-				}),
-			);
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.user.userId.name", "用户 ID"))
-				.setDesc(this.t("settings.user.userId.desc", "用于标识当前用户。"))
-				.addText((text) =>
-				text
-					.setPlaceholder("keith")
-					.setValue(this.host.settings.user.userId)
-					.onChange(async (value) => {
-						this.host.settings.user.userId = value.trim();
-						await this.host.saveSettings();
-					}),
-			);
-
 		new Setting(profileGroup).setName(this.t("settings.user.displayName.name", "显示名称")).addText((text) =>
 			text
-				.setPlaceholder("Keith")
+				.setPlaceholder(this.t("settings.user.displayName.placeholder", "F.R.I.D.A.Y怎么称呼您"))
 				.setValue(this.host.settings.user.displayName)
 				.onChange(async (value) => {
 					this.host.settings.user.displayName = value.trim();

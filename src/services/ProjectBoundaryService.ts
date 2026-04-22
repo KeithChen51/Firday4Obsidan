@@ -1,6 +1,5 @@
 import path from "path";
 import { normalizePath } from "obsidian";
-import { PRIMARY_PATHS } from "../constants/paths";
 import { ProjectEntry } from "../types/project";
 import { FridaySettings } from "../types/settings";
 
@@ -31,7 +30,39 @@ export class ProjectBoundaryService {
 		if (!projectSlug) {
 			return null;
 		}
-		return this.getSettings().projects.find((item) => this.getProjectKey(item) === projectSlug) ?? null;
+		return (this.getSettings().projects ?? []).find((item) => this.getProjectKey(item) === projectSlug) ?? null;
+	}
+
+	getProjectForVaultPath(vaultRelativePath: string): ProjectEntry | null {
+		const normalizedPath = normalizeVaultPath(vaultRelativePath);
+		if (!normalizedPath) {
+			return null;
+		}
+
+		const settings = this.getSettings();
+		const projects = settings.projects ?? [];
+		let matchedProject: ProjectEntry | null = null;
+		let matchedLength = -1;
+
+		for (const project of projects) {
+			const projectRoot = this.getProjectVaultPath(project);
+			if (!projectRoot) {
+				continue;
+			}
+			if (normalizedPath !== projectRoot && !normalizedPath.startsWith(`${projectRoot}/`)) {
+				continue;
+			}
+			if (projectRoot.length > matchedLength) {
+				matchedProject = project;
+				matchedLength = projectRoot.length;
+			}
+		}
+
+		if (matchedProject) {
+			return matchedProject;
+		}
+
+		return null;
 	}
 
 	getProjectVaultPath(project: ProjectEntry | null | undefined): string {
@@ -39,13 +70,10 @@ export class ProjectBoundaryService {
 			return "";
 		}
 		const projectRootPath = project.boundaryPath?.trim();
-		if (projectRootPath === "") {
+		if (!projectRootPath) {
 			return "";
 		}
-		if (projectRootPath && !path.isAbsolute(projectRootPath)) {
-			return normalizeVaultPath(projectRootPath);
-		}
-		return normalizeVaultPath(`${PRIMARY_PATHS.root}/${PRIMARY_PATHS.projects}/${this.getProjectKey(project)}`);
+		return normalizeVaultPath(projectRootPath);
 	}
 
 	getProjectAbsolutePath(project: ProjectEntry | null | undefined): string {
@@ -55,6 +83,9 @@ export class ProjectBoundaryService {
 		const vaultPath = this.getProjectVaultPath(project);
 		if (!vaultPath) {
 			return this.getVaultBasePath();
+		}
+		if (path.isAbsolute(vaultPath)) {
+			return path.normalize(vaultPath);
 		}
 		return path.join(this.getVaultBasePath(), ...vaultPath.split("/"));
 	}

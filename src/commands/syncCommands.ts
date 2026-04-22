@@ -1,5 +1,4 @@
 ﻿import { Notice } from "obsidian";
-import { PERSONAL_SLUG } from "../constants/paths";
 import { FridayPluginApi } from "../types/plugin";
 
 export function registerSyncCommands(plugin: FridayPluginApi): void {
@@ -82,12 +81,7 @@ function getCurrentProject(plugin: FridayPluginApi) {
 		return null;
 	}
 
-	const projectId = plugin.dataService.getProjectIdFromPath(activeFile.path);
-	if (!projectId || projectId === PERSONAL_SLUG) {
-		return null;
-	}
-
-	return plugin.settings.projects.find((project) => project.projectId === projectId) ?? null;
+	return plugin.projectBoundaryService.getProjectForVaultPath(activeFile.path);
 }
 
 function updateProjectSyncTimestamps(

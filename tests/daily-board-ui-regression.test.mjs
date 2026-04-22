@@ -519,6 +519,16 @@ test("chat composer layout keeps the editable surface full-width and placeholder
 	assert.match(styles, /\.friday-mention-composer-editor\.is-empty::before\s*\{[\s\S]*right:\s*0;/);
 });
 
+test("chat message meta removes avatar badges and uses the configured display name for user messages", async () => {
+	const source = readViewSource();
+	assert.doesNotMatch(source, /friday-ai-message-avatar/);
+	assert.doesNotMatch(source, /resolveUserBadgeLabel/);
+	assert.match(source, /private resolveUserDisplayName\(\): string/);
+	assert.match(source, /this\.plugin\.settings\.user\.displayName/);
+	assert.match(source, /text: isUser \? this\.resolveUserDisplayName\(\) : this\.plugin\.t\("ai\.role\.assistant"\)/);
+	assert.match(source, /this\.t\("ai\.role\.userFallback", "用户"\)/);
+});
+
 test("top navigation removes duplicate title tooltips from nav and shell icon buttons", async () => {
 	const source = readViewSource();
 	const navMatch = source.match(/private addNavButton\([\s\S]*?\): void \{([\s\S]*?)\n\t\}/);

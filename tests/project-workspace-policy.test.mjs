@@ -103,6 +103,40 @@ test("project boundary service ignores legacy root fields when boundaryPath is p
 	assert.equal(service.getProjectAbsolutePath(project), path.join("C:\\Vault", "Projects", "alpha"));
 });
 
+test("project boundary service does not fall back to whole-vault projects for unrelated files", async () => {
+	const mod = await loadBoundaryServiceModule();
+	const settings = {
+		activeProjectId: "vault-wide",
+		projects: [
+			{
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "Projects/alpha",
+				gitState: "none",
+				slug: "alpha",
+				groupId: "default-group",
+				gitRemote: "",
+				autoSync: false,
+				lastSyncAt: "",
+			},
+			{
+				projectId: "vault-wide",
+				projectName: "Vault Wide",
+				boundaryPath: "",
+				gitState: "none",
+				slug: "vault-wide",
+				groupId: "default-group",
+				gitRemote: "",
+				autoSync: false,
+				lastSyncAt: "",
+			},
+		],
+	};
+	const service = new mod.ProjectBoundaryService(() => settings, () => "C:\\Vault");
+
+	assert.equal(service.getProjectForVaultPath("Inbox/random-note.md"), null);
+});
+
 test("project entry runtime model no longer carries legacy path fields", async () => {
 	const source = readProjectTypesSource();
 	const match = source.match(/export interface ProjectEntry \{([\s\S]*?)\n\}/);

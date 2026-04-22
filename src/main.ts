@@ -1570,11 +1570,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				if (this.settings.sync.mode !== "continuous_auto") {
 					return;
 				}
-				const projectId = this.dataService.getProjectIdFromPath(file.path);
-				if (!projectId) {
-					return;
-				}
-				const project = this.settings.projects.find((item) => item.projectId === projectId);
+				const project = this.projectBoundaryService.getProjectForVaultPath(file.path);
 				if (!project) {
 					return;
 				}

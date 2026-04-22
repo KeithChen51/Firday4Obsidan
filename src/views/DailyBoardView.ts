@@ -111,7 +111,7 @@ export class DailyBoardView extends ItemView {
 	private activePage: "chat" | "sync" | "tools" = "chat";
 	private readonly approvalQueue = new ApprovalQueue();
 	private pendingProjectRemoval: ProjectEntry | null = null;
-	private memberEditorProjectId = "";
+	private memberEditorProject: ProjectEntry | null = null;
 	private memberEditorMembers: ProjectMember[] = [];
 	private memberEditorNewUserId = "";
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
@@ -459,8 +459,10 @@ export class DailyBoardView extends ItemView {
 
 	private renderMemberEditorCard(containerEl: HTMLElement): void {
 		const card = containerEl.createDiv({ cls: "friday-ai-chat-panel" });
+		const memberEditorProjectLabel =
+			this.memberEditorProject?.projectName || this.memberEditorProject?.projectId || this.t("common.notSet", "Not set");
 		card.createEl("h4", {
-			text: this.t("members.title", "Project members: {slug}", { slug: this.memberEditorProjectId }),
+			text: this.t("members.title", "Project members: {slug}", { slug: memberEditorProjectLabel }),
 		});
 
 		if (this.memberEditorMembers.length === 0) {
@@ -523,13 +525,16 @@ export class DailyBoardView extends ItemView {
 
 		const footer = card.createDiv({ cls: "friday-approval-actions" });
 		this.addPageButton(footer, this.t("members.save", "Save members"), async () => {
-			await this.plugin.dataService.setProjectMembers(this.memberEditorProjectId, this.memberEditorMembers);
-			this.memberEditorProjectId = "";
+			if (!this.memberEditorProject) {
+				return;
+			}
+			await this.plugin.dataService.setProjectMembers(this.memberEditorProject, this.memberEditorMembers);
+			this.memberEditorProject = null;
 			this.memberEditorMembers = [];
 			this.renderBoard();
 		});
 		this.addPageButton(footer, this.t("members.cancel", "Cancel"), async () => {
-			this.memberEditorProjectId = "";
+			this.memberEditorProject = null;
 			this.memberEditorMembers = [];
 			this.renderBoard();
 		});
@@ -2403,13 +2408,9 @@ export class DailyBoardView extends ItemView {
 			cls: `friday-ai-message ${isUser ? "is-user" : "is-assistant"}`,
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		metaEl.createSpan({
-			cls: "friday-ai-message-avatar",
-			text: isUser ? this.resolveUserBadgeLabel() : "F",
-		});
 		const roleEl = metaEl.createSpan({
 			cls: isUser ? "friday-ai-message-role" : "friday-ai-message-role friday-wordmark",
-			text: isUser ? this.plugin.t("ai.role.user") : this.plugin.t("ai.role.assistant"),
+			text: isUser ? this.resolveUserDisplayName() : this.plugin.t("ai.role.assistant"),
 		});
 		if (!isUser) {
 			roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
@@ -2602,10 +2603,6 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message is-assistant friday-ai-approval-message",
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		metaEl.createSpan({
-			cls: "friday-ai-message-avatar",
-			text: "F",
-		});
 		const roleEl = metaEl.createSpan({
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
@@ -2663,10 +2660,6 @@ export class DailyBoardView extends ItemView {
 			cls: `friday-ai-message is-assistant friday-ai-runtime-preview is-${variant}`,
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		metaEl.createSpan({
-			cls: "friday-ai-message-avatar",
-			text: "F",
-		});
 		const roleEl = metaEl.createSpan({
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
@@ -3850,11 +3843,8 @@ export class DailyBoardView extends ItemView {
 		};
 	}
 
-	private resolveUserBadgeLabel(): string {
-		const source = this.plugin.settings.user.displayName
-			|| this.plugin.getPrimaryUserId()
-			|| this.plugin.t("ai.role.user");
-		return (source.trim().charAt(0) || "U").toUpperCase();
+	private resolveUserDisplayName(): string {
+		return this.plugin.settings.user.displayName.trim() || this.t("ai.role.userFallback", "用户");
 	}
 
 	private normalizeRuntimeAssistantText(raw: string): string {
@@ -4223,9 +4213,9 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
-	private async openMemberEditor(projectId: string): Promise<void> {
-		this.memberEditorProjectId = projectId;
-		this.memberEditorMembers = await this.plugin.dataService.getProjectMembers(projectId);
+	private async openMemberEditor(project: ProjectEntry): Promise<void> {
+		this.memberEditorProject = project;
+		this.memberEditorMembers = await this.plugin.dataService.getProjectMembers(project);
 		this.memberEditorNewUserId = "";
 		this.memberEditorNewRole = "editor";
 		this.activePage = "sync";

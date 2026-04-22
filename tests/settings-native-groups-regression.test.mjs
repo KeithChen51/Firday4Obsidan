@@ -124,3 +124,16 @@ test("native settings group styles define grouped headers and divider behavior",
 	assert.match(styles, /\.friday-native-settings-group > \.setting-item:first-child/);
 	assert.match(styles, /\.friday-native-settings-group > \.friday-native-settings-group-header \+ \.setting-item/);
 });
+
+test("user settings only expose display name and remove user id controls", () => {
+	const source = read(settingsPath);
+	const start = source.indexOf("private renderUserSection(containerEl: HTMLElement): void {");
+	const end = source.indexOf("\n\tprivate renderPluginUpdateCard(", start);
+	assert.ok(start >= 0 && end > start, "renderUserSection block should exist");
+	const block = source.slice(start, end);
+	assert.doesNotMatch(block, /settings\.user\.autoDetect\./);
+	assert.doesNotMatch(block, /settings\.user\.userId\./);
+	assert.match(block, /settings\.user\.displayName\.name/);
+	assert.match(block, /settings\.user\.displayName\.placeholder/);
+	assert.match(block, /setPlaceholder\(this\.t\("settings\.user\.displayName\.placeholder", "F\.R\.I\.D\.A\.Y怎么称呼您"\)\)/);
+});

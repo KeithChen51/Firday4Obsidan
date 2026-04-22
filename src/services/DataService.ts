@@ -7,7 +7,7 @@ import {
 	PERSONAL_SLUG,
 	PRIMARY_PATHS,
 } from "../constants/paths";
-import { ProjectMember } from "../types/project";
+import { ProjectEntry, ProjectMember } from "../types/project";
 import { FridaySettings } from "../types/settings";
 import { sortFrontmatterKeys } from "../utils/frontmatter";
 import { getRoleLabel } from "../utils/labels";
@@ -80,12 +80,12 @@ export class DataService {
 		return this.fridayRoot;
 	}
 
-	async getProjectMembers(projectSlug: string): Promise<ProjectMember[]> {
-		if (!projectSlug || projectSlug === PERSONAL_SLUG) {
+	async getProjectMembers(project: Pick<ProjectEntry, "projectId" | "boundaryPath">): Promise<ProjectMember[]> {
+		if (!project.projectId || project.projectId === PERSONAL_SLUG) {
 			return [];
 		}
 
-		const projectFolder = this.resolveProjectFolder(projectSlug);
+		const projectFolder = this.resolveProjectFolder(project);
 		if (!projectFolder) {
 			return [];
 		}
@@ -101,21 +101,24 @@ export class DataService {
 		return this.readMembersFromFiles(projectFolder, (preset) => preset.projectMetaFile);
 	}
 
-	async setProjectMembers(projectSlug: string, members: ProjectMember[]): Promise<void> {
-		if (!projectSlug || projectSlug === PERSONAL_SLUG) {
+	async setProjectMembers(
+		project: Pick<ProjectEntry, "projectId" | "boundaryPath">,
+		members: ProjectMember[],
+	): Promise<void> {
+		if (!project.projectId || project.projectId === PERSONAL_SLUG) {
 			throw new Error("个人项目不支持成员管理。");
 		}
 
-		const projectFolder = this.resolveProjectFolder(projectSlug);
+		const projectFolder = this.resolveProjectFolder(project);
 		if (!projectFolder) {
-			throw new Error(`未找到项目目录：${projectSlug}`);
+			throw new Error(`未找到项目目录：${project.boundaryPath || project.projectId}`);
 		}
 
 		const filePath = this.resolveMembersFilePath(projectFolder);
 		const normalizedMembers = this.normalizeMembers(members);
 		const frontmatter = {
 			type: "project_members",
-			projectId: projectSlug,
+			projectId: project.projectId,
 			updatedAt: new Date().toISOString(),
 			members: normalizedMembers,
 		};
@@ -222,18 +225,14 @@ export class DataService {
 		return message.includes("file already exists") || message.includes("already exists");
 	}
 
-	private resolveProjectFolder(projectSlug: string): string | null {
-		for (const root of getRootCandidates(this.fridayRoot)) {
-			for (const preset of getPathPresets()) {
-				const candidate = normalizePath(`${root}/${preset.projects}/${projectSlug}`);
-				if (this.vault.getAbstractFileByPath(candidate)) {
-					return candidate;
-				}
-			}
+	private resolveProjectFolder(project: Pick<ProjectEntry, "boundaryPath">): string | null {
+		const projectRoot = normalizePath(project.boundaryPath?.trim() ?? "");
+		if (!projectRoot || path.isAbsolute(projectRoot)) {
+			return null;
 		}
 
-		const fallback = normalizePath(`${this.fridayRoot}/${PRIMARY_PATHS.projects}/${projectSlug}`);
-		return this.vault.getAbstractFileByPath(fallback) ? fallback : null;
+		const abstractFile = this.vault.getAbstractFileByPath(projectRoot);
+		return abstractFile instanceof TFolder ? projectRoot : null;
 	}
 
 	private resolveMembersFilePath(projectFolder: string): string {
