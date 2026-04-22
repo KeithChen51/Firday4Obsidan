@@ -1,0 +1,69 @@
+{
+	"schemaVersion": 1,
+	"generatedAt": "2026-04-22T15:09:50.701Z",
+	"id": "official",
+	"title": "Official channel",
+	"rootPath": "F.R.I.D.A.Y",
+	"columns": [
+		{
+			"id": "start-here",
+			"title": "从这里开始 · Start Here",
+			"kind": "directory",
+			"path": "从这里开始 · Start Here",
+			"version": "dc9eaf2d19a94375",
+			"manifestPath": "release/official-content/channels/official.json",
+			"files": [
+				{
+					"path": "从这里开始 · Start Here/从这里开始.md",
+					"hash": "ec046f79ce3d8b923e318bae0b8f1398cc4264f3ce3e69d568070bb35ca1360a",
+					"blobPath": "release/official-content/files/ec046f79ce3d8b923e318bae0b8f1398cc4264f3ce3e69d568070bb35ca1360a.md"
+				}
+			]
+		},
+		{
+			"id": "changelog-md",
+			"title": "Changelog",
+			"kind": "file",
+			"path": "Changelog.md",
+			"version": "a2850717f068def0",
+			"manifestPath": "release/official-content/channels/official.json",
+			"files": [
+				{
+					"path": "Changelog.md",
+					"hash": "b902b189670f579dd1767225fb0ecefa7552fdc7a0bca72691230aed79cdf780",
+					"blobPath": "release/official-content/files/b902b189670f579dd1767225fb0ecefa7552fdc7a0bca72691230aed79cdf780.md"
+				}
+			]
+		},
+		{
+			"id": "study-with-f-r-i-d-a-y",
+			"title": "Study with F.R.I.D.A.Y",
+			"kind": "directory",
+			"path": "Study with F.R.I.D.A.Y",
+			"version": "d8f371789b70f33b",
+			"manifestPath": "release/official-content/channels/official.json",
+			"files": [
+				{
+					"path": "Study with F.R.I.D.A.Y/幕后笔记元数据规范.md",
+					"hash": "7e99c4c9920def70eb0bc6e1c740d4c0c021b407b7a4f840f35aab60d5f8e1d9",
+					"blobPath": "release/official-content/files/7e99c4c9920def70eb0bc6e1c740d4c0c021b407b7a4f840f35aab60d5f8e1d9.md"
+				},
+				{
+					"path": "Study with F.R.I.D.A.Y/四个Obsidian内置Skills的修订笔记.md",
+					"hash": "11cba8aac31e0f78698be7b97fff04fae9a7531303bc0921bcb713049174b5f4",
+					"blobPath": "release/official-content/files/11cba8aac31e0f78698be7b97fff04fae9a7531303bc0921bcb713049174b5f4.md"
+				},
+				{
+					"path": "Study with F.R.I.D.A.Y/Friday 的 Memory 、Agent 与 Soul 统一定义.md",
+					"hash": "a47eb90ca637667a5686317cd8152fe3c1d2d9f5ae1b7233cdd06b24b876e75e",
+					"blobPath": "release/official-content/files/a47eb90ca637667a5686317cd8152fe3c1d2d9f5ae1b7233cdd06b24b876e75e.md"
+				},
+				{
+					"path": "Study with F.R.I.D.A.Y/Study with F.R.I.D.A.Y：写在代码背后的产品思考.md",
+					"hash": "a008e1f8a2bd87641ca7aa95b7f78dbaaf38dc728583c6c6c55da3ea8ea657ff",
+					"blobPath": "release/official-content/files/a008e1f8a2bd87641ca7aa95b7f78dbaaf38dc728583c6c6c55da3ea8ea657ff.md"
+				}
+			]
+		}
+	]
+}

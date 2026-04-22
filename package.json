@@ -7,10 +7,11 @@
 	"scripts": {
 		"generate:builtin-skills": "node scripts/generate-builtin-skill-markdown.mjs",
 		"generate:studio-content": "node scripts/generate-studio-content.mjs",
-		"dev": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && node esbuild.config.mjs",
-		"build": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"generate:official-content-release": "node scripts/generate-official-content-release.mjs",
+		"dev": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && node scripts/generate-official-content-release.mjs && node esbuild.config.mjs",
+		"build": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && node scripts/generate-official-content-release.mjs && tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"release": "node scripts/release.mjs",
-		"test": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && node --test tests/*.mjs",
+		"test": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && node scripts/generate-official-content-release.mjs && node --test tests/*.mjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint ."
 	},
