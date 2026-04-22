@@ -1,6 +1,8 @@
 import { ProjectEntry, ProjectGroupEntry } from "./project";
 import { AgentRuntimeSettings } from "./agent";
 import { LocaleCode } from "../i18n/types";
+import { OFFICIAL_CONTENT_STARTUP_DELAY_MS } from "../constants/officialContent";
+import { OfficialContentCatalogEntry } from "./officialContent";
 
 export interface SlashCommandTemplate {
 	id: string;
@@ -59,6 +61,17 @@ export interface FridaySettings {
 		lastResult: "idle" | "up-to-date" | "available" | "applied" | "error";
 		availableVersion: string;
 	};
+	officialContent: {
+		checkOnStartup: boolean;
+		startupDelayMs: number;
+		lastCheckedAt: string;
+		lastCatalogVersion: string;
+		catalog: OfficialContentCatalogEntry[];
+		channels: Record<string, {
+			subscribed: boolean;
+			lastAppliedVersion: string;
+		}>;
+	};
 	projectGroups: ProjectGroupEntry[];
 	projects: ProjectEntry[];
 	activeProjectId: string;
@@ -67,7 +80,7 @@ export interface FridaySettings {
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 7;
+export const SETTINGS_VERSION = 8;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -123,6 +136,14 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		lastCheckedAt: "",
 		lastResult: "idle",
 		availableVersion: "",
+	},
+	officialContent: {
+		checkOnStartup: true,
+		startupDelayMs: OFFICIAL_CONTENT_STARTUP_DELAY_MS,
+		lastCheckedAt: "",
+		lastCatalogVersion: "",
+		catalog: [],
+		channels: {},
 	},
 	projectGroups: [],
 	projects: [],

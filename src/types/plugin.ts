@@ -21,6 +21,7 @@ import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { SoulSummary } from "./soul";
+import type { OfficialContentCatalogEntry, OfficialContentLegacyGuardState } from "./officialContent";
 import { I18nParams, LocaleCode } from "../i18n/types";
 import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
@@ -31,7 +32,13 @@ import type { RuntimeStateStore } from "../services/RuntimeStateStore";
 import type { LegacyFridayRootMigrationService } from "../services/LegacyFridayRootMigrationService";
 import type { LegacyAgentCleanupService } from "../services/LegacyAgentCleanupService";
 
-export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul" | "agent" | "slash";
+export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul" | "agent" | "subscriptions";
+
+export interface OfficialContentServiceApi {
+	refreshCatalog(): Promise<OfficialContentCatalogEntry[]>;
+	applySubscriptions(): Promise<OfficialContentLegacyGuardState>;
+	runStartupCheck(): Promise<void>;
+}
 
 export interface FridayPluginApi {
 	app: App;
@@ -58,6 +65,7 @@ export interface FridayPluginApi {
 	syncRuntimeStore: SyncRuntimeStore;
 	projectBoundaryService: ProjectBoundaryService;
 	pluginUpdateService: PluginUpdateService;
+	officialContentService: OfficialContentServiceApi;
 	localStateRootService: LocalStateRootService;
 	soulStore: SoulStore;
 	runtimeStateStore: RuntimeStateStore;

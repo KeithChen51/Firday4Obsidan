@@ -53,6 +53,7 @@ import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/sett
 import { SoulDefinition, SoulSummary } from "./types/soul";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
+import type { OfficialContentCatalogEntry } from "./types/officialContent";
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 const ROOT_INDEX_RECOVERY_STORAGE_KEY = "friday:root-index-recovery";
@@ -223,6 +224,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	syncStatusBar!: SyncStatusBar;
 	fridaySettingTab!: FridaySettingTab;
 	pluginUpdateService!: PluginUpdateService;
+	officialContentService!: FridayPluginApi["officialContentService"];
 	localStateRootService!: LocalStateRootService;
 	runtimeStateStore!: RuntimeStateStore;
 	settingsMirrorService!: SettingsMirrorService;
@@ -314,6 +316,16 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
 			});
+			this.officialContentService = {
+				refreshCatalog: async (): Promise<OfficialContentCatalogEntry[]> => this.settings.officialContent.catalog,
+				applySubscriptions: async () => ({
+					blocked: true,
+					blockingPaths: [],
+					canRefreshCatalog: true,
+					takeoverConfirmed: false,
+				}),
+				runStartupCheck: async (): Promise<void> => undefined,
+			};
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap();
@@ -453,6 +465,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			if (this.settings.update.checkOnStartup) {
 				void this.runStartupPluginUpdateCheck();
 			}
+			if (this.settings.officialContent.checkOnStartup) {
+				void this.runStartupOfficialContentCheck();
+			}
 
 			this.startAutoSync();
 		} catch (error) {
@@ -527,6 +542,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			update: {
 				...DEFAULT_SETTINGS.update,
 				...(migrated.update ?? {}),
+			},
+			officialContent: {
+				...DEFAULT_SETTINGS.officialContent,
+				...(migrated.officialContent ?? {}),
+				catalog: migrated.officialContent?.catalog ?? [],
+				channels: migrated.officialContent?.channels ?? {},
 			},
 			agentRuntime: {
 				...DEFAULT_SETTINGS.agentRuntime,
@@ -1004,6 +1025,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			return {
 				version: SETTINGS_VERSION,
 				user: { ...DEFAULT_SETTINGS.user },
+				officialContent: { ...DEFAULT_SETTINGS.officialContent },
 				projectGroups: [this.createDefaultProjectGroup()],
 				projects: [],
 				activeProjectId: "",
@@ -1075,6 +1097,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			autoPush?: boolean;
 			syncInterval?: number;
 		};
+		const rawOfficialContent = (raw.officialContent ?? {}) as Partial<FridaySettings["officialContent"]>;
 		const migratedSyncMode =
 			rawSync.mode ??
 			(rawSync.autoPush ? "continuous_auto" : (rawSync.syncInterval ?? 0) > 0 ? "idle_auto" : "manual");
@@ -1084,12 +1107,54 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			syncOnStartup:
 				typeof rawSync.syncOnStartup === "boolean" ? rawSync.syncOnStartup : DEFAULT_SETTINGS.sync.syncOnStartup,
 		};
+		const migratedOfficialContent = {
+			...DEFAULT_SETTINGS.officialContent,
+			checkOnStartup:
+				typeof rawOfficialContent.checkOnStartup === "boolean"
+					? rawOfficialContent.checkOnStartup
+					: DEFAULT_SETTINGS.officialContent.checkOnStartup,
+			startupDelayMs:
+				typeof rawOfficialContent.startupDelayMs === "number"
+					? rawOfficialContent.startupDelayMs
+					: DEFAULT_SETTINGS.officialContent.startupDelayMs,
+			lastCheckedAt:
+				typeof rawOfficialContent.lastCheckedAt === "string" ? rawOfficialContent.lastCheckedAt : "",
+			lastCatalogVersion:
+				typeof rawOfficialContent.lastCatalogVersion === "string" ? rawOfficialContent.lastCatalogVersion : "",
+			catalog: Array.isArray(rawOfficialContent.catalog)
+				? rawOfficialContent.catalog
+					.filter((item): item is OfficialContentCatalogEntry =>
+						Boolean(item?.id?.trim() && item?.path?.trim()),
+					)
+					.map((item) => ({
+						id: item.id.trim(),
+						title: item.title?.trim() || item.path.trim(),
+						kind: item.kind === "directory" ? "directory" : "file",
+						path: item.path.trim(),
+						version: item.version?.trim() || "",
+						manifestPath: item.manifestPath?.trim() || "",
+					}))
+				: [],
+			channels: Object.fromEntries(
+				Object.entries(rawOfficialContent.channels ?? {})
+					.filter(([id]) => id.trim())
+					.map(([id, value]) => [
+						id.trim(),
+						{
+							subscribed: value?.subscribed === true,
+							lastAppliedVersion:
+								typeof value?.lastAppliedVersion === "string" ? value.lastAppliedVersion : "",
+						},
+					]),
+			),
+		};
 
 		return {
 			...raw,
 			version: SETTINGS_VERSION,
 			user: migratedUser,
 			sync: migratedSync,
+			officialContent: migratedOfficialContent,
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
 			activeProjectId,
@@ -1540,6 +1605,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				console.error("[Friday] Startup plugin update check failed:", error);
 			});
 		}, this.settings.update.startupDelayMs);
+	}
+
+	private async runStartupOfficialContentCheck(): Promise<void> {
+		window.setTimeout(() => {
+			void this.officialContentService.runStartupCheck().catch((error) => {
+				console.error("[Friday] Startup official content check failed:", error);
+			});
+		}, this.settings.officialContent.startupDelayMs);
 	}
 
 	private startAutoSync(): void {
