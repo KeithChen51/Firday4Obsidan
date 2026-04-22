@@ -800,7 +800,7 @@ export const zhCNMessages: I18nMessages = {
 	"settings.user.update.notice.upToDate": "当前已是最新版本。",
 	"settings.user.update.notice.failed": "更新检查失败：{error}",
 	"settings.user.update.notice.applyFailed": "应用更新失败：{error}",
-	"settings.user.update.notice.applied": "更新已写入。点击下方按钮重新加载 F.R.I.D.A.Y 插件，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
+	"settings.user.update.notice.applied": "更新已写入。点击下方按钮重新加载 F.R.I.D.A.Y 插件。插件更新只会替换插件产物，官方内容订阅会通过独立内容 feed 刷新。",
 	"settings.user.update.notice.restart": "重新加载 F.R.I.D.A.Y 插件",
 	"ai.approval.header": "🔧 F.R.I.D.A.Y 请求执行工具",
 };

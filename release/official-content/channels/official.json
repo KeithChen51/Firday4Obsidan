@@ -1,6 +1,6 @@
 {
 	"schemaVersion": 1,
-	"generatedAt": "2026-04-22T15:09:50.701Z",
+	"generatedAt": "2026-04-22T15:49:15.730Z",
 	"id": "official",
 	"title": "Official channel",
 	"rootPath": "F.R.I.D.A.Y",
@@ -25,13 +25,13 @@
 			"title": "Changelog",
 			"kind": "file",
 			"path": "Changelog.md",
-			"version": "a2850717f068def0",
+			"version": "ed22f11d34239ddc",
 			"manifestPath": "release/official-content/channels/official.json",
 			"files": [
 				{
 					"path": "Changelog.md",
-					"hash": "b902b189670f579dd1767225fb0ecefa7552fdc7a0bca72691230aed79cdf780",
-					"blobPath": "release/official-content/files/b902b189670f579dd1767225fb0ecefa7552fdc7a0bca72691230aed79cdf780.md"
+					"hash": "6b87327d72fdb56d2873457f8952bea8cc0d68904565646bcdf9bcd192fe5805",
+					"blobPath": "release/official-content/files/6b87327d72fdb56d2873457f8952bea8cc0d68904565646bcdf9bcd192fe5805.md"
 				}
 			]
 		},

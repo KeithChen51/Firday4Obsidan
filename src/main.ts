@@ -48,6 +48,7 @@ import { normalizeLlmSettings, switchLlmMode } from "./core/llm/LlmSettingsResol
 import { SecureStorage } from "./platform/obsidian/SecureStorage";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
 import { AgentProfile } from "./types/agent";
+import type { OfficialContentCatalogEntry } from "./types/officialContent";
 import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
 import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
@@ -1134,7 +1135,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					.filter((item): item is OfficialContentCatalogEntry =>
 						Boolean(item?.id?.trim() && item?.path?.trim()),
 					)
-					.map((item) => ({
+					.map((item): OfficialContentCatalogEntry => ({
 						id: item.id.trim(),
 						title: item.title?.trim() || item.path.trim(),
 						kind: item.kind === "directory" ? "directory" : "file",

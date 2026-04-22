@@ -51,6 +51,8 @@ test("settings section label renames user section to basic configuration in both
 	assert.match(en, /"settings\.user\.update\.notice\.applied":/);
 	assert.match(zh, /"settings\.user\.update\.notice\.restart":/);
 	assert.match(en, /"settings\.user\.update\.notice\.restart":/);
+	assert.doesNotMatch(zh, /bundled studio|内置 studio|重建“来自制作组”栏目/);
+	assert.doesNotMatch(en, /bundled studio|From the Studio/);
 });
 
 test("renderUserSection includes an automatic update group after git credential inputs", () => {

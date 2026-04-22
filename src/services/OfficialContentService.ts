@@ -141,7 +141,7 @@ export class OfficialContentService {
 			if (subscribed.has(entry.id)) {
 				await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null);
 				settings.officialContent.channels[entry.id] = {
-					...settings.officialContent.channels[entry.id],
+					subscribed: settings.officialContent.channels[entry.id]?.subscribed === true,
 					lastAppliedVersion: entry.version,
 				};
 				continue;

@@ -798,7 +798,7 @@ export const enUSMessages: I18nMessages = {
 	"settings.user.update.notice.upToDate": "You are already on the latest version.",
 	"settings.user.update.notice.failed": "Update check failed: {error}",
 	"settings.user.update.notice.applyFailed": "Failed to apply update: {error}",
-"settings.user.update.notice.applied": "Update files have been written. Reload the F.R.I.D.A.Y plugin below and the new version will rebuild From the Studio from the bundled studio source.",
+"settings.user.update.notice.applied": "Update files have been written. Reload the F.R.I.D.A.Y plugin below. Plugin updates only replace plugin artifacts, while official content subscriptions refresh through a separate content feed.",
 	"settings.user.update.notice.restart": "Reload F.R.I.D.A.Y plugin",
 	"settings.project.openEditor.create": "Opened project registration in the workspace",
 	"settings.project.openEditor.edit": "Opened project editor in the workspace: {slug}",
