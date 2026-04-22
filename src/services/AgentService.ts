@@ -1,6 +1,4 @@
-import { normalizePath, TAbstractFile, TFile, TFolder, Vault } from "obsidian";
-import { PRIMARY_PATHS } from "../constants/paths";
-import { STUDIO_CONTENT_SNAPSHOT, type StudioSnapshotEntry } from "../content/studio/generated";
+import { normalizePath, TFile, TFolder, Vault } from "obsidian";
 import { AgentProfile } from "../types/agent";
 
 const AGENTS_FOLDER = "Agents";
@@ -11,10 +9,6 @@ const MEMORY_FOLDER = "memory";
 const SESSIONS_FOLDER = "sessions";
 const SNAPSHOTS_FOLDER = "snapshots";
 const TOOL_APPROVAL_FILE = "tool-approval-rules.json";
-const DEFAULT_AGENT_ID = "default";
-
-const LEGACY_STUDIO_ROOT = "开发者";
-const LEGACY_STUDIO_ROOT_ALIASES = ["From the Studio"];
 
 const DEFAULT_AGENT_TEMPLATE = `# 默认 Agent
 
@@ -97,10 +91,6 @@ export class AgentService {
 		return normalizePath(`${this.getGlobalRoot()}/${KNOWLEDGE_FOLDER}`);
 	}
 
-	getStudioRoot(): string {
-		return normalizePath(`${this.fridayRoot}/${PRIMARY_PATHS.studio}`);
-	}
-
 	getPresetsRoot(): string {
 		return normalizePath(`${this.getLegacyAgentsRoot()}/${PRESETS_FOLDER}`);
 	}
@@ -142,14 +132,12 @@ export class AgentService {
 	}
 
 	async bootstrap(): Promise<boolean> {
-		await this.removeLegacyStudioRoots();
 		if (this.hasLegacyAgentsRoot()) {
 			await this.ensureBaseFolders();
 			await this.ensurePresetFiles();
 			await this.ensureGlobalKnowledgeFiles();
 			await this.ensureCuratorConfig();
 		}
-		await this.reconcileStudioSnapshot();
 		return false;
 	}
 
@@ -220,7 +208,6 @@ export class AgentService {
 		await this.ensureFolderRecursive(this.getPresetsRoot());
 		await this.ensureFolderRecursive(this.getGlobalRoot());
 		await this.ensureFolderRecursive(this.getGlobalKnowledgeRoot());
-		await this.ensureFolderRecursive(this.getStudioRoot());
 	}
 
 	private async ensurePresetFiles(): Promise<void> {
@@ -262,142 +249,6 @@ export class AgentService {
 			this.getCuratorConfigPath(),
 			`${JSON.stringify(DEFAULT_CURATOR_CONFIG, null, 2)}\n`,
 		);
-	}
-
-	private async reconcileStudioSnapshot(): Promise<void> {
-		await this.ensureFolderRecursive(this.getStudioRoot());
-		await this.removeObsoleteStudioPaths();
-		await this.writeStudioSnapshotEntries();
-	}
-
-	private async removeLegacyStudioRoots(): Promise<void> {
-		const legacyRoots = [
-			normalizePath(`${this.fridayRoot}/${LEGACY_STUDIO_ROOT}`),
-			...LEGACY_STUDIO_ROOT_ALIASES.map((item) => normalizePath(`${this.fridayRoot}/${item}`)),
-		].filter((item) => item !== this.getStudioRoot());
-		for (const legacyRoot of legacyRoots) {
-			await this.deleteTreeIfPresent(legacyRoot);
-		}
-	}
-
-	private buildStudioSnapshotSets(): {
-		directories: Set<string>;
-		files: Set<string>;
-		fileEntries: Array<Extract<StudioSnapshotEntry, { kind: "file" }>>;
-	} {
-		const studioRoot = this.getStudioRoot();
-		const directories = new Set<string>([studioRoot]);
-		const files = new Set<string>();
-		const fileEntries: Array<Extract<StudioSnapshotEntry, { kind: "file" }>> = [];
-
-		for (const entry of STUDIO_CONTENT_SNAPSHOT) {
-			const targetPath = normalizePath(`${studioRoot}/${entry.relativePath}`);
-			const parents = this.collectAncestorDirectories(targetPath, studioRoot);
-			for (const parent of parents) {
-				directories.add(parent);
-			}
-			if (entry.kind === "directory") {
-				directories.add(targetPath);
-				continue;
-			}
-			files.add(targetPath);
-			fileEntries.push(entry);
-		}
-
-		return { directories, files, fileEntries };
-	}
-
-	private async removeObsoleteStudioPaths(): Promise<void> {
-		const studioRoot = this.getStudioRoot();
-		const expected = this.buildStudioSnapshotSets();
-		const loaded = this.listLoadedPathsUnder(studioRoot);
-
-		const files = loaded
-			.filter((item): item is TFile => item instanceof TFile)
-			.filter((item) => !expected.files.has(normalizePath(item.path)))
-			.sort((left, right) => right.path.length - left.path.length);
-		for (const file of files) {
-			await this.vault.delete(file);
-		}
-
-		const folders = loaded
-			.filter((item): item is TFolder => item instanceof TFolder)
-			.filter((item) => normalizePath(item.path) !== studioRoot)
-			.filter((item) => !expected.directories.has(normalizePath(item.path)))
-			.sort((left, right) => right.path.length - left.path.length);
-		for (const folder of folders) {
-			await this.vault.delete(folder);
-		}
-	}
-
-	private async writeStudioSnapshotEntries(): Promise<void> {
-		const studioRoot = this.getStudioRoot();
-		const expected = this.buildStudioSnapshotSets();
-		const directories = [...expected.directories]
-			.filter((item) => item !== studioRoot)
-			.sort((left, right) => left.length - right.length || left.localeCompare(right, "zh-CN"));
-		for (const directory of directories) {
-			await this.ensureFolderRecursive(directory);
-		}
-
-		const files = [...expected.fileEntries].sort((left, right) => left.relativePath.localeCompare(right.relativePath, "zh-CN"));
-		for (const entry of files) {
-			const targetPath = normalizePath(`${studioRoot}/${entry.relativePath}`);
-			await this.writeManagedTextFile(targetPath, entry.content);
-		}
-	}
-
-	private collectAncestorDirectories(targetPath: string, rootPath: string): string[] {
-		const directories: string[] = [];
-		let current = normalizePath(targetPath);
-		const normalizedRoot = normalizePath(rootPath);
-		while (true) {
-			const parent = this.getParentDirectory(current);
-			if (!parent || parent.length < normalizedRoot.length) {
-				break;
-			}
-			directories.unshift(parent);
-			if (parent === normalizedRoot) {
-				break;
-			}
-			current = parent;
-		}
-		return directories;
-	}
-
-	private listLoadedPathsUnder(rootPath: string): TAbstractFile[] {
-		const normalizedRoot = normalizePath(rootPath);
-		return this.vault
-			.getAllLoadedFiles()
-			.filter((item) => item.path === normalizedRoot || item.path.startsWith(`${normalizedRoot}/`));
-	}
-
-	private async deleteTreeIfPresent(rootPath: string): Promise<void> {
-		const normalizedRoot = normalizePath(rootPath);
-		const descendants = this.listLoadedPathsUnder(normalizedRoot)
-			.filter((item) => item.path !== normalizedRoot)
-			.sort((left, right) => {
-				const depth = right.path.length - left.path.length;
-				if (depth !== 0) {
-					return depth;
-				}
-				if (left instanceof TFolder && right instanceof TFile) {
-					return 1;
-				}
-				if (left instanceof TFile && right instanceof TFolder) {
-					return -1;
-				}
-				return right.path.localeCompare(left.path, "zh-CN");
-			});
-		for (const item of descendants) {
-			if (item instanceof TFile || item instanceof TFolder) {
-				await this.vault.delete(item);
-			}
-		}
-		const root = this.vault.getAbstractFileByPath(normalizedRoot);
-		if (root instanceof TFile || root instanceof TFolder) {
-			await this.vault.delete(root);
-		}
 	}
 
 	private normalizeAgentId(rawValue: string): string {
