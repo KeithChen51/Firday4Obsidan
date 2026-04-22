@@ -31,7 +31,8 @@ test("legacy cleanup service backs up ambiguous knowledge files before deleting 
 	assert.match(source, /backup/i);
 });
 
-test("legacy cleanup service ignores compatibility scaffolding when deciding whether old agent data still exists", () => {
+test("legacy cleanup service treats even underscore-only legacy agent roots as cleanup-worthy data", () => {
 	const source = readSource().replace(/\r\n?/g, "\n");
-	assert.match(source, /root\.children\.some\(\(child\) => child instanceof TFolder && !child\.name\.startsWith\("_"\)\)/);
+	assert.doesNotMatch(source, /!child\.name\.startsWith\("_"\)/);
+	assert.match(source, /root\.children\.length > 0/);
 });

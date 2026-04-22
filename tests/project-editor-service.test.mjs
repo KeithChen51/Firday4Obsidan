@@ -275,6 +275,27 @@ test("project editor service rejects new project roots inside the Friday workspa
 	}
 });
 
+test("project editor service still allows editing an existing legacy Friday-managed project root", async () => {
+	const mod = await loadModule();
+	assert.doesNotThrow(() => {
+		mod.validateProjectDraft(
+			{
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "F.R.I.D.A.Y/椤圭洰/alpha",
+				gitRemote: "",
+				autoSync: false,
+			},
+			new Set(),
+			"alpha",
+			"F.R.I.D.A.Y",
+			"F.R.I.D.A.Y/椤圭洰/alpha",
+		);
+	});
+});
+
 test("project editor service fills git remote from an existing local repository root", async () => {
 	const mod = await loadModule();
 	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-existing-local-repo-"));
@@ -492,7 +513,7 @@ test("remote bootstrap defaults derive project identity from repository name", a
 	const defaults = mod.buildRemoteBootstrapDefaults("F.R.I.D.A.Y", "https://example.com/team/demo-repo.git");
 	assert.equal(defaults.projectId, "demo-repo");
 	assert.equal(defaults.projectName, "demo-repo");
-	assert.equal(defaults.boundaryPath, mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "demo-repo"));
+	assert.equal(defaults.boundaryPath, "");
 });
 
 test("remote bootstrap defaults sanitize repository names into valid hidden slugs", async () => {
@@ -500,5 +521,5 @@ test("remote bootstrap defaults sanitize repository names into valid hidden slug
 	const defaults = mod.buildRemoteBootstrapDefaults("F.R.I.D.A.Y", "https://example.com/team/next_gen.git");
 	assert.equal(defaults.projectId, "next-gen");
 	assert.equal(defaults.projectName, "next_gen");
-	assert.equal(defaults.boundaryPath, mod.buildDefaultProjectRootPath("F.R.I.D.A.Y", "next-gen"));
+	assert.equal(defaults.boundaryPath, "");
 });

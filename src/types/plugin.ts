@@ -28,6 +28,7 @@ import type { PluginUpdateService } from "../services/PluginUpdateService";
 import type { LocalStateRootService } from "../services/LocalStateRootService";
 import type { SoulStore } from "../services/SoulStore";
 import type { RuntimeStateStore } from "../services/RuntimeStateStore";
+import type { LegacyFridayRootMigrationService } from "../services/LegacyFridayRootMigrationService";
 import type { LegacyAgentCleanupService } from "../services/LegacyAgentCleanupService";
 
 export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul" | "agent" | "slash";
@@ -60,6 +61,7 @@ export interface FridayPluginApi {
 	localStateRootService: LocalStateRootService;
 	soulStore: SoulStore;
 	runtimeStateStore: RuntimeStateStore;
+	legacyFridayRootMigrationService: LegacyFridayRootMigrationService;
 	legacyAgentCleanupService: LegacyAgentCleanupService;
 	addCommand: Plugin["addCommand"];
 	registerView: Plugin["registerView"];

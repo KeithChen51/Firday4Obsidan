@@ -63,12 +63,13 @@ export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: stri
 	projectName: string;
 	boundaryPath: string;
 } {
+	void fridayRoot;
 	const repoName = extractRepositoryName(gitRemote);
 	const projectId = normalizeProjectIdCandidate(repoName) || "new-project";
 	return {
 		projectId,
 		projectName: repoName,
-		boundaryPath: buildDefaultProjectRootPath(fridayRoot, projectId),
+		boundaryPath: "",
 	};
 }
 

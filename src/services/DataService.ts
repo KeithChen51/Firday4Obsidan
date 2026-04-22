@@ -2,13 +2,11 @@
 import { normalizePath, parseYaml, stringifyYaml, TFile, TFolder, Vault } from "obsidian";
 import {
 	getPathPresets,
-	getRootCandidates,
 	PathPreset,
 	PERSONAL_SLUG,
 	PRIMARY_PATHS,
 } from "../constants/paths";
 import { ProjectEntry, ProjectMember } from "../types/project";
-import { FridaySettings } from "../types/settings";
 import { sortFrontmatterKeys } from "../utils/frontmatter";
 import { getRoleLabel } from "../utils/labels";
 
@@ -17,64 +15,6 @@ export class DataService {
 		private readonly vault: Vault,
 		private readonly fridayRoot: string = PRIMARY_PATHS.root,
 	) {}
-
-	async ensureDirectoryStructure(): Promise<void> {
-		const folders = [
-			this.fridayRoot,
-			`${this.fridayRoot}/${PRIMARY_PATHS.projects}`,
-			`${this.fridayRoot}/${PRIMARY_PATHS.personal}`,
-		];
-
-		for (const folder of folders) {
-			await this.ensureFolderRecursive(folder);
-		}
-	}
-
-	async writeConfigMirror(settings: FridaySettings): Promise<void> {
-		const filePath = this.resolveConfigMirrorPath();
-		const safeLlm = {
-			mode: settings.llm.mode,
-			apiUrl: settings.llm.apiUrl,
-			// apiKey intentionally excluded: never write secrets to vault files
-			model: settings.llm.model,
-			temperature: settings.llm.temperature,
-			maxTokens: settings.llm.maxTokens,
-			enableStreaming: settings.llm.enableStreaming,
-		};
-		const frontmatter = sortFrontmatterKeys({
-			type: "config",
-			version: settings.version,
-			llm: safeLlm,
-			sync: settings.sync,
-			user: {
-				displayName: settings.user.displayName,
-				userId: settings.user.userId,
-			},
-		});
-		const content = this.renderMarkdownWithFrontmatter(frontmatter, "");
-		await this.upsertTextFile(filePath, content);
-	}
-
-	getProjectIdFromPath(filePath: string): string | null {
-		const normalizedPath = normalizePath(filePath);
-
-		for (const root of getRootCandidates(this.fridayRoot)) {
-			for (const preset of getPathPresets()) {
-				const projectPrefix = normalizePath(`${root}/${preset.projects}/`);
-				if (normalizedPath.startsWith(projectPrefix)) {
-					const remainder = normalizedPath.slice(projectPrefix.length);
-					return remainder.split("/")[0] ?? null;
-				}
-
-				const personalPrefix = normalizePath(`${root}/${preset.personal}/`);
-				if (normalizedPath.startsWith(personalPrefix)) {
-					return PERSONAL_SLUG;
-				}
-			}
-		}
-
-		return null;
-	}
 
 	getFridayRoot(): string {
 		return this.fridayRoot;
@@ -315,17 +255,5 @@ export class DataService {
 		}
 
 		return result;
-	}
-
-	private resolveConfigMirrorPath(): string {
-		const candidates: string[] = [];
-		for (const root of getRootCandidates(this.fridayRoot)) {
-			for (const preset of getPathPresets()) {
-				candidates.push(normalizePath(`${root}/${preset.configFile}`));
-			}
-		}
-
-		const existing = candidates.find((item) => this.vault.getAbstractFileByPath(item) instanceof TFile);
-		return existing ?? normalizePath(`${this.fridayRoot}/${PRIMARY_PATHS.configFile}`);
 	}
 }

@@ -196,6 +196,16 @@ test("project editor only syncs derived path logic for remote mode and no longer
 	assert.doesNotMatch(source, /draft\.mode !== "register_existing_dir"/);
 });
 
+test("settings project editor keeps draft boundary paths empty until the user chooses a target folder", async () => {
+	const source = readSettingsSource();
+	const match = source.match(/private computeDraftDefaultBoundaryPath\([\s\S]*?\): string \{([\s\S]*?)\n\t\}/);
+	assert.ok(match, "computeDraftDefaultBoundaryPath block should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /if \(draft\.mode === "local_only"\) \{\s*return "";\s*\}/);
+	assert.match(block, /if \(draft\.mode === "remote_bootstrap"\) \{\s*return "";\s*\}/);
+	assert.doesNotMatch(block, /buildDefaultProjectRootPath/);
+});
+
 test("project editor no longer asks users to type project id manually when creating projects", async () => {
 	const source = readSettingsSource();
 	assert.doesNotMatch(source, /projects\.editor\.projectId/);
@@ -296,4 +306,18 @@ test("settings project editor disables auto sync until a git remote is available
 	assert.match(source, /setDisabled\(disabled\)/);
 	assert.match(source, /settings\.project\.editor\.autoSync\.needsRemote/);
 	assert.match(source, /this\.getDraftAutoSyncAvailability\(draft\)/);
+});
+
+test("settings project section exposes legacy Friday root inventory and safe cleanup actions", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /legacyFridayRootMigrationService/);
+	assert.match(source, /renderLegacyFridayRootSection\(/);
+	assert.match(source, /settings\.project\.legacy\.title/);
+	assert.match(source, /settings\.project\.legacy\.import/);
+	assert.match(source, /settings\.project\.legacy\.cleanup/);
+	assert.match(source, /legacyAgentCleanupService\.cleanupLegacyAgentData\(/);
+	assert.match(source, /hasBlockingLegacyProjectContent\(/);
+	assert.match(source, /canCleanupSystemArtifacts\(/);
+	assert.match(source, /settings\.project\.legacy\.cleanupBlocked/);
+	assert.match(source, /cleanupVisibleLegacyArtifacts\(/);
 });

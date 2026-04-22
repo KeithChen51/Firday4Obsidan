@@ -1,5 +1,5 @@
 ﻿.friday-wordmark {
-	font-family: "FridayAirbeat", "Segoe UI", sans-serif;
+	font-family: "FridayWordmarkSynthra", "Segoe UI", sans-serif;
 }
 
 .friday-settings-title {
@@ -1773,11 +1773,6 @@
 	font-weight: 400;
 	letter-spacing: 0.08em;
 	text-transform: none;
-}
-
-.friday-shell-project-subtitle {
-	font-size: 0.8em;
-	color: var(--text-muted);
 }
 
 .friday-shell-project-inline {

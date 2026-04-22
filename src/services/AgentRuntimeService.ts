@@ -44,6 +44,7 @@ import { StepTraceStore } from "../platform/tools/StepTraceStore";
 import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { ToolRunAuditStore } from "../platform/tools/ToolRunAuditStore";
 import { SoulStore } from "./SoulStore";
+import { RuntimeStateStore } from "./RuntimeStateStore";
 import {
 	isAgentWritableProjectPath,
 	isProjectRawPath,
@@ -215,6 +216,7 @@ export class AgentRuntimeService {
 		private readonly vault: Vault,
 		private readonly aiService: AIService,
 		private readonly soulStore: SoulStore,
+		private readonly runtimeStateStore: RuntimeStateStore,
 		private readonly workspaceAccessService: WorkspaceAccessService,
 		private readonly actionService: AgentActionService,
 		private readonly approvalService: ToolApprovalService,
@@ -232,8 +234,9 @@ export class AgentRuntimeService {
 		this.turnOrchestrator = new TurnOrchestrator();
 		this.toolGovernor = new ToolGovernor();
 		this.sessionOverrideAdapter = new SessionOverrideAdapter();
-		this.toolRunAuditStore = new ToolRunAuditStore(this.vault);
-		this.stepTraceStore = new StepTraceStore(this.vault);
+		const runtimeRoot = this.runtimeStateStore.getRuntimeRoot();
+		this.toolRunAuditStore = new ToolRunAuditStore(runtimeRoot);
+		this.stepTraceStore = new StepTraceStore(runtimeRoot);
 		this.historyCompactor = new HistoryCompactor();
 		this.promptContextEngine = new PromptContextEngine();
 		this.memoryStore = new MemoryStoreV1({ vault: this.vault });

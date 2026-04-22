@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"pluginId": "friday-obsidian-plugin",
-	"version": "0.2.7",
+	"version": "0.2.8",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-04-22T06:09:48.515Z",
+	"publishedAt": "2026-04-22T09:41:41.547Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
 		"styles.css": "release/friday-obsidian-plugin/styles.css"
 	},
-	"releaseNotes": "- Soul 现在成为唯一的运行时身份入口：设置模型、当前角色切换、Daily Board 对话工作台和插件 API 全部改为直接读取 `SoulStore`，旧的 `settings.agents`、`activeAgentId` 与 `getActiveAgent` / `createAgent` 兼容接口已从主链路移除。\n- 旧 Agent 数据迁移进一步收口：启动时会把历史 Agent 档案导入为 Soul 定义，并同步迁移旧会话、工具批准规则和模型偏好；日常会话与快照存储不再依赖 `AgentService` 的 legacy 路径。\n- `来自制作组` 栏目完成命名更新：`幕后笔记 · Behind the Build` 统一为 `Study with F.R.I.D.A.Y`，`迭代手记 · Changelog` 简化为 `Changelog`，同时保留旧路径兼容，避免已有 vault 升级后断链。\n- 调整初始化命令的全局 `FRIDAY.md` 写入路径，并补齐 Soul-only 与 studio 路径迁移相关的回归测试，降低后续迭代时的兼容性回退风险。"
+	"releaseNotes": "- 清理 F.R.I.D.A.Y 根目录的可见运行时痕迹：工具审计、步骤追踪和设置镜像迁移到隐藏本地状态目录，插件启动时不再继续在 vault 里铺开 `F.R.I.D.A.Y/runtime`、可见配置镜像等系统文件。\n- 项目设置页新增“遗留 Friday 根目录内容”面板，可以盘点旧 `项目` / `个人` / `Agents` 目录，导入仍可识别为项目的旧文件夹，并只对安全的空目录和过时镜像执行清理，降低历史 vault 升级后的手工整理成本。\n- 项目边界判定与注册流程进一步收紧：当前文件归属、成员数据与同步入口统一改为基于已注册 `boundaryPath` 判断；本地/远端注册时不再偷偷推导目标目录，必须明确选择 Obsidian 路径，减少项目嵌套和误写入。\n- 工作台身份展示继续收口：顶部标题栏只保留 `F.R.I.D.A.Y` 字标，用户消息优先显示基础配置里的“显示名称”，不再固定显示“你”或头像角标；基础配置也同步移除了旧的用户 ID 输入项。\n- `F.R.I.D.A.Y` 字标更新为新的 Synthra 风格字体，并保持只作用于工作台品牌、聊天消息角色名和设置标题等指定位置，不会扩散到普通正文文本。"
 }

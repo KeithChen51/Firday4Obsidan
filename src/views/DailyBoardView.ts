@@ -14,6 +14,7 @@ import {
 } from "obsidian";
 import { ApprovalQueue, type PendingApproval } from "../features/workbench/ApprovalQueue";
 import { PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
+import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
@@ -298,11 +299,7 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-shell-project-brand friday-wordmark",
 			text: this.t("nav.friday", "F.R.I.D.A.Y"),
 		});
-		projectBrandEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
-		projectSection.createSpan({
-			cls: "friday-shell-project-subtitle",
-			text: this.t("shell.subtitle", "对话工作台"),
-		});
+		projectBrandEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
 
 		const right = containerEl.createDiv({ cls: "friday-shell-bar-right" });
 		const projectInline = right.createDiv({ cls: "friday-shell-project-inline" });
@@ -2413,7 +2410,7 @@ export class DailyBoardView extends ItemView {
 			text: isUser ? this.resolveUserDisplayName() : this.plugin.t("ai.role.assistant"),
 		});
 		if (!isUser) {
-			roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+			roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
 		}
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content${isStreaming ? " is-streaming" : ""}`,
@@ -2607,7 +2604,7 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
-		roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+		roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
 		const contentEl = bubbleEl.createDiv({
 			cls: "friday-ai-message-content friday-ai-approval-content",
 		});
@@ -2664,7 +2661,7 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
-		roleEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+		roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content friday-ai-runtime-card-content${this.aiRuntimePreviewExpanded ? "" : " is-streaming"}`,
 		});

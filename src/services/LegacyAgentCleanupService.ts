@@ -21,7 +21,7 @@ export class LegacyAgentCleanupService {
 		if (!(root instanceof TFolder)) {
 			return false;
 		}
-		return root.children.some((child) => child instanceof TFolder && !child.name.startsWith("_"));
+		return root.children.length > 0;
 	}
 
 	async cleanupLegacyAgentData(): Promise<CleanupResult> {

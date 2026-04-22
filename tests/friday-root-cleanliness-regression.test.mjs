@@ -51,3 +51,21 @@ test("project members storage APIs are keyed by registered project roots", () =>
 		/this\.plugin\.dataService\.setProjectMembers\(this\.memberEditorProject, this\.memberEditorMembers\)/,
 	);
 });
+
+test("plugin startup no longer scaffolds visible project and personal folders under F.R.I.D.A.Y", () => {
+	const mainSource = readSource("src/main.ts");
+	const dataServiceSource = readSource("src/services/DataService.ts");
+
+	assert.doesNotMatch(mainSource, /dataService\.ensureDirectoryStructure\(\)/);
+	assert.doesNotMatch(dataServiceSource, /async ensureDirectoryStructure\(/);
+	assert.doesNotMatch(dataServiceSource, /\$\{this\.fridayRoot\}\/\$\{PRIMARY_PATHS\.projects\}/);
+	assert.doesNotMatch(dataServiceSource, /\$\{this\.fridayRoot\}\/\$\{PRIMARY_PATHS\.personal\}/);
+});
+
+test("runtime audit stores no longer write into the visible F.R.I.D.A.Y runtime folder", () => {
+	const stepTraceSource = readSource("src/platform/tools/StepTraceStore.ts");
+	const toolRunSource = readSource("src/platform/tools/ToolRunAuditStore.ts");
+
+	assert.doesNotMatch(stepTraceSource, /F\.R\.I\.D\.A\.Y\/runtime/);
+	assert.doesNotMatch(toolRunSource, /F\.R\.I\.D\.A\.Y\/runtime/);
+});

@@ -6,7 +6,7 @@ import { registerSyncCommands } from "./commands/syncCommands";
 import { PROJECT_STATE_CHANGED_EVENT } from "./constants/events";
 import { FRIDAY_ICON_ID } from "./constants/icon";
 import { PRIMARY_PATHS } from "./constants/paths";
-import { FRIDAY_WORDMARK_FONT_TTF_BASE64 } from "./constants/wordmarkFont";
+import { FRIDAY_WORDMARK_FONT_FAMILY, FRIDAY_WORDMARK_FONT_TTF_BASE64 } from "./constants/wordmarkFont";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
 import { AgentActionService } from "./services/AgentActionService";
@@ -29,7 +29,9 @@ import { ProjectContentService, RawSourceContext } from "./services/ProjectConte
 import { IngestEventStore } from "./services/IngestEventStore";
 import { LocalStateRootService } from "./services/LocalStateRootService";
 import { RuntimeStateStore } from "./services/RuntimeStateStore";
+import { SettingsMirrorService } from "./services/SettingsMirrorService";
 import { SoulStore } from "./services/SoulStore";
+import { LegacyFridayRootMigrationService } from "./services/LegacyFridayRootMigrationService";
 import { LegacyAgentMigrationService } from "./services/LegacyAgentMigrationService";
 import { LegacyAgentCleanupService } from "./services/LegacyAgentCleanupService";
 import { IngestSummary, WikiIngestService } from "./services/WikiIngestService";
@@ -223,7 +225,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	pluginUpdateService!: PluginUpdateService;
 	localStateRootService!: LocalStateRootService;
 	runtimeStateStore!: RuntimeStateStore;
+	settingsMirrorService!: SettingsMirrorService;
 	soulStore!: SoulStore;
+	legacyFridayRootMigrationService!: LegacyFridayRootMigrationService;
 	legacyAgentMigrationService!: LegacyAgentMigrationService;
 	legacyAgentCleanupService!: LegacyAgentCleanupService;
 	private legacyAgentProfiles: AgentProfile[] = [];
@@ -244,7 +248,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
 			}
 			this.dataService = new DataService(this.app.vault, PRIMARY_PATHS.root);
-			await this.dataService.ensureDirectoryStructure();
 			await this.loadSettings();
 			this.projectBoundaryService = new ProjectBoundaryService(
 				() => this.settings,
@@ -260,9 +263,15 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.manifest.id,
 			);
 			await this.localStateRootService.ensureBaseLayout();
+			this.settingsMirrorService = new SettingsMirrorService(this.localStateRootService);
 			this.runtimeStateStore = new RuntimeStateStore(this.localStateRootService);
 			await this.runtimeStateStore.ensureBaseLayout();
 			this.soulStore = new SoulStore(this.localStateRootService);
+			this.legacyFridayRootMigrationService = new LegacyFridayRootMigrationService(
+				(this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
+				this.dataService.getFridayRoot(),
+				() => this.settings,
+			);
 			this.syncEventBus = new SyncEventBus();
 			this.syncRuntimeStore = new SyncRuntimeStore(this.syncEventBus);
 			const migratedLegacyCredentials = await this.migrateLegacyGitCredentials();
@@ -313,18 +322,18 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				return;
 			}
 
-				this.conversationService = new ConversationService(this.runtimeStateStore);
-				this.projectContentService = new ProjectContentService(this.app.vault);
-				this.ingestEventStore = new IngestEventStore(this.app.vault);
-				this.wikiIngestService = new WikiIngestService(
-					this.app.vault,
-					this.projectContentService,
-					this.ingestEventStore,
-				);
-				this.workspaceAccessService = new WorkspaceAccessService(
-					() => this.settings,
-					this.projectBoundaryService,
-				);
+			this.conversationService = new ConversationService(this.runtimeStateStore);
+			this.projectContentService = new ProjectContentService(this.app.vault);
+			this.ingestEventStore = new IngestEventStore(this.app.vault);
+			this.wikiIngestService = new WikiIngestService(
+				this.app.vault,
+				this.projectContentService,
+				this.ingestEventStore,
+			);
+			this.workspaceAccessService = new WorkspaceAccessService(
+				() => this.settings,
+				this.projectBoundaryService,
+			);
 			this.canvasService = new CanvasService();
 			this.agentActionService = new AgentActionService(
 				this.app.vault,
@@ -378,28 +387,29 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.executionEventRouter = new EventRouter();
 			this.executionPlanner = new ExecutionPlanner();
 			this.aiService = new AIService(() => this.getEffectiveLlmSettings());
-				this.agentRuntimeService = new AgentRuntimeService(
-					this.app.vault,
-					this.aiService,
-					this.soulStore,
+			this.agentRuntimeService = new AgentRuntimeService(
+				this.app.vault,
+				this.aiService,
+				this.soulStore,
+				this.runtimeStateStore,
 				this.workspaceAccessService,
 				this.agentActionService,
 				this.toolApprovalService,
 				this.commandExecService,
 				this.inlineEditService,
 				this.skillCommandService,
-					this.projectBoundaryService,
-					this.workbenchStateStore,
-					(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
-					() => this.settings,
-				);
-				this.executionOrchestrator = new ExecutionOrchestrator(
-					this.skillCommandService,
-					this.agentRuntimeService,
-				);
-				this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
-					await this.handlePulledRawChanges(project, pulledFiles, headRevision);
-				});
+				this.projectBoundaryService,
+				this.workbenchStateStore,
+				(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
+				() => this.settings,
+			);
+			this.executionOrchestrator = new ExecutionOrchestrator(
+				this.skillCommandService,
+				this.agentRuntimeService,
+			);
+			this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
+				await this.handlePulledRawChanges(project, pulledFiles, headRevision);
+			});
 				this.registerEvent(
 					this.app.vault.on("create", (file) => {
 						this.scheduleRawIngest(file, "local_create");
@@ -480,7 +490,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 		try {
 			const fontBytes = Uint8Array.from(Buffer.from(FRIDAY_WORDMARK_FONT_TTF_BASE64, "base64"));
-			const fontFace = new FontFace("FridayAirbeat", fontBytes);
+			const fontFace = new FontFace(FRIDAY_WORDMARK_FONT_FAMILY, fontBytes);
 			await fontFace.load();
 			const fontSet = document.fonts as FontFaceSet & { add(font: FontFace): void };
 			fontSet.add(fontFace);
@@ -537,11 +547,11 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		if (!this.dataService) {
+		if (!this.settingsMirrorService) {
 			return;
 		}
 		try {
-			await this.dataService.writeConfigMirror(this.settings);
+			await this.settingsMirrorService.write(this.settings);
 		} catch (error) {
 			console.error("[Friday] Failed to write config mirror:", error);
 		}

@@ -29,11 +29,13 @@ import {
 	switchLlmMode,
 } from "../core/llm/LlmSettingsResolver";
 import type { ModelCapabilityInfo } from "../services/AIService";
+import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrationService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate } from "../types/settings";
 import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
+import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 
@@ -84,6 +86,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private soulEditorTonePresetDraft: SoulTonePreset = "balanced";
 	private soulEditorToneDraft = "";
 	private pendingSoulCleanupConfirm = false;
+	private pendingLegacyFridayCleanupConfirm = false;
 	private newProjectGroupDraft = "";
 	private pendingDeleteGroupId = "";
 	private policyEditorProjectSlug = "";
@@ -95,6 +98,8 @@ export class FridaySettingTab extends PluginSettingTab {
 	private projectEditorRemoteBootstrapDirectoryState: RemoteBootstrapDirectoryState = "unknown";
 	private projectEditorRemoteBootstrapResolution: RemoteBootstrapResolution = "unset";
 	private projectEditorRemoteBootstrapChoiceInitialized = false;
+	private legacyFridayRootReport: LegacyFridayRootReport | null = null;
+	private legacyFridayRootReportLoading = false;
 	private userGitCredentialLoaded = false;
 	private userGitUsernameDraft = "";
 	private userGitTokenDraft = "";
@@ -174,7 +179,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			cls: "friday-settings-title-brand friday-wordmark",
 			text: brandText,
 		});
-		brandEl.style.fontFamily = 'FridayAirbeat, "Segoe UI", sans-serif';
+		brandEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
 		if (suffixText) {
 			titleEl.createSpan({ cls: "friday-settings-title-suffix", text: suffixText });
 		}
@@ -1455,6 +1460,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private renderProjectSection(containerEl: HTMLElement): void {
 		const shell = containerEl.createDiv({ cls: "friday-project-settings-shell" });
+		void this.ensureLegacyFridayRootReportLoaded();
 		this.renderActiveProjectSelector(shell);
 
 		if (this.projectEditorDraft) {
@@ -1462,6 +1468,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 
 		this.renderProjectGroupSection(shell);
+		this.renderLegacyFridayRootSection(shell);
 
 		if (this.host.settings.projects.length === 0) {
 			this.createNativeSettingsGroup(shell, {
@@ -2752,9 +2759,175 @@ export class FridaySettingTab extends PluginSettingTab {
 		draft: Pick<ProjectEditorDraft, "mode" | "projectId" | "projectName" | "gitRemote">,
 		basePath: string,
 	): string {
-		const defaultPath = this.computeDraftDefaultBoundaryPath(draft);
-		const segment = defaultPath.split("/").filter(Boolean).pop() ?? "new-project";
+		const defaults = buildRemoteBootstrapDefaults(this.host.dataService.getFridayRoot(), draft.gitRemote);
+		const preferredName = draft.projectName.trim() || draft.projectId.trim() || defaults.projectId;
+		const segment = buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), preferredName)
+			.split("/")
+			.filter(Boolean)
+			.pop() ?? "new-project";
 		return basePath.trim() ? `${basePath.trim()}/${segment}` : segment;
+	}
+
+	private async ensureLegacyFridayRootReportLoaded(): Promise<void> {
+		if (this.legacyFridayRootReportLoading || this.legacyFridayRootReport) {
+			return;
+		}
+		await this.refreshLegacyFridayRootReport();
+	}
+
+	private async refreshLegacyFridayRootReport(): Promise<void> {
+		this.legacyFridayRootReportLoading = true;
+		try {
+			this.legacyFridayRootReport = await this.host.legacyFridayRootMigrationService.scan();
+		} finally {
+			this.legacyFridayRootReportLoading = false;
+			this.display();
+		}
+	}
+
+	private renderLegacyFridayRootSection(containerEl: HTMLElement): void {
+		const report = this.legacyFridayRootReport;
+		const hasBlockingLegacyProjectContent = this.host.legacyFridayRootMigrationService.hasBlockingLegacyProjectContent(report);
+		const canCleanupSystemArtifacts = this.host.legacyFridayRootMigrationService.canCleanupSystemArtifacts(report);
+		const hasContent = this.legacyFridayRootReportLoading || (
+			report && (
+				report.registeredLegacyProjects.length > 0
+				|| report.importableLegacyProjects.length > 0
+				|| report.legacyPersonalFolders.length > 0
+				|| report.hasLegacyAgentData
+				|| report.cleanupCandidates.length > 0
+			)
+		);
+		if (!hasContent) {
+			return;
+		}
+
+		const group = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.project.legacy.title", "遗留 Friday 根目录内容"),
+			description: this.t(
+				"settings.project.legacy.desc",
+				"盘点仍留在 F.R.I.D.A.Y 下的旧项目、个人目录与过时镜像；可导入像项目的目录，并仅清理安全的空目录和旧镜像。",
+			),
+			extraClass: "friday-project-settings-panel friday-project-legacy-panel",
+		});
+
+		if (this.legacyFridayRootReportLoading || !report) {
+			group.createEl("p", {
+				text: this.t("settings.project.legacy.loading", "正在扫描遗留目录..."),
+			});
+			return;
+		}
+
+		for (const project of report.registeredLegacyProjects) {
+			new Setting(group)
+				.setName(project.projectId)
+				.setDesc(
+					this.t("settings.project.legacy.registered", "已注册，但仍位于旧路径：{path}", {
+						path: project.boundaryPath,
+					}),
+				);
+		}
+
+		for (const candidate of report.importableLegacyProjects) {
+			new Setting(group)
+				.setName(candidate.folderPath)
+				.setDesc(
+					this.t("settings.project.legacy.importable", "可导入的遗留{source}目录，建议项目 ID：{projectId}", {
+						source: candidate.source === "projects" ? "项目" : "个人",
+						projectId: candidate.suggestedProjectId,
+					}),
+				)
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.project.legacy.import", "导入为已注册项目")).onClick(async () => {
+						const entry = await this.host.legacyFridayRootMigrationService.importLegacyProject(candidate.folderPath);
+						await this.host.upsertProject(entry);
+						await this.host.setActiveProject(entry.projectId);
+						new Notice(
+							this.t("settings.project.legacy.importSuccess", "已导入遗留项目：{project}", {
+								project: entry.projectName,
+							}),
+							3000,
+						);
+						await this.refreshLegacyFridayRootReport();
+					}),
+				);
+		}
+
+		for (const folderPath of report.legacyPersonalFolders) {
+			new Setting(group)
+				.setName(folderPath)
+				.setDesc(
+					this.t("settings.project.legacy.personal", "遗留个人目录，暂不自动迁移；如有需要，请手动整理后再导入。"),
+				);
+		}
+
+		if (report.hasLegacyAgentData) {
+			new Setting(group)
+				.setName(this.t("settings.project.legacy.agents", "遗留 Agents 目录"))
+				.setDesc(
+					this.t(
+						"settings.project.legacy.agentsDesc",
+						"检测到旧 Agent 时代的可见目录内容。完成项目/个人迁移后，可在这里一并备份并清理。",
+					),
+				);
+		}
+
+		if (report.hasLegacyAgentData || report.cleanupCandidates.length > 0) {
+			new Setting(group)
+				.setName(this.t("settings.project.legacy.cleanup", "清理可安全移除的遗留项"))
+				.setDesc(
+					hasBlockingLegacyProjectContent
+						? this.t(
+								"settings.project.legacy.cleanupBlocked",
+								"请先处理遗留项目和个人目录，再清理系统遗留目录与过时镜像。",
+						  )
+						: this.pendingLegacyFridayCleanupConfirm
+						? this.t(
+								"settings.project.legacy.cleanupConfirm",
+								"仅会删除空目录和过时镜像。再次点击才会真正执行。",
+						  )
+						: [
+								...(report.hasLegacyAgentData ? [this.t("settings.project.legacy.agents", "遗留 Agents 目录")] : []),
+								...report.cleanupCandidates,
+						  ].join(" | "),
+				)
+				.addButton((button) =>
+					button
+						.setButtonText(
+							this.pendingLegacyFridayCleanupConfirm
+								? this.t("settings.project.legacy.cleanupConfirmButton", "确认清理")
+								: this.t("settings.project.legacy.cleanup", "清理可安全移除的遗留项"),
+						)
+						.setWarning()
+						.setDisabled(!canCleanupSystemArtifacts)
+						.onClick(async () => {
+							if (!this.pendingLegacyFridayCleanupConfirm) {
+								this.pendingLegacyFridayCleanupConfirm = true;
+								this.display();
+								return;
+							}
+							let removedCount = 0;
+							if (report.hasLegacyAgentData) {
+								const cleanupResult = await this.host.legacyAgentCleanupService.cleanupLegacyAgentData();
+								removedCount += cleanupResult.removedCount;
+							}
+							const result = await this.host.legacyFridayRootMigrationService.cleanupVisibleLegacyArtifacts();
+							removedCount += result.removedPaths.length;
+							this.pendingLegacyFridayCleanupConfirm = false;
+							if (removedCount === 0) {
+								new Notice(this.t("settings.project.legacy.cleanupNoop", "没有可安全清理的遗留项。"), 3000);
+							} else {
+								new Notice(
+									this.t("settings.project.legacy.cleanupSuccess", "已清理 {count} 个遗留项。", {
+										count: removedCount,
+									}),
+									3000,
+								);
+							}
+							await this.refreshLegacyFridayRootReport();
+						}),
+				);
+		}
 	}
 
 	private getParentVaultDirectory(value: string): string {
@@ -2811,11 +2984,10 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (draft.mode === "local_only") {
 			return "";
 		}
-		const preferredName = draft.projectName.trim() || draft.projectId.trim();
-		if (!preferredName) {
-			return buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), "");
+		if (draft.mode === "remote_bootstrap") {
+			return "";
 		}
-		return buildDefaultProjectRootPath(this.host.dataService.getFridayRoot(), preferredName);
+		return "";
 	}
 
 	private computeProjectIdBoundaryPath(projectId: string): string {
