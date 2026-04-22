@@ -19,16 +19,16 @@ function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
 }
 
-test("agent service bootstrap provisions the studio structure under F.R.I.D.A.Y root", async () => {
+test("agent service bootstrap no longer publishes official content under F.R.I.D.A.Y root", async () => {
 	const source = readSource();
-	assert.match(source, /PRIMARY_PATHS/);
-	assert.match(source, /STUDIO_CONTENT_SNAPSHOT/);
-	assert.match(source, /getStudioRoot\(/);
-	assert.match(source, /reconcileStudioSnapshot\(/);
-	assert.match(source, /removeObsoleteStudioPaths\(/);
-	assert.match(source, /writeStudioSnapshotEntries\(/);
+	assert.doesNotMatch(source, /PRIMARY_PATHS/);
+	assert.doesNotMatch(source, /STUDIO_CONTENT_SNAPSHOT/);
+	assert.doesNotMatch(source, /getStudioRoot\(/);
+	assert.doesNotMatch(source, /reconcileStudioSnapshot\(/);
+	assert.doesNotMatch(source, /removeObsoleteStudioPaths\(/);
+	assert.doesNotMatch(source, /writeStudioSnapshotEntries\(/);
 	assert.match(source, /writeManagedTextFile\(/);
-	assert.match(source, /LEGACY_STUDIO_ROOT/);
+	assert.doesNotMatch(source, /LEGACY_STUDIO_ROOT/);
 	assert.doesNotMatch(source, /getStudioNotesRoot\(/);
 	assert.doesNotMatch(source, /getStudioStudyNotesRoot\(/);
 	assert.doesNotMatch(source, /getStudioReadmePath\(/);
