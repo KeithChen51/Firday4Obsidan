@@ -152,8 +152,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.renderSoulSection(containerEl);
 			return;
 		}
-		if (this.activeSection === "slash") {
-			this.renderSlashCommandSection(containerEl);
+		if (this.activeSection === "subscriptions") {
+			this.renderSubscriptionsSection(containerEl);
 			return;
 		}
 		this.renderProjectSection(containerEl);
@@ -193,7 +193,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			{ id: "sync", label: this.host.t("settings.section.sync") },
 			{ id: "llm", label: this.host.t("settings.section.llm") },
 			{ id: "agent", label: this.host.t("settings.section.agent") },
-			{ id: "slash", label: this.host.t("settings.section.slash") },
+			{ id: "subscriptions", label: this.host.t("settings.section.subscriptions") },
 		];
 		for (const item of items) {
 			const button = nav.createEl("button", {
@@ -520,6 +520,111 @@ export class FridaySettingTab extends PluginSettingTab {
 						this.display();
 					}),
 			);
+	}
+
+	private renderSubscriptionsSection(containerEl: HTMLElement): void {
+		const controls = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.subscriptions.title", "订阅频道"),
+			description: this.t(
+				"settings.subscriptions.desc",
+				"在这里选择要挂载到 F.R.I.D.A.Y/ 的官方栏目。新出现的栏目默认不会自动订阅。",
+			),
+		});
+
+		new Setting(controls)
+			.setName(this.t("settings.subscriptions.lastChecked.name", "最近检查"))
+			.setDesc(
+				this.host.settings.officialContent.lastCheckedAt
+					|| this.t("settings.subscriptions.lastChecked.never", "尚未检查官方内容。"),
+			)
+			.addButton((button) =>
+				button
+					.setButtonText(this.t("settings.subscriptions.refresh", "刷新官方内容"))
+					.setCta()
+					.onClick(async () => {
+						try {
+							await this.host.officialContentService.refreshCatalog();
+							await this.host.officialContentService.applySubscriptions();
+							new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
+						} catch (error) {
+							new Notice(
+								this.t("settings.subscriptions.refreshFailed", "刷新官方内容失败：{error}", {
+									error: String(error ?? ""),
+								}),
+								6000,
+							);
+						}
+						this.display();
+					}),
+			);
+
+		new Setting(controls)
+			.setName(this.t("settings.subscriptions.checkOnStartup.name", "启动时自动检查"))
+			.setDesc(this.t("settings.subscriptions.checkOnStartup.desc", "插件启动时自动刷新官方内容目录并尝试应用订阅。"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.host.settings.officialContent.checkOnStartup)
+					.onChange(async (value) => {
+						this.host.settings.officialContent.checkOnStartup = value;
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(controls)
+			.setName(this.t("settings.subscriptions.delay.name", "启动检查延迟（ms）"))
+			.setDesc(this.t("settings.subscriptions.delay.desc", "避免在插件刚启动时立即拉取官方内容目录。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("5000")
+					.setValue(String(this.host.settings.officialContent.startupDelayMs))
+					.onChange(async (value) => {
+						const parsed = Number.parseInt(value, 10);
+						this.host.settings.officialContent.startupDelayMs = Number.isFinite(parsed) ? Math.max(parsed, 0) : 5000;
+						await this.host.saveSettings();
+					}),
+			);
+
+		const providerGroup = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.subscriptions.provider.official", "Official channel"),
+			description: this.t(
+				"settings.subscriptions.provider.official.desc",
+				"F.R.I.D.A.Y/ 本身是官方频道挂载点；下面的一级目录或一级 Markdown 会作为可订阅栏目显示。",
+			),
+		});
+
+		if (this.host.settings.officialContent.catalog.length === 0) {
+			providerGroup.createEl("p", {
+				text: this.t("settings.subscriptions.empty", "暂无可显示的栏目。先点击“刷新官方内容”。"),
+			});
+			return;
+		}
+
+		for (const entry of this.host.settings.officialContent.catalog) {
+			const state = this.ensureOfficialContentChannelState(entry.id);
+			new Setting(providerGroup)
+				.setName(entry.title)
+				.setDesc(
+					this.t("settings.subscriptions.column.desc", "{kind} | 路径：{path} | 版本：{version}", {
+						kind: entry.kind,
+						path: entry.path,
+						version: entry.version,
+					}),
+				)
+				.addToggle((toggle) =>
+					toggle
+						.setValue(state.subscribed)
+						.onChange(async (value) => {
+							const target = this.ensureOfficialContentChannelState(entry.id);
+							target.subscribed = value;
+							if (!value) {
+								target.lastAppliedVersion = "";
+							}
+							await this.host.saveSettings();
+							await this.host.officialContentService.applySubscriptions();
+							this.display();
+						}),
+				);
+		}
 	}
 
 	private renderLlmSection(containerEl: HTMLElement): void {
@@ -3177,6 +3282,18 @@ export class FridaySettingTab extends PluginSettingTab {
 		);
 	}
 
+	private ensureOfficialContentChannelState(entryId: string): { subscribed: boolean; lastAppliedVersion: string } {
+		const existing = this.host.settings.officialContent.channels[entryId];
+		if (existing) {
+			return existing;
+		}
+		this.host.settings.officialContent.channels[entryId] = {
+			subscribed: false,
+			lastAppliedVersion: "",
+		};
+		return this.host.settings.officialContent.channels[entryId];
+	}
+
 	private isGitProfileComplete(): boolean {
 		return Boolean(
 			this.host.settings.user.gitUserEmail.trim() &&
@@ -3302,6 +3419,6 @@ export class FridaySettingTab extends PluginSettingTab {
 type SettingsSection = FridaySettingsSection;
 
 export function isFridaySettingsSection(value: string | undefined): value is FridaySettingsSection {
-	return value === "user" || value === "project" || value === "sync" || value === "llm" || value === "soul" || value === "agent" || value === "slash";
+	return value === "user" || value === "project" || value === "sync" || value === "llm" || value === "soul" || value === "agent" || value === "subscriptions";
 }
 

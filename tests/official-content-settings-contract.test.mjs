@@ -12,6 +12,8 @@ const officialContentTypesPath = path.join(projectRoot, "src", "types", "officia
 const officialContentConstantsPath = path.join(projectRoot, "src", "constants", "officialContent.ts");
 const pluginTypePath = path.join(projectRoot, "src", "types", "plugin.ts");
 const mainPath = path.join(projectRoot, "src", "main.ts");
+const settingsPath = path.join(projectRoot, "src", "settings", "FridaySettingTab.ts");
+const officialContentServicePath = path.join(projectRoot, "src", "services", "OfficialContentService.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
@@ -60,4 +62,28 @@ test("plugin api and startup flow expose official content service and subscripti
 	assert.match(mainSource, /startupDelayMs/);
 	assert.match(mainSource, /runStartupOfficialContentCheck|officialContentService\.runStartupCheck/);
 	assert.doesNotMatch(mainSource, /subscribed:\s*true/);
+});
+
+test("subscriptions settings UI replaces slash navigation and uses official content service", () => {
+	const source = read(settingsPath);
+	assert.match(source, /activeSection === "subscriptions"/);
+	assert.match(source, /renderSubscriptionsSection\(containerEl\)/);
+	assert.match(source, /settings\.section\.subscriptions/);
+	assert.doesNotMatch(source, /{ id: "slash", label: this\.host\.t\("settings\.section\.slash"\) }/);
+	assert.match(source, /officialContentService\.refreshCatalog\(/);
+	assert.match(source, /officialContentService\.applySubscriptions\(/);
+	assert.match(source, /officialContent\.checkOnStartup/);
+	assert.match(source, /officialContent\.startupDelayMs/);
+	assert.match(source, /Official channel|官方频道/);
+});
+
+test("official content service exposes refresh, apply, and startup flows against release artifacts", () => {
+	assert.ok(fs.existsSync(officialContentServicePath), "OfficialContentService should exist");
+	const source = read(officialContentServicePath);
+	assert.match(source, /class OfficialContentService/);
+	assert.match(source, /refreshCatalog\(\): Promise/);
+	assert.match(source, /applySubscriptions\(\): Promise/);
+	assert.match(source, /runStartupCheck\(\): Promise<void>/);
+	assert.match(source, /release\/official-content\/latest\.json/);
+	assert.match(source, /channels\/official\.json|manifestPath/);
 });

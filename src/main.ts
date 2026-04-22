@@ -25,6 +25,7 @@ import { ToolApprovalService } from "./services/ToolApprovalService";
 import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
 import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
 import { PluginUpdateService } from "./services/PluginUpdateService";
+import { OfficialContentService } from "./services/OfficialContentService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
 import { IngestEventStore } from "./services/IngestEventStore";
 import { LocalStateRootService } from "./services/LocalStateRootService";
@@ -53,7 +54,6 @@ import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/sett
 import { SoulDefinition, SoulSummary } from "./types/soul";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
-import type { OfficialContentCatalogEntry } from "./types/officialContent";
 
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 const ROOT_INDEX_RECOVERY_STORAGE_KEY = "friday:root-index-recovery";
@@ -316,16 +316,22 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
 			});
-			this.officialContentService = {
-				refreshCatalog: async (): Promise<OfficialContentCatalogEntry[]> => this.settings.officialContent.catalog,
-				applySubscriptions: async () => ({
-					blocked: true,
-					blockingPaths: [],
-					canRefreshCatalog: true,
-					takeoverConfirmed: false,
-				}),
-				runStartupCheck: async (): Promise<void> => undefined,
-			};
+			this.officialContentService = new OfficialContentService({
+				adapter: this.app.vault.adapter as unknown as {
+					exists(path: string, sensitive?: boolean): Promise<boolean>;
+					mkdir(path: string): Promise<void>;
+					read(path: string): Promise<string>;
+					write(path: string, data: string): Promise<void>;
+					remove(path: string): Promise<void>;
+					rmdir?(path: string, recursive: boolean): Promise<void>;
+					list?(path: string): Promise<{ files: string[]; folders: string[] }>;
+				},
+				getSettings: () => this.settings,
+				saveSettings: () => this.saveSettings(),
+				getGitRuntimeStatus: () => this.getGitRuntimeStatus(),
+				getUserCredential: () => this.getUserGitCredential(),
+				getUserGitEmail: () => this.settings.user.gitUserEmail,
+			});
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap();

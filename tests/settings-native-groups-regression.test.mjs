@@ -102,15 +102,16 @@ test("tab content sections no longer repeat the selected tab title as an extra h
 	assert.doesNotMatch(source, /renderSyncSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.sync"\) \}\)/);
 	assert.doesNotMatch(source, /renderLlmSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.llm"\) \}\)/);
 	assert.doesNotMatch(source, /renderAgentSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.agent"\) \}\)/);
-	assert.doesNotMatch(source, /renderSlashCommandSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.slash"\) \}\)/);
+	assert.doesNotMatch(source, /renderSubscriptionsSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.subscriptions"\) \}\)/);
 	assert.doesNotMatch(source, /renderProjectSection\(containerEl: HTMLElement\): void \{[\s\S]*?createEl\("h3", \{ text: this\.host\.t\("settings\.section\.project"\) \}\)/);
 });
 
-test("slash and project sections replace old friday-card settings panels with native groups", () => {
+test("subscriptions and project sections replace old friday-card settings panels with native groups", () => {
 	const source = read(settingsPath);
 	assert.doesNotMatch(source, /const card = containerEl\.createDiv\(\{ cls: "friday-card" \}\)/);
 	assert.doesNotMatch(source, /friday-card friday-project-settings-panel/);
-	assert.match(source, /createNativeSettingsGroup\(containerEl,\s*\{\s*title: `\/\$\{command\.name\}`/);
+	assert.match(source, /renderSubscriptionsSection\(containerEl: HTMLElement\): void \{/);
+	assert.match(source, /officialContentService\.refreshCatalog\(/);
 	assert.match(source, /createNativeSettingsGroup\(containerEl,\s*\{/);
 	assert.match(source, /friday-project-settings-panel/);
 });
