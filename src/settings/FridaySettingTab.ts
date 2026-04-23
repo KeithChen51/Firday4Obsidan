@@ -352,11 +352,9 @@ export class FridaySettingTab extends PluginSettingTab {
 		});
 		const card = this.createNativeSettingsGroup(containerEl, { extraClass: "friday-plugin-update-group" });
 
-		const gitStatus = this.gitRuntimeStatus;
-		const gitAvailable = Boolean(gitStatus?.available);
-		const gitProfileComplete = this.isGitProfileComplete();
-		const prerequisitesReady = gitAvailable && gitProfileComplete;
-		const prereqDetails = this.getPluginUpdatePrereqDetails(gitAvailable);
+		const accessStatus = this.getReleaseFeedAccessStatus();
+		const prerequisitesReady = accessStatus.ready;
+		const prereqDetails = accessStatus;
 		const availableVersion = this.host.settings.update.availableVersion.trim();
 		const hasAvailableUpdate = Boolean(availableVersion);
 		const needsPluginReload = this.host.settings.update.lastResult === "applied";
@@ -465,10 +463,50 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 	}
 
-	private getPluginUpdatePrereqDetails(gitAvailable: boolean): { readyLabels: string[]; pendingLabels: string[]; summary: string } {
+	private renderSubscriptionsUnavailableState(
+		containerEl: HTMLElement,
+		details: { readyLabels: string[]; pendingLabels: string[]; summary: string },
+	): void {
+		const group = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.subscriptions.unavailable.title", "订阅频道暂不可用"),
+			description: this.t(
+				"settings.subscriptions.unavailable.desc",
+				"当前还不能使用订阅频道。请先补充读取发布 feed 所需的基础配置，然后再返回这里。",
+			),
+			extraClass: "friday-project-settings-panel",
+		});
+		if (details.readyLabels.length > 0) {
+			group.createEl("p", {
+				text: this.t("settings.user.update.prerequisites.ready", "已完成：{items}", {
+					items: details.readyLabels.join("、"),
+				}),
+			});
+		}
+		if (details.pendingLabels.length > 0) {
+			group.createEl("p", {
+				text: this.t("settings.user.update.prerequisites.pending", "待完成：{items}", {
+					items: details.pendingLabels.join("、"),
+				}),
+			});
+		}
+		new Setting(group)
+			.setName(this.t("settings.subscriptions.unavailable.action", "前往基础配置补充信息"))
+			.setDesc(details.summary)
+			.addButton((button) =>
+				button
+					.setCta()
+					.setButtonText(this.t("settings.subscriptions.unavailable.action", "前往基础配置补充信息"))
+					.onClick(() => {
+						this.focusSection("user");
+						this.display();
+					}),
+			);
+	}
+
+	private getReleaseFeedAccessStatus(): { ready: boolean; readyLabels: string[]; pendingLabels: string[]; summary: string } {
+		const gitAvailable = Boolean(this.gitRuntimeStatus?.available);
 		const items = [
 			{ done: this.userGitUsernameDraft.trim().length > 0, label: this.t("settings.user.gitUsername.name", "Git 用户名") },
-			{ done: this.host.settings.user.gitUserEmail.trim().length > 0, label: this.t("settings.user.gitUserEmail.name", "Git 邮箱") },
 			{ done: this.userGitTokenDraft.trim().length > 0, label: this.t("settings.user.gitToken.name", "Git 令牌") },
 			{ done: gitAvailable, label: this.t("settings.user.update.gitRuntime.summary", "本地 Git 环境") },
 		];
@@ -476,10 +514,10 @@ export class FridaySettingTab extends PluginSettingTab {
 		const pendingLabels = items.filter((item) => !item.done).map((item) => item.label);
 		let missingCount = 0;
 		if (!this.userGitUsernameDraft.trim()) missingCount += 1;
-		if (!this.host.settings.user.gitUserEmail.trim()) missingCount += 1;
 		if (!this.userGitTokenDraft.trim()) missingCount += 1;
 		if (!gitAvailable) missingCount += 1;
 		return {
+			ready: pendingLabels.length === 0,
 			readyLabels,
 			pendingLabels,
 			summary: this.t("settings.user.update.prereqSummary", "还缺 {count} 项前置条件。", {
@@ -526,12 +564,20 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSubscriptionsSection(containerEl: HTMLElement): void {
+		void this.ensureUserGitCredentialLoaded();
+		void this.ensureGitRuntimeStatusLoaded();
+		const accessStatus = this.getReleaseFeedAccessStatus();
+		if (!accessStatus.ready) {
+			this.renderSubscriptionsUnavailableState(containerEl, accessStatus);
+			return;
+		}
+
 		void this.ensureOfficialContentGuardStateLoaded();
 		const controls = this.createNativeSettingsGroup(containerEl, {
 			title: this.t("settings.subscriptions.title", "订阅频道"),
 			description: this.t(
 				"settings.subscriptions.desc",
-				"在这里选择要挂载到 F.R.I.D.A.Y/ 的官方栏目。新出现的栏目默认不会自动订阅。",
+				"在这里选择要挂载到 F.R.I.D.A.Y/ 的官方栏目。官方栏目默认会自动订阅，你也可以手动关闭不需要的栏目。",
 			),
 		});
 
@@ -678,6 +724,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						.onChange(async (value) => {
 							const target = this.ensureOfficialContentChannelState(entry.id);
 							target.subscribed = value;
+							target.path = entry.path;
 							if (!value) {
 								target.lastAppliedVersion = "";
 							}
@@ -2954,7 +3001,12 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getOfficialContentOwnedTopLevelPaths(): string[] {
-		return this.host.settings.officialContent.catalog.map((item) => item.path);
+		return [...new Set([
+			...this.host.settings.officialContent.catalog.map((item) => item.path),
+			...Object.values(this.host.settings.officialContent.channels)
+				.map((item) => item.path?.trim() || "")
+				.filter((item) => item.trim().length > 0),
+		])];
 	}
 
 	private async ensureOfficialContentGuardStateLoaded(): Promise<void> {
@@ -3370,24 +3422,17 @@ export class FridaySettingTab extends PluginSettingTab {
 		);
 	}
 
-	private ensureOfficialContentChannelState(entryId: string): { subscribed: boolean; lastAppliedVersion: string } {
+	private ensureOfficialContentChannelState(entryId: string): { subscribed: boolean; lastAppliedVersion: string; path: string } {
 		const existing = this.host.settings.officialContent.channels[entryId];
 		if (existing) {
 			return existing;
 		}
 		this.host.settings.officialContent.channels[entryId] = {
-			subscribed: false,
+			subscribed: true,
 			lastAppliedVersion: "",
+			path: "",
 		};
 		return this.host.settings.officialContent.channels[entryId];
-	}
-
-	private isGitProfileComplete(): boolean {
-		return Boolean(
-			this.host.settings.user.gitUserEmail.trim() &&
-			this.userGitUsernameDraft.trim() &&
-			this.userGitTokenDraft.trim(),
-		);
 	}
 
 	private getGitRuntimeStatusDesc(): string {

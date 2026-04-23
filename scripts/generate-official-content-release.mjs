@@ -9,7 +9,7 @@ const DEFAULT_PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const OFFICIAL_PROVIDER_ID = "official";
 const OFFICIAL_ROOT_PATH = "F.R.I.D.A.Y";
 const OFFICIAL_CHANNEL_TITLE = "Official channel";
-const OUTPUT_ROOT = path.join("release", "official-content");
+const OUTPUT_ROOT = "official";
 const OUTPUT_LATEST_PATH = path.join(OUTPUT_ROOT, "latest.json");
 const OUTPUT_CHANNELS_DIR = path.join(OUTPUT_ROOT, "channels");
 const OUTPUT_FILES_DIR = path.join(OUTPUT_ROOT, "files");
@@ -63,6 +63,10 @@ function slugifyPath(value) {
 		.replace(/[^a-z0-9]+/g, "-")
 		.replace(/-+/g, "-")
 		.replace(/^-|-$/g, "") || "column";
+}
+
+function buildColumnId(value) {
+	return `${slugifyPath(value)}-${hashString(value).slice(0, 12)}`;
 }
 
 function hashString(value) {
@@ -119,7 +123,7 @@ function discoverOfficialColumns(projectRoot) {
 		if (entry.isDirectory()) {
 			const files = collectDirectoryMarkdownFiles(sourceRoot, entry.name);
 			columns.push({
-				id: slugifyPath(entry.name),
+				id: buildColumnId(entry.name),
 				title: titleFromPublishedPath(entry.name, "directory"),
 				kind: "directory",
 				path: entry.name,
@@ -132,7 +136,7 @@ function discoverOfficialColumns(projectRoot) {
 		}
 		const filePath = path.join(sourceRoot, entry.name);
 		columns.push({
-			id: slugifyPath(entry.name),
+			id: buildColumnId(entry.name),
 			title: titleFromPublishedPath(entry.name, "file"),
 			kind: "file",
 			path: entry.name,
@@ -147,7 +151,7 @@ function discoverOfficialColumns(projectRoot) {
 
 	const changelogSource = fs.readFileSync(path.join(projectRoot, CHANGELOG_SOURCE_PATH), "utf8");
 	columns.push({
-		id: slugifyPath(CHANGELOG_TARGET_PATH),
+		id: buildColumnId(CHANGELOG_TARGET_PATH),
 		title: titleFromPublishedPath(CHANGELOG_TARGET_PATH, "file"),
 		kind: "file",
 		path: CHANGELOG_TARGET_PATH,

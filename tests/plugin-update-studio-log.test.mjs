@@ -47,32 +47,31 @@ function createMemoryAdapter(initial = {}) {
 function createGitClient() {
 	const texts = new Map(
 		Object.entries({
-			"FETCH_HEAD:release/latest.json": JSON.stringify({
+			"FETCH_HEAD:plugin/latest.json": JSON.stringify({
 				schemaVersion: 1,
 				pluginId: "friday-obsidian-plugin",
 				version: "0.2.0",
 				minAppVersion: "1.0.0",
-				branch: "master",
+				branch: "release",
 				files: {
-					"main.js": "release/friday-obsidian-plugin/main.js",
-					"manifest.json": "release/friday-obsidian-plugin/manifest.json",
-					"styles.css": "release/friday-obsidian-plugin/styles.css",
+					"main.js": "plugin/artifacts/main.js",
+					"manifest.json": "plugin/artifacts/manifest.json",
+					"styles.css": "plugin/artifacts/styles.css",
 				},
 			}),
-			"FETCH_HEAD:CHANGELOG.md": "# Changelog\n\n## 0.2.0\n\n- New release.\n",
-			"FETCH_HEAD:release/friday-obsidian-plugin/main.js": "console.log('new build');",
-			"FETCH_HEAD:release/friday-obsidian-plugin/manifest.json": JSON.stringify({
+			"FETCH_HEAD:plugin/artifacts/main.js": "console.log('new build');",
+			"FETCH_HEAD:plugin/artifacts/manifest.json": JSON.stringify({
 				id: "friday-obsidian-plugin",
 				version: "0.2.0",
 				minAppVersion: "1.0.0",
 			}),
-			"FETCH_HEAD:release/friday-obsidian-plugin/styles.css": ".demo { color: red; }",
+			"FETCH_HEAD:plugin/artifacts/styles.css": ".demo { color: red; }",
 		}),
 	);
 	return {
 		async ensureWorkspace() {},
 		async lsRemote() {
-			return "abc123\tHEAD\nabc123\trefs/heads/master";
+			return "abc123\tHEAD\nabc123\trefs/heads/release";
 		},
 		async fetch() {},
 		async readText(ref, targetPath) {
@@ -82,7 +81,7 @@ function createGitClient() {
 	};
 }
 
-test("plugin update service leaves studio publication to bootstrap instead of writing studio files directly", async () => {
+test("plugin update service leaves official changelog publication to the official channel instead of writing plugin changelog files", async () => {
 	const mod = await loadModule();
 	const adapter = createMemoryAdapter({
 		".obsidian/plugins/friday-obsidian-plugin/main.js": "console.log('old build');",
@@ -108,4 +107,5 @@ test("plugin update service leaves studio publication to bootstrap instead of wr
 	assert.equal(result.success, true);
 	assert.doesNotMatch(result.updatedFiles.join("\n"), /F\.R\.I\.D\.A\.Y\/来自制作组/);
 	assert.equal(adapter.files.get("F.R.I.D.A.Y/来自制作组/迭代手记.md"), undefined);
+	assert.equal(adapter.files.get(".obsidian/plugins/friday-obsidian-plugin/CHANGELOG.md"), undefined);
 });

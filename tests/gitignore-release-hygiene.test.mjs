@@ -18,10 +18,14 @@ function checkIgnore(relativePath) {
 	};
 }
 
-test("gitignore keeps release feed tracked while ignoring local-only artifacts", () => {
+test("gitignore ignores local publish trees on the source branch", () => {
 	assert.equal(checkIgnore("main.js").ignored, true, "root build output should stay ignored");
-	assert.equal(checkIgnore("release/friday-obsidian-plugin/main.js").ignored, false, "release main.js must stay trackable");
-	assert.equal(checkIgnore("release/latest.json").ignored, false, "release feed must stay trackable");
-	assert.equal(checkIgnore("release/friday-obsidian-plugin.zip").ignored, true, "release zip should be ignored as a generated binary");
+	assert.equal(checkIgnore("plugin/latest.json").ignored, true, "plugin feed should stay local-only on source branch");
+	assert.equal(checkIgnore("plugin/artifacts/main.js").ignored, true, "plugin artifacts should stay local-only on source branch");
+	assert.equal(checkIgnore("official/latest.json").ignored, true, "official feed should stay local-only on source branch");
+	assert.equal(checkIgnore("channel/latest.json").ignored, true, "community channel feed should stay local-only on source branch");
+	assert.equal(checkIgnore("release/latest.json").ignored, false, "legacy bridge feed should stay trackable");
+	assert.equal(checkIgnore("release/friday-obsidian-plugin/main.js").ignored, false, "legacy bridge main.js should stay trackable");
+	assert.equal(checkIgnore("release/friday-obsidian-plugin.zip").ignored, true, "legacy release zip should stay ignored as generated binary");
 	assert.equal(checkIgnore("data.json.bak-20260408-145810").ignored, true, "local data backup should be ignored");
 });

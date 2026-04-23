@@ -26,6 +26,10 @@ test("startup update check is gated by startup toggle, git runtime, and credenti
 	assert.match(source, /gitProfileComplete/);
 	assert.match(source, /setTimeout/);
 	assert.doesNotMatch(source, /this\.settings\.update\.enabled && this\.settings\.update\.checkOnStartup/);
+	const match = source.match(/private async runStartupPluginUpdateCheck\(\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async runStartupOfficialContentCheck/);
+	assert.ok(match, "runStartupPluginUpdateCheck block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /gitUserEmail/);
 });
 
 test("main leaves studio publication to agent bootstrap instead of running a startup changelog backfill", () => {

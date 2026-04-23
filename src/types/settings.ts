@@ -70,6 +70,7 @@ export interface FridaySettings {
 		channels: Record<string, {
 			subscribed: boolean;
 			lastAppliedVersion: string;
+			path: string;
 		}>;
 	};
 	projectGroups: ProjectGroupEntry[];

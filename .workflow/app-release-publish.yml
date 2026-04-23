@@ -1,0 +1,25 @@
+version: '1.0'
+name: app-release-publish
+displayName: Publish plugin and official release trees
+
+trigger:
+  push:
+    branches:
+      include:
+        - main
+        - master
+
+stages:
+  - stage: build_and_publish
+    displayName: Build and publish release trees
+    jobs:
+      publish:
+        displayName: Publish release branch
+        steps:
+          - step: build@nodejs
+            name: build_and_publish
+            displayName: Install, test, build, and publish
+            inputs:
+              nodeVersion: '20'
+              commands:
+                - bash -euo pipefail -c 'npm install --no-audit --no-fund && npm run test && npm run build && test -f plugin/latest.json && test -f official/latest.json && bash scripts/ci-publish-release.sh'

@@ -61,45 +61,32 @@ function createMemoryAdapter(initial = {}, options = {}) {
 function createGitClient(overrides = {}) {
 	const texts = new Map(
 		Object.entries({
-			"FETCH_HEAD:release/latest.json": JSON.stringify({
+			"FETCH_HEAD:plugin/latest.json": JSON.stringify({
 				schemaVersion: 1,
 				pluginId: "friday-obsidian-plugin",
 				version: "0.2.0",
 				minAppVersion: "1.0.0",
-				branch: "master",
+				branch: "release",
 				releaseNotes: "- Added user-facing plugin update history sync.",
 				files: {
-					"main.js": "release/friday-obsidian-plugin/main.js",
-					"manifest.json": "release/friday-obsidian-plugin/manifest.json",
-					"styles.css": "release/friday-obsidian-plugin/styles.css",
+					"main.js": "plugin/artifacts/main.js",
+					"manifest.json": "plugin/artifacts/manifest.json",
+					"styles.css": "plugin/artifacts/styles.css",
 				},
 			}),
-			"FETCH_HEAD:CHANGELOG.md": [
-				"# Changelog",
-				"",
-				"## 0.2.0",
-				"",
-				"- Added user-facing plugin update history sync.",
-				"- Exported release notes into the release feed.",
-				"",
-				"## 0.1.0",
-				"",
-				"- Initial release.",
-				"",
-			].join("\n"),
-			"FETCH_HEAD:release/friday-obsidian-plugin/main.js": "console.log('new build');",
-			"FETCH_HEAD:release/friday-obsidian-plugin/manifest.json": JSON.stringify({
+			"FETCH_HEAD:plugin/artifacts/main.js": "console.log('new build');",
+			"FETCH_HEAD:plugin/artifacts/manifest.json": JSON.stringify({
 				id: "friday-obsidian-plugin",
 				version: "0.2.0",
 				minAppVersion: "1.0.0",
 			}),
-			"FETCH_HEAD:release/friday-obsidian-plugin/styles.css": ".demo { color: red; }",
+			"FETCH_HEAD:plugin/artifacts/styles.css": ".demo { color: red; }",
 		}),
 	);
 	return {
 		async ensureWorkspace() {},
 		async lsRemote() {
-			return "abc123\tHEAD\nabc123\trefs/heads/master";
+			return "abc123\tHEAD\nabc123\trefs/heads/release";
 		},
 		async fetch() {},
 		async readText(ref, targetPath) {
@@ -130,7 +117,7 @@ test("plugin update service reports unavailable when local git is missing", asyn
 	assert.equal(availability.reason, "git_unavailable");
 });
 
-test("plugin update service reports unavailable when git profile is incomplete", async () => {
+test("plugin update service only requires username and token for read-only update checks", async () => {
 	const mod = await loadModule();
 	const service = new mod.PluginUpdateService({
 		pluginId: "friday-obsidian-plugin",
@@ -144,11 +131,11 @@ test("plugin update service reports unavailable when git profile is incomplete",
 	});
 
 	const availability = await service.getAvailability();
-	assert.equal(availability.available, false);
-	assert.equal(availability.reason, "git_profile_incomplete");
+	assert.equal(availability.available, true);
+	assert.equal(availability.reason, "ready");
 });
 
-test("plugin update service detects an available update from the release feed", async () => {
+test("plugin update service detects an available update from the namespaced release feed", async () => {
 	const mod = await loadModule();
 	const service = new mod.PluginUpdateService({
 		pluginId: "friday-obsidian-plugin",
@@ -195,7 +182,7 @@ test("plugin update service applies update files into the live plugin directory"
 	assert.match(adapter.files.get(".obsidian/plugins/friday-obsidian-plugin/manifest.json"), /0\.2\.0/);
 });
 
-test("plugin update service does not write studio runtime content during applyUpdate", async () => {
+test("plugin update service does not write official content or plugin changelog files during applyUpdate", async () => {
 	const mod = await loadModule();
 	const adapter = createMemoryAdapter({
 		".obsidian/plugins/friday-obsidian-plugin/main.js": "console.log('old build');",
@@ -221,6 +208,7 @@ test("plugin update service does not write studio runtime content during applyUp
 	assert.equal(result.success, true);
 	assert.doesNotMatch(result.updatedFiles.join("\n"), /F\.R\.I\.D\.A\.Y\/来自制作组/);
 	assert.equal(adapter.files.get("F.R.I.D.A.Y/来自制作组/迭代手记.md"), undefined);
+	assert.equal(adapter.files.get(".obsidian/plugins/friday-obsidian-plugin/CHANGELOG.md"), undefined);
 });
 
 test("plugin update service removes staged update directories with rmdir on filesystem adapters", async () => {

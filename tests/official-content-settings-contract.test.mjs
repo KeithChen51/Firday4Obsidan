@@ -19,7 +19,7 @@ function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
-test("settings defaults include official content state and keep new columns unsubscribed by default", () => {
+test("settings defaults include official content state and let official columns default to subscribed", () => {
 	const source = read(settingsModulePath);
 	assert.match(source, /officialContent:\s*\{/);
 	assert.match(source, /checkOnStartup:\s*boolean;/);
@@ -61,7 +61,6 @@ test("plugin api and startup flow expose official content service and subscripti
 	assert.match(mainSource, /officialContent\.checkOnStartup/);
 	assert.match(mainSource, /startupDelayMs/);
 	assert.match(mainSource, /runStartupOfficialContentCheck|officialContentService\.runStartupCheck/);
-	assert.doesNotMatch(mainSource, /subscribed:\s*true/);
 });
 
 test("subscriptions settings UI replaces slash navigation and uses official content service", () => {
@@ -74,6 +73,7 @@ test("subscriptions settings UI replaces slash navigation and uses official cont
 	assert.match(source, /officialContentService\.applySubscriptions\(/);
 	assert.match(source, /officialContent\.checkOnStartup/);
 	assert.match(source, /officialContent\.startupDelayMs/);
+	assert.match(source, /subscribed:\s*true/);
 	assert.match(source, /Official channel|官方频道/);
 });
 
@@ -84,6 +84,6 @@ test("official content service exposes refresh, apply, and startup flows against
 	assert.match(source, /refreshCatalog\(\): Promise/);
 	assert.match(source, /applySubscriptions\(\): Promise/);
 	assert.match(source, /runStartupCheck\(\): Promise<void>/);
-	assert.match(source, /release\/official-content\/latest\.json/);
+	assert.match(source, /OFFICIAL_CONTENT_MANIFEST_PATH|official\/latest\.json/);
 	assert.match(source, /channels\/official\.json|manifestPath/);
 });

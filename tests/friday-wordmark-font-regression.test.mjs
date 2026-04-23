@@ -18,7 +18,7 @@ function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
-test("synthra wordmark font stays scoped to targeted F.R.I.D.A.Y labels", () => {
+test("n-neco wordmark font stays scoped to targeted F.R.I.D.A.Y labels", () => {
 	const view = read(viewPath);
 	const settings = read(settingsPath);
 	const main = read(mainPath);
@@ -27,7 +27,7 @@ test("synthra wordmark font stays scoped to targeted F.R.I.D.A.Y labels", () => 
 	const enLocale = read(enLocalePath);
 
 	assert.doesNotMatch(styles, /@font-face\s*\{/);
-	assert.match(styles, /\.friday-wordmark\s*\{[\s\S]*font-family:\s*"FridayWordmarkSynthra"/);
+	assert.match(styles, /\.friday-wordmark\s*\{[\s\S]*font-family:\s*"FridayWordmarkNNeco"/);
 	assert.match(styles, /\.friday-settings-title\b/);
 	assert.match(styles, /\.friday-settings-title-brand\.friday-wordmark\b/);
 	assert.match(styles, /\.friday-shell-project-brand\.friday-wordmark\s*\{[\s\S]*font-size:\s*max\(12\.8px,\s*0\.84em\);/);

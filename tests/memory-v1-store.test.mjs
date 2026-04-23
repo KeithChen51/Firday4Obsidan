@@ -1,5 +1,6 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
+import { homedir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -14,9 +15,19 @@ async function loadModule() {
 	return jiti.import(modulePath);
 }
 
+function getExpectedGlobalMemoryPath() {
+	if (process.platform === "win32") {
+		return path.join(process.env.APPDATA || path.join(homedir(), "AppData", "Roaming"), "friday", "memory", "global.md");
+	}
+	if (process.platform === "darwin") {
+		return path.join(homedir(), "Library", "Application Support", "friday", "memory", "global.md");
+	}
+	return path.join(process.env.XDG_CONFIG_HOME || path.join(homedir(), ".config"), "friday", "memory", "global.md");
+}
+
 test("memory v1 exposes canonical global and project memory paths", async () => {
 	const mod = await loadModule();
-	assert.match(mod.GLOBAL_MEMORY_PATH, /AppData\\Roaming\\friday\\memory\\global\.md$/);
+	assert.equal(mod.GLOBAL_MEMORY_PATH, getExpectedGlobalMemoryPath());
 	assert.equal(mod.getProjectMemoryPath("Projects/demo"), "Projects/demo/.friday/memory/project.md");
 });
 

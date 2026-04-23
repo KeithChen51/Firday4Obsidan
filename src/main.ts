@@ -1153,6 +1153,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 							subscribed: value?.subscribed === true,
 							lastAppliedVersion:
 								typeof value?.lastAppliedVersion === "string" ? value.lastAppliedVersion : "",
+							path: typeof value?.path === "string" ? value.path.trim() : "",
 						},
 					]),
 			),
@@ -1588,7 +1589,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const gitAvailable = gitStatus.available;
 		const credential = await this.getUserGitCredential();
 		const gitProfileComplete = Boolean(
-			this.settings.user.gitUserEmail.trim() &&
 			credential?.username?.trim() &&
 			credential?.token?.trim(),
 		);

@@ -27,6 +27,7 @@ export interface OfficialContentChannelManifest {
 export interface OfficialContentChannelSubscription {
 	subscribed: boolean;
 	lastAppliedVersion: string;
+	path: string;
 }
 
 export interface OfficialContentLegacyGuardState {
@@ -34,4 +35,10 @@ export interface OfficialContentLegacyGuardState {
 	blockingPaths: string[];
 	canRefreshCatalog: boolean;
 	takeoverConfirmed: boolean;
+}
+
+export interface CommunityChannelSource {
+	repoUrl: string;
+	branch?: string;
+	manifestPath?: string;
 }

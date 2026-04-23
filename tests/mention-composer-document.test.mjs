@@ -80,6 +80,6 @@ test("mention node DOM spec includes a dedicated remove control for mouse intera
 });
 
 test("mention composer view binds container click-to-focus behavior for empty editor surface", async () => {
-	const source = await loadSource("C:\\Own Docm\\Coding\\Friday - Ob\\Firday4Obsidan-upload\\src\\views\\components\\MentionComposer.ts");
+	const source = await loadSource(path.join(projectRoot, "src", "views", "components", "MentionComposer.ts"));
 	assert.match(source, /this\.editorEl\.onclick\s*=\s*\(\)\s*=>\s*\{\s*this\.focus\(\);/);
 });

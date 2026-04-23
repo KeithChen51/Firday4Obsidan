@@ -20,9 +20,9 @@ test("package.json exposes npm run release", () => {
 	assert.equal(pkg.scripts.release, "node scripts/release.mjs");
 });
 
-test("release script builds latest feed and release folder from current artifacts", async () => {
+test("release script builds plugin namespaced feed and a legacy bridge publish tree for the bridge version", async () => {
 	const { syncReleaseArtifacts } = await loadReleaseScript();
-	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-release-"));
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-release-bridge-"));
 	const manifest = {
 		id: "friday-obsidian-plugin",
 		name: "F.R.I.D.A.Y",
@@ -56,29 +56,58 @@ test("release script builds latest feed and release folder from current artifact
 	syncReleaseArtifacts({
 		projectRoot: tempRoot,
 		publishedAt: "2026-04-16T00:00:00+08:00",
+		legacyBridgeVersion: "0.2.0",
 		zipWriter: (sourceDir, zipPath) => {
 			zipCalls.push({ sourceDir, zipPath });
 			fs.writeFileSync(zipPath, "zip-placeholder", "utf8");
 		},
 	});
 
-	const latestJsonPath = path.join(tempRoot, "release", "latest.json");
-	const releaseManifestPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "manifest.json");
-	const releaseMainPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "main.js");
-	const releaseStylesPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "styles.css");
-	const releaseChangelogPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "CHANGELOG.md");
-	const zipPath = path.join(tempRoot, "release", "friday-obsidian-plugin.zip");
+	const namespacedLatestJsonPath = path.join(tempRoot, "plugin", "latest.json");
+	const namespacedManifestPath = path.join(tempRoot, "plugin", "artifacts", "manifest.json");
+	const namespacedMainPath = path.join(tempRoot, "plugin", "artifacts", "main.js");
+	const namespacedStylesPath = path.join(tempRoot, "plugin", "artifacts", "styles.css");
+	const namespacedChangelogPath = path.join(tempRoot, "plugin", "artifacts", "CHANGELOG.md");
+	const namespacedZipPath = path.join(tempRoot, "plugin", "friday-obsidian-plugin.zip");
 
-	assert.ok(fs.existsSync(latestJsonPath));
-	assert.ok(fs.existsSync(releaseManifestPath));
-	assert.ok(fs.existsSync(releaseMainPath));
-	assert.ok(fs.existsSync(releaseStylesPath));
-	assert.ok(fs.existsSync(releaseChangelogPath));
-	assert.ok(fs.existsSync(zipPath));
+	const legacyLatestJsonPath = path.join(tempRoot, "release", "latest.json");
+	const legacyManifestPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "manifest.json");
+	const legacyMainPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "main.js");
+	const legacyStylesPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "styles.css");
+	const legacyChangelogPath = path.join(tempRoot, "release", "friday-obsidian-plugin", "CHANGELOG.md");
+
+	assert.ok(fs.existsSync(namespacedLatestJsonPath));
+	assert.ok(fs.existsSync(namespacedManifestPath));
+	assert.ok(fs.existsSync(namespacedMainPath));
+	assert.ok(fs.existsSync(namespacedStylesPath));
+	assert.equal(fs.existsSync(namespacedChangelogPath), false);
+	assert.ok(fs.existsSync(namespacedZipPath));
+
+	assert.ok(fs.existsSync(legacyLatestJsonPath));
+	assert.ok(fs.existsSync(legacyManifestPath));
+	assert.ok(fs.existsSync(legacyMainPath));
+	assert.ok(fs.existsSync(legacyStylesPath));
+	assert.ok(fs.existsSync(legacyChangelogPath));
 	assert.equal(zipCalls.length, 1);
 
-	const latest = JSON.parse(fs.readFileSync(latestJsonPath, "utf8"));
-	assert.deepEqual(latest, {
+	const namespacedLatest = JSON.parse(fs.readFileSync(namespacedLatestJsonPath, "utf8"));
+	assert.deepEqual(namespacedLatest, {
+		schemaVersion: 1,
+		pluginId: "friday-obsidian-plugin",
+		version: "0.2.0",
+		minAppVersion: "1.0.0",
+		branch: "release",
+		publishedAt: "2026-04-16T00:00:00+08:00",
+		releaseNotes: "- Added user-facing plugin update history sync.\n- Exported release notes into the release feed.",
+		files: {
+			"main.js": "plugin/artifacts/main.js",
+			"manifest.json": "plugin/artifacts/manifest.json",
+			"styles.css": "plugin/artifacts/styles.css",
+		},
+	});
+
+	const legacyLatest = JSON.parse(fs.readFileSync(legacyLatestJsonPath, "utf8"));
+	assert.deepEqual(legacyLatest, {
 		schemaVersion: 1,
 		pluginId: "friday-obsidian-plugin",
 		version: "0.2.0",
@@ -92,15 +121,36 @@ test("release script builds latest feed and release folder from current artifact
 			"styles.css": "release/friday-obsidian-plugin/styles.css",
 		},
 	});
+});
 
-	assert.deepEqual(
-		JSON.parse(fs.readFileSync(releaseManifestPath, "utf8")),
-		manifest,
-	);
-	assert.equal(fs.readFileSync(releaseMainPath, "utf8"), "console.log('release');\n");
-	assert.equal(fs.readFileSync(releaseStylesPath, "utf8"), ".demo { color: red; }\n");
-	assert.equal(
-		fs.readFileSync(releaseChangelogPath, "utf8"),
-		changelog.replace("发布日期：2026-04-15", "发布日期：2026-04-16"),
-	);
+test("release script skips the legacy bridge tree after the bridge version", async () => {
+	const { syncReleaseArtifacts } = await loadReleaseScript();
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-release-post-bridge-"));
+	const manifest = {
+		id: "friday-obsidian-plugin",
+		name: "F.R.I.D.A.Y",
+		version: "0.2.1",
+		minAppVersion: "1.0.0",
+		description: "demo",
+		author: "demo",
+		isDesktopOnly: true,
+	};
+
+	fs.writeFileSync(path.join(tempRoot, "main.js"), "console.log('release');\n", "utf8");
+	fs.writeFileSync(path.join(tempRoot, "styles.css"), ".demo { color: red; }\n", "utf8");
+	fs.writeFileSync(path.join(tempRoot, "manifest.json"), JSON.stringify(manifest, null, "\t"), "utf8");
+	fs.writeFileSync(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\n\n## 0.2.1\n\n- Next.\n", "utf8");
+
+	syncReleaseArtifacts({
+		projectRoot: tempRoot,
+		publishedAt: "2026-04-17T00:00:00+08:00",
+		legacyBridgeVersion: "0.2.0",
+		zipWriter: (sourceDir, zipPath) => {
+			fs.writeFileSync(zipPath, "zip-placeholder", "utf8");
+		},
+	});
+
+	assert.ok(fs.existsSync(path.join(tempRoot, "plugin", "latest.json")));
+	assert.equal(fs.existsSync(path.join(tempRoot, "release", "latest.json")), false);
+	assert.equal(fs.existsSync(path.join(tempRoot, "release", "friday-obsidian-plugin", "main.js")), false);
 });

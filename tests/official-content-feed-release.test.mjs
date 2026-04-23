@@ -32,6 +32,8 @@ test("official content generator discovers top-level columns and writes independ
 			path.join(tempRoot, "src", "content", "studio", "Study with F.R.I.D.A.Y", "Guide.md"),
 			"# Guide\n",
 		);
+		writeFile(path.join(tempRoot, "src", "content", "studio", "教程.md"), "# 教程\n");
+		writeFile(path.join(tempRoot, "src", "content", "studio", "周报.md"), "# 周报\n");
 		writeFile(path.join(tempRoot, "src", "content", "studio", "Start Here.md"), "# Start Here\n");
 		writeFile(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\n\n## 0.0.1\n\n- Added.\n");
 
@@ -40,15 +42,15 @@ test("official content generator discovers top-level columns and writes independ
 			publishedAt: "2026-04-22T00:00:00.000Z",
 		});
 
-		assert.match(result.latestJsonPath.replace(/\\/g, "/"), /release\/official-content\/latest\.json$/);
+		assert.match(result.latestJsonPath.replace(/\\/g, "/"), /official\/latest\.json$/);
 		assert.ok(
 			result.channelManifestPaths.some((item) =>
-				/release\/official-content\/channels\/.+\.json$/.test(item.replace(/\\/g, "/"))),
-			"channel manifests should be emitted under release/official-content/channels",
+				/official\/channels\/.+\.json$/.test(item.replace(/\\/g, "/"))),
+			"channel manifests should be emitted under official/channels",
 		);
 		assert.ok(
-			result.filePaths.some((item) => /release\/official-content\/files\/.+\.md$/.test(item.replace(/\\/g, "/"))),
-			"content blobs should be emitted under release/official-content/files",
+			result.filePaths.some((item) => /official\/files\/.+\.md$/.test(item.replace(/\\/g, "/"))),
+			"content blobs should be emitted under official/files",
 		);
 		assert.ok(fs.existsSync(result.latestJsonPath), "latest.json should be written");
 
@@ -58,7 +60,7 @@ test("official content generator discovers top-level columns and writes independ
 		assert.ok(officialProvider, "the official provider rooted at F.R.I.D.A.Y should exist");
 
 		const columnPaths = officialProvider.columns.map((item) => item.path).sort();
-		assert.deepEqual(columnPaths, ["Changelog.md", "Start Here.md", "Study with F.R.I.D.A.Y"]);
+		assert.deepEqual(columnPaths, ["Changelog.md", "Start Here.md", "Study with F.R.I.D.A.Y", "周报.md", "教程.md"]);
 		assert.ok(
 			officialProvider.columns.some((item) => item.kind === "directory" && item.path === "Study with F.R.I.D.A.Y"),
 			"top-level directories should become directory columns",
@@ -72,6 +74,8 @@ test("official content generator discovers top-level columns and writes independ
 			"root CHANGELOG.md should be injected as Changelog.md",
 		);
 		assert.ok(officialProvider.columns.every((item) => item.id && item.manifestPath));
+		const columnIds = officialProvider.columns.map((item) => item.id);
+		assert.equal(new Set(columnIds).size, columnIds.length, "column ids should stay unique even for non-ASCII names");
 		assert.doesNotMatch(JSON.stringify(officialProvider), /README\.md/);
 	} finally {
 		fs.rmSync(tempRoot, { recursive: true, force: true });

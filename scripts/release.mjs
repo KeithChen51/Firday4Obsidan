@@ -5,11 +5,21 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
-const RELEASE_BRANCH = "master";
-const RELEASE_DIR = "release";
-const RELEASE_ARTIFACT_DIRNAME = "friday-obsidian-plugin";
-const RELEASE_ARTIFACT_RELATIVE_DIR = `${RELEASE_DIR}/${RELEASE_ARTIFACT_DIRNAME}`;
-const RELEASE_FILES = ["main.js", "manifest.json", "styles.css", "CHANGELOG.md"];
+const RELEASE_BRANCH = "release";
+const LEGACY_BRIDGE_BRANCH = "master";
+const DEFAULT_LEGACY_BRIDGE_VERSION = "0.2.8";
+const LEGACY_RELEASE_DIR = "release";
+const LEGACY_RELEASE_ARTIFACT_DIRNAME = "friday-obsidian-plugin";
+const LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR = `${LEGACY_RELEASE_DIR}/${LEGACY_RELEASE_ARTIFACT_DIRNAME}`;
+const LEGACY_RELEASE_LATEST_PATH = `${LEGACY_RELEASE_DIR}/latest.json`;
+const PLUGIN_ROOT_DIR = "plugin";
+const PLUGIN_LATEST_PATH = `${PLUGIN_ROOT_DIR}/latest.json`;
+const PLUGIN_ARTIFACT_DIRNAME = "artifacts";
+const PLUGIN_ARTIFACT_RELATIVE_DIR = `${PLUGIN_ROOT_DIR}/${PLUGIN_ARTIFACT_DIRNAME}`;
+const PLUGIN_ZIP_NAME = "friday-obsidian-plugin.zip";
+const PLUGIN_ZIP_PATH = `${PLUGIN_ROOT_DIR}/${PLUGIN_ZIP_NAME}`;
+const RELEASE_FILES = ["main.js", "manifest.json", "styles.css"];
+const LEGACY_BRIDGE_FILES = [...RELEASE_FILES, "CHANGELOG.md"];
 const CHANGELOG_FILE = "CHANGELOG.md";
 
 function ensureFile(projectRoot, relativePath) {
@@ -21,6 +31,7 @@ function ensureFile(projectRoot, relativePath) {
 }
 
 function writeJson(filePath, value) {
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
 	fs.writeFileSync(filePath, `${JSON.stringify(value, null, "\t")}\n`, "utf8");
 }
 
@@ -63,7 +74,6 @@ export function upsertReleaseDate(changelogText, version, publishedAt) {
 
 	const dateLine = `发布日期：${formatPublishedDate(publishedAt)}`;
 	let insertIndex = headingIndex + 1;
-
 	while (lines[insertIndex] === "") {
 		lines.splice(insertIndex, 1);
 	}
@@ -76,7 +86,6 @@ export function upsertReleaseDate(changelogText, version, publishedAt) {
 	} else {
 		lines.splice(insertIndex, 0, dateLine, "");
 	}
-
 	return lines.join("\n");
 }
 
@@ -111,7 +120,6 @@ export function extractReleaseNotes(changelogText, version) {
 	while (captured[0]?.trim() === "") {
 		captured.shift();
 	}
-
 	return captured.join("\n").trim();
 }
 
@@ -145,9 +153,29 @@ export function buildReleaseFeed(manifest, publishedAt = new Date().toISOString(
 		branch: RELEASE_BRANCH,
 		publishedAt,
 		files: {
-			"main.js": `${RELEASE_ARTIFACT_RELATIVE_DIR}/main.js`,
-			"manifest.json": `${RELEASE_ARTIFACT_RELATIVE_DIR}/manifest.json`,
-			"styles.css": `${RELEASE_ARTIFACT_RELATIVE_DIR}/styles.css`,
+			"main.js": `${PLUGIN_ARTIFACT_RELATIVE_DIR}/main.js`,
+			"manifest.json": `${PLUGIN_ARTIFACT_RELATIVE_DIR}/manifest.json`,
+			"styles.css": `${PLUGIN_ARTIFACT_RELATIVE_DIR}/styles.css`,
+		},
+	};
+	if (releaseNotes.trim()) {
+		feed.releaseNotes = releaseNotes.trim();
+	}
+	return feed;
+}
+
+function buildLegacyBridgeFeed(manifest, publishedAt = new Date().toISOString(), releaseNotes = "") {
+	const feed = {
+		schemaVersion: 1,
+		pluginId: manifest.id,
+		version: manifest.version,
+		minAppVersion: manifest.minAppVersion,
+		branch: LEGACY_BRIDGE_BRANCH,
+		publishedAt,
+		files: {
+			"main.js": `${LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR}/main.js`,
+			"manifest.json": `${LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR}/manifest.json`,
+			"styles.css": `${LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR}/styles.css`,
 		},
 	};
 	if (releaseNotes.trim()) {
@@ -177,6 +205,7 @@ export function syncReleaseArtifacts({
 	projectRoot,
 	publishedAt = new Date().toISOString(),
 	zipWriter = createZipArchive,
+	legacyBridgeVersion = DEFAULT_LEGACY_BRIDGE_VERSION,
 } = {}) {
 	if (!projectRoot) {
 		throw new Error("projectRoot is required");
@@ -190,8 +219,7 @@ export function syncReleaseArtifacts({
 
 	syncChangelogPublishDate(projectRoot, manifest.version, publishedAt);
 
-	const releaseRoot = path.join(projectRoot, RELEASE_DIR);
-	const artifactDir = path.join(releaseRoot, RELEASE_ARTIFACT_DIRNAME);
+	const artifactDir = path.join(projectRoot, PLUGIN_ARTIFACT_RELATIVE_DIR);
 	fs.mkdirSync(artifactDir, { recursive: true });
 
 	for (const fileName of RELEASE_FILES) {
@@ -202,11 +230,23 @@ export function syncReleaseArtifacts({
 
 	const releaseNotes = readReleaseNotes(projectRoot, manifest.version);
 	const latestJson = buildReleaseFeed(manifest, publishedAt, releaseNotes);
-	const latestJsonPath = path.join(releaseRoot, "latest.json");
+	const latestJsonPath = path.join(projectRoot, PLUGIN_LATEST_PATH);
 	writeJson(latestJsonPath, latestJson);
 
-	const zipPath = path.join(releaseRoot, `${RELEASE_ARTIFACT_DIRNAME}.zip`);
+	const zipPath = path.join(projectRoot, PLUGIN_ZIP_PATH);
 	zipWriter(artifactDir, zipPath);
+
+	if (manifest.version === legacyBridgeVersion) {
+		const legacyArtifactDir = path.join(projectRoot, LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR);
+		fs.mkdirSync(legacyArtifactDir, { recursive: true });
+		for (const fileName of LEGACY_BRIDGE_FILES) {
+			const sourcePath = ensureFile(projectRoot, fileName);
+			const targetPath = path.join(legacyArtifactDir, fileName);
+			fs.copyFileSync(sourcePath, targetPath);
+		}
+		const legacyLatestJson = buildLegacyBridgeFeed(manifest, publishedAt, releaseNotes);
+		writeJson(path.join(projectRoot, LEGACY_RELEASE_LATEST_PATH), legacyLatestJson);
+	}
 
 	return {
 		latestJsonPath,
@@ -221,21 +261,26 @@ export function runRelease({
 	publishedAt = new Date().toISOString(),
 	buildCommand = (cwd) => runNpmScript(cwd, "build"),
 	zipWriter = createZipArchive,
+	legacyBridgeVersion = DEFAULT_LEGACY_BRIDGE_VERSION,
 } = {}) {
 	buildCommand(projectRoot);
 	return syncReleaseArtifacts({
 		projectRoot,
 		publishedAt,
 		zipWriter,
+		legacyBridgeVersion,
 	});
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
 	try {
-		const result = runRelease();
-		console.log(`Release artifacts updated in ${result.artifactDir}`);
-		console.log(`Release feed written to ${result.latestJsonPath}`);
-		console.log(`Release zip written to ${result.zipPath}`);
+		const shouldSkipBuild = process.argv.includes("--skip-build");
+		const result = shouldSkipBuild
+			? syncReleaseArtifacts({ projectRoot: DEFAULT_PROJECT_ROOT })
+			: runRelease();
+		console.log(`Plugin artifacts updated in ${result.artifactDir}`);
+		console.log(`Plugin release feed written to ${result.latestJsonPath}`);
+		console.log(`Plugin zip written to ${result.zipPath}`);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error ?? "Unknown release failure");
 		console.error(message);

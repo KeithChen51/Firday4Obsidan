@@ -11,14 +11,19 @@ node_modules/
 # Don't include the compiled root main.js file in the repo.
 /main.js
 
-# Keep auto-update release feed and tracked release artifacts in repo.
+# Source branch keeps generated publish trees local-only.
+/plugin/
+/official/
+/channel/
+
+# Keep the single bridge-version legacy plugin release tree trackable on source branch.
+/release/*
 !/release/latest.json
 !/release/friday-obsidian-plugin/
 !/release/friday-obsidian-plugin/main.js
 !/release/friday-obsidian-plugin/manifest.json
 !/release/friday-obsidian-plugin/styles.css
-
-# Generated release archives are reproducible and don't need to live in git.
+!/release/friday-obsidian-plugin/CHANGELOG.md
 /release/*.zip
 
 # Exclude sourcemaps

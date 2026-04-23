@@ -3,10 +3,14 @@ import os from "os";
 import path from "path";
 import simpleGit from "simple-git";
 import {
+	OFFICIAL_CONTENT_CHANNELS_DIR,
+	OFFICIAL_CONTENT_FILES_DIR,
+	OFFICIAL_CONTENT_MANIFEST_PATH,
 	OFFICIAL_CONTENT_PROVIDER_ID,
+	OFFICIAL_CONTENT_RELEASE_BRANCH,
 	OFFICIAL_CONTENT_ROOT_PATH,
 } from "../constants/officialContent";
-import { PLUGIN_UPDATE_BRANCH, PLUGIN_UPDATE_REPO_URL } from "../constants/update";
+import { PLUGIN_UPDATE_REPO_URL } from "../constants/update";
 import type { ProjectGitCredential } from "../types/project";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 import type {
@@ -60,8 +64,6 @@ interface OfficialContentServiceDeps {
 	}) => Promise<OfficialContentLegacyGuardState>;
 }
 
-const OFFICIAL_CONTENT_LATEST_PATH = "release/official-content/latest.json";
-
 export class OfficialContentService {
 	private readonly gitClientFactory: (credential: ProjectGitCredential) => Promise<OfficialContentGitClient>;
 
@@ -98,8 +100,9 @@ export class OfficialContentService {
 		const channels = { ...settings.officialContent.channels };
 		for (const entry of catalog) {
 			channels[entry.id] = {
-				subscribed: channels[entry.id]?.subscribed === true,
+				subscribed: channels[entry.id]?.subscribed ?? true,
 				lastAppliedVersion: channels[entry.id]?.lastAppliedVersion ?? "",
+				path: entry.path,
 			};
 		}
 
@@ -117,7 +120,12 @@ export class OfficialContentService {
 		const catalog = settings.officialContent.catalog.length > 0
 			? settings.officialContent.catalog
 			: await this.refreshCatalog();
-		const ownedTopLevelPaths = catalog.map((item) => item.path);
+		const ownedTopLevelPaths = [...new Set([
+			...catalog.map((item) => item.path),
+			...Object.values(settings.officialContent.channels)
+				.map((item) => item.path?.trim() || "")
+				.filter((item) => item.trim().length > 0),
+		])];
 		const guardState = this.deps.inspectDestructiveApplySafety
 			? await this.deps.inspectDestructiveApplySafety({ ownedTopLevelPaths })
 			: {
@@ -143,10 +151,25 @@ export class OfficialContentService {
 				settings.officialContent.channels[entry.id] = {
 					subscribed: settings.officialContent.channels[entry.id]?.subscribed === true,
 					lastAppliedVersion: entry.version,
+					path: entry.path,
 				};
 				continue;
 			}
 			await this.removeCatalogEntry(entry);
+			settings.officialContent.channels[entry.id] = {
+				subscribed: false,
+				lastAppliedVersion: "",
+				path: entry.path,
+			};
+		}
+
+		const activeIds = new Set(catalog.map((item) => item.id));
+		for (const [channelId, state] of Object.entries({ ...settings.officialContent.channels })) {
+			if (activeIds.has(channelId) || !state.path?.trim()) {
+				continue;
+			}
+			await this.removePathRecursive(normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${state.path}`));
+			delete settings.officialContent.channels[channelId];
 		}
 
 		await this.cleanupRootIfEmpty();
@@ -174,8 +197,8 @@ export class OfficialContentService {
 		try {
 			await gitClient.ensureWorkspace();
 			await gitClient.lsRemote();
-			await gitClient.fetch(PLUGIN_UPDATE_BRANCH);
-			const latestText = await gitClient.readText("FETCH_HEAD", OFFICIAL_CONTENT_LATEST_PATH);
+			await gitClient.fetch(OFFICIAL_CONTENT_RELEASE_BRANCH);
+			const latestText = await gitClient.readText("FETCH_HEAD", OFFICIAL_CONTENT_MANIFEST_PATH);
 			return JSON.parse(latestText) as OfficialContentLatestFeed;
 		} finally {
 			await gitClient.cleanup();
@@ -203,7 +226,7 @@ export class OfficialContentService {
 		try {
 			await gitClient.ensureWorkspace();
 			await gitClient.lsRemote();
-			await gitClient.fetch(PLUGIN_UPDATE_BRANCH);
+			await gitClient.fetch(OFFICIAL_CONTENT_RELEASE_BRANCH);
 			for (const manifestPath of manifestPaths) {
 				const raw = await gitClient.readText("FETCH_HEAD", manifestPath);
 				manifests.set(manifestPath, JSON.parse(raw) as OfficialContentChannelManifest);
@@ -269,7 +292,7 @@ export class OfficialContentService {
 		try {
 			await gitClient.ensureWorkspace();
 			await gitClient.lsRemote();
-			await gitClient.fetch(PLUGIN_UPDATE_BRANCH);
+			await gitClient.fetch(OFFICIAL_CONTENT_RELEASE_BRANCH);
 			const content = await gitClient.readText("FETCH_HEAD", file.blobPath);
 			const targetPath = normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${file.path}`);
 			await this.ensureDirectory(path.posix.dirname(targetPath));
@@ -372,7 +395,6 @@ export class OfficialContentService {
 		}
 		const credential = await this.deps.getUserCredential();
 		const gitProfileComplete = Boolean(
-			this.deps.getUserGitEmail().trim() &&
 			credential?.username?.trim() &&
 			credential?.token?.trim(),
 		);

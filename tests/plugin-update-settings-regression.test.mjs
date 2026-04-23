@@ -39,7 +39,6 @@ test("settings section label renames user section to basic configuration in both
 	assert.match(zh, /"settings\.user\.update\.title":/);
 	assert.match(zh, /"settings\.user\.update\.enabled\.name":/);
 	assert.match(zh, /"settings\.user\.update\.currentVersion\.name":/);
-	assert.match(zh, /"settings\.user\.update\.currentVersion\.name": "当前版本号：\{version\}"/);
 	assert.match(zh, /"settings\.user\.update\.currentVersion\.apply":/);
 	assert.match(en, /"settings\.user\.update\.title": "Automatic Updates"/);
 	assert.match(en, /"settings\.user\.update\.enabled\.name": "Enable automatic updates"/);
@@ -53,6 +52,8 @@ test("settings section label renames user section to basic configuration in both
 	assert.match(en, /"settings\.user\.update\.notice\.restart":/);
 	assert.doesNotMatch(zh, /bundled studio|内置 studio|重建“来自制作组”栏目/);
 	assert.doesNotMatch(en, /bundled studio|From the Studio/);
+	assert.match(zh, /完整 changelog|官方频道|Changelog/);
+	assert.match(en, /official channel|Changelog/);
 });
 
 test("renderUserSection includes an automatic update group after git credential inputs", () => {
@@ -77,11 +78,10 @@ test("plugin update section uses a native settings group and hides advanced cont
 	assert.match(source, /gitRuntimeStatus/);
 	assert.match(source, /gitAvailable/);
 	assert.match(source, /setDisabled\(/);
-	assert.match(source, /settings\.user\.gitUserEmail/);
 	assert.match(source, /userGitUsernameDraft/);
 	assert.match(source, /userGitTokenDraft/);
 	assert.match(source, /renderPluginUpdatePrerequisitesSetting\(/);
-	assert.match(source, /getPluginUpdatePrereqDetails\(/);
+	assert.match(source, /getReleaseFeedAccessStatus\(/);
 	assert.match(source, /settings\.user\.update\.prerequisites\.name/);
 	assert.match(source, /settings\.user\.update\.prerequisites\.ready/);
 	assert.match(source, /settings\.user\.update\.prerequisites\.pending/);
@@ -91,6 +91,17 @@ test("plugin update section uses a native settings group and hides advanced cont
 	assert.match(source, /settings\.user\.update\.checkOnStartup\.name/);
 	assert.doesNotMatch(source, /settings\.user\.update\.actions\.name/);
 	assert.doesNotMatch(source, /settings\.user\.update\.enabled\.name/);
+});
+
+test("plugin update prerequisites no longer require git email for read-only release fetches", () => {
+	const source = read(settingsPath);
+	const match = source.match(/private getReleaseFeedAccessStatus\(\): \{ ready: boolean; readyLabels: string\[\]; pendingLabels: string\[\]; summary: string \} \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
+	assert.ok(match, "getReleaseFeedAccessStatus block should exist");
+	const block = match[1] ?? "";
+	assert.doesNotMatch(block, /settings\.user\.gitUserEmail/);
+	assert.match(block, /userGitUsernameDraft/);
+	assert.match(block, /userGitTokenDraft/);
+	assert.match(block, /gitRuntimeStatus/);
 });
 
 test("plugin update card uses the current-version row as the only check-or-apply action", () => {
