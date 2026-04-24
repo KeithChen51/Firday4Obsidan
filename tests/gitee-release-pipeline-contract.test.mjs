@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const pipelinePath = path.join(projectRoot, ".workflow", "app-release-publish.yml");
+const ciPublishScriptPath = path.join(projectRoot, "scripts", "ci-publish-release.sh");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
@@ -27,7 +28,10 @@ test("gitee release pipeline builds from supported source branches and publishes
 	assert.match(source, /npm run test/);
 	assert.match(source, /npm run build/);
 	assert.match(source, /plugin\/latest\.json/);
-	assert.match(source, /official\/latest\.json/);
 	assert.match(source, /ci-publish-release\.sh/);
 	assert.match(source, /release/);
+
+	const ciPublishSource = read(ciPublishScriptPath);
+	assert.match(ciPublishSource, /generate-official-content-release\.mjs/);
+	assert.match(ciPublishSource, /publish-release-branch\.mjs --branch release plugin official/);
 });

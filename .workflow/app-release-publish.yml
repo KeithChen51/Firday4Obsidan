@@ -22,4 +22,4 @@ stages:
             inputs:
               nodeVersion: '20'
               commands:
-                - bash -euo pipefail -c 'npm install --no-audit --no-fund && npm run test && npm run build && test -f plugin/latest.json && test -f official/latest.json && bash scripts/ci-publish-release.sh'
+                - bash -euo pipefail -c 'npm install --no-audit --no-fund && npm run test && npm run build && test -f plugin/latest.json && bash scripts/ci-publish-release.sh'
