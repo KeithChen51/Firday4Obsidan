@@ -419,18 +419,18 @@ export class OfficialContentService {
 		if (!(await this.deps.adapter.exists(targetPath))) {
 			return;
 		}
-		const listing = await this.listDirectory(targetPath);
+		const listing = await this.tryListDirectory(targetPath);
+		if (!listing) {
+			await this.deps.adapter.remove(targetPath);
+			return;
+		}
 		for (const file of listing.files) {
 			await this.deps.adapter.remove(file);
 		}
 		for (const folder of listing.folders) {
 			await this.removePathRecursive(folder);
 		}
-		if (listing.files.length > 0 || listing.folders.length > 0) {
-			await this.removeDirectory(targetPath);
-			return;
-		}
-		await this.deps.adapter.remove(targetPath);
+		await this.removeDirectory(targetPath);
 	}
 
 	private async removeDirectory(targetPath: string): Promise<void> {
@@ -439,6 +439,17 @@ export class OfficialContentService {
 			return;
 		}
 		await this.deps.adapter.remove(targetPath);
+	}
+
+	private async tryListDirectory(targetPath: string): Promise<{ files: string[]; folders: string[] } | null> {
+		if (typeof this.deps.adapter.list !== "function") {
+			return null;
+		}
+		try {
+			return await this.deps.adapter.list(targetPath);
+		} catch {
+			return null;
+		}
 	}
 
 	private async getAvailability(): Promise<{ ready: boolean; gitRuntime: GitRuntimeStatus }> {

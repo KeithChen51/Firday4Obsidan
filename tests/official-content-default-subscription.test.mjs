@@ -622,6 +622,92 @@ test("applySubscriptions skips unchanged subscribed columns without opening the 
 	assert.equal(settings.officialContent.channels["study-with-friday"].lastAppliedVersion, "already-applied");
 });
 
+test("applySubscriptions removes stale nested legacy official folders with directory removal", async () => {
+	const mod = await loadModule();
+	const removedDirectories = [];
+	const directories = new Set([
+		"F.R.I.D.A.Y",
+		"F.R.I.D.A.Y/来自制作组",
+		"F.R.I.D.A.Y/来自制作组/幕后笔记",
+		"F.R.I.D.A.Y/Study with FRIDAY",
+	]);
+	const listings = new Map([
+		["F.R.I.D.A.Y", { files: [], folders: ["F.R.I.D.A.Y/来自制作组", "F.R.I.D.A.Y/Study with FRIDAY"] }],
+		["F.R.I.D.A.Y/来自制作组", { files: [], folders: ["F.R.I.D.A.Y/来自制作组/幕后笔记"] }],
+		["F.R.I.D.A.Y/来自制作组/幕后笔记", { files: [], folders: [] }],
+		["F.R.I.D.A.Y/Study with FRIDAY", { files: ["F.R.I.D.A.Y/Study with FRIDAY/Guide.md"], folders: [] }],
+	]);
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "study-with-friday",
+					title: "Study with FRIDAY",
+					kind: "directory",
+					path: "Study with FRIDAY",
+					version: "already-applied",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"study-with-friday": {
+					subscribed: true,
+					lastAppliedVersion: "already-applied",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async (targetPath) => directories.has(targetPath) || [...listings.values()].some((item) => item.files.includes(targetPath)),
+			mkdir: async () => {},
+			read: async () => "",
+			write: async () => {},
+			remove: async (targetPath) => {
+				if (directories.has(targetPath)) {
+					throw new Error(`adapter.remove cannot delete directories: ${targetPath}`);
+				}
+				for (const listing of listings.values()) {
+					listing.files = listing.files.filter((filePath) => filePath !== targetPath);
+				}
+			},
+			rmdir: async (targetPath) => {
+				const listing = listings.get(targetPath) ?? { files: [], folders: [] };
+				assert.deepEqual(listing, { files: [], folders: [] }, `${targetPath} should be empty before rmdir`);
+				directories.delete(targetPath);
+				listings.delete(targetPath);
+				for (const parentListing of listings.values()) {
+					parentListing.folders = parentListing.folders.filter((folderPath) => folderPath !== targetPath);
+				}
+				removedDirectories.push(targetPath);
+			},
+			list: async (targetPath) => listings.get(targetPath) ?? { files: [], folders: [] },
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => {
+			throw new Error("already-applied official content should not open the release workspace");
+		},
+	});
+
+	await service.applySubscriptions();
+
+	assert.deepEqual(removedDirectories, [
+		"F.R.I.D.A.Y/来自制作组/幕后笔记",
+		"F.R.I.D.A.Y/来自制作组",
+	]);
+	assert.equal(directories.has("F.R.I.D.A.Y/来自制作组"), false);
+	assert.equal(directories.has("F.R.I.D.A.Y/Study with FRIDAY"), true);
+});
+
 test("runBackgroundSync reuses one in-flight official content sync", async () => {
 	const mod = await loadModule();
 	let fetchCalls = 0;
