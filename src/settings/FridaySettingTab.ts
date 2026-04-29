@@ -37,6 +37,7 @@ import { SlashCommandTemplate, isWorkbenchStartupPlacement } from "../types/sett
 import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
+import { OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS } from "../constants/officialContent";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 
@@ -3158,6 +3159,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			...Object.values(this.host.settings.officialContent.channels)
 				.map((item) => item.path?.trim() || "")
 				.filter((item) => item.trim().length > 0),
+			...OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS,
 		])];
 	}
 

@@ -32,8 +32,8 @@ test("studio content generator exposes shipped markdown files for runtime sync",
 		"file:Start Here · 从这里开始/01 快速上手.md",
 		"file:Start Here · 从这里开始/09 常见问题.md",
 		"file:Changelog.md",
-		"directory:Study with F.R.I.D.A.Y",
-		"file:Study with F.R.I.D.A.Y/四个Obsidian内置Skills的修订笔记.md",
+		"directory:Study with FRIDAY",
+		"file:Study with FRIDAY/四个Obsidian内置Skills的修订笔记.md",
 	]) {
 		assert.ok(summary.includes(requiredPath), `missing ${requiredPath}`);
 	}
@@ -46,7 +46,7 @@ test("studio content generator exposes shipped markdown files for runtime sync",
 	assert.equal(changelog.kind, "file");
 	assert.match(changelog.content, /^# Changelog/m);
 
-	const note = entries.find((entry) => entry.relativePath === "Study with F.R.I.D.A.Y/四个Obsidian内置Skills的修订笔记.md");
+	const note = entries.find((entry) => entry.relativePath === "Study with FRIDAY/四个Obsidian内置Skills的修订笔记.md");
 	assert.ok(note);
 	assert.match(note.content, /author: 制作组/);
 	assert.match(note.content, /四个 Obsidian 内置 Skills 的修订笔记/);
@@ -54,10 +54,11 @@ test("studio content generator exposes shipped markdown files for runtime sync",
 
 test("studio path presets keep the published names and legacy aliases in sync", async () => {
 	const mod = await loadPathsModule();
-	assert.equal(mod.PRIMARY_PATHS.studioNotes, "Study with F.R.I.D.A.Y");
+	assert.equal(mod.PRIMARY_PATHS.studioNotes, "Study with FRIDAY");
 	assert.equal(mod.PRIMARY_PATHS.studioStartHereFile, "Start Here · 从这里开始/00 从这里开始.md");
 	assert.equal(mod.PRIMARY_PATHS.studioLogFile, "Changelog.md");
-	assert.equal(mod.PREVIOUS_PRIMARY_PATHS.studioNotes, "幕后笔记 · Behind the Build");
+	assert.equal(mod.PREVIOUS_PRIMARY_PATHS.studioNotes, "Study with F.R.I.D.A.Y");
 	assert.equal(mod.PREVIOUS_PRIMARY_PATHS.studioStartHereFile, "从这里开始 · Start Here/从这里开始.md");
 	assert.equal(mod.PREVIOUS_PRIMARY_PATHS.studioLogFile, "迭代手记 · Changelog.md");
+	assert.equal(mod.OLDER_PRIMARY_PATHS.studioNotes, "幕后笔记 · Behind the Build");
 });

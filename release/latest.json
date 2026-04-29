@@ -4,7 +4,7 @@
 	"version": "0.2.10",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-04-29T01:03:59.530Z",
+	"publishedAt": "2026-04-29T01:53:24.603Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",

@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import simpleGit from "simple-git";
 import {
+	OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS,
 	OFFICIAL_CONTENT_MANIFEST_PATH,
 	OFFICIAL_CONTENT_PROVIDER_ID,
 	OFFICIAL_CONTENT_RELEASE_BRANCH,
@@ -119,12 +120,10 @@ export class OfficialContentService {
 		const catalog = settings.officialContent.catalog.length > 0
 			? settings.officialContent.catalog
 			: await this.refreshCatalog();
-		const ownedTopLevelPaths = [...new Set([
-			...catalog.map((item) => item.path),
-			...Object.values(settings.officialContent.channels)
-				.map((item) => item.path?.trim() || "")
-				.filter((item) => item.trim().length > 0),
-		])];
+		const ownedTopLevelPaths = collectOfficialContentOwnedTopLevelPaths(
+			catalog,
+			settings.officialContent.channels,
+		);
 		const guardState = this.deps.inspectDestructiveApplySafety
 			? await this.deps.inspectDestructiveApplySafety({ ownedTopLevelPaths })
 			: {
@@ -137,29 +136,37 @@ export class OfficialContentService {
 			return guardState;
 		}
 
-		const manifestMap = await this.loadChannelManifests(catalog);
 		const subscribed = new Set(
 			Object.entries(settings.officialContent.channels)
 				.filter(([, value]) => value.subscribed)
 				.map(([id]) => id),
 		);
 
-		for (const entry of catalog) {
-			if (subscribed.has(entry.id)) {
-				await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null);
+		const gitClient = await this.openOfficialContentGitClient(catalog);
+		try {
+			const manifestMap = gitClient
+				? await this.loadChannelManifests(catalog, gitClient)
+				: new Map<string, OfficialContentChannelManifest>();
+
+			for (const entry of catalog) {
+				if (subscribed.has(entry.id)) {
+					await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null, gitClient);
+					settings.officialContent.channels[entry.id] = {
+						subscribed: settings.officialContent.channels[entry.id]?.subscribed === true,
+						lastAppliedVersion: entry.version,
+						path: entry.path,
+					};
+					continue;
+				}
+				await this.removeCatalogEntry(entry);
 				settings.officialContent.channels[entry.id] = {
-					subscribed: settings.officialContent.channels[entry.id]?.subscribed === true,
-					lastAppliedVersion: entry.version,
+					subscribed: false,
+					lastAppliedVersion: "",
 					path: entry.path,
 				};
-				continue;
 			}
-			await this.removeCatalogEntry(entry);
-			settings.officialContent.channels[entry.id] = {
-				subscribed: false,
-				lastAppliedVersion: "",
-				path: entry.path,
-			};
+		} finally {
+			await gitClient?.cleanup();
 		}
 
 		const activeIds = new Set(catalog.map((item) => item.id));
@@ -171,6 +178,7 @@ export class OfficialContentService {
 			delete settings.officialContent.channels[channelId];
 		}
 
+		await this.removeStaleLegacyOfficialPaths(catalog, settings.officialContent.channels);
 		await this.cleanupRootIfEmpty();
 		await this.deps.saveSettings();
 		return guardState;
@@ -204,34 +212,19 @@ export class OfficialContentService {
 		}
 	}
 
-	private async loadChannelManifests(catalog: OfficialContentCatalogEntry[]): Promise<Map<string, OfficialContentChannelManifest>> {
+	private async loadChannelManifests(
+		catalog: OfficialContentCatalogEntry[],
+		gitClient: OfficialContentGitClient,
+	): Promise<Map<string, OfficialContentChannelManifest>> {
 		const manifestPaths = [...new Set(catalog.map((item) => item.manifestPath).filter(Boolean))];
 		const manifests = new Map<string, OfficialContentChannelManifest>();
 		if (manifestPaths.length === 0) {
 			return manifests;
 		}
 
-		const availability = await this.getAvailability();
-		if (!availability.ready) {
-			throw new Error("Official content manifests cannot be loaded because Git or credentials are unavailable.");
-		}
-
-		const credential = await this.deps.getUserCredential();
-		if (!credential?.username?.trim() || !credential.token?.trim()) {
-			throw new Error("Official content manifests cannot be loaded because Git credentials are unavailable.");
-		}
-
-		const gitClient = await this.gitClientFactory(credential);
-		try {
-			await gitClient.ensureWorkspace();
-			await gitClient.lsRemote();
-			await gitClient.fetch(OFFICIAL_CONTENT_RELEASE_BRANCH);
-			for (const manifestPath of manifestPaths) {
-				const raw = await gitClient.readText("FETCH_HEAD", manifestPath);
-				manifests.set(manifestPath, JSON.parse(raw) as OfficialContentChannelManifest);
-			}
-		} finally {
-			await gitClient.cleanup();
+		for (const manifestPath of manifestPaths) {
+			const raw = await gitClient.readText("FETCH_HEAD", manifestPath);
+			manifests.set(manifestPath, JSON.parse(raw) as OfficialContentChannelManifest);
 		}
 
 		return manifests;
@@ -240,9 +233,13 @@ export class OfficialContentService {
 	private async applyCatalogEntry(
 		entry: OfficialContentCatalogEntry,
 		manifest: OfficialContentChannelManifest | null,
+		gitClient: OfficialContentGitClient | null,
 	): Promise<void> {
 		if (!manifest) {
 			throw new Error(`Official content manifest is unavailable for ${entry.id}.`);
+		}
+		if (!gitClient) {
+			throw new Error(`Official content Git workspace is unavailable for ${entry.id}.`);
 		}
 		const column = manifest.columns.find((item) => item.id === entry.id);
 		if (!column) {
@@ -256,7 +253,7 @@ export class OfficialContentService {
 
 		if (entry.kind === "directory") {
 			for (const file of column.files) {
-				await this.writeRemoteBlob(file);
+				await this.writeRemoteBlob(file, gitClient);
 			}
 			const targetRoot = normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${entry.path}`);
 			const existingFiles = await this.listFilesRecursive(targetRoot);
@@ -274,18 +271,39 @@ export class OfficialContentService {
 		if (!onlyFile) {
 			throw new Error(`Official content catalog entry has no file to apply: ${entry.id}.`);
 		}
-		await this.writeRemoteBlob(onlyFile);
+		await this.writeRemoteBlob(onlyFile, gitClient);
 	}
 
-	private async writeRemoteBlob(file: OfficialContentFileBlob): Promise<void> {
+	private async writeRemoteBlob(file: OfficialContentFileBlob, gitClient: OfficialContentGitClient): Promise<void> {
+		const content = await gitClient.readText("FETCH_HEAD", file.blobPath);
+		const targetPath = normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${file.path}`);
+		await this.ensureDirectory(path.posix.dirname(targetPath));
+		if (file.encoding === "base64") {
+			if (typeof this.deps.adapter.writeBinary !== "function") {
+				throw new Error(`Official content asset requires binary write support: ${file.path}`);
+			}
+			const bytes = Buffer.from(content.trim(), "base64");
+			await this.deps.adapter.writeBinary(targetPath, toExactArrayBuffer(bytes));
+			return;
+		}
+		await this.deps.adapter.write(targetPath, content);
+	}
+
+	private async openOfficialContentGitClient(
+		catalog: OfficialContentCatalogEntry[],
+	): Promise<OfficialContentGitClient | null> {
+		const manifestPaths = [...new Set(catalog.map((item) => item.manifestPath).filter(Boolean))];
+		if (manifestPaths.length === 0) {
+			return null;
+		}
 		const availability = await this.getAvailability();
 		if (!availability.ready) {
-			throw new Error(`Official content blob cannot be written because Git or credentials are unavailable: ${file.path}`);
+			throw new Error("Official content cannot be loaded because Git or credentials are unavailable.");
 		}
 
 		const credential = await this.deps.getUserCredential();
 		if (!credential?.username?.trim() || !credential.token?.trim()) {
-			throw new Error(`Official content blob cannot be written because Git credentials are unavailable: ${file.path}`);
+			throw new Error("Official content cannot be loaded because Git credentials are unavailable.");
 		}
 
 		const gitClient = await this.gitClientFactory(credential);
@@ -293,25 +311,34 @@ export class OfficialContentService {
 			await gitClient.ensureWorkspace();
 			await gitClient.lsRemote();
 			await gitClient.fetch(OFFICIAL_CONTENT_RELEASE_BRANCH);
-			const content = await gitClient.readText("FETCH_HEAD", file.blobPath);
-			const targetPath = normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${file.path}`);
-			await this.ensureDirectory(path.posix.dirname(targetPath));
-			if (file.encoding === "base64") {
-				if (typeof this.deps.adapter.writeBinary !== "function") {
-					throw new Error(`Official content asset requires binary write support: ${file.path}`);
-				}
-				const bytes = Buffer.from(content.trim(), "base64");
-				await this.deps.adapter.writeBinary(targetPath, toExactArrayBuffer(bytes));
-				return;
-			}
-			await this.deps.adapter.write(targetPath, content);
-		} finally {
+			return gitClient;
+		} catch (error) {
 			await gitClient.cleanup();
+			throw error;
 		}
 	}
 
 	private async removeCatalogEntry(entry: OfficialContentCatalogEntry): Promise<void> {
 		await this.removePathRecursive(normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${entry.path}`));
+	}
+
+	private async removeStaleLegacyOfficialPaths(
+		catalog: OfficialContentCatalogEntry[],
+		channels: FridaySettings["officialContent"]["channels"],
+	): Promise<void> {
+		const activePaths = new Set([
+			...catalog.map((item) => normalizeVaultPath(item.path)),
+			...Object.values(channels)
+				.map((item) => normalizeVaultPath(item.path?.trim() || ""))
+				.filter(Boolean),
+		]);
+		for (const legacyPath of OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS) {
+			const normalizedLegacyPath = normalizeVaultPath(legacyPath);
+			if (!normalizedLegacyPath || activePaths.has(normalizedLegacyPath)) {
+				continue;
+			}
+			await this.removePathRecursive(normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${normalizedLegacyPath}`));
+		}
 	}
 
 	private async cleanupRootIfEmpty(): Promise<void> {
@@ -412,6 +439,19 @@ export class OfficialContentService {
 
 function buildCatalogVersion(catalog: OfficialContentCatalogEntry[]): string {
 	return JSON.stringify(catalog.map((item) => ({ id: item.id, version: item.version })));
+}
+
+function collectOfficialContentOwnedTopLevelPaths(
+	catalog: OfficialContentCatalogEntry[],
+	channels: FridaySettings["officialContent"]["channels"],
+): string[] {
+	return [...new Set([
+		...catalog.map((item) => item.path),
+		...Object.values(channels)
+			.map((item) => item.path?.trim() || "")
+			.filter((item) => item.trim().length > 0),
+		...OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS,
+	])];
 }
 
 function normalizeVaultPath(value: string): string {

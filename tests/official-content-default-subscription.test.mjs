@@ -330,3 +330,231 @@ test("applySubscriptions writes base64 official assets through the binary adapte
 	assert.equal(binaryWrites[0].targetPath, "F.R.I.D.A.Y/Start Here · 从这里开始/assets/00-quick-start/workbench-overview.png");
 	assert.deepEqual(binaryWrites[0].content, pngBytes);
 });
+
+test("applySubscriptions removes legacy official column paths even when channel state is missing", async () => {
+	const mod = await loadModule();
+	const removed = [];
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "study-with-friday-new",
+					title: "Study with FRIDAY",
+					kind: "directory",
+					path: "Study with FRIDAY",
+					version: "2026.04.29",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"study-with-friday-new": {
+					subscribed: true,
+					lastAppliedVersion: "",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const manifest = {
+		schemaVersion: 1,
+		generatedAt: "2026-04-29T00:00:00.000Z",
+		id: "official",
+		title: "Official channel",
+		rootPath: "F.R.I.D.A.Y",
+		columns: [
+			{
+				id: "study-with-friday-new",
+				title: "Study with FRIDAY",
+				kind: "directory",
+				path: "Study with FRIDAY",
+				version: "2026.04.29",
+				manifestPath: "official/channels/official.json",
+				files: [
+					{
+						path: "Study with FRIDAY/Guide.md",
+						hash: "guide-hash",
+						blobPath: "official/files/guide.md",
+					},
+				],
+			},
+		],
+	};
+	const files = new Set(["F.R.I.D.A.Y/Study with F.R.I.D.A.Y/Old.md"]);
+	const folders = new Set(["F.R.I.D.A.Y", "F.R.I.D.A.Y/Study with F.R.I.D.A.Y"]);
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async (targetPath) => files.has(targetPath) || folders.has(targetPath),
+			mkdir: async (targetPath) => {
+				folders.add(targetPath);
+			},
+			read: async () => "",
+			write: async (targetPath) => {
+				files.add(targetPath);
+			},
+			remove: async (targetPath) => {
+				files.delete(targetPath);
+				removed.push(targetPath);
+			},
+			rmdir: async (targetPath) => {
+				folders.delete(targetPath);
+				removed.push(`${targetPath}/`);
+			},
+			list: async (targetPath) => {
+				if (targetPath === "F.R.I.D.A.Y") {
+					return { files: [], folders: ["F.R.I.D.A.Y/Study with FRIDAY"] };
+				}
+				if (targetPath === "F.R.I.D.A.Y/Study with F.R.I.D.A.Y") {
+					return { files: ["F.R.I.D.A.Y/Study with F.R.I.D.A.Y/Old.md"], folders: [] };
+				}
+				if (targetPath === "F.R.I.D.A.Y/Study with FRIDAY") {
+					return { files: ["F.R.I.D.A.Y/Study with FRIDAY/Guide.md"], folders: [] };
+				}
+				return { files: [], folders: [] };
+			},
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => ({
+			ensureWorkspace: async () => {},
+			lsRemote: async () => "",
+			fetch: async () => {},
+			readText: async (_ref, targetPath) => {
+				if (targetPath === "official/channels/official.json") {
+					return JSON.stringify(manifest);
+				}
+				if (targetPath === "official/files/guide.md") {
+					return "# Guide\n";
+				}
+				throw new Error(`Unexpected read target: ${targetPath}`);
+			},
+			cleanup: async () => {},
+		}),
+		inspectDestructiveApplySafety: async ({ ownedTopLevelPaths }) => ({
+			blocked: !ownedTopLevelPaths.includes("Study with F.R.I.D.A.Y"),
+			blockingPaths: !ownedTopLevelPaths.includes("Study with F.R.I.D.A.Y")
+				? ["Study with F.R.I.D.A.Y"]
+				: [],
+			canRefreshCatalog: true,
+			takeoverConfirmed: false,
+		}),
+	});
+
+	const result = await service.applySubscriptions();
+
+	assert.equal(result.blocked, false);
+	assert.deepEqual(removed, [
+		"F.R.I.D.A.Y/Study with F.R.I.D.A.Y/Old.md",
+		"F.R.I.D.A.Y/Study with F.R.I.D.A.Y/",
+	]);
+});
+
+test("applySubscriptions reads manifests and blobs from one fetched official content workspace", async () => {
+	const mod = await loadModule();
+	let factoryCalls = 0;
+	let fetchCalls = 0;
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "study-with-friday",
+					title: "Study with FRIDAY",
+					kind: "directory",
+					path: "Study with FRIDAY",
+					version: "multi-file",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"study-with-friday": {
+					subscribed: true,
+					lastAppliedVersion: "",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const manifest = {
+		schemaVersion: 1,
+		generatedAt: "2026-04-29T00:00:00.000Z",
+		id: "official",
+		title: "Official channel",
+		rootPath: "F.R.I.D.A.Y",
+		columns: [
+			{
+				id: "study-with-friday",
+				title: "Study with FRIDAY",
+				kind: "directory",
+				path: "Study with FRIDAY",
+				version: "multi-file",
+				manifestPath: "official/channels/official.json",
+				files: [
+					{
+						path: "Study with FRIDAY/One.md",
+						hash: "one-hash",
+						blobPath: "official/files/one.md",
+					},
+					{
+						path: "Study with FRIDAY/Two.md",
+						hash: "two-hash",
+						blobPath: "official/files/two.md",
+					},
+				],
+			},
+		],
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async () => {},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => {
+			factoryCalls += 1;
+			return {
+				ensureWorkspace: async () => {},
+				lsRemote: async () => "",
+				fetch: async () => {
+					fetchCalls += 1;
+				},
+				readText: async (_ref, targetPath) => {
+					if (targetPath === "official/channels/official.json") {
+						return JSON.stringify(manifest);
+					}
+					if (targetPath === "official/files/one.md") {
+						return "# One\n";
+					}
+					if (targetPath === "official/files/two.md") {
+						return "# Two\n";
+					}
+					throw new Error(`Unexpected read target: ${targetPath}`);
+				},
+				cleanup: async () => {},
+			};
+		},
+	});
+
+	await service.applySubscriptions();
+
+	assert.equal(factoryCalls, 1);
+	assert.equal(fetchCalls, 1);
+});

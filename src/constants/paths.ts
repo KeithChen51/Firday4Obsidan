@@ -20,7 +20,7 @@ export const PRIMARY_PATHS: PathPreset = {
 	projects: "项目",
 	personal: "个人",
 	studio: "来自制作组",
-	studioNotes: "Study with F.R.I.D.A.Y",
+	studioNotes: "Study with FRIDAY",
 	studioReadmeFile: "README.md",
 	studioStartHereFile: "Start Here · 从这里开始/00 从这里开始.md",
 	studioLogFile: "Changelog.md",
@@ -31,9 +31,14 @@ export const PRIMARY_PATHS: PathPreset = {
 
 export const PREVIOUS_PRIMARY_PATHS: PathPreset = {
 	...PRIMARY_PATHS,
-	studioNotes: "幕后笔记 · Behind the Build",
+	studioNotes: "Study with F.R.I.D.A.Y",
 	studioStartHereFile: "从这里开始 · Start Here/从这里开始.md",
 	studioLogFile: "迭代手记 · Changelog.md",
+};
+
+export const OLDER_PRIMARY_PATHS: PathPreset = {
+	...PREVIOUS_PRIMARY_PATHS,
+	studioNotes: "幕后笔记 · Behind the Build",
 };
 
 export const LEGACY_PATHS: PathPreset = {
@@ -59,5 +64,5 @@ export function getRootCandidates(primaryRoot = PRIMARY_PATHS.root): string[] {
 }
 
 export function getPathPresets(): PathPreset[] {
-	return [PRIMARY_PATHS, PREVIOUS_PRIMARY_PATHS, LEGACY_PATHS];
+	return [PRIMARY_PATHS, PREVIOUS_PRIMARY_PATHS, OLDER_PRIMARY_PATHS, LEGACY_PATHS];
 }
