@@ -14,6 +14,8 @@ const pluginTypePath = path.join(projectRoot, "src", "types", "plugin.ts");
 const mainPath = path.join(projectRoot, "src", "main.ts");
 const settingsPath = path.join(projectRoot, "src", "settings", "FridaySettingTab.ts");
 const officialContentServicePath = path.join(projectRoot, "src", "services", "OfficialContentService.ts");
+const zhLocalePath = path.join(projectRoot, "src", "i18n", "locales", "zh-CN.ts");
+const enLocalePath = path.join(projectRoot, "src", "i18n", "locales", "en-US.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
@@ -69,12 +71,20 @@ test("subscriptions settings UI replaces slash navigation and uses official cont
 	assert.match(source, /renderSubscriptionsSection\(containerEl\)/);
 	assert.match(source, /settings\.section\.subscriptions/);
 	assert.doesNotMatch(source, /{ id: "slash", label: this\.host\.t\("settings\.section\.slash"\) }/);
-	assert.match(source, /officialContentService\.refreshCatalog\(/);
-	assert.match(source, /officialContentService\.applySubscriptions\(/);
+	assert.match(source, /officialContentService\.runBackgroundSync\(/);
+	const refreshButtonBlock = source.match(/setButtonText\(this\.t\("settings\.subscriptions\.refresh"[\s\S]*?this\.display\(\);/);
+	assert.ok(refreshButtonBlock, "refresh button handler should exist");
+	assert.doesNotMatch(refreshButtonBlock[0], /await this\.host\.officialContentService\.(refreshCatalog|applySubscriptions|runBackgroundSync)\(/);
 	assert.match(source, /officialContent\.checkOnStartup/);
 	assert.match(source, /officialContent\.startupDelayMs/);
 	assert.match(source, /subscribed:\s*true/);
 	assert.match(source, /Official channel|官方频道/);
+});
+
+test("subscriptions refresh background notice is localized", () => {
+	for (const source of [read(zhLocalePath), read(enLocalePath)]) {
+		assert.match(source, /"settings\.subscriptions\.refreshQueued":/);
+	}
 });
 
 test("official content service exposes refresh, apply, and startup flows against release artifacts", () => {
@@ -83,6 +93,7 @@ test("official content service exposes refresh, apply, and startup flows against
 	assert.match(source, /class OfficialContentService/);
 	assert.match(source, /refreshCatalog\(\): Promise/);
 	assert.match(source, /applySubscriptions\(\): Promise/);
+	assert.match(source, /runBackgroundSync\(\): Promise/);
 	assert.match(source, /runStartupCheck\(\): Promise<void>/);
 	assert.match(source, /OFFICIAL_CONTENT_MANIFEST_PATH|official\/latest\.json/);
 	assert.match(source, /channels\/official\.json|manifestPath/);

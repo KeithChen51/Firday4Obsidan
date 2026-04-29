@@ -558,3 +558,158 @@ test("applySubscriptions reads manifests and blobs from one fetched official con
 	assert.equal(factoryCalls, 1);
 	assert.equal(fetchCalls, 1);
 });
+
+test("applySubscriptions skips unchanged subscribed columns without opening the release workspace", async () => {
+	const mod = await loadModule();
+	let factoryCalls = 0;
+	let writes = 0;
+	let saved = false;
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "study-with-friday",
+					title: "Study with FRIDAY",
+					kind: "directory",
+					path: "Study with FRIDAY",
+					version: "already-applied",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"study-with-friday": {
+					subscribed: true,
+					lastAppliedVersion: "already-applied",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async () => {
+				writes += 1;
+			},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {
+			saved = true;
+		},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => {
+			factoryCalls += 1;
+			throw new Error("unchanged columns should not open the official content workspace");
+		},
+	});
+
+	await service.applySubscriptions();
+
+	assert.equal(factoryCalls, 0);
+	assert.equal(writes, 0);
+	assert.equal(saved, true);
+	assert.equal(settings.officialContent.channels["study-with-friday"].lastAppliedVersion, "already-applied");
+});
+
+test("runBackgroundSync reuses one in-flight official content sync", async () => {
+	const mod = await loadModule();
+	let fetchCalls = 0;
+	let releaseFetchResolver;
+	let releaseFetchFinish;
+	const releaseFetchStarted = new Promise((resolve) => {
+		releaseFetchResolver = resolve;
+	});
+	const releaseFetchCanFinish = new Promise((resolve) => {
+		releaseFetchFinish = resolve;
+	});
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [],
+			channels: {
+				"study-with-friday": {
+					subscribed: true,
+					lastAppliedVersion: "already-applied",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const latestFeed = {
+		schemaVersion: 1,
+		generatedAt: "2026-04-29T00:00:00.000Z",
+		providers: [
+			{
+				id: "official",
+				title: "Official channel",
+				rootPath: "F.R.I.D.A.Y",
+				manifestPath: "official/channels/official.json",
+				columns: [
+					{
+						id: "study-with-friday",
+						title: "Study with FRIDAY",
+						kind: "directory",
+						path: "Study with FRIDAY",
+						version: "already-applied",
+						manifestPath: "official/channels/official.json",
+					},
+				],
+			},
+		],
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async () => {},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => ({
+			ensureWorkspace: async () => {},
+			lsRemote: async () => "",
+			fetch: async () => {
+				fetchCalls += 1;
+				releaseFetchResolver();
+				await releaseFetchCanFinish;
+			},
+			readText: async (_ref, targetPath) => {
+				if (targetPath === "official/latest.json") {
+					return JSON.stringify(latestFeed);
+				}
+				throw new Error(`Unexpected read target: ${targetPath}`);
+			},
+			cleanup: async () => {},
+		}),
+	});
+
+	const first = service.runBackgroundSync();
+	await releaseFetchStarted;
+	const second = service.runBackgroundSync();
+	assert.equal(first, second);
+	releaseFetchFinish();
+	await first;
+
+	assert.equal(fetchCalls, 1);
+});

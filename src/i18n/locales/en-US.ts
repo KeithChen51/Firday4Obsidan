@@ -755,6 +755,7 @@ export const enUSMessages: I18nMessages = {
 	"settings.subscriptions.lastChecked.name": "Last checked",
 	"settings.subscriptions.lastChecked.never": "Official content has not been checked yet.",
 	"settings.subscriptions.refresh": "Refresh official content",
+	"settings.subscriptions.refreshQueued": "Official content is refreshing in the background. Large image updates may take a while.",
 	"settings.subscriptions.refreshSuccess": "Official content catalog refreshed.",
 	"settings.subscriptions.refreshFailed": "Failed to refresh official content: {error}",
 	"settings.subscriptions.checkOnStartup.name": "Check on startup",

@@ -66,6 +66,7 @@ interface OfficialContentServiceDeps {
 
 export class OfficialContentService {
 	private readonly gitClientFactory: (credential: ProjectGitCredential) => Promise<OfficialContentGitClient>;
+	private backgroundSyncPromise: Promise<void> | null = null;
 
 	constructor(private readonly deps: OfficialContentServiceDeps) {
 		this.gitClientFactory = async (credential) =>
@@ -141,16 +142,22 @@ export class OfficialContentService {
 				.filter(([, value]) => value.subscribed)
 				.map(([id]) => id),
 		);
+		const entriesNeedingApply = catalog.filter((entry) =>
+			subscribed.has(entry.id)
+			&& !isCatalogEntryAlreadyApplied(entry, settings.officialContent.channels[entry.id]),
+		);
 
-		const gitClient = await this.openOfficialContentGitClient(catalog);
+		const gitClient = await this.openOfficialContentGitClient(entriesNeedingApply);
 		try {
 			const manifestMap = gitClient
-				? await this.loadChannelManifests(catalog, gitClient)
+				? await this.loadChannelManifests(entriesNeedingApply, gitClient)
 				: new Map<string, OfficialContentChannelManifest>();
 
 			for (const entry of catalog) {
 				if (subscribed.has(entry.id)) {
-					await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null, gitClient);
+					if (!isCatalogEntryAlreadyApplied(entry, settings.officialContent.channels[entry.id])) {
+						await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null, gitClient);
+					}
 					settings.officialContent.channels[entry.id] = {
 						subscribed: settings.officialContent.channels[entry.id]?.subscribed === true,
 						lastAppliedVersion: entry.version,
@@ -187,6 +194,17 @@ export class OfficialContentService {
 	async runStartupCheck(): Promise<void> {
 		await this.refreshCatalog();
 		await this.applySubscriptions();
+	}
+
+	runBackgroundSync(): Promise<void> {
+		if (this.backgroundSyncPromise) {
+			return this.backgroundSyncPromise;
+		}
+		this.backgroundSyncPromise = this.runStartupCheck()
+			.finally(() => {
+				this.backgroundSyncPromise = null;
+			});
+		return this.backgroundSyncPromise;
 	}
 
 	private async fetchLatestFeed(): Promise<OfficialContentLatestFeed | null> {
@@ -439,6 +457,17 @@ export class OfficialContentService {
 
 function buildCatalogVersion(catalog: OfficialContentCatalogEntry[]): string {
 	return JSON.stringify(catalog.map((item) => ({ id: item.id, version: item.version })));
+}
+
+function isCatalogEntryAlreadyApplied(
+	entry: OfficialContentCatalogEntry,
+	channel: FridaySettings["officialContent"]["channels"][string] | undefined,
+): boolean {
+	return Boolean(
+		channel?.subscribed
+		&& channel.lastAppliedVersion === entry.version
+		&& normalizeVaultPath(channel.path?.trim() || "") === normalizeVaultPath(entry.path),
+	);
 }
 
 function collectOfficialContentOwnedTopLevelPaths(

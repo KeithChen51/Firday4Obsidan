@@ -627,21 +627,24 @@ export class FridaySettingTab extends PluginSettingTab {
 				button
 					.setButtonText(this.t("settings.subscriptions.refresh", "刷新官方内容"))
 					.setCta()
-					.onClick(async () => {
-						try {
-							await this.host.officialContentService.refreshCatalog();
-							await this.host.officialContentService.applySubscriptions();
-							await this.refreshOfficialContentGuardState();
-							new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
-						} catch (error) {
-							new Notice(
-								this.t("settings.subscriptions.refreshFailed", "刷新官方内容失败：{error}", {
-									error: String(error ?? ""),
-								}),
-								6000,
-							);
-						}
-						this.display();
+					.onClick(() => {
+						new Notice(this.t("settings.subscriptions.refreshQueued", "官方内容正在后台刷新。图片较多时可稍后回来查看。"), 4000);
+						void this.host.officialContentService.runBackgroundSync()
+							.then(async () => {
+								await this.refreshOfficialContentGuardState();
+								new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
+							})
+							.catch((error) => {
+								new Notice(
+									this.t("settings.subscriptions.refreshFailed", "刷新官方内容失败：{error}", {
+										error: String(error ?? ""),
+									}),
+									6000,
+								);
+							})
+							.finally(() => {
+								this.display();
+							});
 					}),
 			);
 

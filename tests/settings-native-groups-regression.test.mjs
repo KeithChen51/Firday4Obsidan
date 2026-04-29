@@ -111,7 +111,7 @@ test("subscriptions and project sections replace old friday-card settings panels
 	assert.doesNotMatch(source, /const card = containerEl\.createDiv\(\{ cls: "friday-card" \}\)/);
 	assert.doesNotMatch(source, /friday-card friday-project-settings-panel/);
 	assert.match(source, /renderSubscriptionsSection\(containerEl: HTMLElement\): void \{/);
-	assert.match(source, /officialContentService\.refreshCatalog\(/);
+	assert.match(source, /officialContentService\.runBackgroundSync\(/);
 	assert.match(source, /createNativeSettingsGroup\(containerEl,\s*\{/);
 	assert.match(source, /friday-project-settings-panel/);
 });

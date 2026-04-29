@@ -38,6 +38,7 @@ export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul"
 export interface OfficialContentServiceApi {
 	refreshCatalog(): Promise<OfficialContentCatalogEntry[]>;
 	applySubscriptions(): Promise<OfficialContentLegacyGuardState>;
+	runBackgroundSync(): Promise<void>;
 	runStartupCheck(): Promise<void>;
 }
 

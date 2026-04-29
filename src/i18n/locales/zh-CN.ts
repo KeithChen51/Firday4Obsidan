@@ -757,6 +757,7 @@ export const zhCNMessages: I18nMessages = {
 	"settings.subscriptions.lastChecked.name": "最近检查",
 	"settings.subscriptions.lastChecked.never": "尚未检查官方内容。",
 	"settings.subscriptions.refresh": "刷新官方内容",
+	"settings.subscriptions.refreshQueued": "官方内容正在后台刷新。图片较多时可稍后回来查看。",
 	"settings.subscriptions.refreshSuccess": "官方内容目录已刷新。",
 	"settings.subscriptions.refreshFailed": "刷新官方内容失败：{error}",
 	"settings.subscriptions.checkOnStartup.name": "启动时自动检查",
