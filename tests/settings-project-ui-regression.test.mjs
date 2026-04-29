@@ -361,16 +361,20 @@ test("settings project editor disables auto sync until a git remote is available
 	assert.match(source, /this\.getDraftAutoSyncAvailability\(draft\)/);
 });
 
-test("settings project section exposes legacy Friday root inventory and safe cleanup actions", async () => {
+test("settings project section redirects legacy Friday root handling to subscriptions", async () => {
 	const source = readSettingsSource();
 	assert.match(source, /legacyFridayRootMigrationService/);
 	assert.match(source, /renderLegacyFridayRootSection\(/);
 	assert.match(source, /settings\.project\.legacy\.title/);
-	assert.match(source, /settings\.project\.legacy\.import/);
-	assert.match(source, /settings\.project\.legacy\.cleanup/);
-	assert.match(source, /legacyAgentCleanupService\.cleanupLegacyAgentData\(/);
-	assert.match(source, /hasBlockingLegacyProjectContent\(/);
-	assert.match(source, /canCleanupSystemArtifacts\(/);
-	assert.match(source, /settings\.project\.legacy\.cleanupBlocked/);
-	assert.match(source, /cleanupVisibleLegacyArtifacts\(/);
+	assert.match(source, /settings\.project\.legacy\.subscriptionsAction/);
+	assert.match(source, /focusSection\("subscriptions"\)/);
+	const sectionStart = source.indexOf("private renderLegacyFridayRootSection");
+	const sectionEnd = source.indexOf("\n\tprivate getParentVaultDirectory", sectionStart);
+	assert.ok(sectionStart >= 0 && sectionEnd > sectionStart, "legacy Friday root section should exist");
+	const sectionBlock = source.slice(sectionStart, sectionEnd);
+	assert.doesNotMatch(sectionBlock, /settings\.project\.legacy\.import/);
+	assert.doesNotMatch(sectionBlock, /settings\.project\.legacy\.cleanup/);
+	assert.doesNotMatch(sectionBlock, /importLegacyProject\(/);
+	assert.doesNotMatch(sectionBlock, /cleanupVisibleLegacyArtifacts\(/);
+	assert.doesNotMatch(sectionBlock, /cleanupLegacyAgentData\(/);
 });

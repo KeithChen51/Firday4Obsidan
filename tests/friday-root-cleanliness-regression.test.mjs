@@ -70,7 +70,7 @@ test("runtime audit stores no longer write into the visible F.R.I.D.A.Y runtime 
 	assert.doesNotMatch(toolRunSource, /F\.R\.I\.D\.A\.Y\/runtime/);
 });
 
-test("official content takeover reserves F.R.I.D.A.Y for subscription-owned paths only", () => {
+test("official content archive flow reserves F.R.I.D.A.Y for subscription-owned paths only", () => {
 	const pluginSource = readSource("src/types/plugin.ts").replace(/\r\n?/g, "\n");
 	const legacySource = readSource("src/services/LegacyFridayRootMigrationService.ts").replace(/\r\n?/g, "\n");
 
@@ -81,4 +81,5 @@ test("official content takeover reserves F.R.I.D.A.Y for subscription-owned path
 	assert.match(legacySource, /ownedTopLevelPaths/);
 	assert.match(legacySource, /blockingPaths/);
 	assert.match(legacySource, /canRefreshCatalog/);
+	assert.match(legacySource, /archiveVisibleLegacyRoot/);
 });

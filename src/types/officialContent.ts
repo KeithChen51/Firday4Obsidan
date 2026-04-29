@@ -36,7 +36,6 @@ export interface OfficialContentLegacyGuardState {
 	blocked: boolean;
 	blockingPaths: string[];
 	canRefreshCatalog: boolean;
-	takeoverConfirmed: boolean;
 }
 
 export interface CommunityChannelSource {

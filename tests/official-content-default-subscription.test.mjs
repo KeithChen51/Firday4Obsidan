@@ -205,7 +205,6 @@ test("removed official columns are still cleaned instead of being mistaken for l
 			blocked: !ownedTopLevelPaths.includes("旧栏目"),
 			blockingPaths: !ownedTopLevelPaths.includes("旧栏目") ? ["旧栏目"] : [],
 			canRefreshCatalog: true,
-			takeoverConfirmed: false,
 		}),
 	});
 
@@ -442,7 +441,6 @@ test("applySubscriptions removes legacy official column paths even when channel 
 				? ["Study with F.R.I.D.A.Y"]
 				: [],
 			canRefreshCatalog: true,
-			takeoverConfirmed: false,
 		}),
 	});
 

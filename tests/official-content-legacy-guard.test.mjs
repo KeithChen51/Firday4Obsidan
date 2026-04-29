@@ -43,11 +43,12 @@ test("official content service still distinguishes catalog refresh from destruct
 	assert.match(source, /canRefreshCatalog/);
 });
 
-test("subscriptions settings surface a blocking warning and explicit takeover action for legacy root content", () => {
+test("subscriptions settings surface a blocking warning and explicit archive action for legacy root content", () => {
 	const source = read(settingsPath);
 	assert.match(source, /blockingPaths/);
 	assert.match(source, /settings\.subscriptions\.legacy\.warning/);
-	assert.match(source, /settings\.subscriptions\.legacy\.takeover/);
-	assert.match(source, /settings\.subscriptions\.legacy\.takeoverConfirm/);
+	assert.match(source, /settings\.subscriptions\.legacy\.archive/);
+	assert.match(source, /settings\.subscriptions\.legacy\.archiveConfirm/);
+	assert.match(source, /archiveVisibleLegacyRoot\(/);
 	assert.match(source, /officialContentService\.applySubscriptions\(/);
 });

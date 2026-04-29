@@ -110,3 +110,23 @@ test("legacy friday root migration service cleanup removes only obsolete mirror 
 		await fs.rm(vaultRoot, { recursive: true, force: true });
 	}
 });
+
+test("legacy friday root migration service archives the visible Friday root with a unique legacy folder name", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-legacy-root-archive-"));
+
+	try {
+		await fs.mkdir(path.join(vaultRoot, "F.R.I.D.A.Y", "项目", "existing"), { recursive: true });
+		await fs.mkdir(path.join(vaultRoot, "旧版本F.R.I.D.A.Y文件夹"), { recursive: true });
+
+		const service = new mod.LegacyFridayRootMigrationService(vaultRoot, "F.R.I.D.A.Y", () => ({ projects: [] }));
+		const result = await service.archiveVisibleLegacyRoot();
+
+		assert.equal(result.archivedPath, "旧版本F.R.I.D.A.Y文件夹 1");
+		await assert.rejects(fs.stat(path.join(vaultRoot, "F.R.I.D.A.Y")));
+		await fs.stat(path.join(vaultRoot, "旧版本F.R.I.D.A.Y文件夹 1", "项目", "existing"));
+		await fs.stat(path.join(vaultRoot, "旧版本F.R.I.D.A.Y文件夹"));
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});

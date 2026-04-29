@@ -88,7 +88,6 @@ export class FridaySettingTab extends PluginSettingTab {
 	private soulEditorTonePresetDraft: SoulTonePreset = "balanced";
 	private soulEditorToneDraft = "";
 	private pendingSoulCleanupConfirm = false;
-	private pendingLegacyFridayCleanupConfirm = false;
 	private newProjectGroupDraft = "";
 	private pendingDeleteGroupId = "";
 	private policyEditorProjectSlug = "";
@@ -106,7 +105,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private legacyFridayRootReportLoading = false;
 	private officialContentGuardState: Awaited<ReturnType<SettingsHost["legacyFridayRootMigrationService"]["inspectDestructiveApplySafety"]>> | null = null;
 	private officialContentGuardLoading = false;
-	private pendingOfficialContentTakeoverConfirm = false;
+	private pendingOfficialContentArchiveConfirm = false;
 	private userGitCredentialLoaded = false;
 	private userGitUsernameDraft = "";
 	private userGitTokenDraft = "";
@@ -654,7 +653,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					title: this.t("settings.subscriptions.legacy.warning", "检测到 FRIDAY 根目录历史内容"),
 				description: this.t(
 					"settings.subscriptions.legacy.warningDesc",
-					"继续应用订阅会删除这些历史路径。请先迁移、清理，或显式确认由官方频道接管 F.R.I.D.A.Y/。",
+					"F.R.I.D.A.Y/ 将作为订阅频道目录使用。你可以先把当前旧文件夹归档改名，再刷新官方内容。",
 				),
 				extraClass: "friday-project-settings-panel",
 			});
@@ -665,42 +664,51 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 			new Setting(warningGroup)
 				.setName(
-					this.pendingOfficialContentTakeoverConfirm
-						? this.t("settings.subscriptions.legacy.takeoverConfirm", "再次点击，确认接管并删除这些历史路径")
-						: this.t("settings.subscriptions.legacy.takeover", "由官方频道接管 F.R.I.D.A.Y"),
+					this.pendingOfficialContentArchiveConfirm
+						? this.t("settings.subscriptions.legacy.archiveConfirm", "确认归档旧版本文件夹")
+						: this.t("settings.subscriptions.legacy.archive", "归档旧版本文件夹"),
 				)
 				.setDesc(
-					this.pendingOfficialContentTakeoverConfirm
-						? this.t("settings.subscriptions.legacy.takeoverConfirmDesc", "这会删除上面列出的历史路径。")
-						: this.t("settings.subscriptions.legacy.takeoverDesc", "仅当你确认这些历史路径可以被删除时才执行。"),
+					this.pendingOfficialContentArchiveConfirm
+						? this.t("settings.subscriptions.legacy.archiveConfirmDesc", "这不会删除旧数据；只会把当前 F.R.I.D.A.Y/ 改名，为订阅频道腾出新的 F.R.I.D.A.Y/。")
+						: this.t("settings.subscriptions.legacy.archiveDesc", "将当前 F.R.I.D.A.Y/ 改名为“旧版本F.R.I.D.A.Y文件夹”，保留里面的项目、个人和 Agent 数据供你之后手动整理。"),
 				)
 				.addButton((button) =>
 					button
 						.setWarning()
 						.setButtonText(
-							this.pendingOfficialContentTakeoverConfirm
-								? this.t("settings.subscriptions.legacy.takeoverConfirm", "再次点击，确认接管并删除这些历史路径")
-								: this.t("settings.subscriptions.legacy.takeover", "由官方频道接管 F.R.I.D.A.Y"),
+							this.pendingOfficialContentArchiveConfirm
+								? this.t("settings.subscriptions.legacy.archiveConfirm", "确认归档旧版本文件夹")
+								: this.t("settings.subscriptions.legacy.archive", "归档旧版本文件夹"),
 						)
 						.onClick(async () => {
-							if (!this.pendingOfficialContentTakeoverConfirm) {
-								this.pendingOfficialContentTakeoverConfirm = true;
+							if (!this.pendingOfficialContentArchiveConfirm) {
+								this.pendingOfficialContentArchiveConfirm = true;
 								this.display();
 								return;
 							}
-							const result = await this.host.legacyFridayRootMigrationService.confirmDestructiveTakeover({
-								ownedTopLevelPaths: this.getOfficialContentOwnedTopLevelPaths(),
-							});
-							this.pendingOfficialContentTakeoverConfirm = false;
-							await this.host.officialContentService.applySubscriptions();
-							await this.refreshOfficialContentGuardState();
-							new Notice(
-								this.t("settings.subscriptions.legacy.takeoverSuccess", "已删除 {count} 个历史路径并接管 F.R.I.D.A.Y。", {
-									count: result.removedPaths.length,
-								}),
-								4000,
-							);
-							this.display();
+							try {
+								const result = await this.host.legacyFridayRootMigrationService.archiveVisibleLegacyRoot();
+								this.pendingOfficialContentArchiveConfirm = false;
+								await this.host.officialContentService.applySubscriptions();
+								await this.refreshOfficialContentGuardState();
+								new Notice(
+									this.t("settings.subscriptions.legacy.archiveSuccess", "已归档旧版本文件夹：{path}。你可以稍后自行迁移其中与项目相关的信息。", {
+										path: result.archivedPath,
+									}),
+									5000,
+								);
+							} catch (error) {
+								this.pendingOfficialContentArchiveConfirm = false;
+								new Notice(
+									this.t("settings.subscriptions.legacy.archiveFailed", "归档旧版本文件夹失败：{error}", {
+										error: String(error ?? ""),
+									}),
+									6000,
+								);
+							} finally {
+								this.display();
+							}
 						}),
 				);
 		}
@@ -3189,8 +3197,6 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private renderLegacyFridayRootSection(containerEl: HTMLElement): void {
 		const report = this.legacyFridayRootReport;
-		const hasBlockingLegacyProjectContent = this.host.legacyFridayRootMigrationService.hasBlockingLegacyProjectContent(report);
-		const canCleanupSystemArtifacts = this.host.legacyFridayRootMigrationService.canCleanupSystemArtifacts(report);
 		const hasContent = this.legacyFridayRootReportLoading || (
 			report && (
 				report.registeredLegacyProjects.length > 0
@@ -3208,7 +3214,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			title: this.t("settings.project.legacy.title", "遗留 Friday 根目录内容"),
 			description: this.t(
 				"settings.project.legacy.desc",
-				"盘点仍留在 F.R.I.D.A.Y 下的旧项目、个人目录与过时镜像；可导入像项目的目录，并仅清理安全的空目录和旧镜像。",
+				"检测到旧版本数据结构。F.R.I.D.A.Y/ 后续将作为订阅频道目录使用，请前往订阅频道设置归档旧版本文件夹。",
 			),
 			extraClass: "friday-project-settings-panel friday-project-legacy-panel",
 		});
@@ -3220,116 +3226,43 @@ export class FridaySettingTab extends PluginSettingTab {
 			return;
 		}
 
-		for (const project of report.registeredLegacyProjects) {
-			new Setting(group)
-				.setName(project.projectId)
-				.setDesc(
-					this.t("settings.project.legacy.registered", "已注册，但仍位于旧路径：{path}", {
-						path: project.boundaryPath,
+		const legacyProjectCount = report.registeredLegacyProjects.length + report.importableLegacyProjects.length;
+		new Setting(group)
+			.setName(this.t("settings.project.legacy.summary", "检测到的旧版本内容"))
+			.setDesc([
+				this.t("settings.project.legacy.summaryProjects", "旧项目目录：{count}", {
+					count: legacyProjectCount,
+				}),
+				this.t("settings.project.legacy.summaryPersonal", "个人目录：{count}", {
+					count: report.legacyPersonalFolders.length,
+				}),
+				this.t("settings.project.legacy.summaryAgents", "Agent 数据：{status}", {
+					status: report.hasLegacyAgentData
+						? this.t("settings.project.legacy.detected", "已检测到")
+						: this.t("settings.project.legacy.notDetected", "未检测到"),
+				}),
+				this.t("settings.project.legacy.summarySystem", "旧系统项：{count}", {
+					count: report.cleanupCandidates.length,
+				}),
+			].join(" | "));
+
+		new Setting(group)
+			.setName(this.t("settings.project.legacy.subscriptionsAction", "前往订阅频道归档旧版本文件夹"))
+			.setDesc(
+				this.t(
+					"settings.project.legacy.subscriptionsDesc",
+					"旧项目、个人和 Agent 数据不会在这里自动迁移。请在订阅频道设置中将当前 F.R.I.D.A.Y/ 改名为旧版本文件夹，再自行整理其中与项目相关的信息。",
+				),
+			)
+			.addButton((button) =>
+				button
+					.setCta()
+					.setButtonText(this.t("settings.project.legacy.subscriptionsButton", "打开订阅频道设置"))
+					.onClick(() => {
+						this.focusSection("subscriptions");
+						this.display();
 					}),
-				);
-		}
-
-		for (const candidate of report.importableLegacyProjects) {
-			new Setting(group)
-				.setName(candidate.folderPath)
-				.setDesc(
-					this.t("settings.project.legacy.importable", "可导入的遗留{source}目录，建议项目 ID：{projectId}", {
-						source: candidate.source === "projects" ? "项目" : "个人",
-						projectId: candidate.suggestedProjectId,
-					}),
-				)
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.project.legacy.import", "导入为已注册项目")).onClick(async () => {
-						const entry = await this.host.legacyFridayRootMigrationService.importLegacyProject(candidate.folderPath);
-						await this.host.upsertProject(entry);
-						await this.host.setActiveProject(entry.projectId);
-						new Notice(
-							this.t("settings.project.legacy.importSuccess", "已导入遗留项目：{project}", {
-								project: entry.projectName,
-							}),
-							3000,
-						);
-						await this.refreshLegacyFridayRootReport();
-					}),
-				);
-		}
-
-		for (const folderPath of report.legacyPersonalFolders) {
-			new Setting(group)
-				.setName(folderPath)
-				.setDesc(
-					this.t("settings.project.legacy.personal", "遗留个人目录，暂不自动迁移；如有需要，请手动整理后再导入。"),
-				);
-		}
-
-		if (report.hasLegacyAgentData) {
-			new Setting(group)
-				.setName(this.t("settings.project.legacy.agents", "遗留 Agents 目录"))
-				.setDesc(
-					this.t(
-						"settings.project.legacy.agentsDesc",
-						"检测到旧 Agent 时代的可见目录内容。完成项目/个人迁移后，可在这里一并备份并清理。",
-					),
-				);
-		}
-
-		if (report.hasLegacyAgentData || report.cleanupCandidates.length > 0) {
-			new Setting(group)
-				.setName(this.t("settings.project.legacy.cleanup", "清理可安全移除的遗留项"))
-				.setDesc(
-					hasBlockingLegacyProjectContent
-						? this.t(
-								"settings.project.legacy.cleanupBlocked",
-								"请先处理遗留项目和个人目录，再清理系统遗留目录与过时镜像。",
-						  )
-						: this.pendingLegacyFridayCleanupConfirm
-						? this.t(
-								"settings.project.legacy.cleanupConfirm",
-								"仅会删除空目录和过时镜像。再次点击才会真正执行。",
-						  )
-						: [
-								...(report.hasLegacyAgentData ? [this.t("settings.project.legacy.agents", "遗留 Agents 目录")] : []),
-								...report.cleanupCandidates,
-						  ].join(" | "),
-				)
-				.addButton((button) =>
-					button
-						.setButtonText(
-							this.pendingLegacyFridayCleanupConfirm
-								? this.t("settings.project.legacy.cleanupConfirmButton", "确认清理")
-								: this.t("settings.project.legacy.cleanup", "清理可安全移除的遗留项"),
-						)
-						.setWarning()
-						.setDisabled(!canCleanupSystemArtifacts)
-						.onClick(async () => {
-							if (!this.pendingLegacyFridayCleanupConfirm) {
-								this.pendingLegacyFridayCleanupConfirm = true;
-								this.display();
-								return;
-							}
-							let removedCount = 0;
-							if (report.hasLegacyAgentData) {
-								const cleanupResult = await this.host.legacyAgentCleanupService.cleanupLegacyAgentData();
-								removedCount += cleanupResult.removedCount;
-							}
-							const result = await this.host.legacyFridayRootMigrationService.cleanupVisibleLegacyArtifacts();
-							removedCount += result.removedPaths.length;
-							this.pendingLegacyFridayCleanupConfirm = false;
-							if (removedCount === 0) {
-								new Notice(this.t("settings.project.legacy.cleanupNoop", "没有可安全清理的遗留项。"), 3000);
-							} else {
-								new Notice(
-									this.t("settings.project.legacy.cleanupSuccess", "已清理 {count} 个遗留项。", {
-										count: removedCount,
-									}),
-									3000,
-								);
-							}
-							await this.refreshLegacyFridayRootReport();
-						}),
-				);
-		}
+			);
 	}
 
 	private getParentVaultDirectory(value: string): string {

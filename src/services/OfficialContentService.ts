@@ -131,7 +131,6 @@ export class OfficialContentService {
 				blocked: false,
 				blockingPaths: [],
 				canRefreshCatalog: true,
-				takeoverConfirmed: false,
 			};
 		if (guardState.blocked) {
 			return guardState;
