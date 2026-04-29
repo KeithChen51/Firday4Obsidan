@@ -1,0 +1,1673 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY Brand System Manual</title>
+  <style>
+    :root {
+      --graphite: #1E1F21;
+      --warm-bone: #F4F1EB;
+      --muted-teal: #4A7F7B;
+      --stone: #D9D5CA;
+      --accent: #E07A5F;
+      --paper: #FBFAF7;
+      --line: rgba(30, 31, 33, 0.13);
+      --ink-strong: rgba(30, 31, 33, 0.88);
+      --ink-body: rgba(30, 31, 33, 0.72);
+      --ink-muted: rgba(30, 31, 33, 0.58);
+      --muted: rgba(30, 31, 33, 0.62);
+      --soft: rgba(217, 213, 202, 0.46);
+      --radius: 8px;
+      --font-latin-brand: "Avenir Next", "Inter", "Segoe UI", Arial, sans-serif;
+      --font-cjk-display: "LXGW WenKai Screen", "LXGW WenKai", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STFangsong", "FangSong", serif;
+      --font-cjk-body: "LXGW WenKai Screen", "LXGW WenKai", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-cjk-ui: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-code: "SFMono-Regular", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--warm-bone);
+      color: var(--ink-body);
+      font-family: var(--font-cjk-body);
+      line-height: 1.65;
+    }
+
+    a {
+      color: inherit;
+      text-decoration-color: rgba(74, 127, 123, 0.5);
+      text-underline-offset: 4px;
+    }
+
+    a:hover {
+      text-decoration-color: var(--muted-teal);
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      align-self: start;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 28px 24px;
+      border-right: 1px solid var(--line);
+      background: rgba(244, 241, 235, 0.92);
+      overflow-y: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand img {
+      width: 42px;
+      height: auto;
+      display: block;
+    }
+
+    .brand-title {
+      margin: 0;
+      font-family: var(--font-latin-brand);
+      color: var(--graphite);
+      font-size: 16px;
+      letter-spacing: 0.28em;
+      font-weight: 650;
+    }
+
+    .brand-subtitle {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-family: var(--font-latin-brand);
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .module-index {
+      display: grid;
+      gap: 0;
+      margin-top: 22px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .module-link {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr);
+      gap: 12px;
+      padding: 13px 0;
+      color: var(--ink-muted);
+      text-decoration: none;
+      border-top: 1px solid rgba(30, 31, 33, 0.07);
+    }
+
+    .module-link:first-child {
+      border-top: 0;
+    }
+
+    .module-link:hover {
+      color: var(--graphite);
+    }
+
+    .module-number {
+      padding-top: 1px;
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .module-link strong,
+    .module-link em {
+      display: block;
+      font-style: normal;
+    }
+
+    .module-link strong {
+      color: var(--ink-strong);
+      font-size: 14px;
+      line-height: 1.35;
+      font-weight: 650;
+    }
+
+    .module-link em {
+      margin-top: 4px;
+      color: var(--ink-muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .mobile-index {
+      display: none;
+    }
+
+    .meta {
+      margin-top: auto;
+      padding-top: 24px;
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    .hero {
+      min-height: 460px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
+      gap: 44px;
+      align-items: end;
+      padding: 64px clamp(28px, 6vw, 88px);
+      border-bottom: 1px solid var(--line);
+      background: var(--warm-bone);
+    }
+
+    .kicker,
+    .section-kicker {
+      margin: 0 0 12px;
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-family: var(--font-cjk-display);
+      color: var(--graphite);
+      font-size: clamp(38px, 6vw, 78px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      font-weight: 500;
+    }
+
+    .hero-copy {
+      max-width: 720px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: clamp(16px, 1.8vw, 19px);
+    }
+
+    .hero-mark {
+      min-height: 320px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      background:
+        linear-gradient(135deg, rgba(217, 213, 202, 0.22), rgba(251, 250, 247, 0.64));
+    }
+
+    .hero-mark img {
+      width: min(64%, 270px);
+      height: auto;
+      display: block;
+    }
+
+    .content {
+      padding: 56px clamp(28px, 6vw, 88px) 80px;
+    }
+
+    section {
+      scroll-margin-top: 32px;
+      padding: 44px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h2 {
+      max-width: 760px;
+      margin: 0;
+      font-family: var(--font-cjk-display);
+      color: var(--graphite);
+      font-size: clamp(26px, 3vw, 40px);
+      line-height: 1.18;
+      letter-spacing: 0;
+      font-weight: 500;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      color: var(--ink-strong);
+      font-size: 18px;
+      line-height: 1.35;
+      font-weight: 600;
+    }
+
+    p {
+      margin: 12px 0 0;
+      color: var(--ink-body);
+    }
+
+    .lead {
+      max-width: 760px;
+      color: var(--ink-muted);
+      font-size: 16px;
+    }
+
+    .part-heading {
+      padding: 46px 0 28px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .part-heading + section {
+      padding-top: 34px;
+    }
+
+    .part-label {
+      margin: 0 0 14px;
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-size: 12px;
+      font-weight: 650;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+    }
+
+    .part-heading p {
+      max-width: 820px;
+      color: var(--ink-muted);
+      font-size: 16px;
+    }
+
+    .principle-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .philosophy-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+      gap: 28px;
+      margin-top: 24px;
+      max-width: 1080px;
+    }
+
+    .philosophy-body p {
+      color: var(--ink-body);
+      font-size: 15px;
+    }
+
+    .philosophy-note {
+      align-self: start;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+
+    .philosophy-note strong {
+      display: block;
+      margin-bottom: 10px;
+      color: var(--graphite);
+      font-family: var(--font-latin-brand);
+      font-size: 12px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .philosophy-note p {
+      margin-top: 8px;
+      color: var(--ink-muted);
+      font-size: 14px;
+    }
+
+    .principle {
+      min-height: 180px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+
+    .principle h3 {
+      font-family: var(--font-cjk-display);
+      font-size: 21px;
+      font-weight: 500;
+    }
+
+    .asset-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .asset-card {
+      min-height: 300px;
+      display: grid;
+      grid-template-rows: 150px auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    .asset-preview {
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--warm-bone);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .asset-preview.dark {
+      background: var(--graphite);
+    }
+
+    .asset-preview.stone {
+      background: var(--stone);
+    }
+
+    .asset-preview img {
+      max-width: 82%;
+      max-height: 106px;
+      display: block;
+    }
+
+    .asset-body {
+      padding: 16px;
+    }
+
+    .asset-body p {
+      color: var(--ink-body);
+      font-weight: 400;
+    }
+
+    .asset-file {
+      display: inline-block;
+      margin-top: 10px;
+      color: var(--muted-teal);
+      font-size: 12px;
+      font-family: var(--font-code);
+      word-break: break-all;
+    }
+
+    .usage-table,
+    .spec-table {
+      width: 100%;
+      margin-top: 24px;
+      border-collapse: collapse;
+      border-top: 1px solid var(--line);
+      color: var(--ink-body);
+      font-size: 14px;
+    }
+
+    .usage-table th,
+    .usage-table td,
+    .spec-table th,
+    .spec-table td {
+      padding: 14px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .usage-table th,
+    .spec-table th {
+      width: 22%;
+      color: var(--ink-muted);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+
+    .rule-grid,
+    .color-grid,
+    .dos-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .type-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .rule,
+    .color,
+    .do-card,
+    .type-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 20px;
+    }
+
+    .type-card {
+      min-height: 210px;
+    }
+
+    .type-sample {
+      margin: 0 0 16px;
+      line-height: 1.15;
+      color: var(--graphite);
+    }
+
+    .type-sample.latin {
+      font-family: var(--font-latin-brand);
+      font-size: 30px;
+      font-weight: 600;
+      letter-spacing: 0.24em;
+    }
+
+    .type-sample.display {
+      font-family: var(--font-cjk-display);
+      font-size: 34px;
+      font-weight: 500;
+    }
+
+    .type-sample.ui {
+      font-family: var(--font-cjk-ui);
+      font-size: 24px;
+      font-weight: 500;
+    }
+
+    .type-sample.code {
+      font-family: var(--font-code);
+      font-size: 18px;
+      color: var(--muted-teal);
+    }
+
+    .color {
+      display: grid;
+      grid-template-columns: 86px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+      min-height: 124px;
+    }
+
+    .swatch {
+      width: 86px;
+      height: 86px;
+      border: 1px solid var(--line);
+    }
+
+    .swatch.graphite {
+      background: var(--graphite);
+    }
+
+    .swatch.bone {
+      background: var(--warm-bone);
+    }
+
+    .swatch.teal {
+      background: var(--muted-teal);
+    }
+
+    .swatch.stone {
+      background: var(--stone);
+    }
+
+    .swatch.accent {
+      background: var(--accent);
+    }
+
+    .code {
+      margin-top: 6px;
+      color: var(--muted-teal);
+      font-family: var(--font-code);
+      font-size: 13px;
+    }
+
+    .strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      margin-top: 28px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--paper);
+    }
+
+    .size-cell {
+      min-height: 160px;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      border-right: 1px solid var(--line);
+    }
+
+    .size-cell:last-child {
+      border-right: 0;
+    }
+
+    .size-cell figure {
+      margin: 0;
+      text-align: center;
+    }
+
+    .size-cell img {
+      display: block;
+      margin: 0 auto 14px;
+      height: auto;
+    }
+
+    .size-16 {
+      width: 16px;
+    }
+
+    .size-24 {
+      width: 24px;
+    }
+
+    .size-32 {
+      width: 32px;
+    }
+
+    .size-120 {
+      width: 120px;
+    }
+
+    figcaption {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .sample-band {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .sample {
+      min-height: 220px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      padding: 28px;
+    }
+
+    .sample.dark {
+      background: var(--graphite);
+    }
+
+    .sample img {
+      max-width: min(80%, 360px);
+      max-height: 140px;
+      display: block;
+    }
+
+    .manual-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 28px;
+    }
+
+    .manual-card {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+    }
+
+    .manual-card.featured {
+      grid-column: 1 / -1;
+    }
+
+    .manual-shot {
+      position: relative;
+      aspect-ratio: 16 / 10;
+      overflow: hidden;
+      background: var(--stone);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .manual-card.featured .manual-shot {
+      aspect-ratio: 16 / 9;
+    }
+
+    .manual-shot > img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+
+    .shot-watermark {
+      position: absolute;
+      left: clamp(14px, 2.4vw, 28px);
+      bottom: clamp(14px, 2.4vw, 28px);
+      width: clamp(104px, 12vw, 154px);
+      padding: 8px 10px;
+      border: 1px solid rgba(244, 241, 235, 0.16);
+      border-radius: 6px;
+      background: rgba(30, 31, 33, 0.76);
+      box-shadow: 0 8px 22px rgba(30, 31, 33, 0.16);
+      backdrop-filter: blur(8px);
+    }
+
+    .shot-watermark img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .manual-copy {
+      padding: 16px 18px 18px;
+    }
+
+    .manual-copy p {
+      color: var(--ink-body);
+    }
+
+    .incorrect-board {
+      margin-top: 28px;
+      padding: 26px 8px 24px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .incorrect-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 26px 22px;
+    }
+
+    .incorrect-item {
+      min-height: 170px;
+      display: grid;
+      grid-template-rows: 104px auto;
+      justify-items: center;
+      align-items: end;
+      text-align: center;
+      color: var(--ink-muted);
+    }
+
+    .incorrect-mark {
+      position: relative;
+      width: 132px;
+      height: 104px;
+      display: grid;
+      place-items: center;
+    }
+
+    .incorrect-mark::after {
+      content: "";
+      position: absolute;
+      left: 24px;
+      top: 12px;
+      width: 94px;
+      height: 1px;
+      background: rgba(30, 31, 33, 0.34);
+      transform: rotate(-47deg);
+      transform-origin: center;
+    }
+
+    .incorrect-mark img {
+      display: block;
+      width: 74px;
+      height: auto;
+    }
+
+    .incorrect-mark.logo {
+      width: 186px;
+    }
+
+    .incorrect-mark.logo::after {
+      left: 42px;
+      width: 120px;
+    }
+
+    .incorrect-mark.stretch img {
+      transform: skewX(-7deg) scaleX(1.16) scaleY(0.92);
+    }
+
+    .incorrect-mark.proportion img {
+      transform: scaleX(0.72) scaleY(1.08);
+    }
+
+    .incorrect-mark.effects img {
+      filter: blur(0.3px) drop-shadow(9px 9px 3px rgba(30, 31, 33, 0.34));
+    }
+
+    .incorrect-mark.color img {
+      filter: grayscale(1);
+      opacity: 0.48;
+    }
+
+    .incorrect-mark.rotate img {
+      transform: rotate(-13deg);
+    }
+
+    .retyped-lockup {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .incorrect-mark.logo .retyped-lockup img {
+      width: 43px;
+    }
+
+    .retyped-lockup span {
+      color: var(--graphite);
+      font-family: "Segoe UI", Arial, sans-serif;
+      font-size: 24px;
+      letter-spacing: 0.24em;
+      font-weight: 600;
+    }
+
+    .incorrect-label {
+      max-width: 154px;
+      margin: 0;
+      font-family: var(--font-cjk-ui);
+      font-size: 12px;
+      line-height: 1.55;
+      letter-spacing: 0.08em;
+      font-weight: 650;
+    }
+
+    .incorrect-note {
+      max-width: 780px;
+      margin: 0 0 24px;
+      color: var(--ink-muted);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .do-card strong {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .do-card ul {
+      margin: 0;
+      padding-left: 20px;
+      color: var(--ink-body);
+    }
+
+    .do-card li + li {
+      margin-top: 6px;
+    }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 24px;
+      padding-top: 32px;
+      color: var(--ink-muted);
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    @media (max-width: 1060px) {
+      .page {
+        display: block;
+      }
+
+      .sidebar {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .meta {
+        position: static;
+        margin-top: 24px;
+      }
+
+      .sidebar .meta {
+        display: none;
+      }
+
+      .mobile-index,
+      .philosophy-body,
+      .principle-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .sidebar .module-index {
+        display: none;
+      }
+
+      .mobile-index {
+        display: grid;
+        gap: 8px;
+        margin: 0 0 22px;
+        padding-bottom: 24px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .mobile-index .module-link {
+        min-height: 118px;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--paper);
+      }
+
+      .hero {
+        grid-template-columns: 1fr;
+        align-items: start;
+      }
+    }
+
+    @media (max-width: 820px) {
+      .asset-grid,
+      .rule-grid,
+      .color-grid,
+      .type-grid,
+      .dos-grid,
+      .incorrect-grid,
+      .manual-grid,
+      .mobile-index,
+      .philosophy-body,
+      .principle-grid,
+      .sample-band,
+      .strip {
+        grid-template-columns: 1fr;
+      }
+
+      .size-cell {
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .size-cell:last-child {
+        border-bottom: 0;
+      }
+
+      .hero {
+        padding-top: 40px;
+        min-height: auto;
+      }
+
+      .hero-mark {
+        min-height: 220px;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .sidebar,
+      .content,
+      .hero {
+        padding-left: 20px;
+        padding-right: 20px;
+      }
+
+      .color {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar" aria-label="页面目录">
+      <div class="brand">
+        <img src="../logo/friday-icon.svg" alt="FRIDAY 图标">
+        <div>
+          <p class="brand-title">FRIDAY</p>
+          <p class="brand-subtitle">Brand Guide</p>
+        </div>
+      </div>
+      <nav class="module-index" aria-label="品牌手册四大板块">
+        <a class="module-link" href="#philosophy">
+          <span class="module-number">01</span>
+          <span>
+            <strong>设计理念</strong>
+            <em>产品哲学、框架结构和用户主权。</em>
+          </span>
+        </a>
+        <a class="module-link" href="#standards">
+          <span class="module-number">02</span>
+          <span>
+            <strong>VI 规范</strong>
+            <em>字体、颜色、几何、尺寸和错误用法。</em>
+          </span>
+        </a>
+        <a class="module-link" href="#manual">
+          <span class="module-number">03</span>
+          <span>
+            <strong>视觉手册</strong>
+            <em>真实场景、周边物料和水印规则。</em>
+          </span>
+        </a>
+        <a class="module-link" href="#catalog">
+          <span class="module-number">04</span>
+          <span>
+            <strong>资产目录</strong>
+            <em>标准 SVG、导出源和使用索引。</em>
+          </span>
+        </a>
+      </nav>
+      <p class="meta">Double Shell Frame · SVG Source Set</p>
+    </aside>
+
+    <main>
+      <header class="hero" id="overview">
+        <div>
+          <p class="kicker">FRIDAY Brand System Manual</p>
+          <h1>品牌系统手册</h1>
+          <p class="hero-copy">这份手册按照设计理念、VI 规范、视觉手册、资产目录四个板块组织 FRIDAY 的品牌系统。它先说明为什么这样设计，再定义如何长期使用，接着展示真实场景，最后集中收纳可交付资产。</p>
+        </div>
+        <div class="hero-mark" aria-label="FRIDAY 横向组合展示">
+          <img src="../logo/friday-logo.svg" alt="FRIDAY 横向组合">
+        </div>
+      </header>
+
+      <div class="content">
+        <nav class="module-index mobile-index" aria-label="品牌手册四大板块">
+          <a class="module-link" href="#philosophy">
+            <span class="module-number">01</span>
+            <span>
+              <strong>设计理念</strong>
+              <em>产品哲学、Double Shell Frame、F 融入框架和用户主权。</em>
+            </span>
+          </a>
+          <a class="module-link" href="#standards">
+            <span class="module-number">02</span>
+            <span>
+              <strong>VI 规范</strong>
+              <em>结构、圆角、留白、尺寸、颜色、字体和 Obsidian 内部规则。</em>
+            </span>
+          </a>
+          <a class="module-link" href="#manual">
+            <span class="module-number">03</span>
+            <span>
+              <strong>视觉手册</strong>
+              <em>真实摄影质感的杯子、帆布袋、笔记本、贴纸和胸针场景。</em>
+            </span>
+          </a>
+          <a class="module-link" href="#catalog">
+            <span class="module-number">04</span>
+            <span>
+              <strong>资产目录</strong>
+              <em>标准 SVG、用途分组、浅色/深色预览和推荐使用场景。</em>
+            </span>
+          </a>
+        </nav>
+
+        <div class="part-heading" id="philosophy">
+          <p class="part-label">Part 01 · Design Philosophy</p>
+          <h2>设计理念</h2>
+          <p>这一板块说明 FRIDAY 为什么采用 Double Shell Frame、为什么让 F 融入框架，以及这套视觉语言如何对应本地知识、上下文收拢和用户主权。</p>
+        </div>
+
+        <section>
+          <p class="section-kicker">Core Principle</p>
+          <h2>复杂能力退到背后，用户始终掌控。</h2>
+          <p class="lead">FRIDAY 是一个以 Obsidian 为中心的本地 AI 工作伙伴。它不试图成为另一个需要用户迁就的新系统，而是尽量消失在已有工作流里，帮助用户收拢上下文、整理知识、减少重复摩擦，并在需要时提供稳定、克制、可解释的协助。</p>
+          <div class="philosophy-body">
+            <div>
+              <p>FRIDAY 的视觉识别不是为了证明“AI 很强”，而是为了表达“工作可以更从容”。它要服务的是长时间写作、整理、检索、复盘和执行，而不是一次性的视觉冲击。因此它避免强烈的 AI 光效、拟人化主脑、赛博符号和过度未来感，转而用稳定几何、低饱和色彩和清晰比例传达一种可以长期共处的产品气质。</p>
+              <p>在产品关系上，FRIDAY 不是替用户做决定的代理人，也不是独立于 Obsidian 之外的第二套工作系统。它更像一个长期在场的工作层：理解用户已有的笔记结构，记住必要上下文，处理重复和低价值摩擦，并把判断权、控制权和最终决策权留给用户。视觉上的克制，正是在强调这种边界感。</p>
+              <p>Double Shell Frame 的双层框架承载了这层产品哲学。外层像一个稳定保护壳，代表本地优先、版本管理、知识边界和长期可靠性；内层像一个被妥善组织的工作空间，代表笔记、项目、任务和对话之间的自然衔接。两个框架并不是装饰性的叠影，而是前台体验与后台能力之间的关系模型。</p>
+              <p>标志中的 F 从前景框架中自然形成，不是单独塞入矩形里的字母。这一点很重要：FRIDAY 的价值不在于把一个高调品牌符号压到用户工作台上，而在于把混乱信息压缩成可理解的结构。F 的形成方式对应了产品的工作方式：在结构里生成识别，在秩序中降低认知负担。</p>
+              <p>这套 VI 的长期目标，是让 FRIDAY 在插件侧边栏、笔记页、对话窗口、文档封面和真实物料中保持同一种性格：安静但可识别，专业但不冰冷，有能力但不表演。任何新的界面、图标、物料或宣传图，都应先回到这个判断标准。</p>
+            </div>
+            <aside class="philosophy-note">
+              <strong>Brand Position</strong>
+              <p>FRIDAY 是协作者，不是替用户做决定的代理人。</p>
+              <p>FRIDAY 是系统入口，不是炫技舞台。</p>
+              <p>FRIDAY 是本地知识伙伴，不是云端黑箱。</p>
+            </aside>
+          </div>
+          <table class="spec-table">
+            <tbody>
+              <tr>
+                <th>产品定位</th>
+                <td>本地 AI 工作伙伴，围绕 Obsidian 的笔记、项目、任务和上下文运行，不要求用户迁移到新的工作系统。</td>
+              </tr>
+              <tr>
+                <th>视觉翻译</th>
+                <td>双层框架表达“前台轻、后台深”：外壳保护复杂能力，内核承接用户实际工作空间，F 从结构中生成。</td>
+              </tr>
+              <tr>
+                <th>情绪基调</th>
+                <td>安静、可靠、克制、可解释。避免炫技、神秘化、强代理感和过度未来感。</td>
+              </tr>
+              <tr>
+                <th>使用判断</th>
+                <td>当一个设计选择让 FRIDAY 变得更吵、更像接管者、更像通用 AI 工具时，应回退到更低侵入、更清晰、更稳定的表达。</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="principle-grid">
+            <article class="principle">
+              <h3>安静在场</h3>
+              <p>FRIDAY 不以强势代理人的姿态接管工作，而是在需要时提供上下文、整理和执行支持。</p>
+            </article>
+            <article class="principle">
+              <h3>双层结构</h3>
+              <p>外层像保护壳，内层像被组织好的工作空间，表达前台轻、后台深的产品结构。</p>
+            </article>
+            <article class="principle">
+              <h3>F 融入框架</h3>
+              <p>F 不是单独放入框内的字母，而是从框架中自然形成，象征把混乱信息压缩成结构。</p>
+            </article>
+            <article class="principle">
+              <h3>用户主权</h3>
+              <p>视觉保持克制，是为了强调 FRIDAY 辅助判断而不替代判断，始终把控制权留给用户。</p>
+            </article>
+          </div>
+        </section>
+
+        <div class="part-heading" id="standards">
+          <p class="part-label">Part 02 · VI Standards</p>
+          <h2>VI 规范</h2>
+          <p>这一板块收拢 FRIDAY 的严谨规则：Obsidian 插件内露出、字体、颜色、几何结构、尺寸留白、背景反白和错误用法。它服务于长期一致性，而不是一次性的展示效果。</p>
+        </div>
+
+        <section id="obsidian">
+          <p class="section-kicker">Obsidian Plugin Usage</p>
+          <h2>Obsidian 插件内图标与头像规范</h2>
+          <p class="lead">FRIDAY 在 Obsidian 中应尽量安静地存在。侧边栏、页面内小图标和对话头像都使用紧凑图标，不在小尺寸环境里重复完整 Logo。品牌字样统一写作 FRIDAY，不再使用 F.R.I.D.A.Y 作为界面字标。</p>
+
+          <div class="asset-grid">
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-icon-mono.svg" alt="Obsidian 侧边栏图标"></div>
+              <div class="asset-body">
+                <h3>侧边栏 / Ribbon 图标</h3>
+                <p>使用插件内注册的 <span class="code">friday-double-shell</span> 单色图标，跟随 Obsidian 主题的 <span class="code">currentColor</span>。视觉尺寸控制在 18-20 px，不使用通用 AI 图标替代。</p>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-icon-mono.svg" alt="页面内小图标"></div>
+              <div class="asset-body">
+                <h3>页面内小图标</h3>
+                <p>用于工作台页头、页面标题、状态摘要和设置标题附近。推荐 16-22 px，和文字基线居中。旁边已有 FRIDAY 字标时，不再重复横向组合。</p>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview stone"><img src="../logo/friday-icon-mono.svg" alt="FRIDAY 对话头像"></div>
+              <div class="asset-body">
+                <h3>对话头像</h3>
+                <p>assistant 头像使用 22-28 px 圆角方形容器，内部放置单色 Double Shell 图标。圆角建议为 6 px，不使用文字、emoji 或机器人图标。</p>
+              </div>
+            </article>
+          </div>
+
+          <table class="spec-table">
+            <tbody>
+              <tr>
+                <th>插件字标</th>
+                <td>界面统一写作 <span class="code">FRIDAY</span>。工作台页头、设置标题、assistant 角色名使用 <span class="code">Avenir Next, Inter, Segoe UI, Arial, sans-serif</span>，600 字重，0.14-0.18em 字距。</td>
+              </tr>
+              <tr>
+                <th>颜色</th>
+                <td>小尺寸图标优先单色。Muted Teal 保留给选中态、状态点和系统响应，不强行放入 16-20 px 的 Ribbon 图标。</td>
+              </tr>
+              <tr>
+                <th>路径兼容</th>
+                <td><span class="code">F.R.I.D.A.Y/</span> 可以作为历史 Vault 目录或迁移兼容路径保留，但不作为新的界面品牌写法。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="typography">
+          <p class="section-kicker">Typography</p>
+          <h2>字体规范</h2>
+          <p class="lead">FRIDAY 的字体系统要同时服务两个目标：英文标识保持稳定、轻量和专业；中文表达以霞鹜文楷为主视觉，保留知识工作、笔记和长期写作的温度，同时避免在高密度产品界面里牺牲清晰度。</p>
+
+          <div class="type-grid">
+            <article class="type-card">
+              <p class="type-sample latin">FRIDAY</p>
+              <h3>英文字标</h3>
+              <p>当前 SVG 字标使用 <span class="code">Avenir Next, Inter, Segoe UI, Arial, sans-serif</span> 字体栈，设计基准是 Avenir Next。它兼具几何结构和人文曲线，和双层框架的稳定感匹配，但不会像纯几何字体那样冷硬。</p>
+            </article>
+
+            <article class="type-card">
+              <p class="type-sample display">工作可以更从容</p>
+              <h3>中文品牌标题</h3>
+              <p>推荐 <span class="code">LXGW WenKai Screen, LXGW WenKai, Noto Serif SC, Source Han Serif SC</span> 作为中文品牌标题方向。霞鹜文楷是首选，它有写作和手稿感，但结构足够克制，不会把 FRIDAY 推向书法化或装饰化。</p>
+            </article>
+
+            <article class="type-card">
+              <p class="type-sample ui">本地知识与上下文收拢</p>
+              <h3>中文正文与产品 UI</h3>
+              <p>品牌文稿和说明正文可使用 <span class="code">LXGW WenKai Screen</span>，让文字更接近笔记和知识沉淀场景。插件 UI、设置项、列表和表格仍使用现代无衬线，优先保证密度、速度和 Obsidian 内部一致性。</p>
+            </article>
+
+            <article class="type-card">
+              <p class="type-sample code">logo/friday-icon.svg</p>
+              <h3>代码与文件名</h3>
+              <p>路径、版本号、代码和文件名使用 <span class="code">SFMono-Regular, Cascadia Mono, Consolas, Liberation Mono, monospace</span>。等宽字体只用于技术信息，不作为品牌气质主来源。</p>
+            </article>
+          </div>
+
+          <table class="spec-table">
+            <tbody>
+              <tr>
+                <th>正式字标</th>
+                <td>当前 SVG 仍是文本层，设备没有 Avenir Next 时会回退。正式发布、印刷、官网主视觉和应用商店物料建议把 FRIDAY 字标转为轮廓。</td>
+              </tr>
+              <tr>
+                <th>中文标题</th>
+                <td>霞鹜文楷为首选，用于品牌页、文档封面、VI 标准页和少量强调语句。字号较小时优先使用 Screen 版本。</td>
+              </tr>
+              <tr>
+                <th>中文正文</th>
+                <td>品牌叙述、视觉手册正文可使用霞鹜文楷 Screen。插件内部 UI 继续使用现代无衬线，Windows 默认环境可以回退到 Microsoft YaHei UI，但不作为品牌标题首选。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="color">
+          <p class="section-kicker">Color</p>
+          <h2>颜色规范</h2>
+          <p class="lead">FRIDAY 的色彩应该保持克制。Graphite 提供专业和稳定感，但不应该作为所有正文的满值默认色。普通说明文字使用柔和墨色，Warm Bone 保留文档场景中的温度，Muted Teal 只作为理性、低侵入的功能色。</p>
+          <div class="color-grid">
+            <div class="color">
+              <div class="swatch graphite" aria-hidden="true"></div>
+              <div>
+                <h3>Graphite</h3>
+                <p>主标志、字标、正文文字和严肃界面表面。</p>
+                <p class="code">#1E1F21</p>
+              </div>
+            </div>
+            <div class="color">
+              <div class="swatch bone" aria-hidden="true"></div>
+              <div>
+                <h3>Warm Bone</h3>
+                <p>浅色背景、文档底色、反白标志主体。</p>
+                <p class="code">#F4F1EB</p>
+              </div>
+            </div>
+            <div class="color">
+              <div class="swatch teal" aria-hidden="true"></div>
+              <div>
+                <h3>Muted Teal</h3>
+                <p>状态、连接和系统响应的克制功能色。</p>
+                <p class="code">#4A7F7B</p>
+              </div>
+            </div>
+            <div class="color">
+              <div class="swatch stone" aria-hidden="true"></div>
+              <div>
+                <h3>Stone</h3>
+                <p>分隔线、辅助底色和低层级界面元素。</p>
+                <p class="code">#D9D5CA</p>
+              </div>
+            </div>
+            <div class="color">
+              <div class="swatch accent" aria-hidden="true"></div>
+              <div>
+                <h3>Accent</h3>
+                <p>少量用于重要状态或提醒，不作为主品牌色。</p>
+                <p class="code">#E07A5F</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="geometry">
+          <p class="section-kicker">Geometry</p>
+          <h2>几何结构与标志逻辑</h2>
+          <p class="lead">标志不是由描边搭出来的线框，而是由稳定的填充轮廓构成。这样可以减少不同浏览器、操作系统和导出工具之间的 stroke 渲染差异。</p>
+          <div class="rule-grid">
+            <div class="rule">
+              <h3>Double Shell Frame</h3>
+              <p>后方框架表达保护壳和后台能力，前方框架表达用户触达的工作空间。两个框架层叠，但不应被裁切成普通 app 方块。</p>
+            </div>
+            <div class="rule">
+              <h3>F 融入框架</h3>
+              <p>F 由前景框架和中段结构共同形成。不要额外绘制一个独立 F，也不要把 F 放进一个空框里。</p>
+            </div>
+            <div class="rule">
+              <h3>圆角逻辑</h3>
+              <p>外层轮廓采用 8 px 圆角逻辑，内部开口、框架内缘和结构切入采用 6 px 圆角逻辑。</p>
+            </div>
+            <div class="rule">
+              <h3>安全边距</h3>
+              <p>主图标使用 <span class="code">viewBox="-8 -8 128 150"</span>，紧凑源文件使用 <span class="code">viewBox="0 0 112 134"</span>。</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="size">
+          <p class="section-kicker">Size & Clear Space</p>
+          <h2>尺寸与留白</h2>
+          <p class="lead">图标最小可用尺寸为 16 px。横向组合最小建议宽度为 120 px。所有标志四周都应保留至少等于 F 中段横条高度的安全空间。</p>
+          <div class="strip">
+            <div class="size-cell">
+              <figure>
+                <img class="size-16" src="../logo/friday-favicon.svg" alt="16 px 图标示例">
+                <figcaption>16 px minimum</figcaption>
+              </figure>
+            </div>
+            <div class="size-cell">
+              <figure>
+                <img class="size-24" src="../logo/friday-icon.svg" alt="24 px 图标示例">
+                <figcaption>24 px UI</figcaption>
+              </figure>
+            </div>
+            <div class="size-cell">
+              <figure>
+                <img class="size-32" src="../logo/friday-icon.svg" alt="32 px 图标示例">
+                <figcaption>32 px preferred</figcaption>
+              </figure>
+            </div>
+            <div class="size-cell">
+              <figure>
+                <img class="size-120" src="../logo/friday-logo.svg" alt="120 px 横向组合示例">
+                <figcaption>120 px lockup</figcaption>
+              </figure>
+            </div>
+          </div>
+
+          <table class="spec-table">
+            <tbody>
+              <tr>
+                <th>图标最小尺寸</th>
+                <td>16 px 高。低于该尺寸时优先使用 `logo/friday-favicon.svg` 或单色版本。</td>
+              </tr>
+              <tr>
+                <th>产品界面尺寸</th>
+                <td>推荐 20 px 到 32 px 高，适合侧边栏、标签、工具栏和状态区域。</td>
+              </tr>
+              <tr>
+                <th>横向组合尺寸</th>
+                <td>最小建议宽度 120 px，页眉、封面和宣传图中建议使用 160 px 或更大。</td>
+              </tr>
+              <tr>
+                <th>安全空间</th>
+                <td>标志四周至少保留一个 F 中段横条高度的空白，不放文字、边框或其他图形。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section id="background">
+          <p class="section-kicker">Background</p>
+          <h2>背景与反白使用</h2>
+          <p class="lead">浅色背景使用 Graphite 主体版本，深色背景使用 Warm Bone 反白版本。Muted Teal 功能色在两种版本中都应保持一致。</p>
+          <div class="sample-band">
+            <div class="sample">
+              <img src="../logo/friday-logo.svg" alt="浅色背景横向组合">
+            </div>
+            <div class="sample dark">
+              <img src="../logo/friday-logo-reversed.svg" alt="深色背景反白横向组合">
+            </div>
+          </div>
+        </section>
+
+        <section id="incorrect">
+          <p class="section-kicker">Incorrect Usage</p>
+          <h2>错误用法</h2>
+          <div class="incorrect-board" aria-label="FRIDAY 标志错误用法示例">
+            <p class="incorrect-note">以下示例说明标志使用中的常见错误。所有场景都应使用标准源文件，并保持结构、比例、颜色和字距一致；不要通过截图截取、手动排字或后期效果重新制作标志。</p>
+            <div class="incorrect-grid">
+              <figure class="incorrect-item">
+                <div class="incorrect-mark stretch" aria-hidden="true">
+                  <img src="../logo/friday-icon.svg" alt="">
+                </div>
+                <figcaption class="incorrect-label">不要拉伸或倾斜</figcaption>
+              </figure>
+              <figure class="incorrect-item">
+                <div class="incorrect-mark proportion" aria-hidden="true">
+                  <img src="../logo/friday-icon.svg" alt="">
+                </div>
+                <figcaption class="incorrect-label">不要改变比例</figcaption>
+              </figure>
+              <figure class="incorrect-item">
+                <div class="incorrect-mark effects" aria-hidden="true">
+                  <img src="../logo/friday-icon.svg" alt="">
+                </div>
+                <figcaption class="incorrect-label">不要添加阴影或特效</figcaption>
+              </figure>
+              <figure class="incorrect-item">
+                <div class="incorrect-mark color" aria-hidden="true">
+                  <img src="../logo/friday-icon.svg" alt="">
+                </div>
+                <figcaption class="incorrect-label">不要使用非标准色</figcaption>
+              </figure>
+              <figure class="incorrect-item">
+                <div class="incorrect-mark rotate" aria-hidden="true">
+                  <img src="../logo/friday-icon.svg" alt="">
+                </div>
+                <figcaption class="incorrect-label">不要旋转标志</figcaption>
+              </figure>
+              <figure class="incorrect-item">
+                <div class="incorrect-mark logo" aria-hidden="true">
+                  <div class="retyped-lockup">
+                    <img src="../logo/friday-icon-tight.svg" alt="">
+                    <span>FRIDAY</span>
+                  </div>
+                </div>
+                <figcaption class="incorrect-label">不要重绘或重新排字</figcaption>
+              </figure>
+            </div>
+          </div>
+        </section>
+
+        <section id="export">
+          <p class="section-kicker">Export</p>
+          <h2>导出与交付建议</h2>
+          <table class="usage-table">
+            <thead>
+              <tr>
+                <th>目标格式</th>
+                <th>来源文件</th>
+                <th>建议尺寸</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>PNG UI 图标</td>
+                <td><a href="../logo/friday-icon.svg">logo/friday-icon.svg</a></td>
+                <td>16 px、20 px、24 px、32 px、48 px，按 1x、2x、3x 导出。</td>
+              </tr>
+              <tr>
+                <td>Favicon</td>
+                <td><a href="../logo/friday-favicon.svg">logo/friday-favicon.svg</a></td>
+                <td>16 px、32 px、48 px，可进一步生成 ICO。</td>
+              </tr>
+              <tr>
+                <td>Touch icon</td>
+                <td><a href="../logo/friday-app-tile-rounded.svg">logo/friday-app-tile-rounded.svg</a></td>
+                <td>180 px、256 px、512 px。</td>
+              </tr>
+              <tr>
+                <td>文档与官网</td>
+                <td><a href="../logo/friday-logo.svg">logo/friday-logo.svg</a> / <a href="../logo/friday-logo-reversed.svg">logo/friday-logo-reversed.svg</a></td>
+                <td>优先直接使用 SVG，只有在平台不支持时再导出 PNG。</td>
+              </tr>
+              <tr>
+                <td>插件市场</td>
+                <td><a href="../logo/friday-plugin-tile-square.svg">logo/friday-plugin-tile-square.svg</a></td>
+                <td>256 px、512 px、1024 px。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="part-heading" id="manual">
+          <p class="part-label">Part 03 · Visual Manual</p>
+          <h2>视觉手册</h2>
+          <p>这一板块展示 Logo 在具体场景中的使用模拟。图片由 image-gen 生成场景气氛和物料背景，再用 FRIDAY SVG 与水印规则统一品牌识别，避免让生成模型直接决定最终 Logo 细节。</p>
+        </div>
+
+        <section id="manual-scenes">
+          <p class="section-kicker">Visual Manual</p>
+          <h2>周边与真实场景使用模拟</h2>
+          <p class="lead">视觉手册图片用于展示 FRIDAY 在真实物料中的存在方式：清晰、克制、低侵入。所有场景图左下角统一添加品牌水印，水印只承担归属提示，不参与主体构图，也不遮挡产品上的主标志。</p>
+
+          <div class="manual-grid">
+            <article class="manual-card featured">
+              <div class="manual-shot">
+                <img src="../visual-manual/originals/friday-merch-mug-black-white.png" alt="FRIDAY 黑白马克杯周边模拟">
+                <span class="shot-watermark" aria-label="FRIDAY 品牌水印"><img src="../logo/friday-logo-reversed.svg" alt=""></span>
+              </div>
+              <div class="manual-copy">
+                <h3>黑白马克杯</h3>
+                <p>用于展示浅色与 Graphite 深色载体上的反差关系。杯身主标志保持印刷真实感，左下角水印用于视觉手册归档。</p>
+              </div>
+            </article>
+
+            <article class="manual-card">
+              <div class="manual-shot">
+                <img src="../visual-manual/originals/friday-merch-canvas-tote.png" alt="FRIDAY 帆布袋周边模拟">
+                <span class="shot-watermark" aria-label="FRIDAY 品牌水印"><img src="../logo/friday-logo-reversed.svg" alt=""></span>
+              </div>
+              <div class="manual-copy">
+                <h3>帆布袋</h3>
+                <p>适合品牌活动、线下交流和轻量周边。图像应保留织物纹理和自然褶皱，避免过度商业广告感。</p>
+              </div>
+            </article>
+
+            <article class="manual-card">
+              <div class="manual-shot">
+                <img src="../visual-manual/originals/friday-merch-notebook.png" alt="FRIDAY 笔记本周边模拟">
+                <span class="shot-watermark" aria-label="FRIDAY 品牌水印"><img src="../logo/friday-logo-reversed.svg" alt=""></span>
+              </div>
+              <div class="manual-copy">
+                <h3>笔记本</h3>
+                <p>对应知识沉淀、写作和项目记录场景。封面标志宜小而稳定，保留足够留白。</p>
+              </div>
+            </article>
+
+            <article class="manual-card">
+              <div class="manual-shot">
+                <img src="../visual-manual/originals/friday-merch-laptop-sticker.png" alt="FRIDAY 笔记本电脑贴纸模拟">
+                <span class="shot-watermark" aria-label="FRIDAY 品牌水印"><img src="../logo/friday-logo-reversed.svg" alt=""></span>
+              </div>
+              <div class="manual-copy">
+                <h3>MacBook 贴纸</h3>
+                <p>适合开发者工作流和本地工具语境。贴纸可使用 Warm Bone 底与 Graphite 图形，Muted Teal 保留为细节识别。</p>
+              </div>
+            </article>
+
+            <article class="manual-card">
+              <div class="manual-shot">
+                <img src="../visual-manual/originals/friday-merch-enamel-pin.png" alt="FRIDAY 胸针周边模拟">
+                <span class="shot-watermark" aria-label="FRIDAY 品牌水印"><img src="../logo/friday-logo-reversed.svg" alt=""></span>
+              </div>
+              <div class="manual-copy">
+                <h3>胸针</h3>
+                <p>小尺寸周边优先使用图标本体，不强行放入完整字标。背卡可出现 FRIDAY 字样，保持材质和比例清晰。</p>
+              </div>
+            </article>
+          </div>
+
+          <table class="spec-table">
+            <tbody>
+              <tr>
+                <th>水印位置</th>
+                <td>统一放在图片左下角，距离图片边缘约 2%-3% 宽度，不贴边，不压住主体产品或主标志。</td>
+              </tr>
+              <tr>
+                <th>水印尺寸</th>
+                <td>横向组合宽度约为图片宽度的 10%-14%，最小 104 px，最大 154 px。移动端可按容器等比缩放。</td>
+              </tr>
+              <tr>
+                <th>水印样式</th>
+                <td>使用反白横向组合放入半透明 Graphite 底板，底板圆角 6 px，透明度保持克制，确保在浅色和复杂照片上都可读。</td>
+              </tr>
+              <tr>
+                <th>交付文件</th>
+                <td><span class="code">visual-manual/originals/</span> 保留无水印原图，<span class="code">visual-manual/watermarked/</span> 提供已烘焙官方水印的 PNG，可直接用于 PPT、PDF、发布图和外部文档。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <div class="part-heading" id="catalog">
+          <p class="part-label">Part 04 · Asset Catalog</p>
+          <h2>资产目录</h2>
+          <p>这一板块保留标准 SVG 源文件和使用索引，作为后续 PNG、ICO、ICNS、应用图标、文档物料和外部发布图的源头。日常使用优先查这里。</p>
+        </div>
+
+        <section id="assets">
+          <p class="section-kicker">Logo Source Set</p>
+          <h2>Logo SVG 资产</h2>
+          <p class="lead">所有 SVG 都放在当前目录中，作为后续 PNG、ICO、ICNS、应用图标和文档物料的唯一源文件。优先使用下列标准文件，不要从截图或旧版本中重新裁切。</p>
+
+          <div class="asset-grid">
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-icon.svg" alt="主图标"></div>
+              <div class="asset-body">
+                <h3>主图标</h3>
+                <p>用于侧边栏、标题栏、插件列表、系统入口等场景。已包含安全边距。</p>
+                <a class="asset-file" href="../logo/friday-icon.svg">logo/friday-icon.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview dark"><img src="../logo/friday-icon-reversed.svg" alt="反白主图标"></div>
+              <div class="asset-body">
+                <h3>反白主图标</h3>
+                <p>用于 Graphite 或其他深色背景。文件本身透明，不内置背景。</p>
+                <a class="asset-file" href="../logo/friday-icon-reversed.svg">logo/friday-icon-reversed.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-icon-mono.svg" alt="单色图标"></div>
+              <div class="asset-body">
+                <h3>单色图标</h3>
+                <p>用于单色印刷、小尺寸系统栏或无法稳定显示功能色的环境。</p>
+                <a class="asset-file" href="../logo/friday-icon-mono.svg">logo/friday-icon-mono.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-logo.svg" alt="横向组合"></div>
+              <div class="asset-body">
+                <h3>默认横向组合</h3>
+                <p>用于文档页眉、官网区域、发布物料和需要明确品牌名称的位置。</p>
+                <a class="asset-file" href="../logo/friday-logo.svg">logo/friday-logo.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview dark"><img src="../logo/friday-logo-reversed.svg" alt="反白横向组合"></div>
+              <div class="asset-body">
+                <h3>反白横向组合</h3>
+                <p>用于深色表面、深色封面和反白品牌区域。不要直接放到浅色底上。</p>
+                <a class="asset-file" href="../logo/friday-logo-reversed.svg">logo/friday-logo-reversed.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-logo-stacked.svg" alt="上下组合"></div>
+              <div class="asset-body">
+                <h3>上下组合</h3>
+                <p>用于方形构图、封面、竖向物料和横向组合过宽的场景。</p>
+                <a class="asset-file" href="../logo/friday-logo-stacked.svg">logo/friday-logo-stacked.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview"><img src="../logo/friday-favicon.svg" alt="Favicon"></div>
+              <div class="asset-body">
+                <h3>浏览器标签图标</h3>
+                <p>用于 favicon、标签页、浏览器书签和极小尺寸 UI。</p>
+                <a class="asset-file" href="../logo/friday-favicon.svg">logo/friday-favicon.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview stone"><img src="../logo/friday-app-tile-rounded.svg" alt="圆角 App Tile"></div>
+              <div class="asset-body">
+                <h3>圆角 App Tile</h3>
+                <p>用于桌面入口、启动器、安装图标和 touch icon 源文件。</p>
+                <a class="asset-file" href="../logo/friday-app-tile-rounded.svg">logo/friday-app-tile-rounded.svg</a>
+              </div>
+            </article>
+
+            <article class="asset-card">
+              <div class="asset-preview stone"><img src="../logo/friday-plugin-tile-square.svg" alt="方形 Plugin Tile"></div>
+              <div class="asset-body">
+                <h3>方形 Plugin Tile</h3>
+                <p>用于插件市场、仓库封面、列表卡片和固定方形容器。</p>
+                <a class="asset-file" href="../logo/friday-plugin-tile-square.svg">logo/friday-plugin-tile-square.svg</a>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="when">
+          <p class="section-kicker">Usage Map</p>
+          <h2>不同场景应该使用哪个文件</h2>
+          <table class="usage-table">
+            <thead>
+              <tr>
+                <th>场景</th>
+                <th>推荐资产</th>
+                <th>使用说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>产品界面内导航</td>
+                <td><a href="../logo/friday-icon.svg">logo/friday-icon.svg</a></td>
+                <td>当界面附近已经出现 FRIDAY 名称时，图标版本更轻，不会抢占工作内容。</td>
+              </tr>
+              <tr>
+                <td>文档封面与页眉</td>
+                <td><a href="../logo/friday-logo.svg">logo/friday-logo.svg</a></td>
+                <td>需要明确品牌识别时使用横向组合，背景优先选择 Warm Bone、白色或浅中性色。</td>
+              </tr>
+              <tr>
+                <td>深色品牌区域</td>
+                <td><a href="../logo/friday-logo-reversed.svg">logo/friday-logo-reversed.svg</a></td>
+                <td>将反白版本放在 Graphite 或足够深的背景上，保持 Muted Teal 方块不变。</td>
+              </tr>
+              <tr>
+                <td>应用图标</td>
+                <td><a href="../logo/friday-app-tile-rounded.svg">logo/friday-app-tile-rounded.svg</a></td>
+                <td>系统级图标使用 tile 版本，不要把裸图标强行裁成圆角方块。</td>
+              </tr>
+              <tr>
+                <td>插件市场与仓库封面</td>
+                <td><a href="../logo/friday-plugin-tile-square.svg">logo/friday-plugin-tile-square.svg</a></td>
+                <td>方形 tile 更适合统一网格列表，可避免外部平台自动裁切标志主体。</td>
+              </tr>
+              <tr>
+                <td>极小尺寸或单色环境</td>
+                <td><a href="../logo/friday-icon-mono.svg">logo/friday-icon-mono.svg</a></td>
+                <td>当功能色在小尺寸下不清晰，或环境只能接受单色时使用。</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+
+        <footer class="footer">
+          <span>FRIDAY Double Shell Frame</span>
+          <span>Brand system manual · Version 1.2</span>
+        </footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
+
+
+

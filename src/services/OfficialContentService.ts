@@ -3,8 +3,6 @@ import os from "os";
 import path from "path";
 import simpleGit from "simple-git";
 import {
-	OFFICIAL_CONTENT_CHANNELS_DIR,
-	OFFICIAL_CONTENT_FILES_DIR,
 	OFFICIAL_CONTENT_MANIFEST_PATH,
 	OFFICIAL_CONTENT_PROVIDER_ID,
 	OFFICIAL_CONTENT_RELEASE_BRANCH,
@@ -26,6 +24,7 @@ type OfficialContentAdapter = {
 	mkdir(path: string): Promise<void>;
 	read(path: string): Promise<string>;
 	write(path: string, data: string): Promise<void>;
+	writeBinary?(path: string, data: ArrayBuffer): Promise<void>;
 	remove(path: string): Promise<void>;
 	rmdir?(path: string, recursive: boolean): Promise<void>;
 	list?(path: string): Promise<{ files: string[]; folders: string[] }>;
@@ -214,12 +213,12 @@ export class OfficialContentService {
 
 		const availability = await this.getAvailability();
 		if (!availability.ready) {
-			return manifests;
+			throw new Error("Official content manifests cannot be loaded because Git or credentials are unavailable.");
 		}
 
 		const credential = await this.deps.getUserCredential();
 		if (!credential?.username?.trim() || !credential.token?.trim()) {
-			return manifests;
+			throw new Error("Official content manifests cannot be loaded because Git credentials are unavailable.");
 		}
 
 		const gitClient = await this.gitClientFactory(credential);
@@ -243,11 +242,11 @@ export class OfficialContentService {
 		manifest: OfficialContentChannelManifest | null,
 	): Promise<void> {
 		if (!manifest) {
-			return;
+			throw new Error(`Official content manifest is unavailable for ${entry.id}.`);
 		}
 		const column = manifest.columns.find((item) => item.id === entry.id);
 		if (!column) {
-			return;
+			throw new Error(`Official content manifest does not contain catalog entry: ${entry.id}.`);
 		}
 
 		const expectedFiles = new Map<string, OfficialContentFileBlob>();
@@ -272,20 +271,21 @@ export class OfficialContentService {
 		}
 
 		const onlyFile = column.files[0];
-		if (onlyFile) {
-			await this.writeRemoteBlob(onlyFile);
+		if (!onlyFile) {
+			throw new Error(`Official content catalog entry has no file to apply: ${entry.id}.`);
 		}
+		await this.writeRemoteBlob(onlyFile);
 	}
 
 	private async writeRemoteBlob(file: OfficialContentFileBlob): Promise<void> {
 		const availability = await this.getAvailability();
 		if (!availability.ready) {
-			return;
+			throw new Error(`Official content blob cannot be written because Git or credentials are unavailable: ${file.path}`);
 		}
 
 		const credential = await this.deps.getUserCredential();
 		if (!credential?.username?.trim() || !credential.token?.trim()) {
-			return;
+			throw new Error(`Official content blob cannot be written because Git credentials are unavailable: ${file.path}`);
 		}
 
 		const gitClient = await this.gitClientFactory(credential);
@@ -296,6 +296,14 @@ export class OfficialContentService {
 			const content = await gitClient.readText("FETCH_HEAD", file.blobPath);
 			const targetPath = normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${file.path}`);
 			await this.ensureDirectory(path.posix.dirname(targetPath));
+			if (file.encoding === "base64") {
+				if (typeof this.deps.adapter.writeBinary !== "function") {
+					throw new Error(`Official content asset requires binary write support: ${file.path}`);
+				}
+				const bytes = Buffer.from(content.trim(), "base64");
+				await this.deps.adapter.writeBinary(targetPath, toExactArrayBuffer(bytes));
+				return;
+			}
 			await this.deps.adapter.write(targetPath, content);
 		} finally {
 			await gitClient.cleanup();
@@ -408,6 +416,10 @@ function buildCatalogVersion(catalog: OfficialContentCatalogEntry[]): string {
 
 function normalizeVaultPath(value: string): string {
 	return value.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/\/$/, "");
+}
+
+function toExactArrayBuffer(buffer: Buffer): ArrayBuffer {
+	return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength) as ArrayBuffer;
 }
 
 async function createOfficialContentGitClient(credential: ProjectGitCredential): Promise<OfficialContentGitClient> {

@@ -14,18 +14,18 @@ async function loadEventRouterModule() {
 	return jiti.import(modulePath);
 }
 
-test("event router maps compile requests to runtime compile-wiki skill execution", async () => {
+test("event router blocks wiki compile requests while wiki is disabled", async () => {
 	const mod = await loadEventRouterModule();
 	const router = new mod.EventRouter();
-	const route = router.route({
-		type: "knowledge.compile_requested",
-		source: "project_action",
-		projectSlug: "demo",
-	});
-	assert.equal(route.kind, "runtime");
-	assert.equal(route.resolution.requestedSkillName, "compile-wiki");
-	assert.equal(route.resolution.invocation.request.intentType, "event");
-	assert.equal(route.resolution.invocation.request.targetId, "knowledge.compile_requested");
+	assert.throws(
+		() =>
+			router.route({
+				type: "knowledge.compile_requested",
+				source: "project_action",
+				projectSlug: "demo",
+			}),
+		/Wiki compile requests are disabled/,
+	);
 });
 
 test("event router maps conflict proposal requests to runtime resolve-conflict skill execution", async () => {

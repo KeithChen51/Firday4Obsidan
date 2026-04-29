@@ -1,12 +1,17 @@
 import { TOOL_MANIFESTS, findToolManifest, type ToolManifest } from "../../platform/tools/ToolManifestCatalog";
+import { WIKI_FEATURE_ENABLED, WIKI_INTERNAL_CAPABILITIES } from "../../constants/wikiFeature";
 import type { CapabilityDefinition, InternalCapabilityDefinition, ToolCapabilityDefinition } from "./CapabilityDefinition";
 
-const INTERNAL_CAPABILITIES: InternalCapabilityDefinition[] = [
+const ALL_INTERNAL_CAPABILITIES: InternalCapabilityDefinition[] = [
 	{ id: "knowledge.lookup", kind: "internal", userVisible: false },
 	{ id: "git.conflict.inspect", kind: "internal", userVisible: false },
 	{ id: "git.conflict.propose", kind: "internal", userVisible: false },
 	{ id: "project.compileWiki", kind: "internal", userVisible: false },
 ];
+
+const INTERNAL_CAPABILITIES: InternalCapabilityDefinition[] = ALL_INTERNAL_CAPABILITIES.filter(
+	(capability) => WIKI_FEATURE_ENABLED || !WIKI_INTERNAL_CAPABILITIES.has(capability.id),
+);
 
 export class CapabilityRegistry {
 	private static instance: CapabilityRegistry | null = null;

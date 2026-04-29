@@ -21,10 +21,10 @@ function loadBuiltinReviewNotes() {
 	return jiti.import(builtinReviewNotesModulePath);
 }
 
-test("builtin skill pack exports seven builtin skills", async () => {
+test("builtin skill pack exports five enabled builtin skills", async () => {
 	const mod = await loadBuiltinPack();
 	assert.equal(Array.isArray(mod.BUILTIN_SKILL_DEFINITIONS), true);
-	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 7);
+	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 5);
 });
 
 test("builtin skill pack contains required commands", async () => {
@@ -33,8 +33,6 @@ test("builtin skill pack contains required commands", async () => {
 	assert.deepEqual(
 		commands,
 		[
-			"compile-wiki",
-			"lookup-wiki",
 			"resolve-conflict",
 			"obsidian-cli",
 			"obsidian-markdown",
@@ -44,6 +42,13 @@ test("builtin skill pack contains required commands", async () => {
 	);
 });
 
+test("wiki builtin skills are parked and do not resolve", async () => {
+	const mod = await loadBuiltinPack();
+	assert.equal(mod.resolveBuiltinSkill("compile-wiki"), null);
+	assert.equal(mod.resolveBuiltinSkill("lookup-wiki"), null);
+	assert.equal(mod.resolveBuiltinSkill("lookup"), null);
+});
+
 test("builtin skill paths use builtin virtual path format", async () => {
 	const mod = await loadBuiltinPack();
 	for (const entry of mod.BUILTIN_SKILL_DEFINITIONS) {
@@ -51,10 +56,10 @@ test("builtin skill paths use builtin virtual path format", async () => {
 	}
 });
 
-test("builtin skill resolver supports aliases", async () => {
+test("builtin skill resolver supports enabled aliases", async () => {
 	const mod = await loadBuiltinPack();
-	const resolved = mod.resolveBuiltinSkill("lookup");
-	assert.equal(resolved?.command, "lookup-wiki");
+	const resolved = mod.resolveBuiltinSkill("obsidian-dev");
+	assert.equal(resolved?.command, "obsidian-cli");
 });
 
 test("new builtin skills resolve common aliases", async () => {

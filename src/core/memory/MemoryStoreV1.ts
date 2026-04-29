@@ -58,7 +58,7 @@ export class MemoryStoreV1 {
 		const sharedAdapter = options.fileAdapter;
 		this.globalFileAdapter = options.globalFileAdapter ?? sharedAdapter ?? this.createFsAdapter();
 		this.projectFileAdapter = options.projectFileAdapter ?? sharedAdapter ?? this.createVaultAdapter(options.vault);
-		this.matchResolver = options.matchResolver ?? this.defaultMatchResolver;
+		this.matchResolver = options.matchResolver ?? ((records, query) => this.defaultMatchResolver(records, query));
 		this.globalLimit = Math.max(16, options.globalLimit ?? 1400);
 		this.projectLimit = Math.max(16, options.projectLimit ?? 2200);
 	}

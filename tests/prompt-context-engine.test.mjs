@@ -32,7 +32,7 @@ test("prompt context engine builds runtime prompt envelope with context summary 
 		wikiKnowledgeContext: "Wiki facts",
 		memoryContext: "User memory",
 	});
-	assert.match(result.prompt, /You are F\.R\.I\.D\.A\.Y Agent Runtime\./);
+	assert.match(result.prompt, /You are FRIDAY Agent Runtime\./);
 	assert.match(result.prompt, /Current agent\.md excerpt:/);
 	assert.match(result.prompt, /--- Compact context package ---/);
 	assert.match(result.prompt, /memory: \{"action":"add\|replace\|remove","scope":"global\|project"/);

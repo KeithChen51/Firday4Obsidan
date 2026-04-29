@@ -13,6 +13,8 @@ export interface OfficialContentFileBlob {
 	path: string;
 	hash: string;
 	blobPath: string;
+	encoding?: "utf8" | "base64";
+	mediaType?: string;
 }
 
 export interface OfficialContentChannelManifest {

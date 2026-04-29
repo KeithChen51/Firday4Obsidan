@@ -1,6 +1,6 @@
 {
 	"name": "obsidian-friday-plugin",
-	"version": "0.2.9",
+	"version": "0.2.10",
 	"description": "Friday Obsidian plugin MVP",
 	"main": "main.js",
 	"type": "module",

@@ -7,6 +7,7 @@ import {
 	BUILTIN_OBSIDIAN_MARKDOWN_MARKDOWN,
 	BUILTIN_RESOLVE_CONFLICT_MARKDOWN,
 } from "./markdown";
+import { WIKI_FEATURE_ENABLED, WIKI_SKILL_COMMANDS } from "../../../constants/wikiFeature";
 
 export type BuiltinSkillTriggerMode = "auto" | "manual";
 
@@ -25,7 +26,7 @@ export interface BuiltinSkillDefinition {
 
 export const BUILTIN_SKILL_SCHEME = "builtin://";
 
-export const BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = [
+const ALL_BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = [
 	{
 		name: "Compile Wiki",
 		description: "Compile active project raw files into wiki knowledge docs and index outputs.",
@@ -111,6 +112,10 @@ export const BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = [
 		markdown: BUILTIN_OBSIDIAN_BASES_MARKDOWN,
 	},
 ];
+
+export const BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = ALL_BUILTIN_SKILL_DEFINITIONS.filter(
+	(skill) => WIKI_FEATURE_ENABLED || !WIKI_SKILL_COMMANDS.has(skill.command),
+);
 
 function normalizeToken(value: string): string {
 	return value

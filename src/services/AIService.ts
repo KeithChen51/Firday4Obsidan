@@ -16,6 +16,7 @@ export interface ChatMessage {
 	toolCallId?: string;
 	name?: string;
 	toolCalls?: ToolCall[];
+	reasoningContent?: string;
 	uiMeta?: ChatMessageUiMeta;
 }
 
@@ -84,6 +85,8 @@ interface ChatResponseBody {
 		finish_reason?: string;
 		message?: {
 			content?: string | ResponseTextPart[];
+			reasoning?: string;
+			reasoning_content?: string;
 			tool_calls?: Array<{
 				id?: string;
 				type?: string;
@@ -102,8 +105,9 @@ interface ChatResponseBody {
 
 export interface ChatWithToolsResult {
 	assistantText: string;
-	toolCall: ToolCall | null;
+	toolCalls: ToolCall[];
 	finishReason: string;
+	reasoningContent: string;
 }
 
 export type VisionCapability = "supported" | "unsupported" | "unknown";
@@ -349,19 +353,19 @@ export class AIService {
 
 		if (lower.includes("err_connection_reset") || lower.includes("econnreset")) {
 			return new Error(
-				`连接被重置（ERR_CONNECTION_RESET）。这通常是企业网络、代理、VPN 或证书链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+				`连接被重置（ERR_CONNECTION_RESET）。这通常是网络、代理、VPN 或证书链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
 			);
 		}
 
 		if (lower.includes("504") || lower.includes("gateway timeout")) {
 			return new Error(
-				`企业网关超时（504）。这通常是网关或上游模型排队超时，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+				`网关超时（504）。这通常是网关或上游模型排队超时，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
 			);
 		}
 
 		if (lower.includes("timed out") || lower.includes("timeout")) {
 			return new Error(
-				`请求超时。通常是企业网关、代理或网络链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+				`请求超时。通常是网关、代理或网络链路不稳定，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
 			);
 		}
 
@@ -370,7 +374,7 @@ export class AIService {
 		}
 
 		if (lower.includes("403") || lower.includes("forbidden")) {
-			return new Error("访问被拒绝（403）。请检查账号权限或企业网络策略。");
+			return new Error("访问被拒绝（403）。请检查账号权限或网关策略。");
 		}
 
 		if (lower.includes("404")) {
@@ -399,7 +403,7 @@ export class AIService {
 
 		if (lower.includes("500") || lower.includes("502") || lower.includes("503")) {
 			return new Error(
-				`模型服务或企业网关暂时不可用（${extractHttpStatus(error) ?? "5xx"}）。这通常是临时性网络/网关故障，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。原始错误：${raw}`,
+				`模型服务或网关暂时不可用（${extractHttpStatus(error) ?? "5xx"}）。这通常是临时性网络/网关故障，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。原始错误：${raw}`,
 			);
 		}
 
@@ -474,7 +478,7 @@ export class AIService {
 				};
 			}
 			if (item.role === "assistant" && Array.isArray(item.toolCalls) && item.toolCalls.length > 0) {
-				return {
+				const message: Record<string, unknown> = {
 					role: "assistant",
 					content: item.parts && item.parts.length > 0 ? item.parts : item.content,
 					tool_calls: item.toolCalls.map((call) => ({
@@ -486,11 +490,23 @@ export class AIService {
 						},
 					})),
 				};
+				const reasoningContent = item.reasoningContent?.trim();
+				if (reasoningContent) {
+					message.reasoning_content = reasoningContent;
+				}
+				return message;
 			}
-			return {
+			const message: Record<string, unknown> = {
 				role: item.role,
 				content: item.parts && item.parts.length > 0 ? item.parts : item.content,
 			};
+			if (item.role === "assistant") {
+				const reasoningContent = item.reasoningContent?.trim();
+				if (reasoningContent) {
+					message.reasoning_content = reasoningContent;
+				}
+			}
+			return message;
 		});
 	}
 
@@ -631,6 +647,25 @@ export class AIService {
 			return "";
 		}
 
+		throw new Error(
+			this.localizeKnownErrorMessage("LLM response has no usable message content."),
+		);
+	}
+
+	private extractReasoningContent(body: ChatResponseBody): string {
+		const message = body.choices?.[0]?.message;
+		const reasoningContent = message?.reasoning_content?.trim() || message?.reasoning?.trim() || "";
+		return reasoningContent;
+	}
+
+	private extractConnectionProbeText(body: ChatResponseBody): string {
+		const text = this.extractMessageContent(body, true).trim();
+		if (text) {
+			return text;
+		}
+		if (body.choices?.[0] || typeof body.output_text === "string" || Array.isArray(body.output)) {
+			return "";
+		}
 		throw new Error(
 			this.localizeKnownErrorMessage("LLM response has no usable message content."),
 		);
@@ -841,42 +876,44 @@ export class AIService {
 		throw this.normalizeError(lastError, endpoints[endpoints.length - 1]!, triedEndpoints);
 	}
 
-	private extractToolCall(body: ChatResponseBody): ToolCall | null {
+	private extractToolCalls(body: ChatResponseBody): ToolCall[] {
 		const toolCalls = body.choices?.[0]?.message?.tool_calls;
 		if (!Array.isArray(toolCalls) || toolCalls.length === 0) {
-			return null;
-		}
-		const first = toolCalls[0];
-		const fnName = first?.function?.name?.trim() ?? "";
-		if (!fnName) {
-			throw new Error("工具调用协议不兼容：返回的 tool_calls 缺少 function.name。");
+			return [];
 		}
 
-		const rawArgs = first?.function?.arguments?.trim() ?? "";
-		if (!rawArgs) {
+		return toolCalls.map((toolCall) => {
+			const fnName = toolCall?.function?.name?.trim() ?? "";
+			if (!fnName) {
+				throw new Error("工具调用协议不兼容：返回的 tool_calls 缺少 function.name。");
+			}
+
+			const rawArgs = toolCall?.function?.arguments?.trim() ?? "";
+			if (!rawArgs) {
+				return {
+					id: toolCall?.id,
+					name: fnName,
+					args: {},
+				};
+			}
+
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(rawArgs);
+			} catch (error) {
+				throw new Error(`工具调用协议不兼容：function.arguments 不是合法 JSON: ${String(error)}`);
+			}
+
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				throw new Error("工具参数必须是 JSON 对象。");
+			}
+
 			return {
-				id: first?.id,
+				id: toolCall?.id,
 				name: fnName,
-				args: {},
+				args: parsed as Record<string, unknown>,
 			};
-		}
-
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(rawArgs);
-		} catch (error) {
-			throw new Error(`工具调用协议不兼容：function.arguments 不是合法 JSON: ${String(error)}`);
-		}
-
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			throw new Error("工具参数必须是 JSON 对象。");
-		}
-
-		return {
-			id: first?.id,
-			name: fnName,
-			args: parsed as Record<string, unknown>,
-		};
+		});
 	}
 
 	private buildToolPayload(
@@ -960,11 +997,12 @@ export class AIService {
 					});
 					const body = response.json as ChatResponseBody;
 					const assistantText = this.extractMessageContent(body, true);
-					const toolCall = this.extractToolCall(body);
+					const toolCalls = this.extractToolCalls(body);
 					return {
 						assistantText,
-						toolCall,
+						toolCalls,
 						finishReason: body.choices?.[0]?.finish_reason ?? "",
+						reasoningContent: this.extractReasoningContent(body),
 					};
 				} catch (error) {
 					lastError = error;
@@ -987,16 +1025,66 @@ export class AIService {
 	}
 
 	async checkConnection(): Promise<string> {
-		const probe = await this.chat(
-			[
-				{
-					role: "user",
-					content: "请仅回复 OK",
-				},
-			],
-			{ maxTokens: 16 },
-		);
-		return probe.trim();
+		const config = this.getConfig();
+		const effectiveModel = config.model.trim();
+		if (!this.isConfigured()) {
+			throw new Error("LLM 尚未配置，请先在设置中填写 API 地址。");
+		}
+		if (config.mode === "group" && !effectiveModel) {
+			throw new Error("集团集采模式需要先选择模型。");
+		}
+
+		const endpoints = this.resolveEndpointCandidates(config.apiUrl);
+		if (endpoints.length === 0) {
+			throw new Error("LLM API 地址为空，请先在设置中配置。");
+		}
+
+		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);
+		const messages: ChatMessage[] = [
+			{
+				role: "user",
+				content: "Reply exactly OK.",
+			},
+		];
+		const triedEndpoints: string[] = [];
+		let lastError: unknown = null;
+
+		for (let index = 0; index < endpoints.length; index += 1) {
+			const endpoint = endpoints[index]!;
+			triedEndpoints.push(endpoint);
+			let attempt = 0;
+
+			while (true) {
+				const payload = this.buildPayload(messages, endpoint, { maxTokens: 256 });
+				try {
+					const response = await requestUrl({
+						url: endpoint,
+						method: "POST",
+						headers,
+						body: JSON.stringify(payload),
+					});
+					return this.extractConnectionProbeText(response.json as ChatResponseBody).trim();
+				} catch (error) {
+					lastError = error;
+					const status = extractHttpStatus(error);
+					const hasFallback = index < endpoints.length - 1;
+					if ((status === 404 || status === 405) && hasFallback) {
+						break;
+					}
+					if (status === 400 && this.isResponsesEndpoint(endpoint) && hasFallback) {
+						break;
+					}
+					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
+						await this.delay(getLlmRetryDelayMs(attempt));
+						attempt += 1;
+						continue;
+					}
+					throw this.normalizeError(error, endpoint, triedEndpoints);
+				}
+			}
+		}
+
+		throw this.normalizeError(lastError, endpoints[endpoints.length - 1]!, triedEndpoints);
 	}
 
 	async probeVisionCapability(): Promise<ModelCapabilityInfo> {

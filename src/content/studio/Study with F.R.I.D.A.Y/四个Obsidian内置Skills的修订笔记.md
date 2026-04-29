@@ -1,16 +1,17 @@
 ---
 title: 四个Obsidian内置Skills的修订笔记
-series: behind-the-build
+series: study-with-friday
 type: retrospective
 status: stable
-author: Keith Lim
+author: 制作组
 created: 2026-04-19
-updated: 2026-04-19
+updated: 2026-04-28
 summary: 回顾四个 Obsidian 内置 Skills 的修订动机、问题来源和这轮修改背后的设计思路。
 release_scope:
   - 0.2.5
 tags:
   - friday
+  - study-with-friday
   - backstage
   - obsidian
   - skills

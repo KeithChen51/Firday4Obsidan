@@ -69,7 +69,7 @@ test("settings tab keeps Agent as the user-facing section while exposing soul de
 	assert.match(source, /"新建 Soul"/);
 	assert.match(source, /"Soul 名称"/);
 	assert.match(source, /"保存 Soul 定义"/);
-	assert.match(source, /原生F\.R\.I\.D\.A\.Y/);
+	assert.match(source, /原生 FRIDAY/);
 	assert.match(source, /settings\.agent\.profile\.name/);
 	assert.match(source, /settings\.agent\.profile\.summary/);
 	assert.match(source, /settings\.agent\.profile\.definition/);
@@ -135,6 +135,7 @@ test("user settings only expose display name and remove user id controls", () =>
 	assert.doesNotMatch(block, /settings\.user\.autoDetect\./);
 	assert.doesNotMatch(block, /settings\.user\.userId\./);
 	assert.match(block, /settings\.user\.displayName\.name/);
+	assert.match(block, /setName\(this\.t\("settings\.user\.displayName\.name", "FRIDAY 如何称呼你"\)\)/);
 	assert.match(block, /settings\.user\.displayName\.placeholder/);
-	assert.match(block, /setPlaceholder\(this\.t\("settings\.user\.displayName\.placeholder", "F\.R\.I\.D\.A\.Y怎么称呼您"\)\)/);
+	assert.match(block, /setPlaceholder\(this\.t\("settings\.user\.displayName\.placeholder", "FRIDAY [^"]*"\)\)/);
 });

@@ -22,6 +22,7 @@ export interface ProjectEditorDraft {
 	gitToken?: string;
 	slug?: string;
 	projectRootPath?: string;
+	useVaultRootAsProject?: boolean;
 }
 
 export interface ProjectGitStateDetection {
@@ -51,11 +52,17 @@ interface NormalizedProjectDraft {
 	autoSync: boolean;
 	gitUsername: string;
 	gitToken: string;
+	useVaultRootAsProject: boolean;
 }
 
 export function buildDefaultProjectRootPath(fridayRoot: string, name: string): string {
 	const safeName = normalizeProjectRootSegment(name);
 	return normalizeVaultPath(`${fridayRoot}/${PRIMARY_PATHS.projects}/${safeName || "new-project"}`);
+}
+
+export function buildVaultRootProjectPath(name: string): string {
+	const safeName = normalizeProjectRootSegment(name);
+	return normalizeVaultPath(safeName || "new-project");
 }
 
 export function buildRemoteBootstrapDefaults(fridayRoot: string, gitRemote: string): {
@@ -118,6 +125,15 @@ export function validateProjectDraft(
 	if (!rawRoot) {
 		throw new Error("Project root is required.");
 	}
+	if (isWholeVaultProjectRoot(rawRoot)) {
+		if (!normalizedDraft.useVaultRootAsProject) {
+			throw new Error("Whole vault project root requires explicit confirmation.");
+		}
+		if (normalizedDraft.mode !== "local_only") {
+			throw new Error("Whole vault project root is only available for local projects.");
+		}
+		return;
+	}
 	if (!isVaultRelativePath(rawRoot)) {
 		throw new Error("Project root must be a Vault-relative path.");
 	}
@@ -130,7 +146,7 @@ export function validateProjectDraft(
 		isFridayManagedProjectRoot(normalizedRoot, fridayRoot) &&
 		normalizedInitialBoundaryPath !== normalizedRoot
 	) {
-		throw new Error("Project root cannot point to the Friday workspace. Choose a folder outside F.R.I.D.A.Y.");
+		throw new Error("Project root cannot point to the FRIDAY workspace. Choose a folder outside the FRIDAY workspace.");
 	}
 }
 
@@ -155,11 +171,12 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		initial?.boundaryPath ?? "",
 	);
 
-	const normalizedRoot = normalizeVaultPath(normalizedDraft.boundaryPath.trim());
+	const normalizedRoot = normalizedDraft.useVaultRootAsProject ? "/" : normalizeVaultPath(normalizedDraft.boundaryPath.trim());
 	const resolvedPath = await resolveProjectPath(app, normalizedDraft.mode, normalizedRoot);
 	let detectedBefore =
 		normalizedDraft.mode === "local_only" ? await detectProjectGitState(resolvedPath) : null;
 	const effectiveGitRemote = resolveEffectiveGitRemote(normalizedDraft, detectedBefore);
+	const normalizedCredential = normalizeProjectGitCredential(normalizedDraft);
 
 	if (normalizedDraft.mode === "local_only" && effectiveGitRemote && detectedBefore?.detectedParentRepository) {
 		throw new Error(
@@ -167,8 +184,11 @@ export async function submitProjectDraft(options: SubmitOptions): Promise<Projec
 		);
 	}
 
-	await prepareProjectDirectory(normalizedDraft, resolvedPath);
-	await persistProjectGitCredential(syncService, normalizedDraft.projectId, normalizeProjectGitCredential(normalizedDraft));
+	const bootstrapCredential = normalizedDraft.mode === "remote_bootstrap"
+		? await resolveRemoteBootstrapCredential(syncService, normalizedCredential)
+		: null;
+	await prepareProjectDirectory(normalizedDraft, resolvedPath, bootstrapCredential);
+	await persistProjectGitCredential(syncService, normalizedDraft.projectId, normalizedCredential);
 
 	if (normalizedDraft.mode === "local_only" && effectiveGitRemote) {
 		await syncService.prepareRepository({
@@ -254,6 +274,7 @@ async function resolveProjectPath(
 async function prepareProjectDirectory(
 	draft: NormalizedProjectDraft,
 	resolvedPath: string,
+	credential: ProjectGitCredential | null = null,
 ): Promise<void> {
 	if (draft.mode === "remote_bootstrap") {
 		const stat = await fs.stat(resolvedPath).catch(() => null);
@@ -262,9 +283,51 @@ async function prepareProjectDirectory(
 			throw new Error(`Remote bootstrap target must be empty: ${resolvedPath}`);
 		}
 		if (draft.gitRemote) {
-			await simpleGit().clone(draft.gitRemote, resolvedPath);
+			try {
+				await simpleGit().raw(buildRemoteBootstrapCloneArgs(draft.gitRemote, resolvedPath, credential));
+			} catch (error) {
+				throw new Error(`Remote bootstrap clone failed: ${sanitizeGitAuthError(error)}`);
+			}
 		}
 	}
+}
+
+export async function resolveRemoteBootstrapCredential(
+	syncService: SyncService | { getUserGitCredential?: () => Promise<ProjectGitCredential | null> },
+	projectCredential: ProjectGitCredential | null,
+): Promise<ProjectGitCredential | null> {
+	if (projectCredential) {
+		return projectCredential;
+	}
+	if (typeof syncService.getUserGitCredential !== "function") {
+		return null;
+	}
+	return syncService.getUserGitCredential();
+}
+
+export function buildRemoteBootstrapCloneArgs(
+	remote: string,
+	resolvedPath: string,
+	credential: ProjectGitCredential | null,
+): string[] {
+	return [
+		...buildGitAuthArgs(credential),
+		"clone",
+		remote,
+		resolvedPath,
+	];
+}
+
+function buildGitAuthArgs(credential: ProjectGitCredential | null): string[] {
+	if (!credential?.username?.trim() || !credential.token?.trim()) {
+		return [];
+	}
+	const basic = Buffer.from(`${credential.username}:${credential.token}`).toString("base64");
+	return ["-c", `http.extraheader=Authorization: Basic ${basic}`];
+}
+
+function sanitizeGitAuthError(error: unknown): string {
+	return String(error).replace(/Authorization: Basic [A-Za-z0-9+/=]+/g, "Authorization: Basic [redacted]");
 }
 
 async function persistProjectGitCredential(
@@ -279,13 +342,17 @@ async function persistProjectGitCredential(
 
 function getVaultProjectAbsolutePath(app: App, projectRootPath: string): string {
 	const vaultBasePath = getVaultBasePath(app);
+	if (isWholeVaultProjectRoot(projectRootPath)) {
+		return vaultBasePath;
+	}
 	return path.join(vaultBasePath, ...projectRootPath.split("/"));
 }
 
 function normalizeProjectDraft(draft: ProjectEditorDraft): NormalizedProjectDraft {
 	const projectId = (draft.projectId || draft.slug || "").trim().toLowerCase();
 	const projectName = (draft.projectName || draft.projectId || draft.slug || "").trim();
-	const boundaryPath = normalizeVaultPath((draft.boundaryPath || draft.projectRootPath || "").trim());
+	const useVaultRootAsProject = Boolean(draft.useVaultRootAsProject);
+	const boundaryPath = useVaultRootAsProject ? "/" : normalizeVaultPath((draft.boundaryPath || draft.projectRootPath || "").trim());
 	return {
 		groupId: draft.groupId?.trim() || "default-group",
 		mode: draft.mode ?? "local_only",
@@ -296,6 +363,7 @@ function normalizeProjectDraft(draft: ProjectEditorDraft): NormalizedProjectDraf
 		autoSync: Boolean(draft.autoSync),
 		gitUsername: draft.gitUsername?.trim() || "",
 		gitToken: draft.gitToken?.trim() || "",
+		useVaultRootAsProject,
 	};
 }
 
@@ -314,6 +382,7 @@ function applyRemoteBootstrapDraftDefaults(draft: ProjectEditorDraft, fridayRoot
 		projectName: draft.projectName?.trim() || defaults.projectName,
 		boundaryPath: draft.boundaryPath?.trim() || safeDefaultBoundaryPath,
 		projectRootPath: draft.projectRootPath?.trim() || safeDefaultBoundaryPath,
+		useVaultRootAsProject: false,
 	};
 }
 
@@ -349,6 +418,10 @@ function normalizeVaultPath(value: string): string {
 		.replace(/\/+/g, "/")
 		.replace(/^\.\//, "")
 		.replace(/\/$/, "");
+}
+
+function isWholeVaultProjectRoot(value: string): boolean {
+	return value.trim().replace(/\\/g, "/").replace(/\/+/g, "/") === "/";
 }
 
 function isVaultRelativePath(value: string): boolean {

@@ -105,6 +105,29 @@ test("settings project editor lets local mode choose an Obsidian local path from
 	assert.match(source, /this\.renderProjectEditorDropdownSetting\(\s*card,\s*this\.t\("projects\.editor\.vaultDir"/);
 	assert.match(source, /this\.listVaultDirectoryOptions\(false\)/);
 	assert.match(source, /settings\.project\.editor\.vaultDir\.localDesc/);
+	assert.match(source, /projectEditorCreateInVaultRoot/);
+	assert.match(source, /syncLocalVaultRootBoundaryPath\(draft\)/);
+	assert.match(source, /buildVaultRootProjectPath/);
+	assert.match(source, /getVaultDirectoryOptionLabel\(optionValue: string\)/);
+	assert.match(source, /filter\(\(folderPath\) => includeVaultRoot \|\| folderPath !== "\/"\)/);
+	assert.match(source, /draft\.boundaryPath\.trim\(\)\s*\?\s*this\.normalizeVaultDirectorySelectionValue\(draft\.boundaryPath\)\s*:\s*""/);
+	assert.match(source, /value === vaultRootChildSelection \|\| value === "\/"/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.rootCreate/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.rootCreatePreview/);
+	assert.match(source, /label:\s*this\.getVaultDirectoryOptionLabel\(option\)/);
+});
+
+test("settings project editor exposes whole vault only through an advanced confirmation path", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /projectEditorVaultRootConfirmPending/);
+	assert.match(source, /useVaultRootAsProject/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.wholeVault/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.wholeVaultRisk/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.wholeVaultConfirm/);
+	assert.match(source, /settings\.project\.editor\.vaultDir\.wholeVaultArmed/);
+	assert.match(source, /new Setting\(containerEl\)[\s\S]*settings\.project\.editor\.vaultDir\.wholeVault/);
+	assert.match(source, /friday-project-editor-advanced-setting/);
+	assert.doesNotMatch(source, /dropdown\.addOption\("\/",\s*this\.t\("settings\.project\.editor\.vaultDir\.wholeVault/);
 });
 
 test("settings project editor keeps remote mode on the vault folder picker flow", async () => {
@@ -113,6 +136,8 @@ test("settings project editor keeps remote mode on the vault folder picker flow"
 	assert.match(source, /private renderRemoteBootstrapDirectoryPicker\(containerEl: HTMLElement, draft: ProjectEditorDraft\): void \{/);
 	assert.match(source, /this\.listVaultDirectoryOptions\(true\)/);
 	assert.match(source, /settings\.project\.editor\.vaultDir\.remoteDesc/);
+	assert.match(source, /dropdown\.addOption\(optionValue,\s*this\.getVaultDirectoryOptionLabel\(optionValue\)\)/);
+	assert.doesNotMatch(source, /dropdown\.addOption\(optionValue,\s*optionValue\)/);
 });
 
 test("settings project editor filters Friday-managed folders out of vault directory choices", async () => {
@@ -154,9 +179,19 @@ test("project top area renders a native setting row with title description and r
 		/const panel = this\.createNativeSettingsGroup\(containerEl,\s*\{\s*extraClass: "friday-project-register-panel",?\s*\}\);/,
 	);
 	assert.match(activeBlock, /new Setting\(panel\)/);
-	assert.match(activeBlock, /setName\(this\.t\("settings\.project\.register", ".*?"\)\)/);
-	assert.match(activeBlock, /setDesc\(this\.t\("settings\.project\.register\.desc", ".*?"\)\)/);
-	assert.match(activeBlock, /settings\.project\.register/);
+	assert.match(
+		activeBlock,
+		/setName\(this\.t\("settings\.project\.workFolder\.title", "选择 FRIDAY 可以工作的文件夹"\)\)/,
+	);
+	assert.match(
+		activeBlock,
+		/setDesc\(this\.t\("settings\.project\.workFolder\.desc", "这个文件夹会作为 FRIDAY 的工作范围，用来限制读取、写入和同步边界。"\)\)/,
+	);
+	assert.match(
+		activeBlock,
+		/setButtonText\(this\.t\("settings\.project\.workFolder\.action", "选择文件夹"\)\)/,
+	);
+	assert.doesNotMatch(activeBlock, /settings\.project\.register/);
 	assert.match(activeBlock, /registerSetting\.settingEl\.addClass\("friday-project-register-row"\)/);
 	assert.doesNotMatch(activeBlock, /createEl\("select"/);
 	assert.doesNotMatch(activeBlock, /addOption/);
@@ -193,6 +228,7 @@ test("project editor only syncs derived path logic for remote mode and no longer
 	const source = readSettingsSource();
 	assert.match(source, /draft\.projectName = value\.trim\(\)/);
 	assert.match(source, /if \(draft\.mode === "remote_bootstrap"\) \{\s*this\.syncRemoteBootstrapBoundaryPath\(draft\);/);
+	assert.match(source, /if \(this\.projectEditorCreateInVaultRoot\) \{\s*this\.syncLocalVaultRootBoundaryPath\(draft\);/);
 	assert.doesNotMatch(source, /draft\.mode !== "register_existing_dir"/);
 });
 
@@ -271,10 +307,22 @@ test("settings project editor uses translated labels instead of raw registration
 	assert.doesNotMatch(source, /summaryBadges\.createSpan\(\{ cls: "friday-badge", text: draft\.mode \}\)/);
 });
 
+test("settings project editor explains folder selection in first-time-user language", async () => {
+	const source = readSettingsSource();
+	assert.match(source, /this\.t\("projects\.editor\.mode", "创建方式"\)/);
+	assert.match(
+		source,
+		/this\.t\("settings\.project\.editor\.projectName\.desc", "用于在 FRIDAY 中识别这个工作范围。"\)/,
+	);
+});
+
 test("settings project locale files cover active project, project group, editor mode labels, and auto-sync guidance", async () => {
 	for (const localeSource of [readLocaleSource(zhLocalePath), readLocaleSource(enLocalePath)]) {
 		assert.match(localeSource, /"settings\.project\.active\.name":/);
 		assert.match(localeSource, /"settings\.project\.group\.manage":/);
+		assert.match(localeSource, /"settings\.project\.workFolder\.title":/);
+		assert.match(localeSource, /"settings\.project\.workFolder\.desc":/);
+		assert.match(localeSource, /"settings\.project\.workFolder\.action":/);
 		assert.match(localeSource, /"projects\.editor\.mode":/);
 		assert.match(localeSource, /"projects\.editor\.mode\.local_only":/);
 		assert.match(localeSource, /"projects\.editor\.mode\.remote_bootstrap":/);
@@ -282,6 +330,11 @@ test("settings project locale files cover active project, project group, editor 
 		assert.match(localeSource, /"projects\.editor\.parentRepoDetected":/);
 		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.localDesc":/);
 		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.remoteDesc":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.rootCreate":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.rootCreatePreview":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.wholeVault":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.wholeVaultRisk":/);
+		assert.match(localeSource, /"settings\.project\.editor\.vaultDir\.wholeVaultConfirm":/);
 		assert.match(localeSource, /"settings\.project\.editor\.autoSync\.needsRemote":/);
 	}
 });

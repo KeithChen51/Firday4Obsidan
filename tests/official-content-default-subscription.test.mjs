@@ -37,9 +37,9 @@ function createService(initialChannels = {}) {
 				columns: [
 					{
 						id: "study-with-friday",
-						title: "Study with F.R.I.D.A.Y",
+						title: "Study with FRIDAY",
 						kind: "directory",
-						path: "Study with F.R.I.D.A.Y",
+						path: "Study with FRIDAY",
 						version: "2026.04.23",
 						manifestPath: "official/channels/official.json",
 					},
@@ -215,4 +215,118 @@ test("removed official columns are still cleaned instead of being mistaken for l
 	assert.equal(result.blocked, false);
 	assert.deepEqual(removed, ["F.R.I.D.A.Y/旧栏目/Guide.md", "F.R.I.D.A.Y/旧栏目/"]);
 	assert.equal(settings.officialContent.channels["old-column"], undefined);
+});
+
+test("applySubscriptions writes base64 official assets through the binary adapter", async () => {
+	const mod = await loadModule();
+	const binaryWrites = [];
+	const textWrites = [];
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "start-here",
+					title: "Start Here · 从这里开始",
+					kind: "directory",
+					path: "Start Here · 从这里开始",
+					version: "asset-test",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"start-here": {
+					subscribed: true,
+					lastAppliedVersion: "",
+					path: "Start Here · 从这里开始",
+				},
+			},
+		},
+	};
+	const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+	const manifest = {
+		schemaVersion: 1,
+		generatedAt: "2026-04-24T00:00:00.000Z",
+		id: "official",
+		title: "Official channel",
+		rootPath: "F.R.I.D.A.Y",
+		columns: [
+			{
+				id: "start-here",
+				title: "Start Here · 从这里开始",
+				kind: "directory",
+				path: "Start Here · 从这里开始",
+				version: "asset-test",
+				manifestPath: "official/channels/official.json",
+				files: [
+					{
+						path: "Start Here · 从这里开始/01 五分钟上手.md",
+						hash: "note-hash",
+						blobPath: "official/files/note.md",
+					},
+					{
+						path: "Start Here · 从这里开始/assets/00-quick-start/workbench-overview.png",
+						hash: "asset-hash",
+						blobPath: "official/files/asset.b64",
+						encoding: "base64",
+						mediaType: "image/png",
+					},
+				],
+			},
+		],
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async (targetPath, content) => {
+				textWrites.push({ targetPath, content });
+			},
+			writeBinary: async (targetPath, content) => {
+				binaryWrites.push({ targetPath, content: Buffer.from(content) });
+			},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => ({
+			ensureWorkspace: async () => {},
+			lsRemote: async () => "",
+			fetch: async () => {},
+			readText: async (_ref, targetPath) => {
+				if (targetPath === "official/channels/official.json") {
+					return JSON.stringify(manifest);
+				}
+				if (targetPath === "official/files/note.md") {
+					return "# 五分钟上手\n";
+				}
+				if (targetPath === "official/files/asset.b64") {
+					return pngBytes.toString("base64");
+				}
+				throw new Error(`Unexpected read target: ${targetPath}`);
+			},
+			cleanup: async () => {},
+		}),
+	});
+
+	await service.applySubscriptions();
+
+	assert.deepEqual(textWrites, [
+		{
+			targetPath: "F.R.I.D.A.Y/Start Here · 从这里开始/01 五分钟上手.md",
+			content: "# 五分钟上手\n",
+		},
+	]);
+	assert.equal(binaryWrites.length, 1);
+	assert.equal(binaryWrites[0].targetPath, "F.R.I.D.A.Y/Start Here · 从这里开始/assets/00-quick-start/workbench-overview.png");
+	assert.deepEqual(binaryWrites[0].content, pngBytes);
 });

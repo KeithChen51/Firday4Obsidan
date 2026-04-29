@@ -19,7 +19,13 @@ export class MentionDropdown {
 	private selectHandler: ((item: MentionSuggestion) => void) | null = null;
 
 	constructor(parent: HTMLElement) {
-		this.containerEl = parent.createDiv({ cls: "friday-mention-dropdown is-hidden" });
+		this.containerEl = parent.createDiv({
+			cls: "friday-mention-dropdown is-hidden",
+			attr: {
+				role: "listbox",
+				"aria-activedescendant": "",
+			},
+		});
 		this.listEl = this.containerEl.createDiv({ cls: "friday-mention-dropdown-list" });
 	}
 
@@ -35,6 +41,7 @@ export class MentionDropdown {
 		this.suggestions = [];
 		this.activeIndex = 0;
 		this.containerEl.addClass("is-hidden");
+		this.containerEl.setAttribute("aria-activedescendant", "");
 		this.listEl.empty();
 	}
 
@@ -92,13 +99,20 @@ export class MentionDropdown {
 
 	private render(): void {
 		this.listEl.empty();
+		this.containerEl.setAttribute("aria-activedescendant", this.getOptionId(this.activeIndex));
 		this.suggestions.forEach((item, index) => {
+			const optionId = this.getOptionId(index);
 			const row = this.listEl.createDiv({
 				cls: `friday-mention-item ${index === this.activeIndex ? "is-active" : ""}`,
 			});
 			const button = row.createEl("button", {
 				cls: "friday-mention-item-button",
 				text: item.label,
+				attr: {
+					id: optionId,
+					role: "option",
+					"aria-selected": index === this.activeIndex ? "true" : "false",
+				},
 			});
 			button.type = "button";
 			button.onmouseenter = () => {
@@ -117,5 +131,9 @@ export class MentionDropdown {
 				row.createDiv({ cls: "friday-mention-item-description", text: item.description });
 			}
 		});
+	}
+
+	private getOptionId(index: number): string {
+		return `friday-mention-option-${index}`;
 	}
 }

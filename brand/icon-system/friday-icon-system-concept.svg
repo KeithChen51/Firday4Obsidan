@@ -1,0 +1,206 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc">
+  <title id="title">FRIDAY icon system concept sheet</title>
+  <desc id="desc">A controlled SVG concept sheet for FRIDAY proprietary icons, using distinct metaphors under a shared restrained line system.</desc>
+  <defs>
+    <style>
+      :root {
+        --graphite: #1E1F21;
+        --warm-bone: #F4F1EB;
+        --muted-teal: #4A7F7B;
+        --stone: #D9D5CA;
+        --ink-muted: rgba(30, 31, 33, 0.58);
+      }
+      .bg { fill: var(--warm-bone); }
+      .card { fill: #FBFAF7; stroke: rgba(30, 31, 33, 0.12); stroke-width: 1; }
+      .guide { stroke: rgba(30, 31, 33, 0.08); stroke-width: 1; }
+      .icon { fill: none; stroke: var(--graphite); stroke-width: 6; stroke-linecap: butt; stroke-linejoin: round; }
+      .icon-thin { fill: none; stroke: var(--graphite); stroke-width: 4; stroke-linecap: butt; stroke-linejoin: round; }
+      .teal { fill: var(--muted-teal); }
+      .label {
+        fill: var(--graphite);
+        font-family: "Avenir Next", "Segoe UI", Arial, sans-serif;
+        font-size: 15px;
+        font-weight: 650;
+        letter-spacing: 0.14em;
+        text-anchor: middle;
+      }
+      .note {
+        fill: var(--ink-muted);
+        font-family: "LXGW WenKai Screen", "LXGW WenKai", "Microsoft YaHei UI", sans-serif;
+        font-size: 13px;
+        text-anchor: middle;
+      }
+      .title {
+        fill: var(--graphite);
+        font-family: "Avenir Next", "Segoe UI", Arial, sans-serif;
+        font-size: 24px;
+        font-weight: 650;
+        letter-spacing: 0.18em;
+      }
+      .subtitle {
+        fill: var(--ink-muted);
+        font-family: "LXGW WenKai Screen", "LXGW WenKai", "Microsoft YaHei UI", sans-serif;
+        font-size: 16px;
+      }
+    </style>
+
+    <symbol id="icon-mark" viewBox="0 0 96 96">
+      <path class="icon" d="M18 78V23C18 15 23 10 31 10H70"/>
+      <rect class="icon" x="31" y="24" width="48" height="58" rx="8"/>
+      <path class="icon" d="M43 39H67M43 39V70M43 55H61"/>
+      <rect class="teal" x="63" y="66" width="10" height="10" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-avatar" viewBox="0 0 96 96">
+      <path class="icon" d="M21 76V25C21 18 26 13 33 13H68"/>
+      <rect class="icon" x="35" y="28" width="40" height="48" rx="7"/>
+      <path class="icon" d="M45 42H64M45 42V65M45 54H59"/>
+      <rect class="teal" x="72" y="18" width="9" height="9" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-knowledge" viewBox="0 0 96 96">
+      <path class="icon-thin" d="M22 74V25C22 19 26 15 32 15H65"/>
+      <path class="icon-thin" d="M30 80V29C30 23 34 19 40 19H72"/>
+      <rect class="icon" x="38" y="27" width="39" height="54" rx="6"/>
+      <path class="icon-thin" d="M48 43H68M48 55H66M48 67H60"/>
+      <rect class="teal" x="65" y="68" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-context" viewBox="0 0 96 96">
+      <rect class="icon" x="36" y="31" width="34" height="40" rx="6"/>
+      <path class="icon-thin" d="M18 24H34M20 48H34M18 72H34"/>
+      <path class="icon-thin" d="M34 24L41 35M34 48H44M34 72L41 62"/>
+      <rect class="teal" x="56" y="56" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-memory" viewBox="0 0 96 96">
+      <rect class="icon" x="25" y="22" width="50" height="55" rx="8"/>
+      <path class="icon-thin" d="M41 63C35 58 35 48 42 45C38 38 45 31 53 35C59 29 70 36 66 46C72 50 70 61 61 62"/>
+      <path class="icon-thin" d="M45 47H60M47 56H66M54 36V45"/>
+      <rect class="teal" x="55" y="60" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-workspace" viewBox="0 0 96 96">
+      <path class="icon" d="M18 76V24C18 17 23 12 30 12H69"/>
+      <rect class="icon" x="31" y="28" width="48" height="45" rx="7"/>
+      <path class="icon-thin" d="M39 44H70M47 73L43 82M63 73L67 82M38 82H72"/>
+      <rect class="teal" x="64" y="57" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-sync" viewBox="0 0 96 96">
+      <rect class="icon" x="18" y="28" width="28" height="37" rx="6"/>
+      <rect class="icon" x="50" y="31" width="28" height="37" rx="6"/>
+      <path class="icon-thin" d="M45 39H57L52 34M57 56H45L50 61"/>
+      <rect class="teal" x="66" y="55" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-execute" viewBox="0 0 96 96">
+      <rect class="icon" x="34" y="24" width="43" height="52" rx="7"/>
+      <path class="icon-thin" d="M16 50H43"/>
+      <path class="icon-thin" d="M34 41L43 50L34 59"/>
+      <rect class="teal" x="60" y="60" width="8" height="8" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-status" viewBox="0 0 96 96">
+      <path class="icon" d="M20 76V24C20 17 25 12 32 12H67"/>
+      <rect class="icon" x="34" y="28" width="42" height="48" rx="7"/>
+      <path class="icon-thin" d="M45 44H63M45 58H57"/>
+      <rect class="teal" x="62" y="61" width="9" height="9" rx="1"/>
+    </symbol>
+
+    <symbol id="icon-studio" viewBox="0 0 96 96">
+      <path class="icon-thin" d="M25 23H35V75H25"/>
+      <rect class="icon" x="35" y="21" width="42" height="58" rx="6"/>
+      <path class="icon-thin" d="M45 38H67M45 50H65M45 62H58"/>
+      <rect class="teal" x="62" y="64" width="9" height="9" rx="1"/>
+    </symbol>
+  </defs>
+
+  <rect class="bg" width="1200" height="660"/>
+  <text class="title" x="64" y="58">FRIDAY ICON SYSTEM CONCEPT</text>
+  <text class="subtitle" x="64" y="88">手工 SVG 线稿草案：先确认隐喻和识别性，再进入最终图标绘制。</text>
+
+  <g transform="translate(60 126)">
+    <g transform="translate(0 0)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-mark" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">MARK</text>
+      <text class="note" x="98" y="184">系统入口</text>
+    </g>
+
+    <g transform="translate(220 0)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-avatar" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">AVATAR</text>
+      <text class="note" x="98" y="184">在场协作者</text>
+    </g>
+
+    <g transform="translate(440 0)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-knowledge" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">KNOWLEDGE</text>
+      <text class="note" x="98" y="184">本地文档库</text>
+    </g>
+
+    <g transform="translate(660 0)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-context" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">CONTEXT</text>
+      <text class="note" x="98" y="184">片段收拢</text>
+    </g>
+
+    <g transform="translate(880 0)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-memory" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">MEMORY</text>
+      <text class="note" x="98" y="184">记忆回路</text>
+    </g>
+
+    <g transform="translate(0 242)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-workspace" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">WORKSPACE</text>
+      <text class="note" x="98" y="184">工作台面</text>
+    </g>
+
+    <g transform="translate(220 242)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-sync" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">SYNC</text>
+      <text class="note" x="98" y="184">双向通路</text>
+    </g>
+
+    <g transform="translate(440 242)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-execute" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">EXECUTE</text>
+      <text class="note" x="98" y="184">动作推进</text>
+    </g>
+
+    <g transform="translate(660 242)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-status" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">STATUS</text>
+      <text class="note" x="98" y="184">系统响应</text>
+    </g>
+
+    <g transform="translate(880 242)">
+      <rect class="card" width="196" height="210" rx="8"/>
+      <path class="guide" d="M98 38V134M50 86H146"/>
+      <use href="#icon-studio" x="50" y="32" width="96" height="96"/>
+      <text class="label" x="98" y="158">STUDIO</text>
+      <text class="note" x="98" y="184">制作组文稿</text>
+    </g>
+  </g>
+
+  <text class="subtitle" x="60" y="620">规则：Graphite 线条，Muted Teal 只做状态/记忆节点；避免云、数据库圆柱、放大镜、循环箭头、播放按钮、喇叭等通用科技符号。</text>
+</svg>

@@ -1,12 +1,12 @@
 ﻿import { hostname } from "os";
-import { Notice, Plugin, TAbstractFile, WorkspaceLeaf, normalizePath } from "obsidian";
+import { Notice, Plugin, TAbstractFile, WorkspaceLeaf, addIcon, normalizePath } from "obsidian";
 import { registerInitCommand } from "./commands/initCommand";
 import { registerProjectCommands } from "./commands/projectCommands";
 import { registerSyncCommands } from "./commands/syncCommands";
-import { PROJECT_STATE_CHANGED_EVENT } from "./constants/events";
-import { FRIDAY_ICON_ID } from "./constants/icon";
+import { FRIDAY_SETTINGS_CHANGED_EVENT, PROJECT_STATE_CHANGED_EVENT } from "./constants/events";
+import { FRIDAY_ICON_ID, FRIDAY_ICON_SVG } from "./constants/icon";
 import { PRIMARY_PATHS } from "./constants/paths";
-import { FRIDAY_WORDMARK_FONT_FAMILY, FRIDAY_WORDMARK_FONT_TTF_BASE64 } from "./constants/wordmarkFont";
+import { WIKI_FEATURE_ENABLED } from "./constants/wikiFeature";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
 import { AgentActionService } from "./services/AgentActionService";
@@ -26,6 +26,7 @@ import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
 import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
 import { PluginUpdateService } from "./services/PluginUpdateService";
 import { OfficialContentService } from "./services/OfficialContentService";
+import { OnboardingService } from "./services/OnboardingService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
 import { IngestEventStore } from "./services/IngestEventStore";
 import { LocalStateRootService } from "./services/LocalStateRootService";
@@ -51,7 +52,7 @@ import { AgentProfile } from "./types/agent";
 import type { OfficialContentCatalogEntry } from "./types/officialContent";
 import { FridayPluginApi } from "./types/plugin";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry, SourceType } from "./types/project";
-import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION } from "./types/settings";
+import { DEFAULT_SETTINGS, FridaySettings, SETTINGS_VERSION, isWorkbenchStartupPlacement } from "./types/settings";
 import { SoulDefinition, SoulSummary } from "./types/soul";
 import { DailyBoardView, VIEW_TYPE_DAILY_BOARD } from "./views/DailyBoardView";
 import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySettingTab";
@@ -73,10 +74,10 @@ const LEGACY_NATIVE_FRIDAY_SOUL_PRESET: Pick<
 	| "builtIn"
 	| "editable"
 > = {
-	name: "原生F.R.I.D.A.Y",
+	name: "原生 FRIDAY",
 	summary: "低摩擦、安静、以你为主导的本地 AI 工作伙伴。",
-	description: "原生 F.R.I.D.A.Y 是一个低摩擦、以用户为主导的本地 AI 工作伙伴。它以 Obsidian 为中心、以本地知识为基础，尽量隐藏工具复杂性，让思考自然发生在工作流中。",
-	rolePrompt: "你是原生 F.R.I.D.A.Y。你的核心目标是 Make Every Day Friday：让 AI 尽量消失在工作流中，让用户把注意力放回思考与创造本身。你优先降低认知负担和操作摩擦，先帮用户理清上下文，再给出清晰、可执行、可解释的建议。你不会喧宾夺主，也不会替用户做关键决策。你是一个安静、可靠、长期在场的协作者，重视本地知识、低摩擦工作流、隐形 Git、透明可解释与用户主导。",
+	description: "原生 FRIDAY 是一个低摩擦、以用户为主导的本地 AI 工作伙伴。它以 Obsidian 为中心、以本地知识为基础，尽量隐藏工具复杂性，让思考自然发生在工作流中。",
+	rolePrompt: "你是原生 FRIDAY。你的核心目标是 Make Every Day FRIDAY：让 AI 尽量消失在工作流中，让用户把注意力放回思考与创造本身。你优先降低认知负担和操作摩擦，先帮用户理清上下文，再给出清晰、可执行、可解释的建议。你不会喧宾夺主，也不会替用户做关键决策。你是一个安静、可靠、长期在场的协作者，重视本地知识、低摩擦工作流、隐形 Git、透明可解释与用户主导。",
 	tonePreset: "balanced",
 	tonePrompt: "简洁、冷静、克制，像资深合作者。少空话，不夸张，不过度鼓励。",
 	behaviorRules: [
@@ -110,10 +111,10 @@ const NATIVE_FRIDAY_SOUL_PRESET: Pick<
 	| "builtIn"
 	| "editable"
 > = {
-	name: "原生F.R.I.D.A.Y",
+	name: "原生 FRIDAY",
 	summary: "温和、清晰、可靠的本地工作伙伴。",
-	description: "原生 F.R.I.D.A.Y 以自然、低压的方式陪用户推进工作。它帮助用户理顺信息、明确下一步，并在保持专业的同时尽量减少压迫感和操作摩擦。",
-	rolePrompt: "你是原生 F.R.I.D.A.Y。你是一个有温度但不黏人的协作者。你的职责不是喧宾夺主，而是帮助用户把事情理顺、把任务说清、把下一步变得容易开始。你应当先理解上下文，再给出清晰、可信、可执行的回应。你保持礼貌、自然和分寸感，不过度热情，也不使用夸张或表演式表达。你尊重用户主导，不替用户做未经确认的关键决定；当信息不足、风险存在或边界不清时，应直接指出。",
+	description: "原生 FRIDAY 以自然、低压的方式陪用户推进工作。它帮助用户理顺信息、明确下一步，并在保持专业的同时尽量减少压迫感和操作摩擦。",
+	rolePrompt: "你是原生 FRIDAY。你是一个有温度但不黏人的协作者。你的职责不是喧宾夺主，而是帮助用户把事情理顺、把任务说清、把下一步变得容易开始。你应当先理解上下文，再给出清晰、可信、可执行的回应。你保持礼貌、自然和分寸感，不过度热情，也不使用夸张或表演式表达。你尊重用户主导，不替用户做未经确认的关键决定；当信息不足、风险存在或边界不清时，应直接指出。",
 	tonePreset: "warm",
 	tonePrompt: "亲和、自然、有分寸。表达温和，但不要过度热情、讨好或像客服。",
 	behaviorRules: [
@@ -226,6 +227,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	fridaySettingTab!: FridaySettingTab;
 	pluginUpdateService!: PluginUpdateService;
 	officialContentService!: FridayPluginApi["officialContentService"];
+	onboardingService!: OnboardingService;
 	localStateRootService!: LocalStateRootService;
 	runtimeStateStore!: RuntimeStateStore;
 	settingsMirrorService!: SettingsMirrorService;
@@ -241,11 +243,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	private compileWikiInFlight: Promise<WikiCompileResult> | null = null;
 	private detectedUserId = "";
 	private pendingLegacyGitCredentials: ProjectGitCredential | null = null;
-	private wordmarkFontLoadPromise: Promise<void> | null = null;
 
 	async onload(): Promise<void> {
 		try {
-			await this.ensureWordmarkFontLoaded();
 			const runtimeProfile = detectRuntimeProfile();
 			if (!runtimeProfile.supported) {
 				throw new Error(`Unsupported runtime platform: ${runtimeProfile.platform}`);
@@ -259,7 +259,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.secureStorage = new SecureStorage(this.manifest.id);
 			if (this.secureStorage.getMode() !== "secure") {
 				console.warn("[Friday] System secure credential storage unavailable. Falling back to local plugin storage.");
-				new Notice("Friday 未检测到系统安全存储，Git 凭据将仅保存在当前设备的本地插件存储中。", 8000);
+			new Notice("FRIDAY 未检测到系统安全存储，Git 凭据将仅保存在当前设备的本地插件存储中。", 8000);
 			}
 			this.localStateRootService = new LocalStateRootService(
 				(this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
@@ -323,6 +323,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					mkdir(path: string): Promise<void>;
 					read(path: string): Promise<string>;
 					write(path: string, data: string): Promise<void>;
+					writeBinary(path: string, data: ArrayBuffer): Promise<void>;
 					remove(path: string): Promise<void>;
 					rmdir?(path: string, recursive: boolean): Promise<void>;
 					list?(path: string): Promise<{ files: string[]; folders: string[] }>;
@@ -335,6 +336,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				inspectDestructiveApplySafety: ({ ownedTopLevelPaths }) =>
 					this.legacyFridayRootMigrationService.inspectDestructiveApplySafety({ ownedTopLevelPaths }),
 			});
+			this.onboardingService = new OnboardingService(() => this.settings);
 
 			this.agentService = new AgentService(this.app.vault, this.dataService.getFridayRoot());
 			const changedByBootstrap = await this.agentService.bootstrap();
@@ -428,9 +430,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				this.skillCommandService,
 				this.agentRuntimeService,
 			);
-			this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
-				await this.handlePulledRawChanges(project, pulledFiles, headRevision);
-			});
+			if (WIKI_FEATURE_ENABLED) {
+				this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {
+					await this.handlePulledRawChanges(project, pulledFiles, headRevision);
+				});
 				this.registerEvent(
 					this.app.vault.on("create", (file) => {
 						this.scheduleRawIngest(file, "local_create");
@@ -441,6 +444,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 						this.scheduleRawIngest(file, "local_create");
 					}),
 				);
+			}
 
 				const changedBySoulBootstrap = await this.ensureSoulBootstrap();
 				if (changedByBootstrap || migratedLegacyCredentials || migratedLegacyState || changedBySoulBootstrap) {
@@ -453,6 +457,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			registerInitCommand(this);
 			this.fridaySettingTab = new FridaySettingTab(this.app, this);
 			this.addSettingTab(this.fridaySettingTab);
+			addIcon(FRIDAY_ICON_ID, FRIDAY_ICON_SVG);
 			this.addRibbonIcon(FRIDAY_ICON_ID, this.t("app.name"), () => {
 				void this.openWorkspaceView();
 			});
@@ -468,6 +473,15 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				},
 			);
 
+			this.app.workspace.onLayoutReady(() => {
+				if (!this.settings.workbench.openOnStartup) {
+					return;
+				}
+				void this.openWorkspaceView(this.settings.workbench.startupPlacement).catch((error) => {
+					console.error("[Friday] Failed to open workbench on startup:", error);
+				});
+			});
+
 			if (this.settings.sync.syncOnStartup && this.settings.projects.length > 0) {
 				void this.runStartupSync();
 			}
@@ -482,7 +496,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			console.error("[Friday] Plugin onload failed:", error);
-			new Notice(`F.R.I.D.A.Y 加载异常：${message}`, 8000);
+			new Notice(`FRIDAY 加载异常：${message}`, 8000);
 		}
 	}
 
@@ -498,29 +512,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		this.syncStatusBar?.destroy();
 		this.syncRuntimeStore?.destroy();
 		this.app.workspace.detachLeavesOfType(VIEW_TYPE_DAILY_BOARD);
-	}
-
-	private ensureWordmarkFontLoaded(): Promise<void> {
-		if (this.wordmarkFontLoadPromise) {
-			return this.wordmarkFontLoadPromise;
-		}
-		this.wordmarkFontLoadPromise = this.loadWordmarkFont();
-		return this.wordmarkFontLoadPromise;
-	}
-
-	private async loadWordmarkFont(): Promise<void> {
-		if (typeof document === "undefined" || !("fonts" in document)) {
-			return;
-		}
-		try {
-			const fontBytes = Uint8Array.from(Buffer.from(FRIDAY_WORDMARK_FONT_TTF_BASE64, "base64"));
-			const fontFace = new FontFace(FRIDAY_WORDMARK_FONT_FAMILY, fontBytes);
-			await fontFace.load();
-			const fontSet = document.fonts as FontFaceSet & { add(font: FontFace): void };
-			fontSet.add(fontFace);
-		} catch (error) {
-			console.warn("[Friday] Failed to load wordmark font.", error);
-		}
 	}
 
 	async loadSettings(): Promise<void> {
@@ -547,6 +538,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			sync: {
 				...DEFAULT_SETTINGS.sync,
 				...(migrated.sync ?? {}),
+			},
+			workbench: {
+				...DEFAULT_SETTINGS.workbench,
+				...(migrated.workbench ?? {}),
 			},
 			update: {
 				...DEFAULT_SETTINGS.update,
@@ -577,14 +572,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async saveSettings(): Promise<void> {
 		await this.saveData(this.settings);
-		if (!this.settingsMirrorService) {
-			return;
+		if (this.settingsMirrorService) {
+			try {
+				await this.settingsMirrorService.write(this.settings);
+			} catch (error) {
+				console.error("[Friday] Failed to write config mirror:", error);
+			}
 		}
-		try {
-			await this.settingsMirrorService.write(this.settings);
-		} catch (error) {
-			console.error("[Friday] Failed to write config mirror:", error);
-		}
+		window.dispatchEvent(new CustomEvent(FRIDAY_SETTINGS_CHANGED_EVENT));
 	}
 
 	async setSyncMode(mode: FridaySettings["sync"]["mode"]): Promise<void> {
@@ -790,17 +785,28 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		return this.syncService.getGitRuntimeStatus();
 	}
 
-	async openWorkspaceView(): Promise<void> {
+	async openWorkspaceView(placement: FridaySettings["workbench"]["startupPlacement"] = this.settings.workbench.startupPlacement): Promise<void> {
 		const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_DAILY_BOARD);
 		let leaf: WorkspaceLeaf | null = leaves[0] ?? null;
 		if (!leaf) {
-			leaf = this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
+			leaf = this.getWorkspaceLeafForPlacement(placement) ?? this.app.workspace.getRightLeaf(false) ?? this.app.workspace.getLeaf(true);
 		}
 		await leaf.setViewState({
 			type: VIEW_TYPE_DAILY_BOARD,
 			active: true,
 		});
 		this.app.workspace.revealLeaf(leaf);
+	}
+
+	private getWorkspaceLeafForPlacement(placement: FridaySettings["workbench"]["startupPlacement"]): WorkspaceLeaf | null {
+		switch (placement) {
+			case "left-sidebar":
+				return this.app.workspace.getLeftLeaf(false);
+			case "right-sidebar":
+				return this.app.workspace.getRightLeaf(false);
+			default:
+				return this.app.workspace.getRightLeaf(false);
+		}
 	}
 
 	async reloadFridayPlugin(): Promise<void> {
@@ -1034,6 +1040,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			return {
 				version: SETTINGS_VERSION,
 				user: { ...DEFAULT_SETTINGS.user },
+				workbench: { ...DEFAULT_SETTINGS.workbench },
 				officialContent: { ...DEFAULT_SETTINGS.officialContent },
 				projectGroups: [this.createDefaultProjectGroup()],
 				projects: [],
@@ -1106,6 +1113,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			autoPush?: boolean;
 			syncInterval?: number;
 		};
+		const rawWorkbench = (raw.workbench ?? {}) as Partial<FridaySettings["workbench"]>;
 		const rawOfficialContent = (raw.officialContent ?? {}) as Partial<FridaySettings["officialContent"]>;
 		const migratedSyncMode =
 			rawSync.mode ??
@@ -1115,6 +1123,19 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			idleMinutes: typeof rawSync.idleMinutes === "number" ? rawSync.idleMinutes : rawSync.syncInterval ?? 0,
 			syncOnStartup:
 				typeof rawSync.syncOnStartup === "boolean" ? rawSync.syncOnStartup : DEFAULT_SETTINGS.sync.syncOnStartup,
+		};
+		const migratedWorkbench = {
+			openOnStartup:
+				typeof rawWorkbench.openOnStartup === "boolean"
+					? rawWorkbench.openOnStartup
+					: DEFAULT_SETTINGS.workbench.openOnStartup,
+			startupPlacement: isWorkbenchStartupPlacement(rawWorkbench.startupPlacement)
+				? rawWorkbench.startupPlacement
+				: DEFAULT_SETTINGS.workbench.startupPlacement,
+			onboardingDismissed:
+				typeof rawWorkbench.onboardingDismissed === "boolean"
+					? rawWorkbench.onboardingDismissed
+					: DEFAULT_SETTINGS.workbench.onboardingDismissed,
 		};
 		const migratedOfficialContent = {
 			...DEFAULT_SETTINGS.officialContent,
@@ -1164,6 +1185,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			version: SETTINGS_VERSION,
 			user: migratedUser,
 			sync: migratedSync,
+			workbench: migratedWorkbench,
 			officialContent: migratedOfficialContent,
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
@@ -1278,6 +1300,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		},
 	): string {
 		const candidateRoot = project.boundaryPath?.trim() || project.projectRootPath?.trim();
+		if (candidateRoot === "/") {
+			return "/";
+		}
 		if (candidateRoot && !candidateRoot.match(/^[a-zA-Z]:\\/)) {
 			return normalizeVaultPath(candidateRoot);
 		}
@@ -1356,6 +1381,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	private scheduleRawIngest(file: TAbstractFile, sourceType: SourceType): void {
+		if (!WIKI_FEATURE_ENABLED) {
+			return;
+		}
 		const rawPath = normalizePath(file.path || "");
 		if (!rawPath) {
 			return;
@@ -1372,6 +1400,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	private async runLocalRawIngest(rawPath: string, sourceType: SourceType): Promise<void> {
+		if (!WIKI_FEATURE_ENABLED) {
+			return;
+		}
 		const activeProject = this.projectBoundaryService.getActiveProject();
 		if (!activeProject) {
 			return;
@@ -1388,6 +1419,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		pulledFiles: string[],
 		headRevision: string,
 	): Promise<void> {
+		if (!WIKI_FEATURE_ENABLED) {
+			return;
+		}
 		if (this.settings.activeProjectId && project.projectId !== this.settings.activeProjectId) {
 			return;
 		}
@@ -1414,6 +1448,17 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		rethrowError = false,
 		forceRebuild = false,
 	): Promise<IngestSummary> {
+		if (!WIKI_FEATURE_ENABLED) {
+			return {
+				processed: 0,
+				succeeded: 0,
+				failed: 0,
+				events: [],
+				updatedDocs: [],
+				updatedIndex: "",
+				updatedLog: "",
+			};
+		}
 		const projectRoot = this.projectBoundaryService.getProjectRoot(project);
 		const scopedRawPaths = [...new Set(rawPaths.map((item) => normalizePath(item)))].filter(
 			(item) =>
@@ -1468,6 +1513,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	async compileWikiForActiveProject(rawPaths?: string[], forceRebuild = true): Promise<WikiCompileResult> {
+		if (!WIKI_FEATURE_ENABLED) {
+			throw new Error("Wiki feature is disabled.");
+		}
 		if (this.compileWikiInFlight) {
 			return this.compileWikiInFlight;
 		}
@@ -1607,7 +1655,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					return;
 				}
 				new Notice(
-					`Friday 发现新版本 ${result.latestVersion}。前往 设置 -> F.R.I.D.A.Y -> 基础配置 -> 自动更新，点击“应用更新”。`,
+					`FRIDAY 发现新版本 ${result.latestVersion}。前往 设置 -> FRIDAY -> 基础配置 -> 自动更新，点击“应用更新”。`,
 					8000,
 				);
 			})().catch((error) => {

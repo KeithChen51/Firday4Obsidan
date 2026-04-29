@@ -32,13 +32,13 @@ test("skill system context supports auto invocation metadata", async () => {
 		() => ({ agentRuntime: { externalSkillPaths: [] } }),
 		() => projectRoot,
 	);
-	const context = await service.buildSkillSystemContext("lookup-wiki", {
+	const context = await service.buildSkillSystemContext("obsidian-cli", {
 		invocationMode: "auto",
-		selectionReason: "matched wiki retrieval intent",
+		selectionReason: "matched live obsidian operation",
 	});
-	assert.equal(context.skill.command, "lookup-wiki");
+	assert.equal(context.skill.command, "obsidian-cli");
 	assert.equal(context.systemContext.includes("mode: auto"), true);
-	assert.equal(context.systemContext.includes("selection_reason: matched wiki retrieval intent"), true);
+	assert.equal(context.systemContext.includes("selection_reason: matched live obsidian operation"), true);
 	assert.equal(context.systemContext.includes("auto-matched"), true);
 });
 

@@ -12,6 +12,11 @@ function toPosix(relativePath) {
 	return relativePath.split(path.sep).join("/");
 }
 
+function startsWithAscii(value) {
+	const firstCodePoint = value.codePointAt(0);
+	return firstCodePoint !== undefined && firstCodePoint <= 0x7f;
+}
+
 function comparePaths(left, right) {
 	const leftParts = left.split("/");
 	const rightParts = right.split("/");
@@ -19,8 +24,8 @@ function comparePaths(left, right) {
 	for (let index = 0; index < length; index += 1) {
 		const leftPart = leftParts[index];
 		const rightPart = rightParts[index];
-		const leftAscii = /^[\x00-\x7F]/.test(leftPart);
-		const rightAscii = /^[\x00-\x7F]/.test(rightPart);
+		const leftAscii = startsWithAscii(leftPart);
+		const rightAscii = startsWithAscii(rightPart);
 		if (leftAscii !== rightAscii) {
 			return leftAscii ? -1 : 1;
 		}

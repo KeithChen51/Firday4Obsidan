@@ -22,7 +22,7 @@ export const PRIMARY_PATHS: PathPreset = {
 	studio: "来自制作组",
 	studioNotes: "Study with F.R.I.D.A.Y",
 	studioReadmeFile: "README.md",
-	studioStartHereFile: "从这里开始 · Start Here/从这里开始.md",
+	studioStartHereFile: "Start Here · 从这里开始/00 从这里开始.md",
 	studioLogFile: "Changelog.md",
 	configFile: "_配置.md",
 	projectMetaFile: "_项目.md",
@@ -32,6 +32,7 @@ export const PRIMARY_PATHS: PathPreset = {
 export const PREVIOUS_PRIMARY_PATHS: PathPreset = {
 	...PRIMARY_PATHS,
 	studioNotes: "幕后笔记 · Behind the Build",
+	studioStartHereFile: "从这里开始 · Start Here/从这里开始.md",
 	studioLogFile: "迭代手记 · Changelog.md",
 };
 

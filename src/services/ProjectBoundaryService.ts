@@ -8,6 +8,10 @@ function normalizeVaultPath(value: string): string {
 	return normalizer(value).replace(/\/+/g, "/").replace(/\/$/, "");
 }
 
+function isWholeVaultBoundaryPath(value: string): boolean {
+	return value.trim().replace(/\\/g, "/").replace(/\/+/g, "/") === "/";
+}
+
 export class ProjectBoundaryService {
 	constructor(
 		private readonly getSettings: () => FridaySettings,
@@ -46,6 +50,13 @@ export class ProjectBoundaryService {
 
 		for (const project of projects) {
 			const projectRoot = this.getProjectVaultPath(project);
+			if (projectRoot === "/") {
+				if (matchedLength < 0) {
+					matchedProject = project;
+					matchedLength = 0;
+				}
+				continue;
+			}
 			if (!projectRoot) {
 				continue;
 			}
@@ -73,6 +84,9 @@ export class ProjectBoundaryService {
 		if (!projectRootPath) {
 			return "";
 		}
+		if (isWholeVaultBoundaryPath(projectRootPath)) {
+			return "/";
+		}
 		return normalizeVaultPath(projectRootPath);
 	}
 
@@ -81,6 +95,9 @@ export class ProjectBoundaryService {
 			return "";
 		}
 		const vaultPath = this.getProjectVaultPath(project);
+		if (vaultPath === "/") {
+			return this.getVaultBasePath();
+		}
 		if (!vaultPath) {
 			return this.getVaultBasePath();
 		}
@@ -105,6 +122,9 @@ export class ProjectBoundaryService {
 	isWithinProject(project: ProjectEntry, vaultRelativePath: string): boolean {
 		const normalizedPath = normalizeVaultPath(vaultRelativePath);
 		const root = this.getProjectRoot(project);
+		if (root === "/") {
+			return true;
+		}
 		if (!root) {
 			return true;
 		}
@@ -123,13 +143,16 @@ export class ProjectBoundaryService {
 
 	normalizeProjectPath(project: ProjectEntry, inputPath: string): string {
 		const normalizedInput = normalizeVaultPath(inputPath || "");
+		const root = this.getProjectVaultPath(project);
+		if (root === "/") {
+			return normalizedInput ? normalizedInput.replace(/^\/+/, "") : "/";
+		}
 		if (!normalizedInput) {
-			return this.getProjectVaultPath(project);
+			return root;
 		}
 		if (normalizedInput.startsWith("/")) {
 			return normalizedInput;
 		}
-		const root = this.getProjectVaultPath(project);
 		if (!root) {
 			return normalizedInput;
 		}

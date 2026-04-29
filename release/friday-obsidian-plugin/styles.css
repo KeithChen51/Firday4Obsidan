@@ -1,5 +1,9 @@
 ﻿.friday-wordmark {
-	font-family: "FridayWordmarkNNeco", "Segoe UI", sans-serif;
+	font-family: "Avenir Next", Inter, "Segoe UI", Arial, sans-serif;
+	font-weight: 600;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	font-variant-ligatures: none;
 }
 
 .friday-settings-title {
@@ -31,28 +35,29 @@
 	min-height: 0;
 }
 
-.friday-shell-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 10px;
-	padding: 10px 12px;
-	border-radius: 12px;
-	border: 1px solid color-mix(in srgb, var(--interactive-accent) 20%, var(--background-modifier-border));
-	background: linear-gradient(
-		140deg,
-		color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary-alt)) 0%,
-		var(--background-primary-alt) 70%,
-		color-mix(in srgb, var(--background-secondary) 86%, var(--interactive-accent) 3%) 100%
-	);
-}
-
 .friday-shell-project {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
 	gap: 8px;
 	min-width: 0;
+}
+
+.friday-shell-project-mark {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 22px;
+	width: 22px;
+	height: 22px;
+	color: var(--text-normal);
+	opacity: 0.88;
+}
+
+.friday-shell-project-mark svg {
+	width: 19px;
+	height: 19px;
+	stroke-width: 0;
 }
 
 .friday-shell-project-label {
@@ -85,40 +90,13 @@
 	justify-content: flex-end;
 }
 
-.friday-page-content {
-	display: flex;
-	flex-direction: column;
-	gap: 12px;
-	min-width: 0;
-	min-height: 0;
-	flex: 1 1 auto;
-}
-
-.friday-top-nav {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 8px;
-	background:
-		linear-gradient(
-			130deg,
-			color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary-alt)) 0%,
-			var(--background-primary-alt) 55%,
-			color-mix(in srgb, var(--text-muted) 5%, var(--background-primary-alt)) 100%
-		);
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 12px;
-	padding: 7px;
-	box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--background-primary) 50%, transparent);
-	flex-shrink: 0;
-}
-
 .friday-nav-button {
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	padding: 8px 10px;
 	min-height: 34px;
-	border-radius: 9px;
+	border-radius: 8px;
 	border: 1px solid transparent;
 	background: var(--background-primary);
 	cursor: pointer;
@@ -251,22 +229,18 @@
 }
 
 .friday-card {
-	background: linear-gradient(
-		160deg,
-		color-mix(in srgb, var(--background-primary) 88%, var(--interactive-accent) 4%) 0%,
-		color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 2%) 100%
-	);
+	background: var(--background-primary-alt);
 	border: 1px solid var(--background-modifier-border);
-	border-radius: 16px;
+	border-radius: 12px;
 	padding: 16px;
 }
 
 .friday-native-settings-group {
 	margin: 8px 0 20px;
-	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-	border-radius: 18px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
 	overflow: hidden;
-	background: color-mix(in srgb, var(--background-primary-alt) 78%, var(--background-secondary) 22%);
+	background: var(--background-primary-alt);
 }
 
 .friday-native-settings-group-header {
@@ -367,8 +341,9 @@
 }
 
 .friday-project-settings-panel {
-	background: color-mix(in srgb, var(--background-primary-alt) 78%, var(--background-secondary) 22%);
-	border-color: color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
+	border-radius: 12px;
+	background: var(--background-primary-alt);
+	border-color: var(--background-modifier-border);
 	box-shadow: none;
 }
 
@@ -962,16 +937,6 @@
 	gap: 10px;
 }
 
-.friday-ai-chat-shell {
-	padding: 10px;
-	border-radius: 12px;
-	background: linear-gradient(
-		180deg,
-		color-mix(in srgb, var(--background-primary-alt) 86%, var(--interactive-accent) 6%) 0%,
-		var(--background-primary-alt) 100%
-	);
-}
-
 .friday-ai-message-list {
 	display: flex;
 	flex-direction: column;
@@ -1079,20 +1044,6 @@
 
 .friday-ai-runtime-card-content {
 	padding: 0;
-}
-
-.friday-runtime-card {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-	padding: 14px 16px;
-	border-radius: 14px;
-	background: linear-gradient(
-		165deg,
-		color-mix(in srgb, var(--background-secondary) 88%, var(--interactive-accent) 6%) 0%,
-		color-mix(in srgb, var(--background-secondary-alt) 92%, var(--interactive-accent) 4%) 100%
-	);
-	border: 1px solid color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
 }
 
 .friday-runtime-card-brand {
@@ -1339,16 +1290,21 @@
 }
 
 .friday-mention-dropdown {
-	position: static;
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(100% + 8px);
+	z-index: 30;
 	width: 100%;
+	box-sizing: border-box;
 	background: var(--background-primary);
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 10px;
 	box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 	padding: 6px;
-	max-height: 240px;
+	max-height: min(240px, calc(100vh - 220px));
 	overflow-y: auto;
-	margin-bottom: 6px;
+	margin-bottom: 0;
 }
 
 .friday-mention-dropdown.is-hidden {
@@ -1482,6 +1438,7 @@
 	.friday-shell-header {
 		align-items: flex-start;
 		flex-direction: column;
+		border-radius: 12px;
 	}
 
 	.friday-shell-project-select {
@@ -1729,15 +1686,9 @@
 	justify-content: space-between;
 	gap: 10px;
 	padding: 8px 10px;
-	border-radius: 14px;
-	border: 1px solid color-mix(in srgb, var(--interactive-accent) 14%, var(--background-modifier-border));
-	background:
-		radial-gradient(circle at top left, color-mix(in srgb, var(--interactive-accent) 10%, transparent) 0, transparent 52%),
-		linear-gradient(
-			135deg,
-			color-mix(in srgb, var(--background-primary-alt) 92%, var(--interactive-accent) 4%) 0%,
-			color-mix(in srgb, var(--background-secondary) 92%, var(--interactive-accent) 6%) 100%
-		);
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary-alt);
 }
 
 .friday-shell-bar-left,
@@ -1769,10 +1720,11 @@
 }
 
 .friday-shell-project-brand.friday-wordmark {
-	font-size: max(12.8px, 0.84em);
-	font-weight: 400;
-	letter-spacing: 0.08em;
-	text-transform: none;
+	font-size: max(14px, 0.94em);
+	font-weight: 600;
+	line-height: 22px;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
 }
 
 .friday-shell-project-inline {
@@ -1817,7 +1769,7 @@
 	width: 32px;
 	height: 32px;
 	padding: 0;
-	border-radius: 999px;
+	border-radius: 8px;
 	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 12%);
 	background: color-mix(in srgb, var(--background-primary) 90%, transparent);
 	color: var(--text-muted);
@@ -1842,16 +1794,20 @@
 }
 
 .friday-top-nav {
+	display: grid;
 	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
 	padding: 6px;
-	border-radius: 14px;
-	background: color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 4%);
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary-alt);
+	flex-shrink: 0;
 }
 
 .friday-nav-button {
 	min-height: 34px;
 	padding: 6px 8px;
-	border-radius: 10px;
+	border-radius: 8px;
 	background: transparent;
 	gap: 8px;
 	justify-content: center;
@@ -1883,6 +1839,12 @@
 }
 
 .friday-page-content {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	min-width: 0;
+	min-height: 0;
+	flex: 1 1 auto;
 	overflow-y: auto;
 	overflow-x: hidden;
 }
@@ -1916,20 +1878,6 @@
 	line-height: 1.35;
 }
 
-.friday-ai-focus-eyebrow {
-	font-size: 0.72em;
-	font-weight: 700;
-	letter-spacing: 0.12em;
-	text-transform: uppercase;
-	color: var(--text-muted);
-}
-
-.friday-ai-focus-caption {
-	margin: 0;
-	font-size: 0.78em;
-	color: var(--text-muted);
-}
-
 .friday-ai-focus-actions {
 	display: flex;
 	align-items: center;
@@ -1945,14 +1893,9 @@
 
 .friday-ai-chat-shell {
 	padding: 0;
-	border-radius: 16px;
+	border-radius: 12px;
 	overflow: hidden;
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in srgb, var(--background-primary-alt) 94%, var(--interactive-accent) 4%) 0%,
-			color-mix(in srgb, var(--background-secondary) 96%, var(--interactive-accent) 2%) 100%
-		);
+	background: var(--background-primary-alt);
 }
 
 .friday-ai-message-list {
@@ -2006,11 +1949,16 @@
 	justify-content: center;
 	width: 22px;
 	height: 22px;
-	border-radius: 999px;
-	font-size: 0.72em;
-	font-weight: 800;
-	background: color-mix(in srgb, var(--background-secondary) 82%, transparent);
+	flex: 0 0 22px;
+	border: 0;
+	background: transparent;
 	color: var(--text-normal);
+}
+
+.friday-ai-message-avatar svg {
+	width: 15px;
+	height: 15px;
+	stroke-width: 0;
 }
 
 .friday-ai-message-role {
@@ -2023,8 +1971,8 @@
 
 .friday-ai-message-role.friday-wordmark {
 	font-size: max(12.8px, 0.84em);
-	font-weight: 400;
-	letter-spacing: 0.08em;
+	font-weight: 600;
+	letter-spacing: 0.16em;
 }
 
 .friday-ai-message-badges {
@@ -2111,6 +2059,8 @@
 }
 
 .friday-runtime-card {
+	display: flex;
+	flex-direction: column;
 	padding: 0;
 	gap: 0;
 	background: transparent;
@@ -2255,6 +2205,7 @@
 	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 14%);
 	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
 	padding: 10px;
+	overflow: visible;
 }
 
 .friday-mention-composer-root {
@@ -2263,6 +2214,8 @@
 	gap: 6px;
 	width: 100%;
 	min-width: 0;
+	position: relative;
+	overflow: visible;
 }
 
 .friday-mention-composer-editor {
@@ -2338,6 +2291,7 @@
 	height: 12px;
 	min-width: 12px;
 	padding: 0;
+	border-radius: 6px;
 	border: 0;
 	background: transparent;
 	color: color-mix(in srgb, var(--text-muted) 92%, transparent);
@@ -2354,7 +2308,7 @@
 	height: 12px;
 	min-width: 12px;
 	padding: 0;
-	border-radius: 999px;
+	border-radius: 6px;
 }
 
 .friday-inline-mention-token:hover .friday-inline-mention-token-remove,
@@ -2399,7 +2353,7 @@
 .friday-ai-toolbar-button,
 .friday-ai-send-button {
 	min-height: 30px;
-	border-radius: 999px;
+	border-radius: 8px;
 	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, var(--interactive-accent) 12%);
 	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
 	font-size: 0.78em;
@@ -2416,6 +2370,7 @@
 	align-items: center;
 	justify-content: center;
 	padding: 0 10px;
+	border-radius: 8px;
 	cursor: pointer;
 }
 
@@ -2444,6 +2399,7 @@
 .friday-ai-send-button {
 	margin-left: auto;
 	padding: 0 12px;
+	border-radius: 8px;
 	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
 	border-color: color-mix(in srgb, var(--interactive-accent) 36%, var(--background-modifier-border));
 }
@@ -2457,15 +2413,10 @@
 	flex-direction: column;
 	gap: 12px;
 	padding: 14px 12px 12px;
-	border-radius: 20px;
-	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, transparent);
-	background:
-		linear-gradient(
-			180deg,
-			color-mix(in srgb, var(--background-secondary) 94%, var(--interactive-accent) 3%) 0%,
-			color-mix(in srgb, var(--background-primary) 95%, var(--interactive-accent) 2%) 100%
-		);
-	box-shadow: 0 20px 40px color-mix(in srgb, var(--background-primary) 22%, transparent);
+	border-radius: 12px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary-alt);
+	box-shadow: none;
 }
 
 .friday-ai-drawer-backdrop {
@@ -2612,7 +2563,7 @@
 	justify-content: center;
 	min-height: 30px;
 	padding: 0 12px;
-	border-radius: 999px;
+	border-radius: 8px;
 	border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
 	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
 	color: var(--text-normal);
@@ -2623,13 +2574,8 @@
 }
 
 .friday-runtime-card-toggle.is-completed {
-	background:
-		linear-gradient(
-			135deg,
-			color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary)) 0%,
-			color-mix(in srgb, var(--color-green) 10%, var(--background-primary)) 100%
-		);
-	box-shadow: 0 8px 18px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+	background: color-mix(in srgb, var(--color-green) 16%, var(--background-primary));
+	box-shadow: none;
 }
 
 .friday-ai-runtime-preview.is-completed {
@@ -2965,7 +2911,7 @@
 	justify-content: space-between;
 	gap: 10px;
 	padding: 10px 12px;
-	border-radius: 14px;
+	border-radius: 12px;
 	background: color-mix(in srgb, var(--background-primary) 92%, transparent);
 	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
 }
@@ -3002,10 +2948,10 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
+	width: 28px;
+	height: 28px;
 	padding: 0;
-	border-radius: 999px;
+	border-radius: 8px;
 	border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
 	background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
 	color: var(--text-muted);
@@ -3211,6 +3157,97 @@
 	}
 }
 
+.friday-onboarding-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	max-width: 860px;
+	padding: 16px 0 8px;
+}
 
+.friday-onboarding-header {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	text-align: center;
+}
 
+.friday-onboarding-header h3 {
+	margin: 0;
+	font-size: 1.15em;
+	font-weight: 650;
+}
 
+.friday-onboarding-step p {
+	margin: 0;
+	color: var(--text-muted);
+	line-height: 1.55;
+}
+
+.friday-onboarding-list {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.friday-onboarding-step {
+	display: grid;
+	grid-template-columns: 24px minmax(0, 1fr) auto;
+	gap: 12px;
+	align-items: center;
+	padding: 12px 0;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.friday-onboarding-step-marker {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	color: var(--text-muted);
+}
+
+.friday-onboarding-step.is-complete .friday-onboarding-step-marker {
+	color: var(--interactive-accent);
+}
+
+.friday-onboarding-step-body {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.friday-onboarding-step-body h4 {
+	margin: 0;
+	font-size: 0.95em;
+	font-weight: 600;
+}
+
+.friday-onboarding-step-action {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+}
+
+.friday-onboarding-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 4px;
+}
+
+@media (max-width: 720px) {
+	.friday-onboarding-step {
+		grid-template-columns: 24px minmax(0, 1fr);
+	}
+
+	.friday-onboarding-step-action {
+		grid-column: 2;
+		justify-content: flex-start;
+	}
+
+	.friday-onboarding-actions {
+		justify-content: flex-start;
+	}
+}

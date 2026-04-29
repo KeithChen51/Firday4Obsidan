@@ -39,6 +39,7 @@ import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
 import { GitConflictCapability } from "../platform/capability/GitConflictCapability";
 import { WikiCompileCapability } from "../platform/capability/WikiCompileCapability";
 import { WikiLookupCapability } from "../platform/capability/WikiLookupCapability";
+import { WIKI_FEATURE_ENABLED, WIKI_SKILL_COMMANDS } from "../constants/wikiFeature";
 import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 import { StepTraceStore } from "../platform/tools/StepTraceStore";
 import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
@@ -317,7 +318,7 @@ export class AgentRuntimeService {
 				const message = error instanceof Error ? error.message : String(error ?? "");
 				if (this.toolGovernor.isRetryableTransportFailure(message)) {
 					throw new Error(
-						`内网网关暂时不可用，已停止自动切换兼容模式，避免从当前步骤重新请求一次模型并产生额外消耗。${message}`,
+						`模型服务或网关暂时不可用，已停止自动切换兼容模式，避免从当前步骤重新请求一次模型并产生额外消耗。${message}`,
 					);
 				}
 				if (!this.toolGovernor.shouldFallbackToPrompt(message)) {
@@ -357,6 +358,7 @@ export class AgentRuntimeService {
 
 	async runBuiltinSkillCommand(input: BuiltinSkillRunInput): Promise<RuntimeTurnResult> {
 		const turnId = this.createTurnId();
+		const normalizedSkillName = input.skillName.trim().toLowerCase();
 		this.lastContextSummary = null;
 		this.activeTurnId = turnId;
 		this.activeTurnStateMachine = new TurnStateMachine(turnId);
@@ -378,6 +380,31 @@ export class AgentRuntimeService {
 			ok: true,
 			summary: "",
 		};
+
+		if (!WIKI_FEATURE_ENABLED && WIKI_SKILL_COMMANDS.has(normalizedSkillName)) {
+			const message = `Builtin skill is disabled: ${input.skillName}`;
+			const trace: RuntimeToolTrace = {
+				...traceBase,
+				approved: false,
+				approvalReason: message,
+				status: "denied",
+				failureClass: "dependency_unavailable",
+				ok: false,
+				summary: message,
+				error: message,
+			};
+			await this.persistToolRun(trace, startedAt, new Date().toISOString());
+			return this.finalizeTurnResult(
+				turnId,
+				{
+					assistantText: message,
+					traces: [trace],
+					rawFinalReply: message,
+					parseError: message,
+				},
+				input.taskPrompt,
+			);
+		}
 
 		this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, {
 			phase: "start",
@@ -421,18 +448,10 @@ export class AgentRuntimeService {
 		try {
 			let assistantText = "";
 			let summary = `Builtin skill completed: ${input.skillName}`;
-			if (input.skillName === "lookup-wiki") {
-				const wikiKnowledgeContext = await this.wikiLookupCapability.execute(input.taskPrompt);
-				assistantText = wikiKnowledgeContext
-					? `Skill used: lookup-wiki\n\n${wikiKnowledgeContext}`
-					: "Skill used: lookup-wiki\n\nNo related knowledge found.";
-			} else if (input.skillName === "resolve-conflict") {
+			if (input.skillName === "resolve-conflict") {
 				const conflictResult = await this.gitConflictCapability.generateProposal(input.taskPrompt);
 				assistantText = conflictResult.markdown;
 				summary = `Builtin skill completed: ${input.skillName} (${conflictResult.recommendedStrategy})`;
-			} else if (input.skillName === "compile-wiki") {
-				const compileSummary = await this.wikiCompileCapability.execute(undefined, true);
-				assistantText = `Skill used: compile-wiki\n\nWiki compile requested=${compileSummary.requested}, processed=${compileSummary.processed}, succeeded=${compileSummary.succeeded}, failed=${compileSummary.failed}`;
 			} else {
 				throw new Error(`Unsupported builtin skill: ${input.skillName}`);
 			}
@@ -679,7 +698,9 @@ export class AgentRuntimeService {
 			{ action: "tool:grep", effect: resolveEffect("grep", readEffect), source: "global" },
 			{ action: "tool:search_text", effect: resolveEffect("search_text", readEffect), source: "global" },
 			{ action: "tool:glob", effect: resolveEffect("glob", readEffect), source: "global" },
-			{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", writeEffect), source: "global" },
+			...(WIKI_FEATURE_ENABLED
+				? [{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", writeEffect), source: "global" } as PolicyRule]
+				: []),
 			{ action: "tool:memory", effect: resolveEffect("memory", "allow"), source: "global" },
 			{ action: "tool:write", effect: resolveEffect("write", writeEffect), source: "global" },
 			{ action: "tool:edit", effect: resolveEffect("edit", writeEffect), source: "global" },
@@ -860,7 +881,8 @@ export class AgentRuntimeService {
 				message: `Step ${step}: model response received`,
 			});
 
-			if (!response.toolCall) {
+			const toolCalls = response.toolCalls;
+			if (toolCalls.length === 0) {
 				const assistantPayload = assistantStepText;
 				const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload);
 				if (!assistantPayload || this.isIntermediateAssistantText(assistantPayload)) {
@@ -935,44 +957,53 @@ export class AgentRuntimeService {
 				};
 			}
 
-			this.reportProgress(input, {
-				phase: "tool_call",
-				depth,
-				step,
-				tool: response.toolCall.name,
-				targetPath: this.resolveToolTargetPath(response.toolCall.name, response.toolCall.args ?? {}),
-				message: `Step ${step}: calling tool ${response.toolCall.name}`,
-			});
-			const toolResult = await this.executeTool(step, input, {
-				name: response.toolCall.name,
-				args: response.toolCall.args,
-			}, allowedToolSet);
-			traces.push(toolResult.trace);
-			lastToolPayload = toolResult.payload;
-			this.reportProgress(input, {
-				phase: "tool_result",
-				depth,
-				step,
-				tool: response.toolCall.name,
-				targetPath: toolResult.trace.targetPath,
-				status: toolResult.trace.status,
-				summary: toolResult.trace.summary,
-				message: `Step ${step}: tool ${response.toolCall.name} finished - ${toolResult.trace.summary}`,
-			});
+			const toolResultMessages: ChatMessage[] = [];
+			const loadedSkillContexts: string[] = [];
+			for (const toolCall of toolCalls) {
+				this.reportProgress(input, {
+					phase: "tool_call",
+					depth,
+					step,
+					tool: toolCall.name,
+					targetPath: this.resolveToolTargetPath(toolCall.name, toolCall.args ?? {}),
+					message: `Step ${step}: calling tool ${toolCall.name}`,
+				});
+				const toolResult = await this.executeTool(step, input, {
+					name: toolCall.name,
+					args: toolCall.args,
+				}, allowedToolSet);
+				traces.push(toolResult.trace);
+				lastToolPayload = toolResult.payload;
+				this.reportProgress(input, {
+					phase: "tool_result",
+					depth,
+					step,
+					tool: toolCall.name,
+					targetPath: toolResult.trace.targetPath,
+					status: toolResult.trace.status,
+					summary: toolResult.trace.summary,
+					message: `Step ${step}: tool ${toolCall.name} finished - ${toolResult.trace.summary}`,
+				});
+				toolResultMessages.push({
+					role: "tool",
+					content: this.formatToolResultForModel(toolResult.payload),
+					toolCallId: toolCall.id,
+					name: toolCall.name,
+				});
+				const loadedSkillContext = this.extractLoadedSkillSystemContext(toolResult.payload);
+				if (loadedSkillContext) {
+					loadedSkillContexts.push(loadedSkillContext);
+				}
+			}
 
 			modelMessages.push({
 				role: "assistant",
 				content: response.assistantText?.trim() || "",
-				toolCalls: [response.toolCall],
+				toolCalls,
+				reasoningContent: response.reasoningContent,
 			});
-			modelMessages.push({
-				role: "tool",
-				content: this.formatToolResultForModel(toolResult.payload),
-				toolCallId: response.toolCall.id,
-				name: response.toolCall.name,
-			});
-			const loadedSkillContext = this.extractLoadedSkillSystemContext(toolResult.payload);
-			if (loadedSkillContext) {
+			modelMessages.push(...toolResultMessages);
+			for (const loadedSkillContext of loadedSkillContexts) {
 				modelMessages.push({ role: "system", content: loadedSkillContext });
 			}
 		}
@@ -1039,8 +1070,11 @@ export class AgentRuntimeService {
 		const autoSkillContext = await this.buildAutoSkillContext(userPrompt, currentFilePath, trimmedExtra);
 		const runtimeExtraContext = autoSkillContext && autoSkillContext === trimmedExtra ? "" : trimmedExtra;
 
-		this.reportContextProgress(input, depth, "wiki", "检索项目知识与候选文档");
-		const wikiKnowledgeContext = await this.wikiLookupCapability.execute(userPrompt ?? "");
+		let wikiKnowledgeContext = "";
+		if (WIKI_FEATURE_ENABLED) {
+			this.reportContextProgress(input, depth, "wiki", "检索项目知识与候选文档");
+			wikiKnowledgeContext = await this.wikiLookupCapability.execute(userPrompt ?? "");
+		}
 
 		this.reportContextProgress(input, depth, "memory", "加载长期记忆与项目偏好");
 		const memoryContext = await this.loadMemoryContext();
@@ -1366,7 +1400,7 @@ export class AgentRuntimeService {
 			grep: async (payload) => this.toolGrep(payload),
 			search_text: async (payload) => this.toolSearchText(payload),
 			glob: async (payload) => this.toolGlob(payload),
-			compile_wiki: async (payload) => this.toolCompileWiki(payload),
+			...(WIKI_FEATURE_ENABLED ? { compile_wiki: async (payload) => this.toolCompileWiki(payload) } : {}),
 			memory: async (payload) => this.toolMemory(payload),
 			write: async (payload) => this.toolWrite(payload, agentId),
 			edit: async (payload) => this.toolEdit(payload, agentId),
@@ -2070,12 +2104,17 @@ export class AgentRuntimeService {
 	}
 
 	private resolveDefaultVaultSearchPath(rawPath: string | undefined): string {
-		const normalized = normalizePath(rawPath || "");
+		const normalized = this.normalizeVaultRootSearchPath(rawPath);
 		if (normalized) {
 			return normalized;
 		}
 		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		return activeProjectRoot ? normalizePath(activeProjectRoot) : "";
+		return this.normalizeVaultRootSearchPath(activeProjectRoot);
+	}
+
+	private normalizeVaultRootSearchPath(rawPath: string | undefined): string {
+		const normalized = normalizePath(rawPath || "");
+		return normalized === "/" ? "" : normalized;
 	}
 
 	private normalizeToolArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
@@ -2090,7 +2129,7 @@ export class AgentRuntimeService {
 		if (!rawPath || rawPath === "/" || rawPath === "\\" || rawPath === ".") {
 			return {
 				...args,
-				path: normalizePath(activeProjectRoot),
+				path: this.normalizeVaultRootSearchPath(activeProjectRoot),
 			};
 		}
 		return args;
@@ -2102,21 +2141,22 @@ export class AgentRuntimeService {
 	}
 
 	private listVault(targetPath: string, recursive: boolean, maxEntries: number): string[] {
+		const normalizedTargetPath = this.normalizeVaultRootSearchPath(targetPath);
 		const allFiles = this.vault.getAllLoadedFiles();
 		const scoped = allFiles
 			.filter((item) => {
-				if (!targetPath) return true;
-				return item.path === targetPath || item.path.startsWith(`${targetPath}/`);
+				if (!normalizedTargetPath) return true;
+				return item.path === normalizedTargetPath || item.path.startsWith(`${normalizedTargetPath}/`);
 			})
-			.filter((item) => targetPath || item.path.includes("/"));
+			.filter((item) => normalizedTargetPath || item.path.includes("/"));
 
 		const entries = scoped
 			.filter((item) => {
-				if (!targetPath) {
+				if (!normalizedTargetPath) {
 					return item.path.split("/").length === 2 || recursive;
 				}
 				if (recursive) return true;
-				const depth = item.path.split("/").length - targetPath.split("/").length;
+				const depth = item.path.split("/").length - normalizedTargetPath.split("/").length;
 				return depth <= 1;
 			})
 			.map((item) => this.formatAbstractFile(item))
@@ -2223,8 +2263,10 @@ export class AgentRuntimeService {
 	}
 
 	private isPathWithin(candidatePath: string, basePath: string): boolean {
-		if (!basePath) return true;
-		return candidatePath === basePath || candidatePath.startsWith(`${basePath}/`);
+		if (!basePath || basePath === "/") return true;
+		const normalizedBasePath = this.normalizeVaultRootSearchPath(basePath);
+		if (!normalizedBasePath) return true;
+		return candidatePath === normalizedBasePath || candidatePath.startsWith(`${normalizedBasePath}/`);
 	}
 
 	private formatToolResultForModel(payload: RuntimeToolResultPayload): string {
@@ -2585,26 +2627,6 @@ export class AgentRuntimeService {
 						maxMatches: { type: "number", default: 80 },
 					},
 					required: ["pattern"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "compile_wiki",
-				description: "Compile active project raw files into wiki outputs (raw -> wiki re-ingest).",
-				parameters: {
-					type: "object",
-					properties: {
-						mode: { type: "string", enum: ["changed", "all"] },
-						path: {
-							type: "string",
-							description: "Optional single raw path (raw-relative, project-relative, or Vault path).",
-						},
-						paths: {
-							type: "array",
-							items: { type: "string" },
-							description: "Optional raw path list to compile.",
-						},
-					},
 					additionalProperties: false,
 				},
 			},

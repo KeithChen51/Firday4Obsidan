@@ -33,5 +33,6 @@ test("gitee release pipeline builds from supported source branches and publishes
 
 	const ciPublishSource = read(ciPublishScriptPath);
 	assert.match(ciPublishSource, /generate-official-content-release\.mjs/);
-	assert.match(ciPublishSource, /publish-release-branch\.mjs --branch release plugin official/);
+	assert.match(ciPublishSource, /publish-release-branch\.mjs --branch release plugin \.workflow\/publish\/official=official/);
+	assert.doesNotMatch(ciPublishSource, /publish-release-branch\.mjs --branch release plugin official/);
 });

@@ -6,6 +6,7 @@ import { normalizeProjectGroupIdCandidate } from "./projectGroupId";
 import {
 	buildDefaultProjectRootPath,
 	buildRemoteBootstrapDefaults,
+	buildVaultRootProjectPath,
 	detectProjectGitState,
 	isFridayManagedProjectRoot,
 	type ProjectEditorDraft,
@@ -32,7 +33,7 @@ import type { ModelCapabilityInfo } from "../services/AIService";
 import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrationService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
-import { SlashCommandTemplate } from "../types/settings";
+import { SlashCommandTemplate, isWorkbenchStartupPlacement } from "../types/settings";
 import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
@@ -98,6 +99,8 @@ export class FridaySettingTab extends PluginSettingTab {
 	private projectEditorRemoteBootstrapDirectoryState: RemoteBootstrapDirectoryState = "unknown";
 	private projectEditorRemoteBootstrapResolution: RemoteBootstrapResolution = "unset";
 	private projectEditorRemoteBootstrapChoiceInitialized = false;
+	private projectEditorCreateInVaultRoot = false;
+	private projectEditorVaultRootConfirmPending = false;
 	private legacyFridayRootReport: LegacyFridayRootReport | null = null;
 	private legacyFridayRootReportLoading = false;
 	private officialContentGuardState: Awaited<ReturnType<SettingsHost["legacyFridayRootMigrationService"]["inspectDestructiveApplySafety"]>> | null = null;
@@ -164,7 +167,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	private renderSettingsTitle(containerEl: HTMLElement): void {
 		const titleText = this.host.t("settings.title");
-		const brandText = this.t("nav.friday", "F.R.I.D.A.Y");
+		const brandText = this.t("nav.friday", "FRIDAY");
 		const brandIndex = titleText.indexOf(brandText);
 		if (brandIndex < 0) {
 			containerEl.createEl("h2", { text: titleText });
@@ -182,7 +185,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			cls: "friday-settings-title-brand friday-wordmark",
 			text: brandText,
 		});
-		brandEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
+		brandEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
 		if (suffixText) {
 			titleEl.createSpan({ cls: "friday-settings-title-suffix", text: suffixText });
 		}
@@ -239,6 +242,10 @@ export class FridaySettingTab extends PluginSettingTab {
 		void this.ensureUserGitCredentialLoaded();
 		void this.ensureGitRuntimeStatusLoaded();
 		const profileGroup = this.createNativeSettingsGroup(containerEl);
+		const workbenchGroup = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.workbench.title", "启动入口"),
+			description: this.t("settings.workbench.desc", "控制 Obsidian 启动后 FRIDAY 是否自动出现，以及出现在哪个工作区位置。"),
+		});
 		const gitGroup = this.createNativeSettingsGroup(containerEl);
 
 		const localeSetting = new Setting(profileGroup)
@@ -266,15 +273,43 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 		});
 
-		new Setting(profileGroup).setName(this.t("settings.user.displayName.name", "显示名称")).addText((text) =>
+		new Setting(profileGroup).setName(this.t("settings.user.displayName.name", "FRIDAY 如何称呼你")).addText((text) =>
 			text
-				.setPlaceholder(this.t("settings.user.displayName.placeholder", "F.R.I.D.A.Y怎么称呼您"))
+				.setPlaceholder(this.t("settings.user.displayName.placeholder", "FRIDAY 怎么称呼您"))
 				.setValue(this.host.settings.user.displayName)
 				.onChange(async (value) => {
 					this.host.settings.user.displayName = value.trim();
 					await this.host.saveSettings();
 				}),
 		);
+
+		new Setting(workbenchGroup)
+			.setName(this.t("settings.workbench.openOnStartup.name", "Obsidian 启动后自动唤醒 FRIDAY"))
+			.setDesc(this.t("settings.workbench.openOnStartup.desc", "仅自动打开工作台入口，不会自动同步项目、刷新官方内容或调用模型。"))
+			.addToggle((toggle) =>
+				toggle
+					.setValue(this.host.settings.workbench.openOnStartup)
+					.onChange(async (value) => {
+						this.host.settings.workbench.openOnStartup = value;
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(workbenchGroup)
+			.setName(this.t("settings.workbench.startupPlacement.name", "自动打开位置"))
+			.setDesc(this.t("settings.workbench.startupPlacement.desc", "选择启动时 FRIDAY 工作台默认打开的侧边栏位置。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("right-sidebar", this.t("settings.workbench.startupPlacement.rightSidebar", "右侧边栏"));
+				dropdown.addOption("left-sidebar", this.t("settings.workbench.startupPlacement.leftSidebar", "左侧边栏"));
+				dropdown.setValue(this.host.settings.workbench.startupPlacement);
+				dropdown.onChange(async (value) => {
+					if (!isWorkbenchStartupPlacement(value)) {
+						return;
+					}
+					this.host.settings.workbench.startupPlacement = value;
+					await this.host.saveSettings();
+				});
+			});
 
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitUsername.name", "Git 用户名"))
@@ -369,7 +404,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				needsPluginReload
 					? this.t(
 						"settings.user.update.notice.applied",
-						"更新已写入。点击下方按钮重新加载 F.R.I.D.A.Y 插件，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
+						"更新已写入。点击下方按钮重新加载 FRIDAY 插件，新版本加载后会按内置 studio 源内容重建“来自制作组”栏目。",
 					)
 					: this.getPluginUpdateStatusDesc(),
 			)
@@ -377,7 +412,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				button
 					.setButtonText(
 						needsPluginReload
-							? this.t("settings.user.update.notice.restart", "重新加载 F.R.I.D.A.Y 插件")
+							? this.t("settings.user.update.notice.restart", "重新加载 FRIDAY 插件")
 							: hasAvailableUpdate
 							? this.t("settings.user.update.currentVersion.apply", "应用更新")
 							: this.t("settings.user.update.currentVersion.check", "检查更新"),
@@ -612,7 +647,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		const blockingPaths = this.officialContentGuardState?.blockingPaths ?? [];
 		if (this.officialContentGuardState?.blocked) {
 			const warningGroup = this.createNativeSettingsGroup(containerEl, {
-				title: this.t("settings.subscriptions.legacy.warning", "检测到 Friday 根目录历史内容"),
+					title: this.t("settings.subscriptions.legacy.warning", "检测到 FRIDAY 根目录历史内容"),
 				description: this.t(
 					"settings.subscriptions.legacy.warningDesc",
 					"继续应用订阅会删除这些历史路径。请先迁移、清理，或显式确认由官方频道接管 F.R.I.D.A.Y/。",
@@ -1058,18 +1093,18 @@ export class FridaySettingTab extends PluginSettingTab {
 			title: this.t("settings.agent.profile.title", "当前 Soul 定义"),
 			description: this.t(
 				"settings.agent.profile.desc",
-				"这里配置当前 Soul，也就是 Friday 的人格、风格和行为方式。",
+				"这里配置当前 Soul，也就是 FRIDAY 的人格、风格和行为方式。",
 			),
 		});
 		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
 		const pathGroup = this.createNativeSettingsGroup(containerEl);
 
 		new Setting(identityGroup)
-			.setName(this.t("settings.agent.currentSoul.name", "当前 Friday Soul"))
+				.setName(this.t("settings.agent.currentSoul.name", "当前 FRIDAY Soul"))
 			.setDesc(
 				this.t(
 					"settings.agent.currentSoul.desc",
-					"Soul 是对 Friday 的人格、风格的定义，可灵活调整。",
+				"Soul 是对 FRIDAY 的人格、风格的定义，可灵活调整。",
 				),
 			)
 			.addDropdown((dropdown) => {
@@ -1088,7 +1123,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (activeSoulDefinition) {
 			this.ensureSoulEditorDraft(activeSoulDefinition);
 			new Setting(identityGroup)
-				.setName(this.t("settings.agent.currentModel.name", "当前 Friday Model"))
+				.setName(this.t("settings.agent.currentModel.name", "当前 FRIDAY Model"))
 				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
 				.addDropdown((dropdown) => {
 					const agentModelOptions = this.getAvailableAgentModelOptions();
@@ -1167,7 +1202,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					button.setButtonText(this.t("settings.agent.manage.delete", "删除"));
 					if (!this.canDeleteSoul(soul, souls.length)) {
 						button.setDisabled(true);
-						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "原生 F.R.I.D.A.Y 或最后一个 Soul 不能删除。"));
+						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "原生 FRIDAY 或最后一个 Soul 不能删除。"));
 						return;
 					}
 					button.onClick(async () => {
@@ -1181,7 +1216,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				.setDesc(this.t("settings.agent.profile.nameDesc", "这是这个 Soul 的显示名称。"))
 				.addText((text) =>
 					text
-						.setPlaceholder(this.t("settings.agent.defaultName", "原生F.R.I.D.A.Y"))
+						.setPlaceholder(this.t("settings.agent.defaultName", "原生 FRIDAY"))
 						.setValue(this.soulEditorNameDraft)
 						.onChange((value) => {
 							this.soulEditorNameDraft = value;
@@ -1202,7 +1237,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 			new Setting(profileGroup)
 				.setName(this.t("settings.agent.profile.definition", "人格与风格定义"))
-				.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 Friday 的人格、风格和行为方式。"))
+				.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 FRIDAY 的人格、风格和行为方式。"))
 				.addTextArea((textArea) => {
 					textArea
 						.setPlaceholder(this.t("settings.agent.profile.definitionPlaceholder", "例如：先给结论，再展开；语气克制、清晰，少说空话。"))
@@ -1216,7 +1251,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 			new Setting(profileGroup)
 				.setName(this.t("settings.agent.profile.tonePreset", "语气风格"))
-				.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 Friday 默认的表达气质。"))
+				.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 FRIDAY 默认的表达气质。"))
 				.addDropdown((dropdown) => {
 					dropdown.addOption("balanced", this.t("settings.agent.profile.tonePreset.balanced", "平衡"));
 					dropdown.addOption("calm", this.t("settings.agent.profile.tonePreset.calm", "冷静"));
@@ -1243,7 +1278,7 @@ export class FridaySettingTab extends PluginSettingTab {
 
 			new Setting(profileGroup)
 				.setName(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
-				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置原生 F.R.I.D.A.Y 可用，会用最新默认参数覆盖当前 Soul 定义。"))
+				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置原生 FRIDAY 可用，会用最新默认参数覆盖当前 Soul 定义。"))
 				.addButton((button) =>
 					button
 						.setButtonText(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
@@ -1710,10 +1745,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			extraClass: "friday-project-register-panel",
 		});
 		const registerSetting = new Setting(panel)
-			.setName(this.t("settings.project.register", "注册项目"))
-			.setDesc(this.t("settings.project.register.desc", "创建一个新的项目配置。"))
+			.setName(this.t("settings.project.workFolder.title", "选择 FRIDAY 可以工作的文件夹"))
+			.setDesc(this.t("settings.project.workFolder.desc", "这个文件夹会作为 FRIDAY 的工作范围，用来限制读取、写入和同步边界。"))
 			.addButton((button) =>
-				button.setButtonText(this.t("settings.project.register", "注册项目")).setCta().onClick(() => {
+				button.setButtonText(this.t("settings.project.workFolder.action", "选择文件夹")).setCta().onClick(() => {
 					void this.openRegisterProjectModal();
 				}),
 			);
@@ -2366,7 +2401,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private resolveSoulDisplayName(soul: { id: string; name: string }): string {
 		const name = soul.name.trim();
 		if (soul.id.startsWith("default") && (!name || name === "默认 Soul" || name === "默认 Agent" || name === "原生F.R.I.D.A.Y")) {
-			return this.t("settings.agent.defaultName", "原生F.R.I.D.A.Y");
+			return this.t("settings.agent.defaultName", "原生 FRIDAY");
 		}
 		return name || soul.id;
 	}
@@ -2398,7 +2433,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		const souls = this.host.listSouls();
 		const target = souls.find((item) => item.id === soulId);
 		if (!target || !this.canDeleteSoul(target, souls.length)) {
-			throw new Error(this.t("settings.agent.manage.deleteBlocked", "原生 F.R.I.D.A.Y 或最后一个 Soul 不能删除。"));
+			throw new Error(this.t("settings.agent.manage.deleteBlocked", "原生 FRIDAY 或最后一个 Soul 不能删除。"));
 		}
 		const fallback = souls.find((item) => item.id !== soulId);
 		await this.host.soulStore.deleteSoul(soulId);
@@ -2504,6 +2539,8 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.projectEditorInitialProjectId = initial ? this.getProjectKey(initial) : "";
 		this.projectEditorError = "";
 		this.projectGitDetection = null;
+		this.projectEditorCreateInVaultRoot = false;
+		this.projectEditorVaultRootConfirmPending = false;
 		this.resetRemoteBootstrapDirectoryChoice();
 		this.activeSection = "project";
 		this.display();
@@ -2540,6 +2577,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				autoSync: initial.autoSync,
 				slug: projectId,
 				projectRootPath: boundaryPath,
+				useVaultRootAsProject: boundaryPath.trim() === "/",
 			};
 		}
 		const defaultBoundaryPath = "";
@@ -2554,6 +2592,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			autoSync: false,
 			slug: "",
 			projectRootPath: defaultBoundaryPath,
+			useVaultRootAsProject: false,
 		};
 	}
 
@@ -2570,11 +2609,14 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 		this.renderProjectEditorDropdownSetting(
 			card,
-			this.t("projects.editor.mode", "Registration mode"),
+			this.t("projects.editor.mode", "创建方式"),
 			this.t("settings.project.editor.mode.desc", "决定项目是本地新建，还是从远端拉取。"),
 			draft.mode,
 			(value) => {
 				draft.mode = value as ProjectEditorDraft["mode"];
+				draft.useVaultRootAsProject = false;
+				this.projectEditorCreateInVaultRoot = false;
+				this.projectEditorVaultRootConfirmPending = false;
 				if (draft.mode === "remote_bootstrap") {
 					this.applyRemoteBootstrapDefaults(draft);
 					this.resetRemoteBootstrapDirectoryChoice();
@@ -2604,12 +2646,15 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.renderProjectEditorTextSetting(
 			card,
 			this.t("projects.editor.projectName", "Project name"),
-			this.t("settings.project.editor.projectName.desc", "用于设置页和工作台显示的项目名称。"),
+			this.t("settings.project.editor.projectName.desc", "用于在 FRIDAY 中识别这个工作范围。"),
 			draft.projectName,
 			(value) => {
 				draft.projectName = value.trim();
 				if (draft.mode === "remote_bootstrap") {
 					this.syncRemoteBootstrapBoundaryPath(draft);
+				}
+				if (this.projectEditorCreateInVaultRoot) {
+					this.syncLocalVaultRootBoundaryPath(draft);
 				}
 			},
 			"text",
@@ -2646,10 +2691,19 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (draft.mode === "remote_bootstrap") {
 			this.renderRemoteBootstrapDirectoryPicker(fields, draft);
 		} else {
+			const vaultRootChildSelection = "__vault_root_child__";
+			const wholeVaultSelection = "__whole_vault__";
 			const directoryOptions = this.listVaultDirectoryOptions(false);
-			if (draft.boundaryPath.trim() && !directoryOptions.includes(draft.boundaryPath.trim())) {
+			if (draft.boundaryPath.trim() && draft.boundaryPath.trim() !== "/" && !directoryOptions.includes(draft.boundaryPath.trim())) {
 				directoryOptions.unshift(draft.boundaryPath.trim());
 			}
+			const currentLocalSelection = draft.useVaultRootAsProject
+				? wholeVaultSelection
+				: this.projectEditorCreateInVaultRoot
+					? vaultRootChildSelection
+					: draft.boundaryPath.trim()
+						? this.normalizeVaultDirectorySelectionValue(draft.boundaryPath)
+						: "";
 			this.renderProjectEditorDropdownSetting(
 				card,
 				this.t("projects.editor.vaultDir", "Obsidian local path"),
@@ -2657,8 +2711,23 @@ export class FridaySettingTab extends PluginSettingTab {
 					"settings.project.editor.vaultDir.localDesc",
 					"从当前 Obsidian Vault 中选择一个目录；如果该目录已经是 Git 仓库，会自动识别远端。",
 				),
-				this.normalizeVaultDirectorySelectionValue(draft.boundaryPath),
+				currentLocalSelection,
 				(value) => {
+					if (value === vaultRootChildSelection || value === "/") {
+						this.projectEditorCreateInVaultRoot = true;
+						this.projectEditorVaultRootConfirmPending = false;
+						draft.useVaultRootAsProject = false;
+						this.syncLocalVaultRootBoundaryPath(draft);
+						void this.refreshProjectGitDetection(draft);
+						this.display();
+						return;
+					}
+					if (value === wholeVaultSelection && draft.useVaultRootAsProject) {
+						return;
+					}
+					this.projectEditorCreateInVaultRoot = false;
+					this.projectEditorVaultRootConfirmPending = false;
+					draft.useVaultRootAsProject = false;
 					draft.boundaryPath = this.parseVaultDirectorySelectionValue(value);
 					draft.projectRootPath = draft.boundaryPath;
 					void this.refreshProjectGitDetection(draft);
@@ -2669,9 +2738,23 @@ export class FridaySettingTab extends PluginSettingTab {
 						value: "",
 						label: this.t("settings.project.editor.vaultDir.placeholder", "请选择 Obsidian 本地路径"),
 					},
-					...directoryOptions.map((option) => ({ value: option, label: option })),
+					{
+						value: vaultRootChildSelection,
+						label: this.t("settings.project.editor.vaultDir.rootCreate", "/（在 Vault 根目录下新建同名文件夹）"),
+					},
+					...(draft.useVaultRootAsProject
+						? [{
+							value: wholeVaultSelection,
+							label: this.t("settings.project.editor.vaultDir.wholeVaultSelected", "整个 Vault（高级，已确认）"),
+						}]
+						: []),
+					...directoryOptions.map((option) => ({ value: option, label: this.getVaultDirectoryOptionLabel(option) })),
 				],
 			);
+			if (this.projectEditorCreateInVaultRoot) {
+				this.renderLocalVaultRootCreatePreview(card, draft);
+			}
+			this.renderWholeVaultProjectOption(card, draft);
 		}
 		if (draft.mode === "local_only" && this.projectGitDetection?.detectedParentRepository) {
 			card.createDiv({
@@ -2707,9 +2790,62 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.projectEditorInitialProjectId = "";
 			this.projectEditorError = "";
 			this.projectGitDetection = null;
+			this.projectEditorCreateInVaultRoot = false;
+			this.projectEditorVaultRootConfirmPending = false;
 			this.resetRemoteBootstrapDirectoryChoice();
 			this.display();
 		};
+	}
+
+	private renderLocalVaultRootCreatePreview(containerEl: HTMLElement, draft: ProjectEditorDraft): void {
+		const targetPath = this.syncLocalVaultRootBoundaryPath(draft);
+		const setting = new Setting(containerEl)
+			.setName(this.t("settings.project.editor.vaultDir.rootCreatePreviewTitle", "保存位置"))
+			.setDesc(this.t(
+				"settings.project.editor.vaultDir.rootCreatePreview",
+				"保存后会在 Vault 根目录创建：{path}",
+				{ path: targetPath },
+			));
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.settingEl.addClass("friday-project-editor-derived-setting");
+	}
+
+	private renderWholeVaultProjectOption(containerEl: HTMLElement, draft: ProjectEditorDraft): void {
+		const setting = new Setting(containerEl)
+			.setName(this.t("settings.project.editor.vaultDir.wholeVault", "高级选项：将整个 Vault 作为项目"))
+			.setDesc(this.t(
+				"settings.project.editor.vaultDir.wholeVaultRisk",
+				"这会让项目边界覆盖整个 Vault，Agent 和同步相关功能会更容易触及非项目笔记。仅在你明确需要时使用。",
+			));
+		setting.settingEl.addClass("friday-project-editor-setting");
+		setting.settingEl.addClass("friday-project-editor-advanced-setting");
+		setting.addButton((button) => {
+			button.setButtonText(
+				draft.useVaultRootAsProject
+					? this.t("settings.project.editor.vaultDir.wholeVaultSelected", "整个 Vault（高级，已确认）")
+					: this.projectEditorVaultRootConfirmPending
+						? this.t("settings.project.editor.vaultDir.wholeVaultArmed", "再次点击确认")
+						: this.t("settings.project.editor.vaultDir.wholeVaultConfirm", "使用整个 Vault"),
+			);
+			button.setDisabled(Boolean(draft.useVaultRootAsProject));
+			button.onClick(() => {
+				if (draft.useVaultRootAsProject) {
+					return;
+				}
+				if (!this.projectEditorVaultRootConfirmPending) {
+					this.projectEditorVaultRootConfirmPending = true;
+					this.display();
+					return;
+				}
+				this.projectEditorVaultRootConfirmPending = false;
+				this.projectEditorCreateInVaultRoot = false;
+				draft.useVaultRootAsProject = true;
+				draft.boundaryPath = "/";
+				draft.projectRootPath = "/";
+				void this.refreshProjectGitDetection(draft);
+				this.display();
+			});
+		});
 	}
 
 	private renderProjectEditorTextSetting(
@@ -2760,6 +2896,13 @@ export class FridaySettingTab extends PluginSettingTab {
 				onChange(nextValue);
 			});
 		});
+	}
+
+	private getVaultDirectoryOptionLabel(optionValue: string): string {
+		if (optionValue === "/") {
+			return this.t("settings.project.editor.vaultDir.rootCreate", "/（在 Vault 根目录下新建同名文件夹）");
+		}
+		return optionValue;
 	}
 
 	private renderProjectEditorToggleSetting(
@@ -2833,7 +2976,7 @@ export class FridaySettingTab extends PluginSettingTab {
 				directoryOptions.push(currentSelection);
 			}
 			for (const optionValue of directoryOptions) {
-				dropdown.addOption(optionValue, optionValue);
+				dropdown.addOption(optionValue, this.getVaultDirectoryOptionLabel(optionValue));
 			}
 			dropdown.setValue(this.normalizeVaultDirectorySelectionValue(this.projectEditorRemoteBootstrapBasePath));
 			dropdown.selectEl.addClass("friday-project-editor-input");
@@ -2893,6 +3036,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			.filter((item): item is TFolder => item instanceof TFolder)
 			.map((folder) => folder.path.trim())
 			.filter(Boolean)
+			.filter((folderPath) => includeVaultRoot || folderPath !== "/")
 			.filter((folderPath) => !isFridayManagedProjectRoot(folderPath, this.host.dataService.getFridayRoot()))
 			.sort((left, right) => left.localeCompare(right, "en"));
 		const options = [...new Set(folders)];
@@ -2968,6 +3112,14 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 		draft.boundaryPath = "";
 		draft.projectRootPath = "";
+	}
+
+	private syncLocalVaultRootBoundaryPath(draft: ProjectEditorDraft): string {
+		const targetPath = buildVaultRootProjectPath(draft.projectName || draft.projectId || draft.slug || "");
+		draft.boundaryPath = targetPath;
+		draft.projectRootPath = targetPath;
+		draft.useVaultRootAsProject = false;
+		return targetPath;
 	}
 
 	private buildRemoteBootstrapNestedPath(
@@ -3334,7 +3486,9 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 		const previousDetectedRemote = this.projectGitDetection?.gitRemote?.trim() || "";
 		const basePath = (this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".";
-		const absolutePath = path.join(basePath, ...draft.boundaryPath.trim().replace(/\\/g, "/").split("/"));
+		const absolutePath = draft.boundaryPath.trim() === "/"
+			? basePath
+			: path.join(basePath, ...draft.boundaryPath.trim().replace(/\\/g, "/").split("/"));
 		const nextDetection = await detectProjectGitState(absolutePath);
 		const currentRemote = draft.gitRemote.trim();
 		if (!currentRemote || currentRemote === previousDetectedRemote) {
@@ -3352,6 +3506,9 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 		const draft = this.projectEditorDraft;
 		try {
+			if (this.projectEditorCreateInVaultRoot) {
+				this.syncLocalVaultRootBoundaryPath(draft);
+			}
 			const isEditing = Boolean(this.projectEditorInitialProjectId);
 			const entry = await submitProjectDraft({
 				app: this.app,
@@ -3369,6 +3526,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.projectEditorDraft = null;
 			this.projectEditorInitialProjectId = "";
 			this.projectEditorError = "";
+			this.projectEditorCreateInVaultRoot = false;
+			this.projectEditorVaultRootConfirmPending = false;
 			new Notice(
 				this.t(
 					isEditing ? "settings.project.notice.updated" : "settings.project.notice.registered",

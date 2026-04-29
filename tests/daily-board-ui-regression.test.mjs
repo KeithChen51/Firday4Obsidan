@@ -453,10 +453,16 @@ test("skill descriptions can prefer chinese localized metadata", async () => {
 	assert.match(builtinSource, /descriptionZh:/);
 });
 
-test("slash dropdown is rendered in normal flow above composer", async () => {
+test("slash and mention dropdown floats above composer without resizing it", async () => {
 	const styles = readStylesSource();
-	assert.match(styles, /\.friday-ai-composer-wrap\s*\{[\s\S]*position:\s*relative;/);
-	assert.match(styles, /\.friday-mention-dropdown\s*\{[\s\S]*position:\s*static;/);
+	const dropdownBlock = styles.match(/\.friday-mention-dropdown\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+	const composerRootBlock = styles.match(/\.friday-mention-composer-root\s*\{([\s\S]*?)\}/)?.[1] ?? "";
+	assert.match(composerRootBlock, /position:\s*relative;/);
+	assert.match(composerRootBlock, /overflow:\s*visible;/);
+	assert.match(dropdownBlock, /position:\s*absolute;/);
+	assert.match(dropdownBlock, /bottom:\s*calc\(100%\s*\+\s*8px\);/);
+	assert.match(dropdownBlock, /z-index:\s*30;/);
+	assert.doesNotMatch(dropdownBlock, /position:\s*static;/);
 });
 
 test("tools and skills page keeps vertical scrolling enabled", async () => {
@@ -482,6 +488,15 @@ test("@ category labels are localized instead of hardcoded english", async () =>
 	assert.match(source, /ai\.mention\.option\.activeNote/);
 	assert.match(source, /ai\.mention\.option\.notes/);
 	assert.match(source, /ai\.mention\.option\.folders/);
+});
+
+test("chat composer context button shows compact @ label while retaining accessible text", async () => {
+	const source = readViewSource();
+	const match = source.match(/const attachButton = toolbarEl\.createEl\("button", \{([\s\S]*?)\}\);/);
+	assert.ok(match, "context attach button should exist");
+	assert.match(match[1] ?? "", /text:\s*"@"/);
+	assert.match(source, /attachButton\.setAttribute\("aria-label", this\.t\("ai\.attach\.contextButton", "@ Add context"\)\)/);
+	assert.match(source, /attachButton\.title = this\.t\("ai\.attach\.contextButton", "@ Add context"\)/);
 });
 
 test("chat composer styles include visible keyboard focus and inline mention remove affordance", async () => {
@@ -519,14 +534,32 @@ test("chat composer layout keeps the editable surface full-width and placeholder
 	assert.match(styles, /\.friday-mention-composer-editor\.is-empty::before\s*\{[\s\S]*right:\s*0;/);
 });
 
-test("chat message meta removes avatar badges and uses the configured display name for user messages", async () => {
+test("chat message meta uses the configured display name for user messages and FRIDAY avatar for assistant messages", async () => {
 	const source = readViewSource();
-	assert.doesNotMatch(source, /friday-ai-message-avatar/);
+	assert.match(source, /private renderAssistantAvatar\(containerEl: HTMLElement\): void/);
+	assert.match(source, /friday-ai-message-avatar/);
+	assert.match(source, /setIcon\(avatarEl,\s*FRIDAY_ICON_ID\)/);
 	assert.doesNotMatch(source, /resolveUserBadgeLabel/);
 	assert.match(source, /private resolveUserDisplayName\(\): string/);
 	assert.match(source, /this\.plugin\.settings\.user\.displayName/);
 	assert.match(source, /text: isUser \? this\.resolveUserDisplayName\(\) : this\.plugin\.t\("ai\.role\.assistant"\)/);
 	assert.match(source, /this\.t\("ai\.role\.userFallback", "用户"\)/);
+});
+
+test("chat header omits redundant focus and capability summary copy", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const match = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate async populateControlCenter/);
+	assert.ok(match, "renderAiPage block should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /this\.t\("ai\.session\.new", "\+ 新会话"\)/);
+	assert.doesNotMatch(block, /ai\.focus\.label/);
+	assert.doesNotMatch(block, /ai\.focus\.caption/);
+	assert.doesNotMatch(block, /friday-ai-focus-eyebrow/);
+	assert.doesNotMatch(block, /friday-ai-focus-caption/);
+	assert.doesNotMatch(block, /getModelCapability\(effectiveModel \|\| undefined\)/);
+	assert.doesNotMatch(styles, /\.friday-ai-focus-eyebrow\b/);
+	assert.doesNotMatch(styles, /\.friday-ai-focus-caption\b/);
 });
 
 test("top navigation removes duplicate title tooltips from nav and shell icon buttons", async () => {

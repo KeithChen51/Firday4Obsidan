@@ -9,13 +9,21 @@ const DEFAULT_PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const OFFICIAL_PROVIDER_ID = "official";
 const OFFICIAL_ROOT_PATH = "F.R.I.D.A.Y";
 const OFFICIAL_CHANNEL_TITLE = "Official channel";
-const OUTPUT_ROOT = "official";
-const OUTPUT_LATEST_PATH = path.join(OUTPUT_ROOT, "latest.json");
-const OUTPUT_CHANNELS_DIR = path.join(OUTPUT_ROOT, "channels");
-const OUTPUT_FILES_DIR = path.join(OUTPUT_ROOT, "files");
+const RELEASE_OUTPUT_ROOT = "official";
+const DEFAULT_OUTPUT_ROOT = path.join(".workflow", "publish", RELEASE_OUTPUT_ROOT);
+const RELEASE_CHANNELS_DIR = path.posix.join(RELEASE_OUTPUT_ROOT, "channels");
+const RELEASE_FILES_DIR = path.posix.join(RELEASE_OUTPUT_ROOT, "files");
 const SOURCE_ROOT = path.join("src", "content", "studio");
 const CHANGELOG_SOURCE_PATH = "CHANGELOG.md";
 const CHANGELOG_TARGET_PATH = "Changelog.md";
+const ASSET_MEDIA_TYPES = new Map([
+	[".gif", "image/gif"],
+	[".jpeg", "image/jpeg"],
+	[".jpg", "image/jpeg"],
+	[".png", "image/png"],
+	[".svg", "image/svg+xml"],
+	[".webp", "image/webp"],
+]);
 
 function normalizeLineEndings(value) {
 	return value.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
@@ -23,6 +31,30 @@ function normalizeLineEndings(value) {
 
 function toPosix(value) {
 	return value.split(path.sep).join("/");
+}
+
+function parseArgs(argv) {
+	let projectRoot = DEFAULT_PROJECT_ROOT;
+	let outputRoot = DEFAULT_OUTPUT_ROOT;
+	let publishedAt = new Date().toISOString();
+	for (let index = 0; index < argv.length; index += 1) {
+		const current = argv[index];
+		if (current === "--project-root") {
+			projectRoot = path.resolve(argv[index + 1] ?? DEFAULT_PROJECT_ROOT);
+			index += 1;
+			continue;
+		}
+		if (current === "--output-root") {
+			outputRoot = argv[index + 1] ?? DEFAULT_OUTPUT_ROOT;
+			index += 1;
+			continue;
+		}
+		if (current === "--published-at") {
+			publishedAt = argv[index + 1] ?? publishedAt;
+			index += 1;
+		}
+	}
+	return { projectRoot, outputRoot, publishedAt };
 }
 
 function writeJson(filePath, value) {
@@ -73,6 +105,10 @@ function hashString(value) {
 	return crypto.createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+function hashBuffer(value) {
+	return crypto.createHash("sha256").update(value).digest("hex");
+}
+
 function titleFromPublishedPath(publishedPath, kind) {
 	const baseName = kind === "file"
 		? path.posix.basename(publishedPath, path.posix.extname(publishedPath))
@@ -80,7 +116,29 @@ function titleFromPublishedPath(publishedPath, kind) {
 	return baseName || publishedPath;
 }
 
-function collectDirectoryMarkdownFiles(rootDir, directoryName) {
+function toMarkdownBlob(pathValue, content) {
+	const normalizedContent = normalizeMarkdownContent(content);
+	return {
+		path: pathValue,
+		content: normalizedContent,
+		encoding: "utf8",
+		mediaType: "text/markdown",
+		hash: hashString(normalizedContent),
+	};
+}
+
+function toAssetBlob(pathValue, absolutePath, mediaType) {
+	const content = fs.readFileSync(absolutePath);
+	return {
+		path: pathValue,
+		content: content.toString("base64"),
+		encoding: "base64",
+		mediaType,
+		hash: hashBuffer(content),
+	};
+}
+
+function collectDirectoryContentFiles(rootDir, directoryName) {
 	const entries = [];
 	const startDir = path.join(rootDir, directoryName);
 
@@ -96,13 +154,18 @@ function collectDirectoryMarkdownFiles(rootDir, directoryName) {
 				walk(absolutePath);
 				continue;
 			}
-			if (!entry.isFile() || !entry.name.endsWith(".md")) {
+			if (!entry.isFile()) {
 				continue;
 			}
-			entries.push({
-				path: toPosix(path.relative(rootDir, absolutePath)),
-				content: normalizeMarkdownContent(fs.readFileSync(absolutePath, "utf8")),
-			});
+			const relativePath = toPosix(path.relative(rootDir, absolutePath));
+			if (entry.name.endsWith(".md")) {
+				entries.push(toMarkdownBlob(relativePath, fs.readFileSync(absolutePath, "utf8")));
+				continue;
+			}
+			const mediaType = ASSET_MEDIA_TYPES.get(path.extname(entry.name).toLowerCase());
+			if (mediaType) {
+				entries.push(toAssetBlob(relativePath, absolutePath, mediaType));
+			}
 		}
 	}
 
@@ -121,7 +184,7 @@ function discoverOfficialColumns(projectRoot) {
 			continue;
 		}
 		if (entry.isDirectory()) {
-			const files = collectDirectoryMarkdownFiles(sourceRoot, entry.name);
+			const files = collectDirectoryContentFiles(sourceRoot, entry.name);
 			columns.push({
 				id: buildColumnId(entry.name),
 				title: titleFromPublishedPath(entry.name, "directory"),
@@ -140,12 +203,7 @@ function discoverOfficialColumns(projectRoot) {
 			title: titleFromPublishedPath(entry.name, "file"),
 			kind: "file",
 			path: entry.name,
-			files: [
-				{
-					path: entry.name,
-					content: normalizeMarkdownContent(fs.readFileSync(filePath, "utf8")),
-				},
-			],
+			files: [toMarkdownBlob(entry.name, fs.readFileSync(filePath, "utf8"))],
 		});
 	}
 
@@ -155,12 +213,7 @@ function discoverOfficialColumns(projectRoot) {
 		title: titleFromPublishedPath(CHANGELOG_TARGET_PATH, "file"),
 		kind: "file",
 		path: CHANGELOG_TARGET_PATH,
-		files: [
-			{
-				path: CHANGELOG_TARGET_PATH,
-				content: buildInjectedChangelog(changelogSource),
-			},
-		],
+		files: [toMarkdownBlob(CHANGELOG_TARGET_PATH, buildInjectedChangelog(changelogSource))],
 	});
 
 	return columns.sort((left, right) => comparePaths(left.path, right.path));
@@ -173,7 +226,9 @@ function buildColumnVersion(column) {
 		path: column.path,
 		files: column.files.map((item) => ({
 			path: item.path,
-			hash: hashString(item.content),
+			hash: item.hash,
+			encoding: item.encoding,
+			mediaType: item.mediaType,
 		})),
 	});
 	return hashString(versionPayload).slice(0, 16);
@@ -181,27 +236,31 @@ function buildColumnVersion(column) {
 
 export function generateOfficialContentRelease({
 	projectRoot = DEFAULT_PROJECT_ROOT,
+	outputRoot = DEFAULT_OUTPUT_ROOT,
 	publishedAt = new Date().toISOString(),
 } = {}) {
-	const outputRoot = path.join(projectRoot, OUTPUT_ROOT);
-	const channelsDir = path.join(projectRoot, OUTPUT_CHANNELS_DIR);
-	const filesDir = path.join(projectRoot, OUTPUT_FILES_DIR);
-	const channelManifestRelativePath = toPosix(path.join(OUTPUT_CHANNELS_DIR, `${OFFICIAL_PROVIDER_ID}.json`));
+	const outputRootPath = path.resolve(projectRoot, outputRoot);
+	const channelsDir = path.join(outputRootPath, "channels");
+	const filesDir = path.join(outputRootPath, "files");
+	const channelManifestRelativePath = `${RELEASE_CHANNELS_DIR}/${OFFICIAL_PROVIDER_ID}.json`;
 	const discoveredColumns = discoverOfficialColumns(projectRoot);
 
-	fs.rmSync(outputRoot, { recursive: true, force: true });
+	fs.rmSync(outputRootPath, { recursive: true, force: true });
 	fs.mkdirSync(channelsDir, { recursive: true });
 	fs.mkdirSync(filesDir, { recursive: true });
 
 	const channelColumns = discoveredColumns.map((column) => {
 		const files = column.files.map((file) => {
-			const hash = hashString(file.content);
-			const blobRelativePath = toPosix(path.join(OUTPUT_FILES_DIR, `${hash}.md`));
-			writeText(path.join(projectRoot, blobRelativePath), file.content);
+			const hash = file.hash;
+			const blobName = file.encoding === "base64" ? `${hash}.b64` : `${hash}.md`;
+			const blobRelativePath = `${RELEASE_FILES_DIR}/${blobName}`;
+			writeText(path.join(filesDir, blobName), file.content);
 			return {
 				path: file.path,
 				hash,
 				blobPath: blobRelativePath,
+				encoding: file.encoding,
+				mediaType: file.mediaType,
 			};
 		});
 
@@ -245,22 +304,24 @@ export function generateOfficialContentRelease({
 		columns: channelColumns,
 	};
 
-	const latestJsonPath = path.join(projectRoot, OUTPUT_LATEST_PATH);
-	const channelManifestPath = path.join(projectRoot, channelManifestRelativePath);
+	const latestJsonPath = path.join(outputRootPath, "latest.json");
+	const channelManifestPath = path.join(channelsDir, `${OFFICIAL_PROVIDER_ID}.json`);
 	writeJson(latestJsonPath, latestPayload);
 	writeJson(channelManifestPath, channelPayload);
 
 	return {
+		outputRootPath,
 		latestJsonPath,
 		channelManifestPaths: [channelManifestPath],
 		filePaths: channelColumns.flatMap((column) =>
-			column.files.map((file) => path.join(projectRoot, file.blobPath))),
+			column.files.map((file) => path.join(outputRootPath, "files", path.posix.basename(file.blobPath)))),
 		latest: latestPayload,
 		channel: channelPayload,
 	};
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-	const result = generateOfficialContentRelease();
+	const { projectRoot, outputRoot, publishedAt } = parseArgs(process.argv.slice(2));
+	const result = generateOfficialContentRelease({ projectRoot, outputRoot, publishedAt });
 	console.log(`Official content release written to ${result.latestJsonPath}`);
 }

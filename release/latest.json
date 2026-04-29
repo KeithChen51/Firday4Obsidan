@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"pluginId": "friday-obsidian-plugin",
-	"version": "0.2.8",
+	"version": "0.2.10",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-04-23T11:22:54.891Z",
+	"publishedAt": "2026-04-29T01:03:59.530Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
 		"styles.css": "release/friday-obsidian-plugin/styles.css"
 	},
-	"releaseNotes": "- `F.R.I.D.A.Y/` 现在被重新定义为官方频道在本地 vault 里的挂载点；它的一级目录和一级 Markdown 文件会作为可订阅栏目呈现，而不再承载插件配置、运行时状态或脚手架内容。\n- 官方内容更新与插件版本更新正式解耦：构建流程会生成独立的 `release/official-content/*` feed，插件更新继续只发布插件产物，官方栏目目录和正文通过独立内容 feed 刷新。\n- 设置页移除了原先面向 slash commands 的用户入口，并在相同导航槽位换成“订阅频道 / Subscriptions”；第一版只接入“官方频道”，但信息架构已经为后续社区来源预留。\n- 官方栏目改为从远端 feed 元数据动态发现，并默认自动订阅；用户仍可按需手动关闭不需要的栏目。\n- `LegacyFridayRootMigrationService` 现在承担 `F.R.I.D.A.Y/` 接管前的长期安全门：如果根目录下仍有历史 `项目` / `个人` / `Agents` / `runtime` / `_配置.md` 或其他未知内容，catalog 仍可刷新，但 destructive apply 会被阻断，直到用户迁移、清理或显式确认接管。\n- 清理 F.R.I.D.A.Y 根目录的可见运行时痕迹：工具审计、步骤追踪和设置镜像迁移到隐藏本地状态目录，插件启动时不再继续在 vault 里铺开 `F.R.I.D.A.Y/runtime`、可见配置镜像等系统文件。\n- 项目设置页新增“遗留 Friday 根目录内容”面板，可以盘点旧 `项目` / `个人` / `Agents` 目录，导入仍可识别为项目的旧文件夹，并只对安全的空目录和过时镜像执行清理，降低历史 vault 升级后的手工整理成本。\n- 项目边界判定与注册流程进一步收紧：当前文件归属、成员数据与同步入口统一改为基于已注册 `boundaryPath` 判断；本地/远端注册时不再偷偷推导目标目录，必须明确选择 Obsidian 路径，减少项目嵌套和误写入。\n- 工作台身份展示继续收口：顶部标题栏只保留 `F.R.I.D.A.Y` 字标，用户消息优先显示基础配置里的“显示名称”，不再固定显示“你”或头像角标；基础配置也同步移除了旧的用户 ID 输入项。\n- `F.R.I.D.A.Y` 字标调整回 n-neco 风格字体，并保持只作用于工作台品牌、聊天消息角色名和设置标题等指定位置，不会扩散到普通正文文本。"
+	"releaseNotes": "- 首次启用或启动 Obsidian 后，FRIDAY 工作台可以默认自动打开到右侧边栏；设置页新增“启动入口”，可关闭自动打开，也可改到左侧边栏。这个启动动作只打开界面，不会自动同步项目、刷新官方内容或调用模型。\n- 对话页新增冷启动 Onboarding Panel。没有项目或模型时，会先提示“选择一个文件夹”和“模型配置”，并提供直接跳转入口；用户也可以跳过引导，之后再到设置页继续配置。\n- 新手路径里的“项目注册”文案改成“选择一个文件夹 / 选择工作范围”，项目设置页也用更接近用户理解的语言说明 FRIDAY 的工作边界。\n- 本地新建项目时，如果选择 `/（在 Vault 根目录下新建同名文件夹）`，FRIDAY 会按项目名称在 Vault 根目录创建同名文件夹，并在保存前显示将要创建的位置。\n- “将整个 Vault 作为项目”改为高级选项，并需要二次确认。确认后，项目边界、路径归属判断和 Agent 写入策略都能识别 `/` 作为整个 Vault 的项目根目录。\n- LLM 连通测试改为直接探测当前配置的 endpoint，支持在 Chat Completions / Responses 端点之间回退，并对网关超时、连接重置、403 等错误给出更准确的说明。\n- 模型返回的 `reasoning_content` / `reasoning` 会被保留并传回 Agent 运行链路，减少推理模型多轮工具调用时丢失推理上下文的概率。\n- 对话页去掉了“对话焦点”和能力摘要等冗余信息；`@` 上下文按钮更紧凑，下拉菜单会浮在输入框上方，不再撑开输入区域。\n- 新增 FRIDAY 双页图标，并统一工作台、设置页、命令面板、消息角色和提示文案里的 FRIDAY 品牌显示。\n- Start Here 更新为完整的 `Start Here · 从这里开始` 指南，包含快速上手、基础配置、工作台、项目同步、对话、Skill、Soul、官方内容和常见问题等图文内容。\n- 新增 `Study with F.R.I.D.A.Y：打破新用户冷启动的循环依赖`，记录为什么冷启动第一公里要放在插件 UI，而不是只依赖 Vault 内文档。\n- 官方内容发布支持图片资源。Start Here 里的 PNG 等资产会通过官方内容 feed 写入 Vault，不再只发布 Markdown。\n- 发布脚本同步更新：`0.2.10` 会同时生成 `plugin/` 命名空间产物和旧桥接更新使用的 `release/` 产物，方便从 0.2.9 过渡到新发布链路。"
 }

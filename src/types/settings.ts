@@ -24,6 +24,17 @@ export interface LlmModeConfig {
 	enableStreaming: boolean;
 }
 
+export type WorkbenchStartupPlacement =
+	| "right-sidebar"
+	| "left-sidebar";
+
+export function isWorkbenchStartupPlacement(value: unknown): value is WorkbenchStartupPlacement {
+	return (
+		value === "right-sidebar" ||
+		value === "left-sidebar"
+	);
+}
+
 export interface FridaySettings {
 	version: number;
 	locale: LocaleCode;
@@ -51,6 +62,11 @@ export interface FridaySettings {
 		mode: "manual" | "idle_auto" | "continuous_auto";
 		idleMinutes: number;
 		syncOnStartup: boolean;
+	};
+	workbench: {
+		openOnStartup: boolean;
+		startupPlacement: WorkbenchStartupPlacement;
+		onboardingDismissed: boolean;
 	};
 	update: {
 		enabled: boolean;
@@ -81,7 +97,7 @@ export interface FridaySettings {
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 8;
+export const SETTINGS_VERSION = 10;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -128,6 +144,11 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		mode: "manual",
 		idleMinutes: 0,
 		syncOnStartup: true,
+	},
+	workbench: {
+		openOnStartup: true,
+		startupPlacement: "right-sidebar",
+		onboardingDismissed: false,
 	},
 	update: {
 		enabled: false,

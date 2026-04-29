@@ -1,5 +1,6 @@
 import type { InvocationResolution } from "./InvocationResolver";
 import type { RuntimeEvent } from "./RuntimeEvent";
+import { WIKI_FEATURE_ENABLED } from "../../constants/wikiFeature";
 
 export type RuntimeEventRoute =
 	{
@@ -11,6 +12,9 @@ export class EventRouter {
 	route(event: RuntimeEvent): RuntimeEventRoute {
 		switch (event.type) {
 			case "knowledge.compile_requested":
+				if (!WIKI_FEATURE_ENABLED) {
+					throw new Error("Wiki compile requests are disabled.");
+				}
 				return {
 					kind: "runtime",
 					resolution: this.buildSkillRuntimeResolution(

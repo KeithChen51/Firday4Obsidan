@@ -523,3 +523,104 @@ test("remote bootstrap defaults sanitize repository names into valid hidden slug
 	assert.equal(defaults.projectName, "next_gen");
 	assert.equal(defaults.boundaryPath, "");
 });
+
+test("remote bootstrap clone args include configured credentials without embedding them in the remote", async () => {
+	const mod = await loadModule();
+	const remote = "https://example.com/team/private.git";
+	const targetPath = path.join("C:\\Vault", "projects", "private");
+	const args = mod.buildRemoteBootstrapCloneArgs(remote, targetPath, {
+		username: "demo-user",
+		token: "secret-token",
+	});
+
+	assert.deepEqual(args.slice(-3), ["clone", remote, targetPath]);
+	assert.equal(args[0], "-c");
+	assert.match(args[1], /^http\.extraheader=Authorization: Basic /);
+	assert.doesNotMatch(args.join(" "), /demo-user|secret-token/);
+	assert.equal(remote, "https://example.com/team/private.git");
+});
+
+test("remote bootstrap falls back to the stored user git credential before cloning", async () => {
+	const mod = await loadModule();
+	const source = await fs.readFile(modulePath, "utf8");
+
+	assert.equal(typeof mod.resolveRemoteBootstrapCredential, "function");
+	assert.deepEqual(
+		await mod.resolveRemoteBootstrapCredential(
+			{
+				getUserGitCredential: async () => ({ username: "global-user", token: "global-token" }),
+			},
+			null,
+		),
+		{ username: "global-user", token: "global-token" },
+	);
+	assert.match(source, /resolveRemoteBootstrapCredential\(syncService,\s*normalizedCredential\)/);
+	assert.match(source, /buildRemoteBootstrapCloneArgs\(draft\.gitRemote,\s*resolvedPath,\s*credential\)/);
+});
+
+test("project editor service builds vault-root child paths from project names", async () => {
+	const mod = await loadModule();
+	assert.equal(mod.buildVaultRootProjectPath("Alpha Project"), "Alpha Project");
+	assert.equal(mod.buildVaultRootProjectPath("bad/name"), "bad-name");
+	assert.equal(mod.buildVaultRootProjectPath(""), "new-project");
+});
+
+test("project editor service requires explicit confirmation for whole-vault project roots", async () => {
+	const mod = await loadModule();
+	const draft = {
+		groupId: "default-group",
+		mode: "local_only",
+		projectId: "whole-vault",
+		projectName: "Whole Vault",
+		boundaryPath: "/",
+		gitRemote: "",
+		autoSync: false,
+	};
+
+	assert.throws(() => {
+		mod.validateProjectDraft(draft, new Set());
+	}, /whole vault|confirmation/i);
+
+	assert.doesNotThrow(() => {
+		mod.validateProjectDraft({ ...draft, useVaultRootAsProject: true }, new Set());
+	});
+});
+
+test("project editor service stores confirmed whole-vault project roots as slash", async () => {
+	const mod = await loadModule();
+	const vaultRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-whole-vault-project-"));
+
+	try {
+		const entry = await mod.submitProjectDraft({
+			app: {
+				vault: {
+					adapter: {
+						basePath: vaultRoot,
+					},
+				},
+			},
+			syncService: {
+				async prepareRepository() {},
+			},
+			draft: {
+				groupId: "default-group",
+				mode: "local_only",
+				projectId: "whole-vault",
+				projectName: "Whole Vault",
+				boundaryPath: "/",
+				gitRemote: "",
+				autoSync: false,
+				useVaultRootAsProject: true,
+			},
+			existingProjectIds: new Set(),
+			fridayRoot: "F.R.I.D.A.Y",
+			currentUserId: "keith",
+		});
+
+		assert.equal(entry.boundaryPath, "/");
+		assert.equal(entry.projectId, "whole-vault");
+		assert.equal(entry.gitState, "none");
+	} finally {
+		await fs.rm(vaultRoot, { recursive: true, force: true });
+	}
+});

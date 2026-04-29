@@ -1,3 +1,5 @@
+import { WIKI_FEATURE_ENABLED, WIKI_TOOL_NAMES } from "../../constants/wikiFeature";
+
 export interface ToolManifest {
 	name: string;
 	capability: string;
@@ -6,7 +8,7 @@ export interface ToolManifest {
 	relatedSkillCommand?: string;
 }
 
-export const TOOL_MANIFESTS: ToolManifest[] = [
+const ALL_TOOL_MANIFESTS: ToolManifest[] = [
 	{ name: "ls", capability: "filesystem.list", readOnly: true, primary: true },
 	{ name: "read", capability: "filesystem.read", readOnly: true, primary: true },
 	{ name: "grep", capability: "filesystem.search", readOnly: true, primary: true },
@@ -19,6 +21,10 @@ export const TOOL_MANIFESTS: ToolManifest[] = [
 	{ name: "delete", capability: "filesystem.delete", readOnly: false, primary: false },
 	{ name: "exec", capability: "system.exec", readOnly: false, primary: false },
 ];
+
+export const TOOL_MANIFESTS: ToolManifest[] = ALL_TOOL_MANIFESTS.filter(
+	(tool) => WIKI_FEATURE_ENABLED || !WIKI_TOOL_NAMES.has(tool.name),
+);
 
 export function findToolManifest(name: string): ToolManifest | null {
 	const normalized = name.trim().toLowerCase();

@@ -15,6 +15,7 @@ node_modules/
 /plugin/
 /official/
 /channel/
+/.workflow/publish/
 
 # Keep the single bridge-version legacy plugin release tree trackable on source branch.
 /release/*

@@ -25,5 +25,6 @@ test("ci publish helper hides tokenized remote setup behind a shell script", () 
 	assert.match(source, /git config user\.email/);
 	assert.doesNotMatch(source, /Friday-test\.git/);
 	assert.match(source, /node scripts\/generate-official-content-release\.mjs/);
-	assert.match(source, /node scripts\/publish-release-branch\.mjs --branch release plugin official/);
+	assert.match(source, /node scripts\/publish-release-branch\.mjs --branch release plugin \.workflow\/publish\/official=official/);
+	assert.doesNotMatch(source, /publish-release-branch\.mjs --branch release plugin official/);
 });

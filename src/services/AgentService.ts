@@ -12,7 +12,7 @@ const TOOL_APPROVAL_FILE = "tool-approval-rules.json";
 
 const DEFAULT_AGENT_TEMPLATE = `# 默认 Agent
 
-你是 F.R.I.D.A.Y 的默认协作助手。
+你是 FRIDAY 的默认协作助手。
 
 ## 行为规范
 - 优先给出可执行建议。

@@ -9,6 +9,32 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_PROJECT_ROOT = path.resolve(SCRIPT_DIR, "..");
 const DEFAULT_RELEASE_BRANCH = "release";
 const PRESERVED_NAMES = new Set([".git"]);
+const DEFAULT_PUBLISH_ROOT_SPECS = ["plugin", ".workflow/publish/official=official"];
+
+function normalizePathSegment(value) {
+	return value.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\.\/+/, "").replace(/\/$/, "");
+}
+
+function parsePublishRootSpec(spec) {
+	const raw = String(spec ?? "").trim();
+	if (!raw) {
+		throw new Error("Invalid publish root: empty");
+	}
+	const separatorIndex = raw.indexOf("=");
+	const source = normalizePathSegment(separatorIndex >= 0 ? raw.slice(0, separatorIndex) : raw);
+	const target = normalizePathSegment(separatorIndex >= 0 ? raw.slice(separatorIndex + 1) : raw);
+	for (const item of [source, target]) {
+		if (!item || path.isAbsolute(item) || item === "." || item.split("/").includes("..")) {
+			throw new Error(`Invalid publish root: ${raw}`);
+		}
+	}
+	return { source, target };
+}
+
+export function normalizePublishRoots(roots) {
+	const specs = roots.length > 0 ? roots : DEFAULT_PUBLISH_ROOT_SPECS;
+	return specs.map(parsePublishRootSpec);
+}
 
 function parseArgs(argv) {
 	const roots = [];
@@ -31,7 +57,7 @@ function parseArgs(argv) {
 	return {
 		projectRoot,
 		releaseBranch,
-		publishRoots: roots.length > 0 ? roots : ["plugin", "official"],
+		publishRoots: normalizePublishRoots(roots),
 	};
 }
 
@@ -59,17 +85,17 @@ function hasRemoteBranch(baseDir, branch) {
 }
 
 async function ensurePublishRoots(projectRoot, publishRoots) {
-	for (const rootName of publishRoots) {
-		const absolute = path.join(projectRoot, rootName);
+	for (const root of publishRoots) {
+		const absolute = path.join(projectRoot, root.source);
 		if (!fs.existsSync(absolute)) {
-			throw new Error(`Missing publish root: ${rootName}`);
+			throw new Error(`Missing publish root: ${root.source}`);
 		}
 	}
 }
 
 async function copyPublishRoots(projectRoot, worktreePath, publishRoots) {
-	for (const rootName of publishRoots) {
-		await cp(path.join(projectRoot, rootName), path.join(worktreePath, rootName), { recursive: true });
+	for (const root of publishRoots) {
+		await cp(path.join(projectRoot, root.source), path.join(worktreePath, root.target), { recursive: true });
 	}
 }
 
@@ -91,14 +117,17 @@ function isCleanWorktree(baseDir) {
 export async function publishReleaseBranch({
 	projectRoot = DEFAULT_PROJECT_ROOT,
 	releaseBranch = DEFAULT_RELEASE_BRANCH,
-	publishRoots = ["plugin", "official"],
+	publishRoots = normalizePublishRoots([]),
 } = {}) {
-	await ensurePublishRoots(projectRoot, publishRoots);
+	const normalizedPublishRoots = Array.isArray(publishRoots) && typeof publishRoots[0] === "string"
+		? normalizePublishRoots(publishRoots)
+		: publishRoots;
+	await ensurePublishRoots(projectRoot, normalizedPublishRoots);
 	const worktreePath = await mkdtemp(path.join(os.tmpdir(), "friday-release-worktree-"));
 	let worktreeReady = false;
 
 	try {
-		runGit(projectRoot, ["fetch", "origin", releaseBranch], { allowFailure: true });
+		runGit(projectRoot, ["fetch", "origin", `${releaseBranch}:refs/remotes/origin/${releaseBranch}`], { allowFailure: true });
 		if (hasLocalBranch(projectRoot, releaseBranch)) {
 			runGit(projectRoot, ["worktree", "add", "--force", worktreePath, releaseBranch]);
 		} else if (hasRemoteBranch(projectRoot, releaseBranch)) {
@@ -109,14 +138,15 @@ export async function publishReleaseBranch({
 		worktreeReady = true;
 
 		await clearWorktreeRoot(worktreePath);
-		await copyPublishRoots(projectRoot, worktreePath, publishRoots);
+		await copyPublishRoots(projectRoot, worktreePath, normalizedPublishRoots);
 
 		runGit(worktreePath, ["add", "."]);
 		if (isCleanWorktree(worktreePath)) {
 			return { changed: false, worktreePath, releaseBranch };
 		}
 
-		runGit(worktreePath, ["commit", "-m", `chore: publish ${publishRoots.join(", ")} release trees`]);
+		const targetNames = normalizedPublishRoots.map((root) => root.target);
+		runGit(worktreePath, ["commit", "-m", `chore: publish ${targetNames.join(", ")} release trees`]);
 		runGit(worktreePath, ["push", "-u", "origin", releaseBranch]);
 		return { changed: true, worktreePath, releaseBranch };
 	} finally {
@@ -131,11 +161,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
 	const { projectRoot, releaseBranch, publishRoots } = parseArgs(process.argv.slice(2));
 	publishReleaseBranch({ projectRoot, releaseBranch, publishRoots })
 		.then((result) => {
+			const targetNames = publishRoots.map((root) => root.target);
 			if (result.changed) {
-				console.log(`Published ${publishRoots.join(", ")} to ${releaseBranch}`);
+				console.log(`Published ${targetNames.join(", ")} to ${releaseBranch}`);
 				return;
 			}
-			console.log(`No release-tree changes to publish for ${publishRoots.join(", ")}`);
+			console.log(`No release-tree changes to publish for ${targetNames.join(", ")}`);
 		})
 		.catch((error) => {
 			console.error(error instanceof Error ? error.message : String(error ?? "Unknown publish failure"));

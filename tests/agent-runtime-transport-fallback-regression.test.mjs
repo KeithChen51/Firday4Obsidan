@@ -17,4 +17,6 @@ test("agent runtime does not fallback to prompt mode for retryable transport fai
 	const source = readRuntimeSource();
 	assert.match(source, /isRetryableTransportFailure\(message\)/);
 	assert.match(source, /已停止自动切换兼容模式/);
+	assert.doesNotMatch(source, /内网网关暂时不可用/);
+	assert.match(source, /模型服务或网关暂时不可用/);
 });

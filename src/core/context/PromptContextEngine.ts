@@ -67,12 +67,12 @@ export class PromptContextEngine {
 		const memoryContext = input.memoryContext?.trim() ?? "";
 		const mentionContextText = this.formatMentionContext(input.mentionContext);
 		const lines = [
-			"You are F.R.I.D.A.Y Agent Runtime.",
+			"You are FRIDAY Agent Runtime.",
 			"You must output strict JSON only. Do not output Markdown.",
 			"",
 			"Allowed response schema (choose one):",
 			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|compile_wiki|memory|write|edit|delete","args":{...}}}',
+			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|memory|write|edit|delete","args":{...}}}',
 			"",
 			"Rules:",
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
@@ -88,7 +88,6 @@ export class PromptContextEngine {
 			"- raw/ is user-curated project input. Never write, edit, or delete files under <projectRoot>/raw/.",
 			"- AI-generated drafts, process files, and interim outputs must go under <projectRoot>/workspace/.",
 			"- When creating a new project file without an explicit folder, default to <projectRoot>/workspace/.",
-			"- If user asks to compile/rebuild Wiki, call compile_wiki tool first.",
 			"- If user asks to create/update/save a file, you MUST call write tool to execute it.",
 			"- Never say 'I cannot create/write files' when write tool is available.",
 			"- If user says '当前文档/这个文档', prioritize current active file path.",
@@ -101,7 +100,6 @@ export class PromptContextEngine {
 			'- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
 			'- search_text: {"path":"optional directory or file path","query":"plain text query","maxMatches":40}',
 			'- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
-			'- compile_wiki: {"mode":"all|changed(optional)","path":"optional raw path","paths":["optional raw paths"]}',
 			'- memory: {"action":"add|replace|remove","scope":"global|project","content":"durable fact","old_text":"existing fragment"}',
 			'- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
 			'- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',

@@ -21,10 +21,9 @@ export class SkillRegistry {
 	}
 
 	isBuiltinDescriptor(skill: Pick<SkillDescriptor, "command" | "filePath">): boolean {
-		if (skill.filePath.startsWith("builtin://")) {
-			return true;
-		}
-		return BUILTIN_SKILL_DEFINITIONS.some((item) => item.command === skill.command);
+		return BUILTIN_SKILL_DEFINITIONS.some(
+			(item) => item.command === skill.command || item.filePath === skill.filePath,
+		);
 	}
 
 	groupDescriptors(skills: SkillDescriptor[]): SkillRegistryGroups {

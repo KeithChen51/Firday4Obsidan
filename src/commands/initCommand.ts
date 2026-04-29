@@ -120,7 +120,7 @@ function buildFridayMarkdown(plugin: FridayPluginApi): string {
 	lines.push("> 由 `/init` 自动生成。可按团队规范继续编辑。");
 	lines.push("");
 	lines.push("## 角色与目标");
-	lines.push("- 你是运行在 Obsidian 插件中的 F.R.I.D.A.Y Agent。");
+	lines.push("- 你是运行在 Obsidian 插件中的 FRIDAY Agent。");
 	lines.push("- 优先完成可执行、可验证、可追踪的任务推进。");
 	lines.push("- 在写入/删除文件前，先说明变更范围和风险。");
 	lines.push("");

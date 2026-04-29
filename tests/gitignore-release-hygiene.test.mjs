@@ -22,6 +22,7 @@ test("gitignore ignores local publish trees on the source branch", () => {
 	assert.equal(checkIgnore("main.js").ignored, true, "root build output should stay ignored");
 	assert.equal(checkIgnore("plugin/latest.json").ignored, true, "plugin feed should stay local-only on source branch");
 	assert.equal(checkIgnore("plugin/artifacts/main.js").ignored, true, "plugin artifacts should stay local-only on source branch");
+	assert.equal(checkIgnore(".workflow/publish/official/latest.json").ignored, true, "official staging feed should stay local-only on source branch");
 	assert.equal(checkIgnore("official/latest.json").ignored, true, "official feed should stay local-only on source branch");
 	assert.equal(checkIgnore("channel/latest.json").ignored, true, "community channel feed should stay local-only on source branch");
 	assert.equal(checkIgnore("release/latest.json").ignored, false, "legacy bridge feed should stay trackable");

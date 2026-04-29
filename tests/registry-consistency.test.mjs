@@ -31,10 +31,11 @@ test("capability registry exposes user-visible tools and internal capabilities",
 	const registry = capability.CapabilityRegistry.getInstance();
 	const userVisible = registry.listUserVisibleTools();
 	const internal = registry.listInternalCapabilities();
-	assert.ok(userVisible.some((item) => item.name === "compile_wiki"));
+	assert.ok(!userVisible.some((item) => item.name === "compile_wiki"));
 	assert.ok(userVisible.some((item) => item.name === "memory"));
 	assert.ok(!userVisible.some((item) => item.name === "subagent"));
-	assert.ok(internal.some((item) => item.id === "knowledge.lookup"));
+	assert.ok(!internal.some((item) => item.id === "knowledge.lookup"));
+	assert.ok(!internal.some((item) => item.id === "project.compileWiki"));
 	assert.ok(!internal.some((item) => item.id === "memory.persist"));
 });
 
@@ -43,10 +44,10 @@ test("skill registry groups builtin and personal skills consistently", async () 
 	const registry = skill.SkillRegistry.getInstance();
 	const groups = registry.groupDescriptors([
 		{
-			name: "Compile Wiki",
-			description: "compile",
-			filePath: "builtin://compile-wiki/SKILL.md",
-			command: "compile-wiki",
+			name: "Obsidian CLI",
+			description: "debug obsidian",
+			filePath: "builtin://obsidian-cli/SKILL.md",
+			command: "obsidian-cli",
 			aliases: [],
 			tags: [],
 			globs: [],
@@ -65,7 +66,7 @@ test("skill registry groups builtin and personal skills consistently", async () 
 	]);
 	assert.equal(groups.builtinSkills.length, 1);
 	assert.equal(groups.personalSkills.length, 1);
-	assert.equal(groups.builtinSkills[0]?.command, "compile-wiki");
+	assert.equal(groups.builtinSkills[0]?.command, "obsidian-cli");
 	assert.equal(groups.personalSkills[0]?.command, "custom-skill");
 });
 

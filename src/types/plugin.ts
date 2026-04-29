@@ -31,6 +31,7 @@ import type { SoulStore } from "../services/SoulStore";
 import type { RuntimeStateStore } from "../services/RuntimeStateStore";
 import type { LegacyFridayRootMigrationService } from "../services/LegacyFridayRootMigrationService";
 import type { LegacyAgentCleanupService } from "../services/LegacyAgentCleanupService";
+import type { OnboardingService } from "../services/OnboardingService";
 
 export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul" | "agent" | "subscriptions";
 
@@ -66,6 +67,7 @@ export interface FridayPluginApi {
 	projectBoundaryService: ProjectBoundaryService;
 	pluginUpdateService: PluginUpdateService;
 	officialContentService: OfficialContentServiceApi;
+	onboardingService: OnboardingService;
 	localStateRootService: LocalStateRootService;
 	soulStore: SoulStore;
 	runtimeStateStore: RuntimeStateStore;
@@ -89,7 +91,7 @@ export interface FridayPluginApi {
 	upsertProjectGroup(group: ProjectGroupEntry): Promise<void>;
 	removeProjectGroup(groupId: string): Promise<void>;
 	openSettingsTab(section?: FridaySettingsSection): void;
-	openWorkspaceView(): Promise<void>;
+	openWorkspaceView(placement?: FridaySettings["workbench"]["startupPlacement"]): Promise<void>;
 	reloadFridayPlugin(): Promise<void>;
 	reloadObsidianApp(): void;
 	getLocale(): LocaleCode;

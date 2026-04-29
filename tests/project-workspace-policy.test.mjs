@@ -137,6 +137,58 @@ test("project boundary service does not fall back to whole-vault projects for un
 	assert.equal(service.getProjectForVaultPath("Inbox/random-note.md"), null);
 });
 
+test("project boundary service supports explicitly confirmed whole-vault projects", async () => {
+	const mod = await loadBoundaryServiceModule();
+	const settings = {
+		activeProjectId: "vault-wide",
+		projects: [
+			{
+				projectId: "vault-wide",
+				projectName: "Vault Wide",
+				boundaryPath: "/",
+				gitState: "none",
+				slug: "vault-wide",
+				groupId: "default-group",
+				gitRemote: "",
+				autoSync: false,
+				lastSyncAt: "",
+			},
+			{
+				projectId: "alpha",
+				projectName: "Alpha",
+				boundaryPath: "Projects/alpha",
+				gitState: "none",
+				slug: "alpha",
+				groupId: "default-group",
+				gitRemote: "",
+				autoSync: false,
+				lastSyncAt: "",
+			},
+		],
+	};
+	const service = new mod.ProjectBoundaryService(() => settings, () => "C:\\Vault");
+	const vaultProject = settings.projects[0];
+	const nestedProject = settings.projects[1];
+
+	assert.equal(service.getProjectVaultPath(vaultProject), "/");
+	assert.equal(service.getProjectAbsolutePath(vaultProject), "C:\\Vault");
+	assert.equal(service.isWithinProject(vaultProject, "Inbox/random-note.md"), true);
+	assert.equal(service.getProjectForVaultPath("Inbox/random-note.md")?.projectId, "vault-wide");
+	assert.equal(service.getProjectForVaultPath("Projects/alpha/file.md")?.projectId, "alpha");
+	assert.equal(service.normalizeProjectPath(vaultProject, "Inbox/random-note.md"), "Inbox/random-note.md");
+	assert.equal(service.normalizeProjectPath(vaultProject, ""), "/");
+	assert.equal(service.normalizeProjectPath(nestedProject, "draft.md"), "Projects/alpha/draft.md");
+});
+
+test("whole-vault project workspace policy still keeps generated agent drafts under workspace", async () => {
+	const mod = await loadModule();
+	assert.equal(mod.resolveAgentWritableVaultPath("/", "drafts/plan.md"), "workspace/drafts/plan.md");
+	assert.equal(mod.resolveAgentWritableVaultPath("/", "wiki/index.md"), "wiki/index.md");
+	assert.equal(mod.isProjectRawPath("/", "raw/facts.md"), true);
+	assert.equal(mod.isAgentWritableProjectPath("/", "raw/facts.md"), false);
+	assert.equal(mod.isAgentWritableProjectPath("/", "workspace/drafts/plan.md"), true);
+});
+
 test("project entry runtime model no longer carries legacy path fields", async () => {
 	const source = readProjectTypesSource();
 	const match = source.match(/export interface ProjectEntry \{([\s\S]*?)\n\}/);

@@ -13,7 +13,8 @@ import {
 	WorkspaceLeaf,
 } from "obsidian";
 import { ApprovalQueue, type PendingApproval } from "../features/workbench/ApprovalQueue";
-import { PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
+import { FRIDAY_SETTINGS_CHANGED_EVENT, PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
+import { FRIDAY_ICON_ID } from "../constants/icon";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
@@ -167,6 +168,10 @@ export class DailyBoardView extends ItemView {
 		return VIEW_TYPE_DAILY_BOARD;
 	}
 
+	getIcon(): string {
+		return FRIDAY_ICON_ID;
+	}
+
 	getDisplayText(): string {
 		return this.plugin.t("view.board.title");
 	}
@@ -191,6 +196,7 @@ export class DailyBoardView extends ItemView {
 			}),
 		);
 		window.addEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
+		window.addEventListener(FRIDAY_SETTINGS_CHANGED_EVENT, this.handleSettingsChanged);
 		await this.ensureActiveProjectInitialized();
 		await this.ensureAiSessionLoaded();
 		await this.safeRenderBoard();
@@ -210,6 +216,7 @@ export class DailyBoardView extends ItemView {
 		this.aiSendAbortController?.abort();
 		this.aiSendAbortController = null;
 		window.removeEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
+		window.removeEventListener(FRIDAY_SETTINGS_CHANGED_EVENT, this.handleSettingsChanged);
 		this.contentEl.empty();
 	}
 
@@ -221,6 +228,10 @@ export class DailyBoardView extends ItemView {
 			void this.safeRenderBoard();
 		}, 300);
 	}
+
+	private handleSettingsChanged = (): void => {
+		void this.safeRenderBoard();
+	};
 
 	private async safeRenderBoard(): Promise<void> {
 		try {
@@ -251,7 +262,10 @@ export class DailyBoardView extends ItemView {
 
 		this.renderShellHeader(shellHeaderEl);
 		this.renderTopNav(topNavEl);
-		if (this.plugin.settings.projects.length === 0) {
+		const onboardingSnapshot = this.plugin.onboardingService.getSnapshot();
+		if (onboardingSnapshot.shouldShowPanel) {
+			this.renderOnboardingPanel(contentEl);
+		} else if (this.plugin.settings.projects.length === 0) {
 			this.activePage = "sync";
 			this.renderSyncPage(contentEl);
 		} else if (this.activePage === "sync") {
@@ -267,6 +281,64 @@ export class DailyBoardView extends ItemView {
 		if (shouldRestoreComposerFocus) {
 			(this.composer as MentionComposer | null)?.focus();
 		}
+	}
+
+	private renderOnboardingPanel(contentEl: HTMLElement): void {
+		const snapshot = this.plugin.onboardingService.getSnapshot();
+		const panel = contentEl.createDiv({ cls: "friday-onboarding-panel" });
+		const header = panel.createDiv({ cls: "friday-onboarding-header" });
+		header.createEl("h3", {
+			text: this.t("onboarding.title", "开启和FRIDAY的首次对话"),
+		});
+
+		const list = panel.createDiv({ cls: "friday-onboarding-list" });
+		this.renderOnboardingStep(
+			list,
+			snapshot.projectRegistered,
+			this.t("onboarding.step.project.title", "选择一个文件夹"),
+			this.t("onboarding.step.project.desc", "FRIDAY 需要一个项目边界，才能安全地读取、写入和同步文件。"),
+			this.t("onboarding.action.registerProject", "选择工作范围"),
+			async () => {
+				this.plugin.openSettingsTab("project");
+			},
+		);
+		this.renderOnboardingStep(
+			list,
+			snapshot.modelConfigured,
+			this.t("onboarding.step.model.title", "模型配置"),
+			this.t(
+				"onboarding.step.model.desc",
+				"配置模型后，FRIDAY 才能开始对话。Git、官方内容和插件更新可以稍后再配。",
+			),
+			this.t("onboarding.action.configureModel", "去配置模型"),
+			async () => {
+				this.plugin.openSettingsTab("llm");
+			},
+		);
+		const actions = panel.createDiv({ cls: "friday-onboarding-actions" });
+		this.addPageButton(actions, this.t("onboarding.action.skip", "跳过唤醒引导"), async () => {
+			this.plugin.settings.workbench.onboardingDismissed = true;
+			await this.plugin.saveSettings();
+			new Notice(this.t("onboarding.notice.skipped", "已跳过唤醒引导。可在设置中继续配置。"), 3000);
+			await this.safeRenderBoard();
+		});
+	}
+
+	private renderOnboardingStep(
+		containerEl: HTMLElement,
+		done: boolean,
+		title: string,
+		description: string,
+		actionLabel: string,
+		action: () => Promise<void>,
+	): void {
+		const row = containerEl.createDiv({ cls: `friday-onboarding-step${done ? " is-complete" : ""}` });
+		const marker = row.createSpan({ cls: "friday-onboarding-step-marker" });
+		setIcon(marker, done ? "check" : "circle");
+		const body = row.createDiv({ cls: "friday-onboarding-step-body" });
+		body.createEl("h4", { text: title });
+		body.createEl("p", { text: description });
+		this.addPageButton(row.createDiv({ cls: "friday-onboarding-step-action" }), actionLabel, action);
 	}
 
 	private resetAiChatShellRefs(): void {
@@ -295,11 +367,16 @@ export class DailyBoardView extends ItemView {
 		});
 
 		const projectSection = left.createDiv({ cls: "friday-shell-project" });
+		const projectMarkEl = projectSection.createSpan({
+			cls: "friday-shell-project-mark",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(projectMarkEl, FRIDAY_ICON_ID);
 		const projectBrandEl = projectSection.createSpan({
 			cls: "friday-shell-project-brand friday-wordmark",
-			text: this.t("nav.friday", "F.R.I.D.A.Y"),
+			text: this.t("nav.friday", "FRIDAY"),
 		});
-		projectBrandEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
+		projectBrandEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
 
 		const right = containerEl.createDiv({ cls: "friday-shell-bar-right" });
 		const projectInline = right.createDiv({ cls: "friday-shell-project-inline" });
@@ -1186,25 +1263,12 @@ export class DailyBoardView extends ItemView {
 		const llmConfigured = this.plugin.aiService.isConfigured();
 		const activeSoul = this.plugin.getActiveSoul();
 		const activeSoulDefinition = activeSoul ? this.plugin.soulStore.getSoulSync(activeSoul.id) : null;
-		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
-		const modelCapability = this.plugin.aiService.getModelCapability(effectiveModel || undefined);
 		const currentSession = this.aiSessions.find((session) => session.sessionId === this.aiSessionId) ?? null;
 		const panelEl = containerEl.createDiv({ cls: "friday-ai-workbench" });
 		const metaEl = panelEl.createDiv({ cls: "friday-ai-focus-meta" });
 		const metaCopy = metaEl.createDiv({ cls: "friday-ai-focus-copy" });
-		metaCopy.createSpan({
-			cls: "friday-ai-focus-eyebrow",
-			text: this.t("ai.focus.label", "Chat focus"),
-		});
 		metaCopy.createEl("h3", {
 			text: currentSession ? this.buildSessionTitle(currentSession) : this.t("ai.session.new", "+ 新会话"),
-		});
-		metaCopy.createEl("p", {
-			cls: "friday-ai-focus-caption",
-			text: this.t("ai.focus.caption", "{agent} · {vision}", {
-				agent: activeSoul?.name ?? this.t("common.notSet", "Not set"),
-				vision: this.resolveVisionLabel(modelCapability),
-			}),
 		});
 
 		const metaActions = metaEl.createDiv({ cls: "friday-ai-focus-actions" });
@@ -1344,7 +1408,7 @@ export class DailyBoardView extends ItemView {
 
 		const attachButton = toolbarEl.createEl("button", {
 			cls: "friday-ai-toolbar-button",
-			text: this.t("ai.attach.contextButton", "@ Add context"),
+			text: "@",
 		});
 		attachButton.type = "button";
 		attachButton.setAttribute("aria-label", this.t("ai.attach.contextButton", "@ Add context"));
@@ -2405,17 +2469,28 @@ export class DailyBoardView extends ItemView {
 			cls: `friday-ai-message ${isUser ? "is-user" : "is-assistant"}`,
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
+		if (!isUser) {
+			this.renderAssistantAvatar(metaEl);
+		}
 		const roleEl = metaEl.createSpan({
 			cls: isUser ? "friday-ai-message-role" : "friday-ai-message-role friday-wordmark",
 			text: isUser ? this.resolveUserDisplayName() : this.plugin.t("ai.role.assistant"),
 		});
 		if (!isUser) {
-			roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
+			roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
 		}
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content${isStreaming ? " is-streaming" : ""}`,
 		});
 		this.renderAiMessageContent(contentEl, message);
+	}
+
+	private renderAssistantAvatar(containerEl: HTMLElement): void {
+		const avatarEl = containerEl.createSpan({
+			cls: "friday-ai-message-avatar",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(avatarEl, FRIDAY_ICON_ID);
 	}
 
 	private renderAiMessageContent(containerEl: HTMLElement, message: ChatMessage): void {
@@ -2600,11 +2675,12 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-ai-message is-assistant friday-ai-approval-message",
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
+		this.renderAssistantAvatar(metaEl);
 		const roleEl = metaEl.createSpan({
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
-		roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
+		roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
 		const contentEl = bubbleEl.createDiv({
 			cls: "friday-ai-message-content friday-ai-approval-content",
 		});
@@ -2614,7 +2690,7 @@ export class DailyBoardView extends ItemView {
 		});
 		contentEl.createDiv({
 			cls: "friday-ai-approval-summary",
-			text: this.t("approval.chatSummary", "F.R.I.D.A.Y 想要执行 {tool}：{target}", {
+			text: this.t("approval.chatSummary", "FRIDAY 想要执行 {tool}：{target}", {
 				tool: item.request.tool,
 				target: item.request.targetPath || this.t("approval.noTarget", "(no target)"),
 			}),
@@ -2657,11 +2733,12 @@ export class DailyBoardView extends ItemView {
 			cls: `friday-ai-message is-assistant friday-ai-runtime-preview is-${variant}`,
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
+		this.renderAssistantAvatar(metaEl);
 		const roleEl = metaEl.createSpan({
 			cls: "friday-ai-message-role friday-wordmark",
 			text: this.plugin.t("ai.role.assistant"),
 		});
-		roleEl.style.fontFamily = `${FRIDAY_WORDMARK_FONT_FAMILY}, "Segoe UI", sans-serif`;
+		roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content friday-ai-runtime-card-content${this.aiRuntimePreviewExpanded ? "" : " is-streaming"}`,
 		});
@@ -2939,7 +3016,7 @@ export class DailyBoardView extends ItemView {
 				const message = error instanceof Error ? error.message : String(error ?? "");
 				this.aiLastError = message.trim() || this.t("common.unknownError", "Unknown error");
 				new Notice(
-					this.t("ai.notice.chatFailed", "F.R.I.D.A.Y chat failed: {error}", { error: this.aiLastError }),
+					this.t("ai.notice.chatFailed", "FRIDAY chat failed: {error}", { error: this.aiLastError }),
 					7000,
 				);
 			}
@@ -3045,7 +3122,7 @@ export class DailyBoardView extends ItemView {
 			step: 1,
 			tool: "compile_wiki",
 			targetPath: "raw",
-			message: this.t("ai.runtime.progress.compileStart", "F.R.I.D.A.Y 正在编译 Wiki…（{step}）", { step: "1" }),
+			message: this.t("ai.runtime.progress.compileStart", "FRIDAY 正在编译 Wiki…（{step}）", { step: "1" }),
 		});
 		const summary = await this.plugin.compileWikiForActiveProject();
 		this.handleRuntimeProgress({
@@ -3056,7 +3133,7 @@ export class DailyBoardView extends ItemView {
 			targetPath: summary.projectRoot,
 			status: "ok",
 			summary: this.t("ai.compile.summary.header", "Wiki 编译完成"),
-			message: this.t("ai.runtime.progress.compileDone", "F.R.I.D.A.Y 已完成 Wiki 编译（{step}）", { step: "1" }),
+			message: this.t("ai.runtime.progress.compileDone", "FRIDAY 已完成 Wiki 编译（{step}）", { step: "1" }),
 		});
 		return summary;
 	}
@@ -3855,7 +3932,7 @@ export class DailyBoardView extends ItemView {
 		}
 		const parsed = parseRuntimeEnvelopeText(trimmed);
 		if (parsed?.type === "tool_call") {
-			return this.t("ai.runtime.toolCallFallback", "F.R.I.D.A.Y 正在继续调用工具。");
+			return this.t("ai.runtime.toolCallFallback", "FRIDAY 正在继续调用工具。");
 		}
 		return raw;
 	}
@@ -4355,16 +4432,6 @@ export class DailyBoardView extends ItemView {
 				);
 			}
 		};
-	}
-
-	private resolveVisionLabel(modelName: { model: string; vision: "supported" | "unsupported" | "unknown" }): string {
-		if (modelName.vision === "supported") {
-			return this.plugin.t("vision.supported", { model: modelName.model });
-		}
-		if (modelName.vision === "unsupported") {
-			return this.plugin.t("vision.unsupported", { model: modelName.model });
-		}
-		return this.plugin.t("vision.unknown", { model: modelName.model });
 	}
 
 	private captureAiMessageListScrollState(listEl: HTMLElement | null = this.contentEl.querySelector(".friday-ai-message-list")): void {
