@@ -3,10 +3,21 @@ export interface ParsedRuntimeToolCall {
 	args?: Record<string, unknown>;
 }
 
+export interface ParsedRuntimeMutationPlan {
+	id?: string;
+	operation?: string;
+	targetPath?: string;
+	summary?: string;
+	status?: string;
+	source?: string;
+}
+
 export interface ParsedRuntimeEnvelope {
 	type?: string;
 	assistant?: string;
 	tool?: ParsedRuntimeToolCall;
+	mutations?: ParsedRuntimeMutationPlan[];
+	pendingMutations?: ParsedRuntimeMutationPlan[];
 }
 
 export function parseRuntimeEnvelopeText(raw: string, codeFence = "friday-runtime"): ParsedRuntimeEnvelope | null {

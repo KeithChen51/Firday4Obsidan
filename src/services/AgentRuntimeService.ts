@@ -8,7 +8,7 @@ import {
 	Vault,
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
-import { AgentAction, AgentActionType } from "../types/action";
+import { AgentActionType } from "../types/action";
 import { FridaySettings } from "../types/settings";
 import { AgentActionService } from "./AgentActionService";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
@@ -30,6 +30,25 @@ import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
 import type { MemoryWriteInput } from "../core/memory/MemoryTypes";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
+import { CapabilityPolicy } from "../core/policy/CapabilityPolicy";
+import { ToolGateway } from "../core/tools/ToolGateway";
+import {
+	buildNativeToolDefinitionsFromRegistry,
+	type AgentMode,
+} from "../core/tools/ToolRegistry";
+import { TurnEventLog, type TurnEventInput } from "../core/runtime/TurnEventLog";
+import {
+	createMutationPlan,
+	hashMutationContent,
+	setMutationPlanStatus,
+	type MutationApplyStatus,
+	MutationPlan,
+	MutationPlanStatus,
+	type MutationChangeType,
+	type MutationOperation,
+} from "../core/mutations/MutationPlan";
+import { MutationApplier } from "../core/mutations/MutationApplier";
+import { MutationPlanStore } from "../core/mutations/MutationPlanStore";
 import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
@@ -57,10 +76,21 @@ interface RuntimeToolCall {
 	args?: Record<string, unknown>;
 }
 
+export interface RuntimeMutationPlan {
+	id?: string;
+	operation?: string;
+	targetPath?: string;
+	summary?: string;
+	status?: string;
+	source?: string;
+}
+
 interface RuntimeEnvelope {
 	type?: string;
 	assistant?: string;
 	tool?: RuntimeToolCall;
+	mutations?: RuntimeMutationPlan[];
+	pendingMutations?: RuntimeMutationPlan[];
 }
 
 interface RuntimeToolResultPayload {
@@ -69,6 +99,8 @@ interface RuntimeToolResultPayload {
 	data?: unknown;
 	error?: string;
 }
+
+type RuntimeFailureClass = ToolFailureClass | "cancelled";
 
 interface ExecVaultDeleteRedirect {
 	routedToDelete: true;
@@ -103,6 +135,7 @@ export interface RuntimeTurnResult {
 	assistantText: string;
 	traces: RuntimeToolTrace[];
 	rawFinalReply: string;
+	pendingMutations?: RuntimeMutationPlan[];
 	turnId?: string;
 	stepTraces?: StepTraceEvent[];
 	runtimeProfile?: RuntimeProfile;
@@ -176,6 +209,7 @@ interface RuntimeTurnInput {
 	extraSystemContext?: string;
 	mentionContext?: PromptMentionContext;
 	allowedTools?: string[];
+	agentMode?: AgentMode;
 	onProgress?: (event: RuntimeProgressEvent) => void;
 }
 
@@ -200,6 +234,7 @@ export class AgentRuntimeService {
 	private readonly sessionOverrideAdapter: SessionOverrideAdapter;
 	private readonly toolRunAuditStore: ToolRunAuditStore;
 	private readonly stepTraceStore: StepTraceStore;
+	private readonly turnEventLog: TurnEventLog;
 	private readonly historyCompactor: HistoryCompactor;
 	private readonly promptContextEngine: PromptContextEngine;
 	private readonly memoryStore: MemoryStoreV1;
@@ -208,7 +243,14 @@ export class AgentRuntimeService {
 	private readonly wikiCompileCapability: WikiCompileCapability;
 	private readonly wikiLookupCapability: WikiLookupCapability;
 	private readonly gitConflictCapability: GitConflictCapability;
+	private readonly capabilityPolicy: CapabilityPolicy;
+	private readonly toolGateway: ToolGateway;
+	private readonly mutationApplier: MutationApplier;
+	private readonly mutationPlanStore: MutationPlanStore;
 	private activeTurnId = "";
+	private activeConversationId = "default";
+	private activeTaskId: string | undefined;
+	private activeTurnSideEvents: TurnEventInput[] = [];
 	private activeTurnStateMachine: TurnStateMachine | null = null;
 	private activeRuntimeProfile: RuntimeProfile = detectRuntimeProfile();
 	private lastContextSummary: RuntimeContextSummary | null = null;
@@ -238,11 +280,30 @@ export class AgentRuntimeService {
 		const runtimeRoot = this.runtimeStateStore.getRuntimeRoot();
 		this.toolRunAuditStore = new ToolRunAuditStore(runtimeRoot);
 		this.stepTraceStore = new StepTraceStore(runtimeRoot);
+		this.turnEventLog = new TurnEventLog({
+			resolveTurnPath: ({ conversationId, turnId }) =>
+				this.runtimeStateStore.getTurnEventLogPath(conversationId, turnId),
+		});
 		this.historyCompactor = new HistoryCompactor();
 		this.promptContextEngine = new PromptContextEngine();
 		this.memoryStore = new MemoryStoreV1({ vault: this.vault });
 		this.wikiKnowledgeProvider = new WikiKnowledgeProvider();
 		this.executionGate = new ExecutionGate(this.getSettings);
+		this.capabilityPolicy = new CapabilityPolicy();
+		this.toolGateway = new ToolGateway(this.capabilityPolicy);
+		this.mutationPlanStore = new MutationPlanStore({
+			storePath: () => this.runtimeStateStore.getMutationPlanStorePath(),
+		});
+		this.mutationApplier = new MutationApplier(
+			{
+				read: async (targetPath) => this.readVaultFileContentOrNull(targetPath),
+				write: async (targetPath, content, plan) => this.applyVaultWrite(targetPath, content, plan.agentId),
+				delete: async (targetPath, plan) => this.applyVaultDelete(targetPath, plan.agentId),
+			},
+			{
+				validatePath: (targetPath) => this.validateMutationApplyPath(targetPath),
+			},
+		);
 		this.wikiCompileCapability = new WikiCompileCapability(this.compileWikiForActiveProject);
 		this.wikiLookupCapability = new WikiLookupCapability(
 			this.vault,
@@ -257,10 +318,14 @@ export class AgentRuntimeService {
 
 	async runTurn(input: RuntimeTurnInput): Promise<RuntimeTurnResult> {
 		const turnId = this.createTurnId();
+		const conversationId = this.resolveConversationId(input.agentId);
 		const depth = input.depth ?? 0;
 		const mode = this.getSettings().agentRuntime.toolCallingMode ?? "auto";
 		this.lastContextSummary = null;
 		this.activeTurnId = turnId;
+		this.activeConversationId = conversationId;
+		this.activeTaskId = undefined;
+		this.activeTurnSideEvents = [];
 		this.activeTurnStateMachine = new TurnStateMachine(turnId);
 		this.activeRuntimeProfile = detectRuntimeProfile();
 		this.reportProgress(input, {
@@ -349,18 +414,31 @@ export class AgentRuntimeService {
 				depth,
 				message: `Runtime failed: ${this.truncateText(message, 220)}`,
 			});
+			await this.persistTurnEvents(
+				turnId,
+				conversationId,
+				this.activeTurnStateMachine?.snapshot() ?? [],
+				{ failureMessage: message },
+			);
 			throw error;
 		} finally {
 			this.activeTurnId = "";
+			this.activeConversationId = "default";
+			this.activeTaskId = undefined;
+			this.activeTurnSideEvents = [];
 			this.activeTurnStateMachine = null;
 		}
 	}
 
 	async runBuiltinSkillCommand(input: BuiltinSkillRunInput): Promise<RuntimeTurnResult> {
 		const turnId = this.createTurnId();
+		const conversationId = this.resolveConversationId(input.agentId);
 		const normalizedSkillName = input.skillName.trim().toLowerCase();
 		this.lastContextSummary = null;
 		this.activeTurnId = turnId;
+		this.activeConversationId = conversationId;
+		this.activeTaskId = undefined;
+		this.activeTurnSideEvents = [];
 		this.activeTurnStateMachine = new TurnStateMachine(turnId);
 		this.activeRuntimeProfile = detectRuntimeProfile();
 
@@ -508,6 +586,9 @@ export class AgentRuntimeService {
 			);
 		} finally {
 			this.activeTurnId = "";
+			this.activeConversationId = "default";
+			this.activeTaskId = undefined;
+			this.activeTurnSideEvents = [];
 			this.activeTurnStateMachine = null;
 		}
 	}
@@ -586,20 +667,329 @@ export class AgentRuntimeService {
 		result: RuntimeTurnResult,
 		userPrompt: string,
 	): Promise<RuntimeTurnResult> {
+		const finalResult = this.withPendingMutationNotice(result);
 		const stepTraces = this.activeTurnStateMachine?.snapshot() ?? [];
+		const conversationId = this.activeConversationId;
+		const sideEvents = [...this.activeTurnSideEvents];
 		try {
 			await this.stepTraceStore.appendMany(stepTraces);
 		} catch {
 			// Keep runtime response available even if trace persistence fails.
 		}
+		await this.persistTurnEvents(turnId, conversationId, stepTraces, { result: finalResult, sideEvents });
 		void userPrompt;
 		return {
-			...result,
+			...finalResult,
 			turnId,
 			stepTraces,
 			runtimeProfile: this.activeRuntimeProfile,
 			contextSummary: this.lastContextSummary ?? undefined,
 		};
+	}
+
+	private withPendingMutationNotice(result: RuntimeTurnResult): RuntimeTurnResult {
+		const pendingPlans = this.workbenchStateStore
+			.getEditPlans()
+			.filter((plan) =>
+				plan.originConversationId === this.activeConversationId &&
+				plan.originTurnId === this.activeTurnId &&
+				plan.items.some((item) => item.status === "pending")
+			);
+		const pendingCount = pendingPlans.reduce(
+			(total, plan) => total + plan.items.filter((item) => item.status === "pending").length,
+			0,
+		);
+		if (pendingCount === 0) {
+			return result;
+		}
+		const notice = `Pending file review: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
+		if (result.assistantText.includes(notice)) {
+			return result;
+		}
+		return {
+			...result,
+			assistantText: `${result.assistantText.trim()}\n\n${notice}`.trim(),
+		};
+	}
+
+	private async persistTurnEvents(
+		turnId: string,
+		conversationId: string,
+		stepTraces: StepTraceEvent[],
+		options: { result?: RuntimeTurnResult; failureMessage?: string; sideEvents?: TurnEventInput[] },
+	): Promise<void> {
+		const events = this.buildTurnEvents(stepTraces, options);
+		if (events.length === 0) {
+			return;
+		}
+		try {
+			await this.turnEventLog.appendMany({ conversationId, turnId, taskId: this.activeTaskId }, events);
+		} catch {
+			// Event replay must not block the user-facing runtime result.
+		}
+	}
+
+	private buildTurnEvents(
+		stepTraces: StepTraceEvent[],
+		options: { result?: RuntimeTurnResult; failureMessage?: string; sideEvents?: TurnEventInput[] },
+	): TurnEventInput[] {
+		const result = options.result;
+		const toolTraces = result?.traces ?? [];
+		const toolTraceCursors = new Map<string, number>();
+		const events = stepTraces.flatMap((trace) =>
+			this.mapStepTraceToTurnEvents(trace, toolTraces, toolTraceCursors)
+		);
+		events.push(...(options.sideEvents ?? this.activeTurnSideEvents));
+		if (result?.parseError) {
+			events.push({
+				type: "parse_error",
+				payload: { summary: this.truncateText(result.parseError, 240) },
+			});
+		}
+		const safeStopped = this.isMaxToolIterationStop(result?.assistantText ?? "");
+		if (safeStopped) {
+			events.push({
+				type: "max_tool_iterations",
+				payload: { summary: "Maximum tool iteration limit reached." },
+			});
+		}
+		if (options.failureMessage) {
+			const diagnostics = this.buildFailureDiagnostics(
+				options.failureMessage,
+				this.isCancellationFailure(options.failureMessage) ? "cancelled" : undefined,
+			);
+			const failedModelStep = this.findUnansweredModelRequestStep(stepTraces);
+			if (failedModelStep !== undefined) {
+				events.push({
+					type: "model_failed",
+					payload: {
+						step: failedModelStep,
+						summary: this.truncateText(options.failureMessage, 240),
+						...diagnostics,
+					},
+				});
+			}
+			if (this.isCancellationFailure(options.failureMessage)) {
+				events.push({
+					type: "turn_cancelled",
+					payload: {
+						summary: this.truncateText(options.failureMessage, 240),
+						...diagnostics,
+					},
+				});
+				return events;
+			}
+			events.push({
+				type: "turn_failed",
+				payload: {
+					summary: this.truncateText(options.failureMessage, 240),
+					...diagnostics,
+				},
+			});
+			return events;
+		}
+		events.push({
+			type: "assistant_final",
+			payload: { summary: this.truncateText(result?.assistantText ?? "", 240) },
+		});
+		events.push({
+			type: "turn_completed",
+			payload: {
+				status: safeStopped ? "safe_stopped" : "completed",
+				summary: safeStopped ? "Stopped after maximum tool iterations." : "Turn completed.",
+			},
+		});
+		return events;
+	}
+
+	private mapStepTraceToTurnEvents(
+		trace: StepTraceEvent,
+		toolTraces: RuntimeToolTrace[],
+		toolTraceCursors: Map<string, number>,
+	): TurnEventInput[] {
+		const toolTrace = this.getToolTraceForStepTrace(trace, toolTraces, toolTraceCursors, trace.stepName === "STEP_TOOL_RESULT");
+		const payload = this.buildStepTracePayload(trace, toolTrace);
+		switch (trace.stepName) {
+			case "STEP_START":
+				return [{ type: "turn_started", payload }];
+			case "STEP_CONTEXT":
+				return [{ type: "context_built", payload }];
+			case "STEP_MODEL_REQUEST":
+				return [{ type: "model_requested", payload }];
+			case "STEP_MODEL_RESPONSE":
+				return [{ type: "model_completed", payload }];
+			case "STEP_TOOL_CALL":
+				return [
+					{ type: "tool_requested", payload },
+					{ type: "tool_policy_checked", payload: this.buildToolPolicyPayload(payload, toolTrace) },
+				];
+			case "STEP_TOOL_APPROVAL":
+				return [{
+					type: this.isApprovalRequestTrace(trace) ? "tool_approval_requested" : "tool_approval_resolved",
+					payload: this.isApprovalRequestTrace(trace)
+						? payload
+						: this.buildToolApprovalResolvedPayload(payload, toolTrace),
+				}];
+			case "STEP_TOOL_RESULT":
+				if (trace.status === "ok") {
+					return [{ type: "tool_completed", payload }];
+				}
+				if (trace.status === "denied") {
+					return [{ type: "tool_denied", payload }];
+				}
+				return [{ type: "tool_failed", payload }];
+			case "STEP_FALLBACK":
+				return [{ type: "fallback", payload }];
+			case "STEP_DONE":
+			case "STEP_ERROR":
+				return [];
+			default:
+				return [];
+		}
+	}
+
+	private buildStepTracePayload(trace: StepTraceEvent, toolTrace?: RuntimeToolTrace): Record<string, unknown> {
+		const payload: Record<string, unknown> = {
+			depth: trace.depth,
+			summary: this.truncateText(trace.summary ?? trace.message, 240),
+		};
+		if (trace.step !== undefined) {
+			payload.step = trace.step;
+		}
+		if (trace.tool) {
+			payload.tool = trace.tool;
+		}
+		if (trace.step !== undefined && trace.tool) {
+			payload.toolCallId = this.resolveToolCallId(trace, toolTrace);
+		}
+		if (toolTrace?.runId) {
+			payload.runId = toolTrace.runId;
+		}
+		if (trace.contextKey) {
+			payload.contextKey = trace.contextKey;
+		}
+		if (trace.contextKey === "compact" && this.lastContextSummary) {
+			payload.used = this.lastContextSummary.used;
+			payload.softLimit = this.lastContextSummary.softLimit;
+			payload.hardLimit = this.lastContextSummary.hardLimit;
+			payload.trimmedChannels = [...this.lastContextSummary.trimmedChannels];
+		}
+		if (trace.targetPath) {
+			payload.targetPath = trace.targetPath;
+		}
+		if (trace.status) {
+			payload.status = trace.status;
+		}
+		if ((trace.status === "failed" || toolTrace?.status === "failed") && (toolTrace?.error || trace.summary || trace.message)) {
+			Object.assign(
+				payload,
+				this.buildFailureDiagnostics(toolTrace?.error ?? trace.summary ?? trace.message, toolTrace?.failureClass),
+			);
+		}
+		return payload;
+	}
+
+	private buildToolPolicyPayload(
+		payload: Record<string, unknown>,
+		toolTrace: RuntimeToolTrace | undefined,
+	): Record<string, unknown> {
+		return {
+			...payload,
+			decision: toolTrace?.approved === false || toolTrace?.status === "denied" ? "deny" : "allow",
+			status: toolTrace?.status,
+			reason: toolTrace?.approvalReason,
+		};
+	}
+
+	private buildToolApprovalResolvedPayload(
+		payload: Record<string, unknown>,
+		toolTrace: RuntimeToolTrace | undefined,
+	): Record<string, unknown> {
+		const approved = Boolean(toolTrace?.approved);
+		return {
+			...payload,
+			approved,
+			decision: approved ? "approved" : "denied",
+			persistedRule: toolTrace?.persistedRule ?? false,
+			viaRule: toolTrace?.viaRule ?? false,
+			reason: toolTrace?.approvalReason,
+		};
+	}
+
+	private getToolTraceForStepTrace(
+		trace: StepTraceEvent,
+		toolTraces: RuntimeToolTrace[],
+		cursors: Map<string, number>,
+		consume: boolean,
+	): RuntimeToolTrace | undefined {
+		if (trace.step === undefined || !trace.tool) {
+			return undefined;
+		}
+		const key = this.toolTraceKey(trace.step, trace.tool);
+		const matchingTraces = toolTraces.filter((item) => this.toolTraceKey(item.step, item.tool) === key);
+		const cursor = cursors.get(key) ?? 0;
+		const match = matchingTraces[cursor];
+		if (consume && match) {
+			cursors.set(key, cursor + 1);
+		}
+		return match;
+	}
+
+	private toolTraceKey(step: number, tool: string): string {
+		return `${step}:${tool.trim().toLowerCase()}`;
+	}
+
+	private resolveToolCallId(trace: StepTraceEvent, toolTrace?: RuntimeToolTrace): string {
+		if (toolTrace?.runId) {
+			return toolTrace.runId;
+		}
+		return `tool-${trace.step ?? 0}-${(trace.tool ?? "unknown").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "_")}`;
+	}
+
+	private isApprovalRequestTrace(trace: StepTraceEvent): boolean {
+		return trace.message.includes("正在申请") || trace.message.toLowerCase().includes("request");
+	}
+
+	private findUnansweredModelRequestStep(stepTraces: StepTraceEvent[]): number | undefined {
+		const requested = stepTraces.filter((trace) => trace.stepName === "STEP_MODEL_REQUEST" && trace.step !== undefined);
+		for (const request of [...requested].reverse()) {
+			const hasResponse = stepTraces.some((trace) =>
+				trace.step === request.step &&
+				trace.index > request.index &&
+				trace.stepName === "STEP_MODEL_RESPONSE"
+			);
+			if (!hasResponse) {
+				return request.step;
+			}
+		}
+		return undefined;
+	}
+
+	private isCancellationFailure(message: string): boolean {
+		return /cancelled|canceled|aborted|abort/i.test(message);
+	}
+
+	private buildFailureDiagnostics(
+		message: string,
+		failureClassOverride?: RuntimeFailureClass,
+	): Record<string, unknown> {
+		const error = message.trim() || "Unknown runtime failure.";
+		const failureClass = failureClassOverride ?? this.toolGovernor.classifyFailure(error);
+		const retryable = failureClass !== "cancelled" && this.toolGovernor.isRetryableTransportFailure(error);
+		return {
+			error: this.truncateText(error, 500),
+			failureClass,
+			recoverable: retryable,
+			retryable,
+		};
+	}
+
+	private isMaxToolIterationStop(assistantText: string): boolean {
+		return assistantText.includes("Maximum tool-iteration limit reached");
+	}
+
+	private resolveConversationId(agentId: string | undefined): string {
+		return agentId?.trim() || "default";
 	}
 
 	setSessionToolPolicyOverride(action: string, effect: PolicyEffect): void {
@@ -627,22 +1017,61 @@ export class AgentRuntimeService {
 		});
 	}
 
-	async acceptEditPlan(planId: string): Promise<void> {
-		const record = this.workbenchStateStore.getEditPlans().find((item) => item.id === planId);
-		if (!record) {
-			throw new Error(`Edit plan not found: ${planId}`);
+	async restorePendingMutationPlans(): Promise<number> {
+		const plans = await this.mutationPlanStore.getPending();
+		for (const plan of plans) {
+			this.workbenchStateStore.recordEditPlan(this.toEditPlanRecord(plan));
 		}
-		this.workbenchStateStore.replaceEditPlan({
-			...record,
-			items: record.items.map((item) => ({
-				...item,
-				status: item.status === "applied" ? "accepted" : item.status,
-			})),
-		});
+		return plans.length;
+	}
+
+	async listPendingMutationPlans(): Promise<MutationPlan[]> {
+		return this.mutationPlanStore.getPending();
+	}
+
+	async listMutationPlansByTurnId(turnId: string): Promise<MutationPlan[]> {
+		return this.mutationPlanStore.getByTurnId(turnId);
+	}
+
+	async listMutationPlansByConversationId(conversationId: string): Promise<MutationPlan[]> {
+		return this.mutationPlanStore.getByConversationId(conversationId);
+	}
+
+	async acceptEditPlan(planId: string): Promise<MutationApplyStatus> {
+		const record = await this.getEditPlanRecord(planId);
+		const storedPlan = await this.mutationPlanStore.get(planId);
+		const result = await this.mutationApplier.apply(storedPlan ?? this.toMutationPlan(record));
+		await this.mutationPlanStore.replace(result.plan);
+		if (result.status === "failed") {
+			this.workbenchStateStore.replaceEditPlan(record);
+			await this.persistMutationReviewEvent(record, "mutation_apply_failed", result.reason);
+			return result.status;
+		}
+		const nextRecord = this.withEditPlanStatus(record, result.status);
+		this.workbenchStateStore.replaceEditPlan(nextRecord);
+		await this.persistMutationReviewEvent(
+			nextRecord,
+			result.status === "conflicted" ? "mutation_conflicted" : "mutation_applied",
+			result.reason,
+		);
+		return result.status;
 	}
 
 	async rejectEditPlan(planId: string): Promise<void> {
-		await this.rollbackEditPlan(planId, "rejected");
+		const record = await this.getEditPlanRecord(planId);
+		if (record.items.some((item) => item.status === "applied" || item.status === "accepted")) {
+			await this.rollbackEditPlan(planId, "rejected");
+			return;
+		}
+		const storedPlan = await this.mutationPlanStore.get(planId);
+		const result = await this.mutationApplier.reject(storedPlan ?? this.toMutationPlan(record));
+		if (result.status === "failed") {
+			throw new Error(result.reason ?? `Edit plan could not be rejected: ${planId}`);
+		}
+		await this.mutationPlanStore.replace(result.plan);
+		const nextRecord = this.withEditPlanStatus(record, "rejected");
+		this.workbenchStateStore.replaceEditPlan(nextRecord);
+		await this.persistMutationReviewEvent(nextRecord, "mutation_rejected");
 	}
 
 	async rollbackEditPlan(planId: string, nextStatus: "rejected" | "rolled_back" = "rolled_back"): Promise<void> {
@@ -652,12 +1081,27 @@ export class AgentRuntimeService {
 		}
 		for (const item of [...record.items].reverse()) {
 			if (item.status !== "applied" && item.status !== "accepted") {
+				item.status = nextStatus;
 				continue;
 			}
 			await this.rollbackEditPlanItem(item, record.agentId);
 			item.status = nextStatus;
 		}
 		this.workbenchStateStore.replaceEditPlan(record);
+		await this.mutationPlanStore.replace(setMutationPlanStatus(this.toMutationPlan(record), "rejected"));
+		await this.persistMutationReviewEvent(record, "mutation_rejected");
+	}
+
+	private async getEditPlanRecord(planId: string): Promise<EditPlanRecord> {
+		const record = this.workbenchStateStore.getEditPlans().find((item) => item.id === planId);
+		if (record) {
+			return record;
+		}
+		const storedPlan = await this.mutationPlanStore.get(planId);
+		if (storedPlan) {
+			return this.toEditPlanRecord(storedPlan);
+		}
+		throw new Error(`Edit plan not found: ${planId}`);
 	}
 
 	private resolveToolPolicy(toolName: string): { effect: PolicyEffect; source: string } {
@@ -769,10 +1213,22 @@ export class AgentRuntimeService {
 			}
 
 			if (parsed.type === "response" || (!parsed.type && !parsed.tool)) {
+				const pendingMutations = this.recordMutationPlansFromEnvelope(parsed);
 				return {
 					assistantText: (parsed.assistant ?? finalReply).trim() || "(Model returned no usable content)",
 					traces,
 					rawFinalReply: finalReply,
+					...(pendingMutations.length > 0 ? { pendingMutations } : {}),
+				};
+			}
+
+			if (!parsed.tool && this.hasMutationPlans(parsed)) {
+				const pendingMutations = this.recordMutationPlansFromEnvelope(parsed);
+				return {
+					assistantText: (parsed.assistant ?? finalReply).trim() || "(Model returned no usable content)",
+					traces,
+					rawFinalReply: finalReply,
+					pendingMutations,
 				};
 			}
 
@@ -849,7 +1305,7 @@ export class AgentRuntimeService {
 			...history,
 			{ role: "user", content: input.userPrompt },
 		];
-		const tools = this.buildNativeToolDefinitions(settings, allowedToolSet);
+		const tools = this.buildNativeToolDefinitions(settings, allowedToolSet, this.resolveAgentMode(input));
 		if (tools.length === 0) {
 			return {
 				assistantText: "No tool is allowed for this command.",
@@ -896,10 +1352,22 @@ export class AgentRuntimeService {
 				const parsed = this.parseRuntimeEnvelope(assistantPayload);
 				if (parsed) {
 					if (parsed.type === "response" || (!parsed.type && !parsed.tool)) {
+						const pendingMutations = this.recordMutationPlansFromEnvelope(parsed);
 						return {
 							assistantText: (parsed.assistant ?? assistantPayload).trim() || "(Model returned no usable content)",
 							traces,
 							rawFinalReply: assistantPayload || finalReply,
+							...(pendingMutations.length > 0 ? { pendingMutations } : {}),
+						};
+					}
+
+					if (!parsed.tool && this.hasMutationPlans(parsed)) {
+						const pendingMutations = this.recordMutationPlansFromEnvelope(parsed);
+						return {
+							assistantText: (parsed.assistant ?? assistantPayload).trim() || "(Model returned no usable content)",
+							traces,
+							rawFinalReply: assistantPayload || finalReply,
+							pendingMutations,
 						};
 					}
 
@@ -1080,6 +1548,8 @@ export class AgentRuntimeService {
 		const memoryContext = await this.loadMemoryContext();
 
 		this.reportContextProgress(input, depth, "compact", "压缩上下文并生成提示包");
+		const agentMode = this.resolveAgentMode(input);
+		const allowedToolSet = this.buildAllowedToolSet(input.allowedTools);
 		const promptContext = this.promptContextEngine.build({
 			mode: settings.agentRuntime.toolCallingMode ?? "auto",
 			depth,
@@ -1099,7 +1569,8 @@ export class AgentRuntimeService {
 			wikiKnowledgeContext,
 			memoryContext,
 			mentionContext: input.mentionContext,
-			enableExecTool: settings.agentRuntime.enableExecTool,
+			enableExecTool: this.shouldExposeExecTool(settings, allowedToolSet, agentMode),
+			agentMode,
 			hardLimit: 1600,
 		});
 		this.lastContextSummary = promptContext.summary;
@@ -1156,6 +1627,66 @@ export class AgentRuntimeService {
 		return parsed as RuntimeEnvelope | null;
 	}
 
+	private hasMutationPlans(envelope: RuntimeEnvelope): boolean {
+		return envelope.type === "mutation_plan" ||
+			Array.isArray(envelope.mutations) ||
+			Array.isArray(envelope.pendingMutations);
+	}
+
+	private recordMutationPlansFromEnvelope(envelope: RuntimeEnvelope): RuntimeMutationPlan[] {
+		const rawPlans = Array.isArray(envelope.mutations)
+			? envelope.mutations
+			: Array.isArray(envelope.pendingMutations)
+				? envelope.pendingMutations
+				: [];
+		return this.recordRuntimeMutationPlans(rawPlans, "model_envelope");
+	}
+
+	private recordRuntimeMutationPlans(
+		plans: RuntimeMutationPlan[],
+		source: string,
+	): RuntimeMutationPlan[] {
+		const normalized = plans
+			.map((plan, index) => this.normalizeRuntimeMutationPlan(plan, index, source))
+			.filter((plan) => Boolean(plan.operation || plan.targetPath || plan.summary));
+		for (const plan of normalized) {
+			this.activeTurnSideEvents.push({
+				type: "mutation_planned",
+				payload: {
+					id: plan.id,
+					operation: plan.operation,
+					targetPath: plan.targetPath,
+					summary: plan.summary,
+					status: plan.status,
+					source: plan.source,
+				},
+			});
+		}
+		return normalized;
+	}
+
+	private normalizeRuntimeMutationPlan(
+		plan: RuntimeMutationPlan,
+		index: number,
+		source: string,
+	): RuntimeMutationPlan {
+		const operation = typeof plan.operation === "string" ? plan.operation.trim() : "";
+		const targetPath = typeof plan.targetPath === "string" ? normalizePath(plan.targetPath.trim()) : "";
+		const summary = typeof plan.summary === "string" ? this.truncateText(plan.summary.trim(), 240) : "";
+		const id = typeof plan.id === "string" && plan.id.trim()
+			? plan.id.trim()
+			: `mutation-plan-${this.activeTurnId || "turn"}-${index + 1}`;
+		const status = typeof plan.status === "string" && plan.status.trim() ? plan.status.trim() : "pending";
+		return {
+			id,
+			operation,
+			targetPath,
+			summary,
+			status,
+			source,
+		};
+	}
+
 	private async executeTool(
 		step: number,
 		input: RuntimeTurnInput,
@@ -1171,93 +1702,8 @@ export class AgentRuntimeService {
 		const targetPath = this.resolveToolTargetPath(name, args);
 		const scope = this.resolveScope(targetPath);
 		const shouldReportApproval = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
-		if (scope === "external" && !this.activeRuntimeProfile.capabilities.supportsExternalRead) {
-			const reason = `Runtime profile ${this.activeRuntimeProfile.id} does not allow external read operations.`;
-			const trace: RuntimeToolTrace = {
-				runId,
-				step,
-				tool: name,
-				scope,
-				targetPath,
-				approved: false,
-				approvalReason: reason,
-				persistedRule: false,
-				viaRule: false,
-				status: "denied",
-				failureClass: "dependency_unavailable",
-				ok: false,
-				summary: `${name} blocked by runtime capability`,
-				error: reason,
-			};
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: {
-					ok: false,
-					tool: name,
-					error: reason,
-				},
-			};
-		}
-		if (allowedTools && allowedTools.size > 0 && !allowedTools.has(name)) {
-			const reason = `Tool ${name} is not allowed by the current command policy.`;
-			const trace: RuntimeToolTrace = {
-				runId,
-				step,
-				tool: name,
-				scope,
-				targetPath,
-				approved: false,
-				approvalReason: reason,
-				persistedRule: false,
-				viaRule: false,
-				status: "denied",
-				failureClass: "invalid_input",
-				ok: false,
-				summary: `${name} 已被命令策略拦截`,
-				error: reason,
-			};
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: {
-					ok: false,
-					tool: name,
-					error: reason,
-				},
-			};
-		}
-
-		const policy = this.resolveToolPolicy(name);
-		if (policy.effect === "deny") {
-			const reason = `Policy denied tool:${name} (source=${policy.source})`;
-			const trace: RuntimeToolTrace = {
-				runId,
-				step,
-				tool: name,
-				scope,
-				targetPath,
-				approved: false,
-				approvalReason: reason,
-				persistedRule: false,
-				viaRule: false,
-				status: "denied",
-				failureClass: "dependency_unavailable",
-				ok: false,
-				summary: `${name} blocked by policy`,
-				error: reason,
-			};
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: {
-					ok: false,
-					tool: name,
-					error: reason,
-				},
-			};
-		}
-
+		const settings = this.getSettings();
+		const gatewayPolicy = this.resolveToolPolicy(name);
 		if (shouldReportApproval) {
 			const target = targetPath ? `（${targetPath}）` : "";
 			this.reportProgress(input, {
@@ -1269,23 +1715,42 @@ export class AgentRuntimeService {
 			});
 		}
 
-		const approval = policy.effect === "allow"
-			? {
-				allowed: true,
-				persisted: false,
-				viaRule: false,
-				reason: `Policy allow (source=${policy.source})`,
-			}
-			: await this.approvalService.requestApproval({
+		const gatewayResult = await this.toolGateway.run({
+			policyInput: {
+				agentMode: this.resolveAgentMode(input),
+				enableExecTool: settings.agentRuntime.enableExecTool,
+				runtimeProfile: this.activeRuntimeProfile,
+				toolName: name,
+				args,
+				scope,
+				targetPath,
+				disabledTools: this.buildDisabledToolSet(),
+				allowedTools,
+				policyEffect: gatewayPolicy.effect,
+				workspaceRoot: this.resolvePolicyWorkspaceRoot(),
+			},
+			approvalRequest: {
 				agentId,
 				tool: name,
 				scope,
 				targetPath: scope === "vault" ? normalizePath(targetPath || "") : targetPath,
 				description: `${name}(${this.safeStringify(args, 260)})`,
-			});
+			},
+			requestApproval: gatewayPolicy.effect === "allow"
+				? async () => ({
+					allowed: true,
+					persisted: false,
+					viaRule: false,
+					reason: `Policy allow (source=${gatewayPolicy.source})`,
+				})
+				: (request) => this.approvalService.requestApproval(request),
+			execute: () => this.runToolByName(name, args, agentId, runId),
+		});
+		const gatewayApproval = gatewayResult.approval;
+		const gatewayApprovalReason = gatewayApproval?.reason ?? gatewayResult.decision.reason;
 
-		if (!approval.allowed) {
-			if (shouldReportApproval) {
+		if (shouldReportApproval) {
+			if (gatewayResult.status === "denied") {
 				this.reportProgress(input, {
 					phase: "tool_approval",
 					depth,
@@ -1293,48 +1758,24 @@ export class AgentRuntimeService {
 					tool: name,
 					message: `工具权限被拒绝：${name}`,
 				});
+			} else {
+				const approvalStatus = gatewayApproval?.viaRule
+					? "命中已保存规则，自动授权"
+					: gatewayApproval?.persisted
+						? "已授权并保存规则"
+						: "已授权";
+				this.reportProgress(input, {
+					phase: "tool_approval",
+					depth,
+					step,
+					tool: name,
+					message: `${name} 权限${approvalStatus}`,
+				});
 			}
-			const trace: RuntimeToolTrace = {
-				runId,
-				step,
-				tool: name,
-				scope,
-				targetPath,
-				approved: false,
-				approvalReason: approval.reason,
-				persistedRule: approval.persisted,
-				viaRule: approval.viaRule,
-				status: "denied",
-				failureClass: "dependency_unavailable",
-				ok: false,
-				summary: `${name} blocked`,
-				error: approval.reason,
-			};
-			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return {
-				trace,
-				payload: { ok: false, tool: name, error: approval.reason },
-			};
 		}
 
-		if (shouldReportApproval) {
-			const approvalStatus = approval.viaRule
-				? "命中已保存规则，自动授权"
-				: approval.persisted
-					? "已授权并保存规则"
-					: "已授权";
-			this.reportProgress(input, {
-				phase: "tool_approval",
-				depth,
-				step,
-				tool: name,
-				message: `${name} 权限${approvalStatus}`,
-			});
-		}
-
-		try {
-			const data = await this.runToolByName(name, args, agentId);
-			const payload: RuntimeToolResultPayload = { ok: true, tool: name, data };
+		if (gatewayResult.status === "ok") {
+			const data = gatewayResult.data;
 			const trace: RuntimeToolTrace = {
 				runId,
 				step,
@@ -1342,9 +1783,9 @@ export class AgentRuntimeService {
 				scope,
 				targetPath,
 				approved: true,
-				approvalReason: approval.reason,
-				persistedRule: approval.persisted,
-				viaRule: approval.viaRule,
+				approvalReason: gatewayApprovalReason,
+				persistedRule: gatewayApproval?.persisted ?? false,
+				viaRule: gatewayApproval?.viaRule ?? false,
 				status: "ok",
 				ok: true,
 				summary: this.buildSummaryFromData(name, data),
@@ -1352,10 +1793,12 @@ export class AgentRuntimeService {
 			await this.persistToolRun(trace, startedAt, new Date().toISOString());
 			return {
 				trace,
-				payload,
+				payload: { ok: true, tool: name, data },
 			};
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error ?? "");
+		}
+
+		if (gatewayResult.status === "failed") {
+			const message = gatewayResult.error || "Unknown error";
 			const failureClass = this.toolGovernor.classifyFailure(message);
 			const trace: RuntimeToolTrace = {
 				runId,
@@ -1363,29 +1806,54 @@ export class AgentRuntimeService {
 				tool: name,
 				scope,
 				targetPath,
-				approved: true,
-				approvalReason: approval.reason,
-				persistedRule: approval.persisted,
-				viaRule: approval.viaRule,
+				approved: Boolean(gatewayApproval?.allowed ?? gatewayResult.decision.allow),
+				approvalReason: gatewayApprovalReason,
+				persistedRule: gatewayApproval?.persisted ?? false,
+				viaRule: gatewayApproval?.viaRule ?? false,
 				status: "failed",
 				failureClass,
 				ok: false,
 				summary: `${name} failed`,
-				error: message || "Unknown error",
+				error: message,
 			};
 			await this.persistToolRun(trace, startedAt, new Date().toISOString());
 			return {
 				trace,
-				payload: {
-					ok: false,
-					tool: name,
-					error: message || "unknown tool execution error",
-				},
+				payload: { ok: false, tool: name, error: message },
 			};
 		}
+
+		const denyCode = gatewayResult.decision.allow ? undefined : gatewayResult.decision.code;
+		const denyReason = gatewayResult.error || gatewayApprovalReason;
+		const deniedTrace: RuntimeToolTrace = {
+			runId,
+			step,
+			tool: name,
+			scope,
+			targetPath,
+			approved: false,
+			approvalReason: denyReason,
+			persistedRule: gatewayApproval?.persisted ?? false,
+			viaRule: gatewayApproval?.viaRule ?? false,
+			status: "denied",
+			failureClass: this.classifyPolicyDeny(denyCode),
+			ok: false,
+			summary: `${name} blocked`,
+			error: denyReason,
+		};
+		await this.persistToolRun(deniedTrace, startedAt, new Date().toISOString());
+		return {
+			trace: deniedTrace,
+			payload: { ok: false, tool: name, error: denyReason },
+		};
 	}
 
-	private async runToolByName(name: string, args: Record<string, unknown>, agentId: string): Promise<unknown> {
+	private async runToolByName(
+		name: string,
+		args: Record<string, unknown>,
+		agentId: string,
+		toolCallId?: string,
+	): Promise<unknown> {
 		if (name === "use_skill") {
 			return this.toolUseSkill(args);
 		}
@@ -1402,9 +1870,9 @@ export class AgentRuntimeService {
 			glob: async (payload) => this.toolGlob(payload),
 			...(WIKI_FEATURE_ENABLED ? { compile_wiki: async (payload) => this.toolCompileWiki(payload) } : {}),
 			memory: async (payload) => this.toolMemory(payload),
-			write: async (payload) => this.toolWrite(payload, agentId),
-			edit: async (payload) => this.toolEdit(payload, agentId),
-			delete: async (payload) => this.toolDelete(payload, agentId),
+			write: async (payload) => this.toolWrite(payload, agentId, toolCallId),
+			edit: async (payload) => this.toolEdit(payload, agentId, toolCallId),
+			delete: async (payload) => this.toolDelete(payload, agentId, toolCallId),
 			exec: async (payload) => this.toolExec(payload),
 		});
 
@@ -1653,7 +2121,7 @@ export class AgentRuntimeService {
 		return this.wikiCompileCapability.execute(normalized.length > 0 ? normalized : undefined, false);
 	}
 
-	private async toolWrite(args: Record<string, unknown>, agentId: string): Promise<unknown> {
+	private async toolWrite(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
 			throw new Error("write only supports Vault-relative paths.");
@@ -1679,36 +2147,31 @@ export class AgentRuntimeService {
 		}
 
 		const beforeContent = existing instanceof TFile ? await this.vault.cachedRead(existing) : "";
-		const action: AgentAction = {
-			type: actionType,
-			targetType: normalizedPath.toLowerCase().endsWith(".canvas") ? "canvas" : "markdown",
-			path: effectivePath,
-			content,
-		};
-
-		await this.actionService.execute(action, agentId);
-		const afterFile = this.vault.getAbstractFileByPath(effectivePath);
-		const afterContent = afterFile instanceof TFile ? await this.vault.cachedRead(afterFile) : content;
-
+		const afterContent = content;
 		const diffSegments = this.inlineEditService.computeLineDiff(beforeContent, afterContent);
-		const editPlanId = this.recordEditPlan({
+		const editPlanId = await this.recordEditPlan({
 			agentId,
+			toolCallId,
 			tool: "write",
 			path: effectivePath,
 			before: beforeContent,
 			after: afterContent,
 			changeType: actionType === "create" ? "create" : "update",
 		});
+		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
 		return {
 			editPlanId,
 			path: effectivePath,
 			type: actionType,
+			status: applied ? "applied" : "pending_review",
+			planned: !applied,
+			applied,
 			diff: this.makeSimpleDiffSummary(beforeContent, afterContent),
 			diffPreview: this.inlineEditService.formatDiffForModel(diffSegments),
 		};
 	}
 
-	private async toolDelete(args: Record<string, unknown>, agentId: string): Promise<unknown> {
+	private async toolDelete(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
 			throw new Error("delete only supports Vault-relative paths.");
@@ -1723,35 +2186,31 @@ export class AgentRuntimeService {
 		}
 		const deletedType = beforeTarget instanceof TFolder ? "folder" : "file";
 		const beforeContent = beforeTarget instanceof TFile ? await this.vault.cachedRead(beforeTarget) : "";
-		const action: AgentAction = {
-			type: "delete",
-			targetType: deletedType === "folder"
-				? "folder"
-				: effectivePath.toLowerCase().endsWith(".canvas")
-					? "canvas"
-					: "markdown",
+		if (deletedType === "folder") {
+			throw new Error("Folder delete cannot be represented as a reviewable mutation plan yet.");
+		}
+		const editPlanId = await this.recordEditPlan({
+			agentId,
+			toolCallId,
+			tool: "delete",
 			path: effectivePath,
-		};
-		await this.actionService.execute(action, agentId);
-		const editPlanId = deletedType === "folder"
-			? undefined
-			: this.recordEditPlan({
-				agentId,
-				tool: "delete",
-				path: effectivePath,
-				before: beforeContent,
-				after: "",
-				changeType: "delete",
-			});
+			before: beforeContent,
+			after: "",
+			changeType: "delete",
+		});
+		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
 		return {
 			editPlanId,
 			path: effectivePath,
 			type: "delete",
 			deletedType,
+			status: applied ? "applied" : "pending_review",
+			planned: !applied,
+			applied,
 		};
 	}
 
-	private async toolEdit(args: Record<string, unknown>, agentId: string): Promise<unknown> {
+	private async toolEdit(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
 		const pathValue = this.getRequiredStringArg(args, "path");
 		if (this.resolveScope(pathValue) === "external") {
 			throw new Error("edit only supports Vault-relative paths.");
@@ -1772,57 +2231,293 @@ export class AgentRuntimeService {
 			throw new Error(`No matching text found: ${editResult.failedReasons.join("; ")}`);
 		}
 
-		const action: AgentAction = {
-			type: "update",
-			targetType: effectivePath.toLowerCase().endsWith(".canvas") ? "canvas" : "markdown",
-			path: effectivePath,
-			content: editResult.result,
-		};
-		await this.actionService.execute(action, agentId);
-
 		const diffSegments = this.inlineEditService.computeLineDiff(beforeContent, editResult.result);
-		const editPlanId = this.recordEditPlan({
+		const editPlanId = await this.recordEditPlan({
 			agentId,
+			toolCallId,
 			tool: "edit",
 			path: effectivePath,
 			before: beforeContent,
 			after: editResult.result,
 			changeType: "update",
 		});
+		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
 		return {
 			editPlanId,
 			path: effectivePath,
+			status: applied ? "applied" : "pending_review",
+			planned: !applied,
+			applied,
+			proposedEdits: editResult.appliedCount,
 			appliedEdits: editResult.appliedCount,
 			failedReasons: editResult.failedReasons,
 			diffPreview: this.inlineEditService.formatDiffForModel(diffSegments),
 		};
 	}
 
-	private recordEditPlan(input: {
+	private async recordEditPlan(input: {
 		agentId: string;
+		toolCallId?: string;
 		tool: string;
 		path: string;
 		before: string;
 		after: string;
 		changeType: "create" | "update" | "delete";
-	}): string {
-		const record: EditPlanRecord = {
-			id: `edit-plan-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
+	}): Promise<string> {
+		const id = `edit-plan-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+		const operation = this.resolveMutationOperation(input.tool);
+		const plan = createMutationPlan({
+			id,
 			agentId: input.agentId,
+			conversationId: this.activeConversationId,
+			turnId: this.activeTurnId,
+			taskId: this.activeTaskId,
+			toolCallId: input.toolCallId,
+			operation,
+			targetPath: input.path,
+			before: input.before,
+			after: input.after,
+			changeType: input.changeType,
+			summary: `${input.tool} ${input.changeType} ${input.path}`,
+		});
+		const record: EditPlanRecord = {
+			id: plan.id,
+			agentId: plan.agentId,
+			originConversationId: plan.conversationId,
+			originTurnId: plan.turnId,
+			originTaskId: plan.taskId,
+			toolCallId: plan.toolCallId,
 			tool: input.tool,
-			recordedAt: new Date().toISOString(),
+			recordedAt: plan.createdAt,
 			items: [
 				{
 					path: input.path,
 					before: input.before,
 					after: input.after,
-					status: "applied",
+					beforeHash: plan.beforeHash,
+					afterHash: plan.proposedHash,
+					status: "pending",
 					changeType: input.changeType,
+					riskLevel: plan.riskLevel,
+					summary: plan.summary,
 				},
 			],
 		};
+		await this.mutationPlanStore.save(plan);
 		this.workbenchStateStore.recordEditPlan(record);
+		this.activeTurnSideEvents.push({
+			type: "mutation_planned",
+			payload: this.buildMutationEventPayload(record, "planned"),
+		});
 		return record.id;
+	}
+
+	private async maybeAutoApplyEditPlan(planId: string): Promise<boolean> {
+		if (this.getFileMutationMode() !== "autoApproved") {
+			return false;
+		}
+		const status = await this.acceptEditPlan(planId);
+		return status === "applied";
+	}
+
+	private getFileMutationMode(): FridaySettings["agentRuntime"]["fileMutationMode"] {
+		return this.getSettings().agentRuntime.fileMutationMode ?? "review";
+	}
+
+	private resolveMutationOperation(tool: string): MutationOperation {
+		const normalized = tool.trim().toLowerCase();
+		if (normalized === "delete") {
+			return "delete";
+		}
+		if (normalized === "edit") {
+			return "edit";
+		}
+		return "write";
+	}
+
+	private toMutationPlan(record: EditPlanRecord): MutationPlan {
+		const items = record.items.map((item) => ({
+			path: item.path,
+			before: item.before,
+			after: item.after,
+			beforeHash: item.beforeHash ?? hashMutationContent(item.before),
+			afterHash: item.afterHash ?? hashMutationContent(item.after),
+			status: this.toMutationPlanStatus(item.status),
+			changeType: item.changeType as MutationChangeType,
+		}));
+		const firstItem = items[0];
+		const riskLevel = record.items[0]?.riskLevel ??
+			(firstItem?.changeType === "delete" ? "high" : "standard");
+		return {
+			id: record.id,
+			agentId: record.agentId,
+			...(record.originConversationId ? { conversationId: record.originConversationId } : {}),
+			...(record.originTurnId ? { turnId: record.originTurnId } : {}),
+			...(record.originTaskId ? { taskId: record.originTaskId } : {}),
+			...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
+			operation: this.resolveMutationOperation(record.tool),
+			targetPath: firstItem?.path ?? "",
+			beforeHash: firstItem?.beforeHash ?? hashMutationContent(""),
+			proposedHash: firstItem?.afterHash ?? hashMutationContent(""),
+			riskLevel,
+			summary: record.items[0]?.summary ?? `${record.tool} ${firstItem?.changeType ?? "update"} ${firstItem?.path ?? ""}`.trim(),
+			status: this.resolveEditPlanStatus(record),
+			createdAt: record.recordedAt,
+			items,
+		};
+	}
+
+	private toEditPlanRecord(plan: MutationPlan): EditPlanRecord {
+		return {
+			id: plan.id,
+			agentId: plan.agentId,
+			originConversationId: plan.conversationId,
+			originTurnId: plan.turnId,
+			originTaskId: plan.taskId,
+			toolCallId: plan.toolCallId,
+			tool: plan.operation,
+			recordedAt: plan.createdAt,
+			items: plan.items.map((item) => ({
+				path: item.path,
+				before: item.before,
+				after: item.after,
+				beforeHash: item.beforeHash,
+				afterHash: item.afterHash,
+				status: item.status,
+				changeType: item.changeType,
+				riskLevel: plan.riskLevel,
+				summary: plan.summary,
+			})),
+		};
+	}
+
+	private resolveEditPlanStatus(record: EditPlanRecord): MutationPlanStatus {
+		if (record.items.some((item) => item.status === "conflicted")) {
+			return "conflicted";
+		}
+		if (record.items.length > 0 && record.items.every((item) => item.status === "applied" || item.status === "accepted")) {
+			return "applied";
+		}
+		if (record.items.length > 0 && record.items.every((item) => item.status === "rejected" || item.status === "rolled_back")) {
+			return "rejected";
+		}
+		return "pending";
+	}
+
+	private toMutationPlanStatus(status: EditPlanRecord["items"][number]["status"]): MutationPlanStatus {
+		if (status === "applied" || status === "accepted") {
+			return "applied";
+		}
+		if (status === "rejected" || status === "rolled_back") {
+			return "rejected";
+		}
+		if (status === "conflicted") {
+			return "conflicted";
+		}
+		return "pending";
+	}
+
+	private withEditPlanStatus(record: EditPlanRecord, status: MutationPlanStatus): EditPlanRecord {
+		return {
+			...record,
+			items: record.items.map((item) => ({
+				...item,
+				status,
+			})),
+		};
+	}
+
+	private async persistMutationReviewEvent(
+		record: EditPlanRecord,
+		type: "mutation_applied" | "mutation_rejected" | "mutation_conflicted" | "mutation_apply_failed",
+		reason?: string,
+	): Promise<void> {
+		if (!record.originConversationId || !record.originTurnId) {
+			return;
+		}
+		const status = type === "mutation_applied"
+			? "applied"
+			: type === "mutation_rejected"
+				? "rejected"
+				: type === "mutation_conflicted"
+					? "conflicted"
+					: "apply_failed";
+		const event: TurnEventInput = {
+			type,
+			payload: this.buildMutationEventPayload(record, status, reason),
+		};
+		if (record.originTurnId === this.activeTurnId && record.originConversationId === this.activeConversationId) {
+			this.activeTurnSideEvents.push(event);
+			return;
+		}
+		try {
+			await this.turnEventLog.append({
+				conversationId: record.originConversationId,
+				turnId: record.originTurnId,
+				taskId: record.originTaskId,
+			}, event);
+		} catch {
+			// Mutation review events are diagnostic and must not block review actions.
+		}
+	}
+
+	private buildMutationEventPayload(
+		record: EditPlanRecord,
+		status: "planned" | "applied" | "rejected" | "conflicted" | "apply_failed",
+		reason?: string,
+	): Record<string, unknown> {
+		const firstItem = record.items[0];
+		return {
+			id: record.id,
+			...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
+			...(record.originTaskId ? { taskId: record.originTaskId } : {}),
+			tool: record.tool,
+			status,
+			operation: this.resolveMutationOperation(record.tool),
+			targetPath: firstItem?.path ?? "",
+			beforeHash: firstItem?.beforeHash ?? "",
+			proposedHash: firstItem?.afterHash ?? "",
+			riskLevel: firstItem?.riskLevel ?? "standard",
+			itemCount: record.items.length,
+			summary: reason || `${record.tool} ${status} ${record.items.length} mutation(s)`,
+			...(reason ? { reason } : {}),
+			...(status === "apply_failed" && reason ? { error: reason } : {}),
+		};
+	}
+
+	private async readVaultFileContentOrNull(targetPath: string): Promise<string | null> {
+		const file = this.vault.getAbstractFileByPath(normalizePath(targetPath));
+		if (!(file instanceof TFile)) {
+			return null;
+		}
+		return this.vault.cachedRead(file);
+	}
+
+	private async applyVaultWrite(targetPath: string, content: string, agentId: string): Promise<void> {
+		await this.ensureVaultFolder(targetPath.split("/").slice(0, -1).join("/"));
+		const existing = this.vault.getAbstractFileByPath(targetPath);
+		await this.actionService.execute({
+			type: existing instanceof TFile ? "update" : "create",
+			targetType: targetPath.toLowerCase().endsWith(".canvas") ? "canvas" : "markdown",
+			path: targetPath,
+			content,
+		}, agentId);
+	}
+
+	private async applyVaultDelete(targetPath: string, agentId: string): Promise<void> {
+		const existing = this.vault.getAbstractFileByPath(targetPath);
+		if (!(existing instanceof TFile) && !(existing instanceof TFolder)) {
+			return;
+		}
+		await this.actionService.execute({
+			type: "delete",
+			targetType: existing instanceof TFolder
+				? "folder"
+				: targetPath.toLowerCase().endsWith(".canvas")
+					? "canvas"
+					: "markdown",
+			path: targetPath,
+		}, agentId);
 	}
 
 	private async rollbackEditPlanItem(
@@ -2030,6 +2725,15 @@ export class AgentRuntimeService {
 			throw new Error(this.buildRawBoundaryDeniedError(targetPath, activeProjectRoot));
 		}
 		throw new Error(this.buildVaultScopeDeniedError(targetPath, "write"));
+	}
+
+	private validateMutationApplyPath(targetPath: string): true | string {
+		try {
+			this.assertAgentWritableVaultPath(targetPath);
+			return true;
+		} catch (error) {
+			return error instanceof Error ? error.message : String(error ?? "Mutation path is not writable.");
+		}
 	}
 
 	private buildVaultScopeDeniedError(targetPath: string, mode: "read" | "write"): string {
@@ -2338,17 +3042,18 @@ export class AgentRuntimeService {
 			return `Wiki compile ${payload.projectId ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
 		}
 		if (tool === "write") {
-			const payload = data as { path?: string };
-			return `Write completed ${payload.path ?? ""}`.trim();
+			const payload = data as { path?: string; status?: string };
+			return `${payload.status === "pending_review" ? "Write planned" : "Write completed"} ${payload.path ?? ""}`.trim();
 		}
 		if (tool === "delete") {
-			const payload = data as { path?: string; deletedType?: string };
+			const payload = data as { path?: string; deletedType?: string; status?: string };
 			const targetLabel = payload.deletedType === "folder" ? "folder" : "file";
-			return `Delete completed ${targetLabel} ${payload.path ?? ""}`.trim();
+			return `${payload.status === "pending_review" ? "Delete planned" : "Delete completed"} ${targetLabel} ${payload.path ?? ""}`.trim();
 		}
 		if (tool === "edit") {
-			const payload = data as { path?: string; appliedEdits?: number };
-			return `Edited ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
+			const payload = data as { path?: string; appliedEdits?: number; status?: string };
+			const verb = payload.status === "pending_review" ? "Edit planned" : "Edited";
+			return `${verb} ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
 		}
 		if (tool === "exec") {
 			const payload = data as { exitCode?: number; timedOut?: boolean; routedToDelete?: boolean; path?: string; deletedType?: string };
@@ -2545,184 +3250,60 @@ export class AgentRuntimeService {
 		return this.truncateText(raw, maxChars);
 	}
 
-	private buildNativeToolDefinitions(settings: FridaySettings, allowedTools: Set<string> | null): ToolDefinition[] {
-		const disabledTools = this.buildDisabledToolSet();
-		const tools: ToolDefinition[] = [
-			{
-				name: "use_skill",
-				description: "Load the full instructions for a skill from SkillCatalog before continuing with the task.",
-				parameters: {
-					type: "object",
-					properties: {
-						command: { type: "string", description: "Skill command from SkillCatalog." },
-						reason: { type: "string", description: "Why this skill matches the current task." },
-					},
-					required: ["command"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "ls",
-				description: "List files and folders in a path. Uses Vault-relative path by default.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string", description: "Optional path. Relative for Vault; absolute for allowed external path." },
-						recursive: { type: "boolean", default: false },
-						maxEntries: { type: "number", default: 120 },
-					},
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "read",
-				description: "Read file content from Vault or allowed external path.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string", description: "File path." },
-						maxChars: { type: "number", default: 10000 },
-					},
-					required: ["path"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "grep",
-				description: "Search text pattern in files.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-						pattern: { type: "string" },
-						flags: { type: "string", default: "i" },
-						maxMatches: { type: "number", default: 40 },
-					},
-					required: ["pattern"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "search_text",
-				description: "Search plain text keywords in files.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-						query: { type: "string" },
-						maxMatches: { type: "number", default: 40 },
-					},
-					required: ["query"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "glob",
-				description: "Find files by glob pattern.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-						pattern: { type: "string" },
-						maxMatches: { type: "number", default: 80 },
-					},
-					required: ["pattern"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "memory",
-				description: "Persist a durable fact to global or active-project memory. Writes apply on the next turn, not the current turn.",
-				parameters: {
-					type: "object",
-					properties: {
-						action: { type: "string", enum: ["add", "replace", "remove"] },
-						scope: { type: "string", enum: ["global", "project"] },
-						content: { type: "string" },
-						old_text: { type: "string" },
-					},
-					required: ["action", "scope"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "write",
-				description: "Create or update a Vault file with full content.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-						content: { type: "string" },
-						mode: { type: "string", enum: ["create", "update", "upsert"] },
-					},
-					required: ["path", "content"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "edit",
-				description: "Apply targeted search/replace edits to a Vault file.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-						edits: {
-							type: "array",
-							items: {
-								type: "object",
-								properties: {
-									search: { type: "string" },
-									replace: { type: "string" },
-									description: { type: "string" },
-								},
-								required: ["search", "replace"],
-								additionalProperties: false,
-							},
-						},
-					},
-					required: ["path", "edits"],
-					additionalProperties: false,
-				},
-			},
-			{
-				name: "delete",
-				description: "Delete a Vault file or folder.",
-				parameters: {
-					type: "object",
-					properties: {
-						path: { type: "string" },
-					},
-					required: ["path"],
-					additionalProperties: false,
-				},
-			},
-		];
+	private resolveAgentMode(input: RuntimeTurnInput): AgentMode {
+		return input.agentMode ?? "ask";
+	}
 
-		if (settings.agentRuntime.enableExecTool) {
-			tools.push({
-				name: "exec",
-				description: "Run a shell command with allowlist/approval restrictions.",
-				parameters: {
-					type: "object",
-					properties: {
-						command: { type: "string" },
-						args: {
-							type: "array",
-							items: { type: "string" },
-						},
-						cwd: { type: "string" },
-					},
-					required: ["command"],
-					additionalProperties: false,
-				},
-			});
+	private shouldExposeExecTool(
+		settings: FridaySettings,
+		allowedTools: Set<string> | null,
+		agentMode: AgentMode,
+	): boolean {
+		if (!settings.agentRuntime.enableExecTool) {
+			return false;
 		}
-		const enabledTools = tools.filter((tool) => !disabledTools.has(tool.name));
+		if (agentMode !== "debug" && agentMode !== "developer") {
+			return false;
+		}
+		if (!this.activeRuntimeProfile.capabilities.supportsExecTool) {
+			return false;
+		}
+		return !allowedTools || allowedTools.size === 0 || allowedTools.has("exec");
+	}
 
-		if (!allowedTools || allowedTools.size === 0) {
-			return enabledTools;
+	private resolvePolicyWorkspaceRoot(): string {
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		const service = this.projectBoundaryService as ProjectBoundaryService & {
+			getProjectAbsolutePath?: (project: ReturnType<ProjectBoundaryService["getActiveProject"]>) => string;
+		};
+		if (typeof service.getProjectAbsolutePath !== "function") {
+			return "";
 		}
-		return enabledTools.filter((tool) => allowedTools.has(tool.name));
+		return service.getProjectAbsolutePath(activeProject);
+	}
+
+	private classifyPolicyDeny(code: string | undefined): ToolFailureClass {
+		if (code === "tool_not_allowed" || code === "tool_unknown" || code === "tool_disabled") {
+			return "invalid_input";
+		}
+		if (code === "external_read_unsupported") {
+			return "dependency_unavailable";
+		}
+		return "dependency_unavailable";
+	}
+
+	private buildNativeToolDefinitions(
+		settings: FridaySettings,
+		allowedTools: Set<string> | null,
+		agentMode: AgentMode = "ask",
+	): ToolDefinition[] {
+		const registryDisabledTools = this.buildDisabledToolSet();
+		return buildNativeToolDefinitionsFromRegistry({
+			agentMode,
+			enableExecTool: this.shouldExposeExecTool(settings, allowedTools, agentMode),
+			disabledTools: registryDisabledTools,
+			allowedTools,
+		});
 	}
 
 	private buildDisabledToolSet(): Set<string> {

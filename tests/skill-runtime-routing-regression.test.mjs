@@ -4,13 +4,16 @@ import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { createJiti } from "jiti";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
+const jiti = createJiti(import.meta.url);
 const orchestratorPath = path.join(projectRoot, "src/core/execution/ExecutionOrchestrator.ts");
 const promptContextPath = path.join(projectRoot, "src/core/context/PromptContextEngine.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
+const registryPath = path.join(projectRoot, "src/core/tools/ToolRegistry.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
@@ -30,8 +33,11 @@ test("prompt context teaches the model to load skills through use_skill before e
 });
 
 test("agent runtime exposes use_skill as a first-class runtime tool and reinjects loaded skill context", async () => {
+	const registry = await jiti.import(registryPath);
+	const useSkill = registry.ToolRegistry.getInstance().get("use_skill");
 	const source = read(runtimePath);
-	assert.match(source, /name:\s*"use_skill"/);
+	assert.equal(useSkill?.handlerName, "toolUseSkill");
+	assert.equal(useSkill?.category, "skill");
 	assert.match(source, /toolUseSkill\(/);
 	assert.match(source, /extractLoadedSkillSystemContext\(/);
 	assert.match(source, /role:\s*"system", content: loadedSkillContext/);

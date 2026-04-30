@@ -1,30 +1,8 @@
-import { WIKI_FEATURE_ENABLED, WIKI_TOOL_NAMES } from "../../constants/wikiFeature";
+import { ToolRegistry, type ToolManifestContract } from "../../core/tools/ToolRegistry";
 
-export interface ToolManifest {
-	name: string;
-	capability: string;
-	readOnly: boolean;
-	primary: boolean;
-	relatedSkillCommand?: string;
-}
+export interface ToolManifest extends ToolManifestContract {}
 
-const ALL_TOOL_MANIFESTS: ToolManifest[] = [
-	{ name: "ls", capability: "filesystem.list", readOnly: true, primary: true },
-	{ name: "read", capability: "filesystem.read", readOnly: true, primary: true },
-	{ name: "grep", capability: "filesystem.search", readOnly: true, primary: true },
-	{ name: "search_text", capability: "filesystem.search_text", readOnly: true, primary: true },
-	{ name: "glob", capability: "filesystem.glob", readOnly: true, primary: true },
-	{ name: "compile_wiki", capability: "knowledge.compile", readOnly: false, primary: true, relatedSkillCommand: "compile-wiki" },
-	{ name: "memory", capability: "memory.write", readOnly: false, primary: true },
-	{ name: "write", capability: "filesystem.write", readOnly: false, primary: true },
-	{ name: "edit", capability: "filesystem.patch", readOnly: false, primary: true },
-	{ name: "delete", capability: "filesystem.delete", readOnly: false, primary: false },
-	{ name: "exec", capability: "system.exec", readOnly: false, primary: false },
-];
-
-export const TOOL_MANIFESTS: ToolManifest[] = ALL_TOOL_MANIFESTS.filter(
-	(tool) => WIKI_FEATURE_ENABLED || !WIKI_TOOL_NAMES.has(tool.name),
-);
+export const TOOL_MANIFESTS: ToolManifest[] = ToolRegistry.getInstance().listManifests();
 
 export function findToolManifest(name: string): ToolManifest | null {
 	const normalized = name.trim().toLowerCase();

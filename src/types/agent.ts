@@ -12,6 +12,7 @@ export interface AgentProfile {
 }
 
 export type ToolPermissionMode = "auto" | "standard" | "strict";
+export type FileMutationMode = "review" | "autoApproved";
 export type RuntimePolicyEffect = "allow" | "ask" | "deny";
 export type RuntimeExecutionGateCode =
 	| "allowed"
@@ -30,6 +31,7 @@ export interface RuntimeToolPolicyRule {
 export interface AgentRuntimeSettings {
 	requireWriteConfirmation: boolean;
 	toolPermissionMode: ToolPermissionMode;
+	fileMutationMode: FileMutationMode;
 	disabledTools: string[];
 	disabledSkills: string[];
 	enableExecTool: boolean;

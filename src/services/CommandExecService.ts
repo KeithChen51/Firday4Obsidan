@@ -1,4 +1,6 @@
 import { spawn } from "child_process";
+import path from "path";
+import { CapabilityPolicy } from "../core/policy/CapabilityPolicy";
 import { FridaySettings } from "../types/settings";
 
 const MAX_EXEC_OUTPUT_CHARS = 8000;
@@ -27,14 +29,25 @@ export class CommandExecService {
 		const settings = this.getSettings();
 
 		if (!settings.agentRuntime.enableExecTool) {
-			throw new Error("命令执行功能未启用，请在设置中开启。");
+			throw new Error("Exec command execution is disabled. Enable it in settings first.");
+		}
+
+		const timeout = options?.timeout ?? settings.agentRuntime.execTimeout;
+		const cwd = this.resolveCwd(options?.cwd);
+		const policyDecision = new CapabilityPolicy().evaluateExecRequest({
+			agentMode: "debug",
+			enableExecTool: settings.agentRuntime.enableExecTool,
+			command,
+			args,
+			cwd,
+			workspaceRoot: this.getVaultBasePath(),
+		});
+		if (!policyDecision.allow) {
+			throw new Error(this.formatPolicyDenyReason(policyDecision.code, policyDecision.reason));
 		}
 
 		const fullCommand = [command, ...args].join(" ");
 		this.checkBlocklist(fullCommand, settings.agentRuntime.blockedCommands);
-
-		const timeout = options?.timeout ?? settings.agentRuntime.execTimeout;
-		const cwd = this.resolveCwd(options?.cwd);
 
 		return new Promise<ExecResult>((resolve) => {
 			let stdout = "";
@@ -112,13 +125,23 @@ export class CommandExecService {
 
 	private resolveCwd(customCwd?: string): string {
 		if (customCwd) {
-			return customCwd;
+			return path.resolve(customCwd);
 		}
 		const settings = this.getSettings();
 		if (settings.agentRuntime.execWorkingDir === "custom" && settings.agentRuntime.execCustomCwd) {
-			return settings.agentRuntime.execCustomCwd;
+			return path.resolve(settings.agentRuntime.execCustomCwd);
 		}
-		return this.getVaultBasePath();
+		return path.resolve(this.getVaultBasePath());
+	}
+
+	private formatPolicyDenyReason(code: string, reason: string): string {
+		if (code === "exec_cwd_outside_workspace") {
+			return `Exec denied: cwd is outside workspace. ${reason}`;
+		}
+		if (code === "exec_not_allowlisted") {
+			return `Exec denied by debug-profile allowlist. ${reason}`;
+		}
+		return `Exec denied: ${reason}`;
 	}
 
 	private checkBlocklist(fullCommand: string, patterns: string[]): void {
@@ -127,14 +150,14 @@ export class CommandExecService {
 				const regex = new RegExp(pattern, "i");
 				if (regex.test(fullCommand)) {
 					throw new Error(
-						`命令被安全黑名单拦截：${fullCommand}\n匹配规则：${pattern}\n如需执行此命令，请在设置中修改命令黑名单。`,
+						`Exec command was blocked by the configured command blocklist: ${fullCommand}\nMatched rule: ${pattern}`,
 					);
 				}
 			} catch (error) {
-				if (error instanceof Error && error.message.startsWith("命令被安全黑名单拦截")) {
+				if (error instanceof Error && error.message.startsWith("Exec command was blocked")) {
 					throw error;
 				}
-				// Ignore invalid regex patterns silently
+				// Ignore invalid regex patterns silently.
 			}
 		}
 	}

@@ -13,6 +13,7 @@ import {
 	WorkspaceLeaf,
 } from "obsidian";
 import { ApprovalQueue, type PendingApproval } from "../features/workbench/ApprovalQueue";
+import type { EditPlanRecord } from "../features/workbench/WorkbenchStateStore";
 import { FRIDAY_SETTINGS_CHANGED_EVENT, PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
 import { FRIDAY_ICON_ID } from "../constants/icon";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
@@ -1317,6 +1318,7 @@ export class DailyBoardView extends ItemView {
 		this.syncAiQueueHint();
 
 		this.renderAiOverrideBar(chatShellEl);
+		this.renderEditPlanReviewPanel(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
 		const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });
@@ -1433,6 +1435,96 @@ export class DailyBoardView extends ItemView {
 
 		this.syncAiComposerControls();
 		this.restoreAiMessageListScrollState(messageListEl);
+	}
+
+	private renderEditPlanReviewPanel(containerEl: HTMLElement): void {
+		const plans = this.plugin.workbenchStateStore
+			.getEditPlans()
+			.filter((plan) => plan.items.some((item) => item.status === "pending" || item.status === "conflicted"));
+		if (plans.length === 0) {
+			return;
+		}
+
+		const panel = containerEl.createDiv({ cls: "friday-mutation-review-panel" });
+		const header = panel.createDiv({ cls: "friday-control-center-header" });
+		header.createEl("h5", { text: this.t("mutation.review.title", "Review file changes") });
+		header.createSpan({
+			cls: "friday-control-center-hint",
+			text: this.t("mutation.review.count", "{count} pending", { count: plans.length }),
+		});
+
+		for (const plan of plans) {
+			this.renderEditPlanReviewItem(panel, plan);
+		}
+	}
+
+	private renderEditPlanReviewItem(containerEl: HTMLElement, plan: EditPlanRecord): void {
+		const firstItem = plan.items[0];
+		const itemEl = containerEl.createDiv({ cls: "friday-approval-card friday-mutation-review-item" });
+		itemEl.createDiv({
+			cls: "friday-approval-header",
+			text: firstItem?.summary ?? `${plan.tool} ${firstItem?.changeType ?? ""}`.trim(),
+		});
+		itemEl.createDiv({
+			cls: "friday-approval-detail",
+			text: firstItem?.path ?? plan.id,
+		});
+		itemEl.createDiv({
+			cls: "friday-approval-detail",
+			text: this.formatEditPlanReviewStatus(plan),
+		});
+		const actions = itemEl.createDiv({ cls: "friday-approval-actions" });
+		const canApply = plan.items.some((item) => item.status === "pending");
+		this.addMutationReviewButton(actions, this.t("mutation.review.apply", "Apply"), !canApply || this.aiBusy, async () => {
+			await this.plugin.agentRuntimeService.acceptEditPlan(plan.id);
+			new Notice(this.t("mutation.review.applied", "Change applied."), 3000);
+			this.renderBoard();
+		});
+		this.addMutationReviewButton(actions, this.t("mutation.review.reject", "Reject"), this.aiBusy, async () => {
+			await this.plugin.agentRuntimeService.rejectEditPlan(plan.id);
+			new Notice(this.t("mutation.review.rejected", "Change rejected."), 3000);
+			this.renderBoard();
+		});
+	}
+
+	private addMutationReviewButton(
+		containerEl: HTMLElement,
+		label: string,
+		disabled: boolean,
+		action: () => Promise<void>,
+	): void {
+		const button = containerEl.createEl("button", {
+			cls: "friday-approval-btn",
+			text: label,
+		});
+		button.type = "button";
+		button.disabled = disabled;
+		button.onclick = async () => {
+			try {
+				await action();
+			} catch (error) {
+				new Notice(
+					this.t("mutation.review.failed", "Review action failed: {error}", {
+						error: String(error),
+					}),
+					6000,
+				);
+			}
+		};
+	}
+
+	private formatEditPlanReviewStatus(plan: EditPlanRecord): string {
+		const firstItem = plan.items[0];
+		if (!firstItem) {
+			return this.t("mutation.review.empty", "No file change.");
+		}
+		if (plan.items.some((item) => item.status === "conflicted")) {
+			return this.t("mutation.review.conflicted", "Conflict: file changed after the plan was created.");
+		}
+		return this.t("mutation.review.summary", "{operation} · {status}", {
+			operation: firstItem.changeType,
+			status: firstItem.status,
+		});
 	}
 
 	private async populateControlCenter(containerEl: HTMLElement): Promise<void> {

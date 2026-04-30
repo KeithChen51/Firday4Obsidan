@@ -174,6 +174,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 	agentRuntime: {
 		requireWriteConfirmation: true,
 		toolPermissionMode: "standard",
+		fileMutationMode: "review",
 		disabledTools: [],
 		disabledSkills: [],
 		enableExecTool: false,

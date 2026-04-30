@@ -38,6 +38,7 @@ const INVALID_INPUT_PATTERNS: RegExp[] = [
 	/invalid argument/i,
 	/invalid input/i,
 	/unsupported tool/i,
+	/does not exist/i,
 ];
 
 const DEPENDENCY_PATTERNS: RegExp[] = [

@@ -20,14 +20,22 @@ export interface ConflictProposalRecord {
 export interface EditPlanRecord {
 	id: string;
 	agentId: string;
+	originConversationId?: string;
+	originTurnId?: string;
+	originTaskId?: string;
+	toolCallId?: string;
 	tool: string;
 	recordedAt: string;
 	items: Array<{
 		path: string;
 		before: string;
 		after: string;
-		status: "pending" | "accepted" | "rejected" | "applied" | "rolled_back";
+		beforeHash?: string;
+		afterHash?: string;
+		status: "pending" | "accepted" | "rejected" | "applied" | "rolled_back" | "conflicted";
 		changeType: "create" | "update" | "delete";
+		riskLevel?: "standard" | "high";
+		summary?: string;
 	}>;
 }
 

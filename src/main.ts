@@ -426,6 +426,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				(rawPaths?: string[]) => this.compileWikiForActiveProject(rawPaths),
 				() => this.settings,
 			);
+			await this.agentRuntimeService.restorePendingMutationPlans();
 			this.executionOrchestrator = new ExecutionOrchestrator(
 				this.skillCommandService,
 				this.agentRuntimeService,

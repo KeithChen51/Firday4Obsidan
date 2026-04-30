@@ -1441,6 +1441,19 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 			});
 
+		new Setting(runtimeGroup)
+			.setName(this.t("settings.agent.fileMutationMode.name", "文件修改模式"))
+			.setDesc(this.t("settings.agent.fileMutationMode.desc", "review：先生成变更计划；autoApproved：授权后直接应用。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("review", this.t("settings.agent.fileMutationMode.review", "review（默认）"));
+				dropdown.addOption("autoApproved", this.t("settings.agent.fileMutationMode.autoApproved", "auto-approved"));
+				dropdown.setValue(this.host.settings.agentRuntime.fileMutationMode ?? "review");
+				dropdown.onChange(async (value) => {
+					this.host.settings.agentRuntime.fileMutationMode = value as "review" | "autoApproved";
+					await this.host.saveSettings();
+				});
+			});
+
 		if (this.host.settings.projects.length > 0) {
 			const policyGroup = this.createNativeSettingsGroup(containerEl, {
 				title: this.t("settings.soul.policy.title", "项目工具策略"),

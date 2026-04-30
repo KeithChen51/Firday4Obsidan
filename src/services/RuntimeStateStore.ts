@@ -29,6 +29,18 @@ export class RuntimeStateStore {
 		return this.localStateRootService.resolveVault("runtime");
 	}
 
+	getConversationRuntimeRoot(conversationId: string): string {
+		return path.join(this.getRuntimeRoot(), "conversations", this.safePathSegment(conversationId));
+	}
+
+	getTurnEventLogPath(conversationId: string, turnId: string): string {
+		return path.join(this.getConversationRuntimeRoot(conversationId), "turns", `${this.safePathSegment(turnId)}.jsonl`);
+	}
+
+	getMutationPlanStorePath(): string {
+		return path.join(this.getRuntimeRoot(), "mutation-plans.json");
+	}
+
 	getBackupsRoot(): string {
 		return this.localStateRootService.resolveVault("backups");
 	}
@@ -61,5 +73,10 @@ export class RuntimeStateStore {
 		]) {
 			await mkdir(directory, { recursive: true });
 		}
+	}
+
+	private safePathSegment(value: string): string {
+		const segment = value.trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+		return segment || "default";
 	}
 }

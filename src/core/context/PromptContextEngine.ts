@@ -4,6 +4,11 @@ import type {
 	MentionSourceMapEntry,
 	MentionTokenType,
 } from "./mention/MentionResolver";
+import {
+	buildPromptToolArgumentLinesFromRegistry,
+	buildPromptToolNameUnionFromRegistry,
+	type AgentMode,
+} from "../tools/ToolRegistry";
 
 export interface PromptMentionContext {
 	resolvedCount: number;
@@ -35,6 +40,7 @@ export interface PromptContextBuildInput {
 	memoryContext?: string;
 	mentionContext?: PromptMentionContext;
 	enableExecTool?: boolean;
+	agentMode?: AgentMode;
 	hardLimit?: number;
 }
 
@@ -66,13 +72,19 @@ export class PromptContextEngine {
 		const wikiKnowledgeContext = input.wikiKnowledgeContext?.trim() ?? "";
 		const memoryContext = input.memoryContext?.trim() ?? "";
 		const mentionContextText = this.formatMentionContext(input.mentionContext);
+		const toolListOptions = {
+			agentMode: input.agentMode ?? "ask",
+			enableExecTool: input.enableExecTool ?? false,
+		};
+		const toolNameUnion = buildPromptToolNameUnionFromRegistry(toolListOptions);
+		const toolArgumentLines = buildPromptToolArgumentLinesFromRegistry(toolListOptions);
 		const lines = [
 			"You are FRIDAY Agent Runtime.",
 			"You must output strict JSON only. Do not output Markdown.",
 			"",
 			"Allowed response schema (choose one):",
 			'{"type":"response","assistant":"final response for user"}',
-			'{"type":"tool_call","assistant":"optional note","tool":{"name":"use_skill|ls|read|grep|search_text|glob|memory|write|edit|delete","args":{...}}}',
+			`{"type":"tool_call","assistant":"optional note","tool":{"name":"${toolNameUnion}","args":{...}}}`,
 			"",
 			"Rules:",
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
@@ -94,19 +106,7 @@ export class PromptContextEngine {
 			"- Before final response, ensure conclusions are based on tool results.",
 			"",
 			"Tool arguments:",
-			'- use_skill: {"command":"skill command from SkillCatalog","reason":"why the skill matches the current task"}',
-			'- ls: {"path":"optional path","recursive":false,"maxEntries":120}',
-			'- read: {"path":"file path","maxChars":10000}',
-			'- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
-			'- search_text: {"path":"optional directory or file path","query":"plain text query","maxMatches":40}',
-			'- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
-			'- memory: {"action":"add|replace|remove","scope":"global|project","content":"durable fact","old_text":"existing fragment"}',
-			'- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
-			'- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',
-			'- delete: {"path":"Vault-relative path"}',
-			...(input.enableExecTool
-				? ['- exec: {"command":"command-name","args":["arg1","arg2"],"cwd":"optional-working-directory"}']
-				: []),
+			...toolArgumentLines,
 			"",
 			"--- Few-shot examples ---",
 			"User: list files in project root",
