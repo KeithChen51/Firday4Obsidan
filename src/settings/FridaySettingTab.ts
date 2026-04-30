@@ -32,6 +32,7 @@ import {
 import type { ModelCapabilityInfo } from "../services/AIService";
 import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrationService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
+import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement } from "../types/settings";
 import type { SoulTonePreset } from "../types/soul";
@@ -106,6 +107,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private officialContentGuardState: Awaited<ReturnType<SettingsHost["legacyFridayRootMigrationService"]["inspectDestructiveApplySafety"]>> | null = null;
 	private officialContentGuardLoading = false;
 	private pendingOfficialContentArchiveConfirm = false;
+	private officialContentRefreshStatus: OfficialContentSyncProgress | null = null;
 	private userGitCredentialLoaded = false;
 	private userGitUsernameDraft = "";
 	private userGitTokenDraft = "";
@@ -626,26 +628,10 @@ export class FridaySettingTab extends PluginSettingTab {
 				button
 					.setButtonText(this.t("settings.subscriptions.refresh", "刷新官方内容"))
 					.setCta()
-					.onClick(() => {
-						new Notice(this.t("settings.subscriptions.refreshQueued", "官方内容正在后台刷新。图片较多时可稍后回来查看。"), 4000);
-						void this.host.officialContentService.runBackgroundSync()
-							.then(async () => {
-								await this.refreshOfficialContentGuardState();
-								new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
-							})
-							.catch((error) => {
-								new Notice(
-									this.t("settings.subscriptions.refreshFailed", "刷新官方内容失败：{error}", {
-										error: String(error ?? ""),
-									}),
-									6000,
-								);
-							})
-							.finally(() => {
-								this.display();
-							});
-					}),
+					.setDisabled(this.isOfficialContentRefreshRunning())
+					.onClick(() => this.queueOfficialContentBackgroundSync()),
 			);
+		this.renderOfficialContentRefreshStatus(controls);
 
 		const blockingPaths = this.officialContentGuardState?.blockingPaths ?? [];
 		if (this.officialContentGuardState?.blocked) {
@@ -772,15 +758,96 @@ export class FridaySettingTab extends PluginSettingTab {
 							const target = this.ensureOfficialContentChannelState(entry.id);
 							target.subscribed = value;
 							target.path = entry.path;
-							if (!value) {
-								target.lastAppliedVersion = "";
-							}
+							target.lastAppliedVersion = "";
 							await this.host.saveSettings();
-							await this.host.officialContentService.applySubscriptions();
+							if (value) {
+								this.queueOfficialContentBackgroundSync();
+							} else {
+								await this.host.officialContentService.applySubscriptions();
+							}
 							await this.refreshOfficialContentGuardState();
 							this.display();
 						}),
 				);
+		}
+	}
+
+	private renderOfficialContentRefreshStatus(containerEl: HTMLElement): void {
+		const status = this.getOfficialContentRefreshStatus();
+		if (status.stage === "idle") {
+			return;
+		}
+
+		const statusLabel = this.getOfficialContentRefreshStatusLabel(status);
+		const detail = status.error?.trim()
+			? this.t("settings.subscriptions.refreshStatus.error", "错误：{error}", { error: status.error })
+			: status.message;
+		const statusSetting = new Setting(containerEl)
+			.setName(this.t("settings.subscriptions.refreshStatus.name", "刷新状态"))
+			.setDesc(
+				this.t("settings.subscriptions.refreshStatus.desc", "当前状态：{status}。{detail}", {
+					status: statusLabel,
+					detail,
+				}),
+			);
+		const progressContainer = statusSetting.controlEl.createDiv({ cls: "friday-subscriptions-refresh-progress" });
+		const progressEl = progressContainer.createEl("progress") as HTMLProgressElement;
+		const percent = Math.max(0, Math.min(100, Math.round(status.percent)));
+		progressEl.max = 100;
+		progressEl.value = percent;
+		progressEl.setAttribute("aria-label", statusLabel);
+		progressContainer.createSpan({
+			cls: "friday-subscriptions-refresh-progress-label",
+			text: this.t("settings.subscriptions.refreshStatus.progress", "{percent}%", { percent }),
+		});
+	}
+
+	private queueOfficialContentBackgroundSync(): void {
+		new Notice(this.t("settings.subscriptions.refreshQueued", "官方内容正在后台刷新。图片较多时可稍后回来查看。"), 4000);
+		void this.host.officialContentService.runBackgroundSync((progress) => {
+			this.officialContentRefreshStatus = progress;
+			if (this.activeSection === "subscriptions") {
+				this.display();
+			}
+		})
+			.then(async () => {
+				await this.refreshOfficialContentGuardState();
+				new Notice(this.t("settings.subscriptions.refreshSuccess", "官方内容目录已刷新。"), 3000);
+			})
+			.catch((error) => {
+				new Notice(
+					this.t("settings.subscriptions.refreshFailed", "刷新官方内容失败：{error}", {
+						error: String(error ?? ""),
+					}),
+					6000,
+				);
+			})
+			.finally(() => {
+				this.display();
+			});
+	}
+
+	private getOfficialContentRefreshStatus(): OfficialContentSyncProgress {
+		return this.officialContentRefreshStatus ?? this.host.officialContentService.getBackgroundSyncProgress();
+	}
+
+	private isOfficialContentRefreshRunning(): boolean {
+		const stage = this.getOfficialContentRefreshStatus().stage;
+		return stage === "refreshingCatalog" || stage === "applyingSubscriptions";
+	}
+
+	private getOfficialContentRefreshStatusLabel(status: OfficialContentSyncProgress): string {
+		switch (status.stage) {
+			case "refreshingCatalog":
+				return this.t("settings.subscriptions.refreshStatus.refreshingCatalog", "正在读取官方内容目录");
+			case "applyingSubscriptions":
+				return this.t("settings.subscriptions.refreshStatus.applyingSubscriptions", "正在应用订阅内容");
+			case "completed":
+				return this.t("settings.subscriptions.refreshStatus.completed", "刷新完成");
+			case "failed":
+				return this.t("settings.subscriptions.refreshStatus.failed", "刷新失败");
+			default:
+				return this.t("settings.subscriptions.refreshStatus.idle", "空闲");
 		}
 	}
 

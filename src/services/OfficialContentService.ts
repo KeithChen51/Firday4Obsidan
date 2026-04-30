@@ -17,6 +17,7 @@ import type {
 	OfficialContentChannelManifest,
 	OfficialContentFileBlob,
 	OfficialContentLegacyGuardState,
+	OfficialContentSyncProgress,
 } from "../types/officialContent";
 import type { FridaySettings } from "../types/settings";
 
@@ -67,6 +68,11 @@ interface OfficialContentServiceDeps {
 export class OfficialContentService {
 	private readonly gitClientFactory: (credential: ProjectGitCredential) => Promise<OfficialContentGitClient>;
 	private backgroundSyncPromise: Promise<void> | null = null;
+	private backgroundSyncProgress: OfficialContentSyncProgress = {
+		stage: "idle",
+		percent: 0,
+		message: "Idle",
+	};
 
 	constructor(private readonly deps: OfficialContentServiceDeps) {
 		this.gitClientFactory = async (credential) =>
@@ -141,10 +147,16 @@ export class OfficialContentService {
 				.filter(([, value]) => value.subscribed)
 				.map(([id]) => id),
 		);
-		const entriesNeedingApply = catalog.filter((entry) =>
-			subscribed.has(entry.id)
-			&& !isCatalogEntryAlreadyApplied(entry, settings.officialContent.channels[entry.id]),
-		);
+		const entriesNeedingApply: OfficialContentCatalogEntry[] = [];
+		for (const entry of catalog) {
+			if (
+				subscribed.has(entry.id)
+				&& !(await this.isCatalogEntryAlreadyApplied(entry, settings.officialContent.channels[entry.id]))
+			) {
+				entriesNeedingApply.push(entry);
+			}
+		}
+		const entriesNeedingApplyIds = new Set(entriesNeedingApply.map((entry) => entry.id));
 
 		const gitClient = await this.openOfficialContentGitClient(entriesNeedingApply);
 		try {
@@ -154,7 +166,7 @@ export class OfficialContentService {
 
 			for (const entry of catalog) {
 				if (subscribed.has(entry.id)) {
-					if (!isCatalogEntryAlreadyApplied(entry, settings.officialContent.channels[entry.id])) {
+					if (entriesNeedingApplyIds.has(entry.id)) {
 						await this.applyCatalogEntry(entry, manifestMap.get(entry.manifestPath) ?? null, gitClient);
 					}
 					settings.officialContent.channels[entry.id] = {
@@ -195,15 +207,59 @@ export class OfficialContentService {
 		await this.applySubscriptions();
 	}
 
-	runBackgroundSync(): Promise<void> {
+	runBackgroundSync(): Promise<void>;
+	runBackgroundSync(onProgress?: (progress: OfficialContentSyncProgress) => void): Promise<void> {
 		if (this.backgroundSyncPromise) {
+			onProgress?.({ ...this.backgroundSyncProgress });
 			return this.backgroundSyncPromise;
 		}
-		this.backgroundSyncPromise = this.runStartupCheck()
+		this.backgroundSyncPromise = this.runBackgroundSyncWithProgress(onProgress)
 			.finally(() => {
 				this.backgroundSyncPromise = null;
 			});
 		return this.backgroundSyncPromise;
+	}
+
+	getBackgroundSyncProgress(): OfficialContentSyncProgress {
+		return { ...this.backgroundSyncProgress };
+	}
+
+	private async runBackgroundSyncWithProgress(onProgress?: (progress: OfficialContentSyncProgress) => void): Promise<void> {
+		try {
+			this.reportBackgroundSyncProgress({
+				stage: "refreshingCatalog",
+				percent: 25,
+				message: "Refreshing official content catalog",
+			}, onProgress);
+			await this.refreshCatalog();
+			this.reportBackgroundSyncProgress({
+				stage: "applyingSubscriptions",
+				percent: 70,
+				message: "Applying subscribed official content",
+			}, onProgress);
+			await this.applySubscriptions();
+			this.reportBackgroundSyncProgress({
+				stage: "completed",
+				percent: 100,
+				message: "Official content sync completed",
+			}, onProgress);
+		} catch (error) {
+			this.reportBackgroundSyncProgress({
+				stage: "failed",
+				percent: 100,
+				message: "Official content sync failed",
+				error: String(error ?? ""),
+			}, onProgress);
+			throw error;
+		}
+	}
+
+	private reportBackgroundSyncProgress(
+		progress: OfficialContentSyncProgress,
+		onProgress?: (progress: OfficialContentSyncProgress) => void,
+	): void {
+		this.backgroundSyncProgress = progress;
+		onProgress?.({ ...progress });
 	}
 
 	private async fetchLatestFeed(): Promise<OfficialContentLatestFeed | null> {
@@ -245,6 +301,16 @@ export class OfficialContentService {
 		}
 
 		return manifests;
+	}
+
+	private async isCatalogEntryAlreadyApplied(
+		entry: OfficialContentCatalogEntry,
+		channel: FridaySettings["officialContent"]["channels"][string] | undefined,
+	): Promise<boolean> {
+		if (!isCatalogEntryStateCurrent(entry, channel)) {
+			return false;
+		}
+		return this.deps.adapter.exists(normalizeVaultPath(`${OFFICIAL_CONTENT_ROOT_PATH}/${entry.path}`));
 	}
 
 	private async applyCatalogEntry(
@@ -469,7 +535,7 @@ function buildCatalogVersion(catalog: OfficialContentCatalogEntry[]): string {
 	return JSON.stringify(catalog.map((item) => ({ id: item.id, version: item.version })));
 }
 
-function isCatalogEntryAlreadyApplied(
+function isCatalogEntryStateCurrent(
 	entry: OfficialContentCatalogEntry,
 	channel: FridaySettings["officialContent"]["channels"][string] | undefined,
 ): boolean {

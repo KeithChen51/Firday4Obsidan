@@ -87,6 +87,25 @@ test("subscriptions refresh background notice is localized", () => {
 	}
 });
 
+test("subscriptions refresh surfaces background sync progress and current status", () => {
+	const source = read(settingsPath);
+	assert.match(source, /officialContentRefreshStatus/);
+	assert.match(source, /renderOfficialContentRefreshStatus\(/);
+	assert.match(source, /settings\.subscriptions\.refreshStatus\.name/);
+	assert.match(source, /settings\.subscriptions\.refreshStatus\.progress/);
+	assert.match(source, /createEl\("progress"/);
+	assert.match(source, /runBackgroundSync\(\(progress\) =>/);
+});
+
+test("re-enabling an official channel resets apply state and queues download", () => {
+	const source = read(settingsPath);
+	const toggleBlock = source.match(/target\.subscribed = value;[\s\S]*?await this\.refreshOfficialContentGuardState\(\);[\s\S]*?this\.display\(\);/);
+	assert.ok(toggleBlock, "subscription toggle handler should update channel state and refresh the view");
+	assert.match(toggleBlock[0], /target\.lastAppliedVersion = "";/);
+	assert.match(toggleBlock[0], /if \(value\) \{[\s\S]*(runBackgroundSync|queueOfficialContentBackgroundSync)\(/);
+	assert.match(toggleBlock[0], /else \{[\s\S]*applySubscriptions\(\)/);
+});
+
 test("official content service exposes refresh, apply, and startup flows against release artifacts", () => {
 	assert.ok(fs.existsSync(officialContentServicePath), "OfficialContentService should exist");
 	const source = read(officialContentServicePath);

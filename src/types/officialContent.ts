@@ -38,6 +38,15 @@ export interface OfficialContentLegacyGuardState {
 	canRefreshCatalog: boolean;
 }
 
+export type OfficialContentSyncStage = "idle" | "refreshingCatalog" | "applyingSubscriptions" | "completed" | "failed";
+
+export interface OfficialContentSyncProgress {
+	stage: OfficialContentSyncStage;
+	percent: number;
+	message: string;
+	error?: string;
+}
+
 export interface CommunityChannelSource {
 	repoUrl: string;
 	branch?: string;

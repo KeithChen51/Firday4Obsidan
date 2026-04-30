@@ -557,6 +557,96 @@ test("applySubscriptions reads manifests and blobs from one fetched official con
 	assert.equal(fetchCalls, 1);
 });
 
+test("applySubscriptions reapplies a subscribed channel when its mounted folder is missing", async () => {
+	const mod = await loadModule();
+	let factoryCalls = 0;
+	const writes = [];
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [
+				{
+					id: "study-with-friday",
+					title: "Study with FRIDAY",
+					kind: "directory",
+					path: "Study with FRIDAY",
+					version: "already-applied",
+					manifestPath: "official/channels/official.json",
+				},
+			],
+			channels: {
+				"study-with-friday": {
+					subscribed: true,
+					lastAppliedVersion: "already-applied",
+					path: "Study with FRIDAY",
+				},
+			},
+		},
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async (targetPath, content) => {
+				writes.push({ targetPath, content });
+			},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => {
+			factoryCalls += 1;
+			return {
+				ensureWorkspace: async () => {},
+				lsRemote: async () => "",
+				fetch: async () => {},
+				readText: async (_ref, targetPath) => {
+					if (targetPath === "official/channels/official.json") {
+						return JSON.stringify({
+							columns: [
+								{
+									id: "study-with-friday",
+									files: [
+										{
+											path: "Study with FRIDAY/Guide.md",
+											blobPath: "official/files/guide.md",
+											encoding: "utf8",
+										},
+									],
+								},
+							],
+						});
+					}
+					if (targetPath === "official/files/guide.md") {
+						return "# Guide\n";
+					}
+					throw new Error(`Unexpected read target: ${targetPath}`);
+				},
+				cleanup: async () => {},
+			};
+		},
+	});
+
+	await service.applySubscriptions();
+
+	assert.equal(factoryCalls, 1);
+	assert.deepEqual(writes, [
+		{
+			targetPath: "F.R.I.D.A.Y/Study with FRIDAY/Guide.md",
+			content: "# Guide\n",
+		},
+	]);
+});
+
 test("applySubscriptions skips unchanged subscribed columns without opening the release workspace", async () => {
 	const mod = await loadModule();
 	let factoryCalls = 0;
@@ -589,7 +679,7 @@ test("applySubscriptions skips unchanged subscribed columns without opening the 
 	};
 	const service = new mod.OfficialContentService({
 		adapter: {
-			exists: async () => false,
+			exists: async (targetPath) => targetPath === "F.R.I.D.A.Y/Study with FRIDAY",
 			mkdir: async () => {},
 			read: async () => "",
 			write: async () => {
@@ -757,7 +847,7 @@ test("runBackgroundSync reuses one in-flight official content sync", async () =>
 	};
 	const service = new mod.OfficialContentService({
 		adapter: {
-			exists: async () => false,
+			exists: async (targetPath) => targetPath === "F.R.I.D.A.Y/Study with FRIDAY",
 			mkdir: async () => {},
 			read: async () => "",
 			write: async () => {},
@@ -796,4 +886,74 @@ test("runBackgroundSync reuses one in-flight official content sync", async () =>
 	await first;
 
 	assert.equal(fetchCalls, 1);
+});
+
+test("runBackgroundSync reports visible progress stages", async () => {
+	const mod = await loadModule();
+	const progressEvents = [];
+	const settings = {
+		officialContent: {
+			checkOnStartup: true,
+			startupDelayMs: 5000,
+			lastCheckedAt: "",
+			lastCatalogVersion: "",
+			catalog: [],
+			channels: {},
+		},
+	};
+	const latestFeed = {
+		schemaVersion: 1,
+		generatedAt: "2026-04-29T00:00:00.000Z",
+		providers: [
+			{
+				id: "official",
+				title: "Official channel",
+				rootPath: "F.R.I.D.A.Y",
+				manifestPath: "official/channels/official.json",
+				columns: [],
+			},
+		],
+	};
+	const service = new mod.OfficialContentService({
+		adapter: {
+			exists: async () => false,
+			mkdir: async () => {},
+			read: async () => "",
+			write: async () => {},
+			remove: async () => {},
+			rmdir: async () => {},
+			list: async () => ({ files: [], folders: [] }),
+		},
+		getSettings: () => settings,
+		saveSettings: async () => {},
+		getGitRuntimeStatus: async () => ({ available: true, version: "2.0.0", error: "" }),
+		getUserCredential: async () => ({ username: "demo", token: "secret" }),
+		getUserGitEmail: () => "",
+		gitClientFactory: async () => ({
+			ensureWorkspace: async () => {},
+			lsRemote: async () => "",
+			fetch: async () => {},
+			readText: async (_ref, targetPath) => {
+				if (targetPath === "official/latest.json") {
+					return JSON.stringify(latestFeed);
+				}
+				throw new Error(`Unexpected read target: ${targetPath}`);
+			},
+			cleanup: async () => {},
+		}),
+	});
+
+	await service.runBackgroundSync((progress) => {
+		progressEvents.push(progress);
+	});
+
+	assert.deepEqual(
+		progressEvents.map((event) => event.stage),
+		["refreshingCatalog", "applyingSubscriptions", "completed"],
+	);
+	assert.deepEqual(
+		progressEvents.map((event) => event.percent),
+		[25, 70, 100],
+	);
+	assert.equal(progressEvents.every((event) => typeof event.message === "string" && event.message.length > 0), true);
 });

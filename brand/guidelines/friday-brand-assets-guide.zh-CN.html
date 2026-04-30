@@ -302,9 +302,10 @@
 
     .principle-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 16px;
-      margin-top: 28px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 32px;
+      counter-reset: principle;
     }
 
     .philosophy-body {
@@ -318,6 +319,36 @@
     .philosophy-body p {
       color: var(--ink-body);
       font-size: 15px;
+    }
+
+    .philosophy-brief {
+      display: grid;
+      gap: 18px;
+    }
+
+    .philosophy-point {
+      padding-top: 16px;
+      border-top: 1px solid rgba(30, 31, 33, 0.1);
+    }
+
+    .philosophy-point:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .philosophy-point strong {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted-teal);
+      font-family: var(--font-cjk-ui);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .philosophy-point p {
+      margin: 0;
     }
 
     .philosophy-note {
@@ -345,17 +376,69 @@
     }
 
     .principle {
-      min-height: 180px;
-      padding: 18px;
-      border: 1px solid var(--line);
+      position: relative;
+      min-height: 210px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      padding: 22px 22px 20px;
+      overflow: hidden;
+      border: 1px solid rgba(30, 31, 33, 0.12);
       border-radius: var(--radius);
-      background: var(--paper);
+      background:
+        linear-gradient(135deg, rgba(74, 127, 123, 0.07), transparent 34%),
+        linear-gradient(180deg, rgba(251, 250, 247, 0.96), rgba(244, 241, 235, 0.72));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+      counter-increment: principle;
+    }
+
+    .principle::before {
+      content: "0" counter(principle);
+      position: absolute;
+      top: 18px;
+      right: 20px;
+      color: rgba(74, 127, 123, 0.48);
+      font-family: var(--font-latin-brand);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+    }
+
+    .principle::after {
+      content: "";
+      position: absolute;
+      left: 22px;
+      bottom: 20px;
+      width: 34px;
+      height: 1px;
+      background: var(--muted-teal);
+      opacity: 0.74;
+    }
+
+    .principle-label {
+      margin: 0 0 32px;
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
     }
 
     .principle h3 {
+      margin: 0;
       font-family: var(--font-cjk-display);
-      font-size: 21px;
+      color: var(--graphite);
+      font-size: clamp(24px, 2.1vw, 31px);
+      line-height: 1.18;
       font-weight: 500;
+    }
+
+    .principle p:last-child {
+      max-width: 30em;
+      margin: 14px 0 18px;
+      color: var(--ink-body);
+      font-size: 14px;
+      line-height: 1.75;
     }
 
     .asset-grid {
@@ -1033,20 +1116,27 @@
         <div class="part-heading" id="philosophy">
           <p class="part-label">Part 01 · Design Philosophy</p>
           <h2>设计理念</h2>
-          <p>这一板块说明 FRIDAY 为什么采用 Double Shell Frame、为什么让 F 融入框架，以及这套视觉语言如何对应本地知识、上下文收拢和用户主权。</p>
+          <p>这一板块定义 FRIDAY 的产品判断、Double Shell Frame、F 融入框架与用户主权。</p>
         </div>
 
         <section>
           <p class="section-kicker">Core Principle</p>
           <h2>复杂能力退到背后，用户始终掌控。</h2>
-          <p class="lead">FRIDAY 是一个以 Obsidian 为中心的本地 AI 工作伙伴。它不试图成为另一个需要用户迁就的新系统，而是尽量消失在已有工作流里，帮助用户收拢上下文、整理知识、减少重复摩擦，并在需要时提供稳定、克制、可解释的协助。</p>
+          <p class="lead">视觉标准只有一个核心判断：复杂能力可以很深，用户入口必须轻、清晰、可控。</p>
           <div class="philosophy-body">
-            <div>
-              <p>FRIDAY 的视觉识别不是为了证明“AI 很强”，而是为了表达“工作可以更从容”。它要服务的是长时间写作、整理、检索、复盘和执行，而不是一次性的视觉冲击。因此它避免强烈的 AI 光效、拟人化主脑、赛博符号和过度未来感，转而用稳定几何、低饱和色彩和清晰比例传达一种可以长期共处的产品气质。</p>
-              <p>在产品关系上，FRIDAY 不是替用户做决定的代理人，也不是独立于 Obsidian 之外的第二套工作系统。它更像一个长期在场的工作层：理解用户已有的笔记结构，记住必要上下文，处理重复和低价值摩擦，并把判断权、控制权和最终决策权留给用户。视觉上的克制，正是在强调这种边界感。</p>
-              <p>Double Shell Frame 的双层框架承载了这层产品哲学。外层像一个稳定保护壳，代表本地优先、版本管理、知识边界和长期可靠性；内层像一个被妥善组织的工作空间，代表笔记、项目、任务和对话之间的自然衔接。两个框架并不是装饰性的叠影，而是前台体验与后台能力之间的关系模型。</p>
-              <p>标志中的 F 从前景框架中自然形成，不是单独塞入矩形里的字母。这一点很重要：FRIDAY 的价值不在于把一个高调品牌符号压到用户工作台上，而在于把混乱信息压缩成可理解的结构。F 的形成方式对应了产品的工作方式：在结构里生成识别，在秩序中降低认知负担。</p>
-              <p>这套 VI 的长期目标，是让 FRIDAY 在插件侧边栏、笔记页、对话窗口、文档封面和真实物料中保持同一种性格：安静但可识别，专业但不冰冷，有能力但不表演。任何新的界面、图标、物料或宣传图，都应先回到这个判断标准。</p>
+            <div class="philosophy-brief">
+              <article class="philosophy-point">
+                <strong>01 · 产品定位</strong>
+                <p>FRIDAY 是围绕 Obsidian 运转的本地 AI 工作伙伴，而不是要求用户迁移到另一套系统。它进入的是用户已经形成的笔记、项目、任务和对话，把分散上下文收拢起来，处理重复和低价值摩擦，并在需要时提供稳定、克制、可解释的协助。</p>
+              </article>
+              <article class="philosophy-point">
+                <strong>02 · 视觉翻译</strong>
+                <p>Double Shell Frame 把这种关系翻译成图形：外层像保护壳，代表本地优先、版本管理和知识边界；内层像被妥善组织的工作空间，承接用户真正触达的笔记与行动。F 从框架中自然形成，说明识别来自结构，而不是外加的装饰。</p>
+              </article>
+              <article class="philosophy-point">
+                <strong>03 · 使用判断</strong>
+                <p>使用这套视觉时，先判断它是否让工作更安静、更清晰、更可控。凡是让 FRIDAY 显得炫技、神秘、强代理或过度未来的设计，都应回退到更低侵入的表达。品牌资产要帮助用户建立信任，而不是把注意力从思考和写作上夺走。</p>
+              </article>
             </div>
             <aside class="philosophy-note">
               <strong>Brand Position</strong>
@@ -1055,40 +1145,24 @@
               <p>FRIDAY 是本地知识伙伴，不是云端黑箱。</p>
             </aside>
           </div>
-          <table class="spec-table">
-            <tbody>
-              <tr>
-                <th>产品定位</th>
-                <td>本地 AI 工作伙伴，围绕 Obsidian 的笔记、项目、任务和上下文运行，不要求用户迁移到新的工作系统。</td>
-              </tr>
-              <tr>
-                <th>视觉翻译</th>
-                <td>双层框架表达“前台轻、后台深”：外壳保护复杂能力，内核承接用户实际工作空间，F 从结构中生成。</td>
-              </tr>
-              <tr>
-                <th>情绪基调</th>
-                <td>安静、可靠、克制、可解释。避免炫技、神秘化、强代理感和过度未来感。</td>
-              </tr>
-              <tr>
-                <th>使用判断</th>
-                <td>当一个设计选择让 FRIDAY 变得更吵、更像接管者、更像通用 AI 工具时，应回退到更低侵入、更清晰、更稳定的表达。</td>
-              </tr>
-            </tbody>
-          </table>
           <div class="principle-grid">
             <article class="principle">
+              <p class="principle-label">Quiet Presence</p>
               <h3>安静在场</h3>
               <p>FRIDAY 不以强势代理人的姿态接管工作，而是在需要时提供上下文、整理和执行支持。</p>
             </article>
             <article class="principle">
+              <p class="principle-label">Double Layer</p>
               <h3>双层结构</h3>
               <p>外层像保护壳，内层像被组织好的工作空间，表达前台轻、后台深的产品结构。</p>
             </article>
             <article class="principle">
+              <p class="principle-label">Embedded Mark</p>
               <h3>F 融入框架</h3>
               <p>F 不是单独放入框内的字母，而是从框架中自然形成，象征把混乱信息压缩成结构。</p>
             </article>
             <article class="principle">
+              <p class="principle-label">User Sovereignty</p>
               <h3>用户主权</h3>
               <p>视觉保持克制，是为了强调 FRIDAY 辅助判断而不替代判断，始终把控制权留给用户。</p>
             </article>

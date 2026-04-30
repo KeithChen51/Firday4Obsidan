@@ -21,7 +21,7 @@ import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
 import { FridaySettings } from "./settings";
 import { SoulSummary } from "./soul";
-import type { OfficialContentCatalogEntry, OfficialContentLegacyGuardState } from "./officialContent";
+import type { OfficialContentCatalogEntry, OfficialContentLegacyGuardState, OfficialContentSyncProgress } from "./officialContent";
 import { I18nParams, LocaleCode } from "../i18n/types";
 import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
@@ -38,7 +38,8 @@ export type FridaySettingsSection = "user" | "project" | "sync" | "llm" | "soul"
 export interface OfficialContentServiceApi {
 	refreshCatalog(): Promise<OfficialContentCatalogEntry[]>;
 	applySubscriptions(): Promise<OfficialContentLegacyGuardState>;
-	runBackgroundSync(): Promise<void>;
+	runBackgroundSync(onProgress?: (progress: OfficialContentSyncProgress) => void): Promise<void>;
+	getBackgroundSyncProgress(): OfficialContentSyncProgress;
 	runStartupCheck(): Promise<void>;
 }
 

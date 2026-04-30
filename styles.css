@@ -3237,6 +3237,25 @@
 	padding-top: 4px;
 }
 
+.friday-subscriptions-refresh-progress {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 180px;
+}
+
+.friday-subscriptions-refresh-progress progress {
+	width: 120px;
+	height: 8px;
+}
+
+.friday-subscriptions-refresh-progress-label {
+	min-width: 3.5em;
+	color: var(--text-muted);
+	font-size: 0.9em;
+	text-align: right;
+}
+
 @media (max-width: 720px) {
 	.friday-onboarding-step {
 		grid-template-columns: 24px minmax(0, 1fr);
