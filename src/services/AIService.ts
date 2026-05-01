@@ -46,6 +46,7 @@ export interface ChatMessageUiMeta {
 	badges?: ChatMessageUiBadge[];
 	detail?: string;
 	segments?: ChatMessageUiSegment[];
+	taskId?: string;
 }
 
 export type ChatMessagePart =
@@ -64,6 +65,7 @@ interface ChatOptions {
 	temperature?: number;
 	maxTokens?: number;
 	modelOverride?: string;
+	signal?: AbortSignal;
 }
 
 interface ChatWithToolsOptions extends ChatOptions {
@@ -698,6 +700,7 @@ export class AIService {
 			let attempt = 0;
 
 			while (true) {
+				this.throwIfAborted(options?.signal);
 				const payload = this.buildPayload(messages, endpoint, options);
 				try {
 					const response = await requestUrl({
@@ -706,6 +709,7 @@ export class AIService {
 						headers,
 						body: JSON.stringify(payload),
 					});
+					this.throwIfAborted(options?.signal);
 					return this.extractMessageContent(response.json as ChatResponseBody);
 				} catch (error) {
 					lastError = error;
@@ -718,7 +722,7 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt));
+						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
 						attempt += 1;
 						continue;
 					}
@@ -853,7 +857,7 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt));
+						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
 						attempt += 1;
 						continue;
 					}
@@ -987,6 +991,7 @@ export class AIService {
 			let attempt = 0;
 
 			while (true) {
+				this.throwIfAborted(options?.signal);
 				const payload = this.buildToolPayload(messages, tools, options);
 				try {
 					const response = await requestUrl({
@@ -995,6 +1000,7 @@ export class AIService {
 						headers,
 						body: JSON.stringify(payload),
 					});
+					this.throwIfAborted(options?.signal);
 					const body = response.json as ChatResponseBody;
 					const assistantText = this.extractMessageContent(body, true);
 					const toolCalls = this.extractToolCalls(body);
@@ -1012,7 +1018,7 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt));
+						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
 						attempt += 1;
 						continue;
 					}
@@ -1137,10 +1143,24 @@ export class AIService {
 		}
 	}
 
-	private async delay(ms: number): Promise<void> {
+	private throwIfAborted(signal?: AbortSignal): void {
+		if (signal?.aborted) {
+			throw new Error("Task cancelled.");
+		}
+	}
+
+	private async delay(ms: number, signal?: AbortSignal): Promise<void> {
+		this.throwIfAborted(signal);
 		await new Promise<void>((resolve) => {
-			window.setTimeout(resolve, ms);
+			const timeout = window.setTimeout(resolve, ms);
+			if (signal) {
+				signal.addEventListener("abort", () => {
+					window.clearTimeout(timeout);
+					resolve();
+				}, { once: true });
+			}
 		});
+		this.throwIfAborted(signal);
 	}
 }
 

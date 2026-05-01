@@ -88,6 +88,30 @@ test("exec profile policy rejects normal modes shell chaining deletion and outsi
 	}).code, "exec_cwd_outside_workspace");
 });
 
+test("CommandExecService defaults to non-exec agent mode unless the caller passes debug or developer", async () => {
+	const { commandExec } = await loadModules();
+	const service = new commandExec.CommandExecService(
+		() => projectRoot,
+		() => ({
+			agentRuntime: {
+				enableExecTool: true,
+				blockedCommands: [],
+				execTimeout: 1000,
+				execWorkingDir: "vault",
+				execCustomCwd: "",
+			},
+		}),
+	);
+
+	await assert.rejects(
+		() => service.exec("git", ["status"]),
+		/debug/i,
+	);
+	const result = await service.exec("git", ["status"], { agentMode: "debug", timeout: 3000 });
+	assert.equal(result.command, "git");
+	assert.deepEqual(result.args, ["status"]);
+});
+
 test("CommandExecService enforces the same allowlist before spawning", async () => {
 	const { commandExec } = await loadModules();
 	const service = new commandExec.CommandExecService(
@@ -104,11 +128,11 @@ test("CommandExecService enforces the same allowlist before spawning", async () 
 	);
 
 	await assert.rejects(
-		() => service.exec("node", ["-e", "console.log('not allowlisted')"]),
+		() => service.exec("node", ["-e", "console.log('not allowlisted')"], { agentMode: "debug" }),
 		/allowlist/i,
 	);
 	await assert.rejects(
-		() => service.exec("git", ["status"], { cwd: path.dirname(projectRoot) }),
+		() => service.exec("git", ["status"], { cwd: path.dirname(projectRoot), agentMode: "debug" }),
 		/outside workspace/i,
 	);
 });

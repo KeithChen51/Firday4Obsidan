@@ -49,6 +49,7 @@ export interface PromptContextSummary {
 	softLimit: number;
 	hardLimit: number;
 	trimmedChannels: string[];
+	overflowChannels: string[];
 	hasWikiContext: boolean;
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
@@ -131,54 +132,15 @@ export class PromptContextEngine {
 			`Runtime capabilities: exec=${input.runtimeCapabilities?.supportsExecTool ?? false}, externalRead=${input.runtimeCapabilities?.supportsExternalRead ?? false}`,
 		];
 
-		if (input.fridayMd) {
-			lines.push("");
-			lines.push("--- Project instructions (FRIDAY.md) ---");
-			lines.push(input.fridayMd);
-			lines.push("--- End project instructions ---");
-		}
-
 		lines.push("");
 		lines.push("Current agent.md excerpt:");
 		lines.push(input.agentProfile);
-
-		if (trimmedExtra) {
-			lines.push("");
-			lines.push("Extra runtime context:");
-			lines.push(trimmedExtra);
-		}
-
-		if (autoSkillContext) {
-			lines.push("");
-			lines.push(autoSkillContext);
-		}
-
-		if (wikiKnowledgeContext) {
-			lines.push("");
-			lines.push("--- Wiki knowledge context ---");
-			lines.push(wikiKnowledgeContext);
-			lines.push("--- End wiki knowledge context ---");
-		}
-
-		if (memoryContext) {
-			lines.push("");
-			lines.push("--- Memory context ---");
-			lines.push(memoryContext);
-			lines.push("--- End memory context ---");
-		}
-
-		if (mentionContextText) {
-			lines.push("");
-			lines.push("--- Mention context ---");
-			lines.push(mentionContextText);
-			lines.push("--- End mention context ---");
-		}
 
 		const assembledContext = this.contextAssembler.assemble({
 			userQuery: input.userPrompt ?? "",
 			system: input.fridayMd ?? "",
 			policy: trimmedExtra,
-			mentions: mentionContextText,
+			mentions: mentionContextText ? `Mention context\n${mentionContextText}` : "",
 			history: memoryContext,
 			secondaryContext: autoSkillContext,
 			attachments: wikiKnowledgeContext,
@@ -189,6 +151,7 @@ export class PromptContextEngine {
 			softLimit: assembledContext.softLimit,
 			hardLimit: assembledContext.hardLimit,
 			trimmedChannels: [...assembledContext.trimmedChannels],
+			overflowChannels: [...assembledContext.overflowChannels],
 			hasWikiContext: Boolean(wikiKnowledgeContext),
 			hasMemoryContext: Boolean(memoryContext),
 			hasAutoSkillContext: Boolean(autoSkillContext),

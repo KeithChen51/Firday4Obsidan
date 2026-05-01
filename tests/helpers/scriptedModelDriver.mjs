@@ -18,6 +18,7 @@ export class ScriptedModelDriver {
 		this.calls.total += 1;
 		this.requests.push({ channel: "prompt", messages, options });
 		const step = this.nextStep("prompt");
+		await this.delayStep(step, options.signal);
 		this.collectPendingMutations(step);
 		if (step.raw != null) {
 			return String(step.raw);
@@ -36,6 +37,7 @@ export class ScriptedModelDriver {
 		this.calls.total += 1;
 		this.requests.push({ channel: "native", messages, tools, options });
 		const step = this.nextStep("native");
+		await this.delayStep(step, options.signal);
 		this.collectPendingMutations(step);
 		const toolCalls = step.toolCalls ?? (step.tool ? [this.toToolCall(step.tool)] : []);
 		const assistantText = toolCalls.length > 0
@@ -66,6 +68,30 @@ export class ScriptedModelDriver {
 			return;
 		}
 		this.pendingMutations.push(...step.pendingMutations.map((mutation) => ({ ...mutation })));
+	}
+
+	async delayStep(step, signal) {
+		const delayMs = Number(step.delayMs ?? 0);
+		if (!Number.isFinite(delayMs) || delayMs <= 0) {
+			this.throwIfAborted(signal);
+			return;
+		}
+		await new Promise((resolve) => {
+			const timeout = setTimeout(resolve, delayMs);
+			if (signal) {
+				signal.addEventListener("abort", () => {
+					clearTimeout(timeout);
+					resolve();
+				}, { once: true });
+			}
+		});
+		this.throwIfAborted(signal);
+	}
+
+	throwIfAborted(signal) {
+		if (signal?.aborted) {
+			throw new Error("Task cancelled.");
+		}
 	}
 
 	toToolCall(tool) {

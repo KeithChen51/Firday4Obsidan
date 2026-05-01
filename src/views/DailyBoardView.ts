@@ -30,6 +30,7 @@ import { parseOpencodeConfig, selectOpencodeProvider } from "../core/llm/Opencod
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
+import type { AgentTask, AgentTaskStatus as CoreAgentTaskStatus } from "../core/tasks/AgentTask";
 import {
 	RuntimeProgressEvent,
 	RuntimeTurnResult,
@@ -71,6 +72,11 @@ import {
 } from "../core/editor/mention/MentionComposerDocument";
 import { MentionComposer, type MentionComposerQuery } from "./components/MentionComposer";
 import { isPathWithinMentionScope, resolveMentionScopePrefixes } from "./components/mentionScope";
+import {
+	createAgentTaskPanelActionHandlers,
+	recordTaskFromRuntimeProgress,
+} from "./agentTaskPanelActions";
+import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
@@ -79,6 +85,7 @@ type TranslateParams = Record<string, string | number | boolean | null | undefin
 type RuntimeExecutionStatus = "pending" | "running" | "ok" | "failed";
 type RuntimeExecutionStageKey = "context" | "analysis" | "tools" | "finalize";
 type RuntimeExecutionEntryKind = "context" | "model" | "tool" | "system";
+type AgentTaskStatus = CoreAgentTaskStatus;
 
 interface RuntimeExecutionStage {
 	key: RuntimeExecutionStageKey;
@@ -101,6 +108,19 @@ interface RuntimeExecutionState {
 	stages: RuntimeExecutionStage[];
 	entries: RuntimeExecutionEntry[];
 	activeContextEntryKey: string | null;
+}
+
+interface AgentTaskViewState {
+	id: string;
+	status: AgentTaskStatus;
+	title: string;
+	summary: string;
+	failureReason?: string;
+	waitingForApproval?: AgentTask["waitingForApproval"];
+	waitingForUser?: AgentTask["waitingForUser"];
+	availableActions: AgentTask["availableActions"];
+	pendingMutationCount: number;
+	changedFileCount: number;
 }
 
 interface SessionListGroup {
@@ -137,11 +157,13 @@ export class DailyBoardView extends ItemView {
 	private aiStreamingPreview = "";
 	private aiRuntimeExecutionState: RuntimeExecutionState | null = null;
 	private aiLastCompletedRuntimeExecutionState: RuntimeExecutionState | null = null;
+	private aiAgentTasks: AgentTaskViewState[] = [];
 	private aiRuntimePreviewExpanded = false;
 	private aiMessageListScrollTop = 0;
 	private aiMessageListStickToBottom = true;
 	private aiForceScrollToBottomOnce = false;
 	private aiRuntimeLastRenderAt = 0;
+	private aiRuntimeProgressTaskIds = new Set<string>();
 	private aiSendAbortController: AbortController | null = null;
 	private aiSessionManageMode = false;
 	private aiSessionSelection = new Set<string>();
@@ -216,6 +238,7 @@ export class DailyBoardView extends ItemView {
 		this.plugin.toolApprovalService.clearPromptHandler();
 		this.aiSendAbortController?.abort();
 		this.aiSendAbortController = null;
+		this.aiRuntimeProgressTaskIds.clear();
 		window.removeEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
 		window.removeEventListener(FRIDAY_SETTINGS_CHANGED_EVENT, this.handleSettingsChanged);
 		this.contentEl.empty();
@@ -1473,6 +1496,9 @@ export class DailyBoardView extends ItemView {
 			cls: "friday-approval-detail",
 			text: this.formatEditPlanReviewStatus(plan),
 		});
+		if (firstItem) {
+			this.renderEditPlanDiffPreview(itemEl, firstItem.before, firstItem.after);
+		}
 		const actions = itemEl.createDiv({ cls: "friday-approval-actions" });
 		const canApply = plan.items.some((item) => item.status === "pending");
 		this.addMutationReviewButton(actions, this.t("mutation.review.apply", "Apply"), !canApply || this.aiBusy, async () => {
@@ -1485,6 +1511,28 @@ export class DailyBoardView extends ItemView {
 			new Notice(this.t("mutation.review.rejected", "Change rejected."), 3000);
 			this.renderBoard();
 		});
+	}
+
+	private renderEditPlanDiffPreview(containerEl: HTMLElement, before: string, after: string): void {
+		const preview = buildMutationDiffPreview({ before, after });
+		if (preview.lines.length === 0) {
+			return;
+		}
+		const diffEl = containerEl.createDiv({ cls: "friday-mutation-review-diff" });
+		for (const line of preview.lines) {
+			diffEl.createDiv({
+				cls: `friday-mutation-review-diff-line is-${line.kind}`,
+				text: `${line.kind === "remove" ? "-" : "+"} ${line.text}`,
+			});
+		}
+		if (preview.truncated) {
+			diffEl.createDiv({
+				cls: "friday-mutation-review-diff-line is-omitted",
+				text: this.t("mutation.review.diffOmitted", "{count} more changed lines omitted", {
+					count: preview.omittedLineCount,
+				}),
+			});
+		}
 	}
 
 	private addMutationReviewButton(
@@ -2264,6 +2312,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
 		this.aiLastCompletedRuntimeExecutionState = null;
+		this.aiAgentTasks = [];
 		this.aiRuntimePreviewExpanded = false;
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiSessionSearchQuery = "";
@@ -2293,6 +2342,7 @@ export class DailyBoardView extends ItemView {
 		}
 		this.aiSessionId = target.sessionId;
 		this.aiConversation = [...target.messages];
+		await this.hydrateAgentTasksForCurrentSession();
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiQueuedPrompts = [];
@@ -2618,7 +2668,13 @@ export class DailyBoardView extends ItemView {
 	private renderAiMessageList(containerEl: HTMLElement): void {
 		containerEl.empty();
 		const pendingApprovals = this.approvalQueue.list();
-		if (this.aiConversation.length === 0 && !this.aiStreamingPreview && !this.aiRuntimeExecutionState && pendingApprovals.length === 0) {
+		if (
+			this.aiConversation.length === 0 &&
+			!this.aiStreamingPreview &&
+			!this.aiRuntimeExecutionState &&
+			pendingApprovals.length === 0 &&
+			this.aiAgentTasks.length === 0
+		) {
 			const emptyEl = containerEl.createDiv({ cls: "friday-ai-empty" });
 			emptyEl.createEl("h4", { text: this.plugin.t("ai.empty.title") });
 			emptyEl.createEl("p", { text: this.plugin.t("ai.empty.desc") });
@@ -2637,6 +2693,9 @@ export class DailyBoardView extends ItemView {
 				},
 				true,
 			);
+		}
+		for (const task of this.aiAgentTasks) {
+			this.renderAgentTaskPanel(containerEl, task);
 		}
 		for (const item of pendingApprovals) {
 			this.renderApprovalMessage(containerEl, item);
@@ -2757,6 +2816,199 @@ export class DailyBoardView extends ItemView {
 		}
 		this.enqueueAiPrompt(draftSnapshot, "front");
 		this.aiSendAbortController.abort();
+	}
+
+	private async handleAgentTaskRetry(taskId: string): Promise<void> {
+		await this.createAgentTaskPanelActionHandlers(taskId).retry();
+	}
+
+	private async handleAgentTaskCancel(taskId: string): Promise<void> {
+		await this.createAgentTaskPanelActionHandlers(taskId).cancel();
+	}
+
+	private async handleAgentTaskContinue(taskId: string): Promise<void> {
+		await this.createAgentTaskPanelActionHandlers(taskId).continue();
+	}
+
+	private createAgentTaskPanelActionHandlers(taskId: string) {
+		return createAgentTaskPanelActionHandlers(taskId, this.plugin.agentRuntimeService, {
+			abortCurrentRun: () => this.aiSendAbortController?.abort(),
+			getContinuePrompt: () => this.aiDraft.trim() || "Continue.",
+			onProgress: (event) => this.handleRuntimeProgress(event),
+			recordAgentTask: (task) => this.recordAgentTask(task),
+			render: () => this.renderBoard(),
+			signal: this.aiSendAbortController?.signal,
+		});
+	}
+
+	private async hydrateAgentTasksForCurrentSession(): Promise<void> {
+		const activeSoul = this.plugin.getActiveSoul();
+		if (!activeSoul) {
+			this.aiAgentTasks = [];
+			return;
+		}
+		const taskIds = new Set(
+			this.aiConversation
+				.map((message) => message.uiMeta?.taskId)
+				.filter((taskId): taskId is string => Boolean(taskId)),
+		);
+		const byId = new Map<string, AgentTask>();
+		const conversationTasks = await this.plugin.agentRuntimeService.listAgentTasksByConversationId(activeSoul.id);
+		for (const task of conversationTasks) {
+			if (taskIds.has(task.id) || this.isVisibleAgentTaskStatus(task.status)) {
+				byId.set(task.id, task);
+			}
+		}
+		for (const taskId of taskIds) {
+			if (byId.has(taskId)) {
+				continue;
+			}
+			const task = await this.plugin.agentRuntimeService.getAgentTask(taskId);
+			if (task) {
+				byId.set(task.id, task);
+			}
+		}
+		this.aiAgentTasks = [...byId.values()]
+			.sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+			.slice(-8)
+			.map((task) => this.toAgentTaskViewState(task));
+	}
+
+	private isVisibleAgentTaskStatus(status: AgentTaskStatus): boolean {
+		return status === "running" || status === "waiting_for_approval" || status === "waiting_for_user" || status === "failed";
+	}
+
+	private recordAgentTask(task?: AgentTask): void {
+		if (!task) {
+			return;
+		}
+		const viewState = this.toAgentTaskViewState(task);
+		const existingIndex = this.aiAgentTasks.findIndex((item) => item.id === task.id);
+		if (existingIndex >= 0) {
+			this.aiAgentTasks.splice(existingIndex, 1, viewState);
+		} else {
+			this.aiAgentTasks.push(viewState);
+		}
+		this.aiAgentTasks = this.aiAgentTasks.slice(-8);
+	}
+
+	private toAgentTaskViewState(task: AgentTask): AgentTaskViewState {
+		return {
+			id: task.id,
+			status: task.status,
+			title: task.title,
+			summary: task.summary,
+			...(task.failureReason ? { failureReason: task.failureReason } : {}),
+			...(task.waitingForApproval ? { waitingForApproval: task.waitingForApproval } : {}),
+			...(task.waitingForUser ? { waitingForUser: task.waitingForUser } : {}),
+			availableActions: [...task.availableActions],
+			pendingMutationCount: task.pendingMutationCount,
+			changedFileCount: task.changedFileCount,
+		};
+	}
+
+	private formatAgentTaskStatus(status: AgentTaskStatus): string {
+		switch (status) {
+			case "created":
+				return this.t("ai.task.status.created", "Created");
+			case "running":
+				return this.t("ai.task.status.running", "Running");
+			case "waiting_for_approval":
+				return this.t("ai.task.status.waitingApproval", "Waiting for approval");
+			case "waiting_for_user":
+				return this.t("ai.task.status.waitingUser", "Waiting for you");
+			case "failed":
+				return this.t("ai.task.status.failed", "Failed");
+			case "cancelled":
+				return this.t("ai.task.status.cancelled", "Cancelled");
+			case "completed":
+				return this.t("ai.task.status.completed", "Completed");
+			default:
+				return status;
+		}
+	}
+
+	private formatAgentTaskAction(action: AgentTask["availableActions"][number]): string {
+		switch (action) {
+			case "retry":
+				return this.t("ai.task.action.retry", "Retry");
+			case "cancel":
+				return this.t("ai.task.action.cancel", "Cancel");
+			case "continue":
+				return this.t("ai.task.action.continue", "Continue");
+			case "apply":
+				return this.t("ai.task.action.apply", "Apply");
+			case "reject":
+				return this.t("ai.task.action.reject", "Reject");
+			default:
+				return action;
+		}
+	}
+
+	private renderAgentTaskPanel(containerEl: HTMLElement, task: AgentTaskViewState): void {
+		const taskActions = this.createAgentTaskPanelActionHandlers(task.id);
+		const rowEl = containerEl.createDiv({ cls: "friday-ai-message-row is-assistant" });
+		const panelEl = rowEl.createDiv({
+			cls: `friday-ai-message is-assistant friday-agent-task-panel is-${task.status}`,
+		});
+		const headerEl = panelEl.createDiv({ cls: "friday-agent-task-header" });
+		headerEl.createDiv({
+			cls: "friday-agent-task-title",
+			text: task.title,
+		});
+		headerEl.createDiv({
+			cls: "friday-agent-task-status",
+			text: this.formatAgentTaskStatus(task.status),
+		});
+		panelEl.createDiv({
+			cls: "friday-agent-task-summary",
+			text: task.failureReason || task.summary,
+		});
+		if (task.waitingForApproval) {
+			panelEl.createDiv({
+				cls: "friday-agent-task-waiting",
+				text: task.waitingForApproval.summary || this.t("ai.task.waitingApproval", "Waiting for approval."),
+			});
+		}
+		if (task.waitingForUser) {
+			panelEl.createDiv({
+				cls: "friday-agent-task-waiting",
+				text: task.waitingForUser.prompt,
+			});
+		}
+		if (task.pendingMutationCount > 0 || task.changedFileCount > 0) {
+			panelEl.createDiv({
+				cls: "friday-agent-task-mutations",
+				text: this.t("ai.task.mutations", "{count} file change(s) pending review.", {
+					count: task.pendingMutationCount || task.changedFileCount,
+				}),
+			});
+		}
+		const actionsEl = panelEl.createDiv({ cls: "friday-agent-task-actions" });
+		for (const action of task.availableActions) {
+			const button = actionsEl.createEl("button", {
+				cls: `friday-agent-task-action is-${action}`,
+				text: this.formatAgentTaskAction(action),
+			});
+			button.type = "button";
+			if (action === "retry") {
+				button.onclick = () => void taskActions.retry();
+			} else if (action === "cancel") {
+				button.onclick = () => void taskActions.cancel();
+			} else if (action === "continue") {
+				button.onclick = () => void taskActions.continue();
+			} else if (action === "apply") {
+				button.onclick = () => {
+					const planId = task.waitingForApproval?.mutationPlanIds?.[0];
+					void taskActions.apply(planId);
+				};
+			} else if (action === "reject") {
+				button.onclick = () => {
+					const planId = task.waitingForApproval?.mutationPlanIds?.[0];
+					void taskActions.reject(planId);
+				};
+			}
+		}
 	}
 
 	private renderApprovalMessage(containerEl: HTMLElement, item: PendingApproval): void {
@@ -3005,17 +3257,20 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeExecutionState = null;
 		this.aiRuntimePreviewExpanded = false;
+		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
+		this.aiSendAbortController?.abort();
+		const runAbortController = new AbortController();
+		this.aiSendAbortController = runAbortController;
 		this.aiForceScrollToBottomOnce = true;
 		this.syncAiLiveChatShell();
 
 		try {
 			let modelOverride = effectiveModel || undefined;
-			let runtimePrompt = rawPrompt;
-			let extraSystemContext = "";
 			let allowedTools: string[] | undefined;
 			let allowedModels: string[] | undefined;
 			let assistantText = "";
+			let runtimeTask: AgentTask | undefined;
 			let shouldStreamFinalText = false;
 			if (resolution.type === "catalog") {
 				const skills = await this.plugin.skillCommandService.listSkills();
@@ -3023,10 +3278,9 @@ export class DailyBoardView extends ItemView {
 				shouldStreamFinalText = true;
 			} else {
 				const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath });
-				runtimePrompt = decision.runtimePrompt;
 				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
-				if (!assistantText && this.plugin.settings.agentRuntime.toolRuntimeEnabled) {
+				if (!assistantText) {
 					const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeSoul.id,
 						conversation: history,
@@ -3037,57 +3291,17 @@ export class DailyBoardView extends ItemView {
 						onProgress: (event) => {
 							this.handleRuntimeProgress(event);
 						},
+						signal: runAbortController.signal,
 					});
+					this.recordAgentTask(runtimeResult.task);
+					runtimeTask = runtimeResult.task;
 					assistantText = this.buildRuntimeReply(runtimeResult);
 					shouldStreamFinalText = true;
-				} else if (!assistantText) {
-					extraSystemContext = await this.plugin.executionOrchestrator.buildSystemContext(
-						decision,
-						"",
-					);
-					const mentionSystemContext = this.renderMentionSystemContext(promptMentionContext);
-					extraSystemContext = mentionSystemContext
-						? `${extraSystemContext}\n\n${mentionSystemContext}`.trim()
-						: extraSystemContext;
 				}
 			}
 
 			if (modelOverride && allowedModels && allowedModels.length > 0 && !allowedModels.includes(modelOverride.trim())) {
 				throw new Error(this.t("ai.error.modelBlocked", "Current model is not allowed for this slash command."));
-			}
-
-			runtimePrompt = runtimePrompt.trim() || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
-
-			if (!assistantText) {
-				const modelMessages: ChatMessage[] = [
-					...history,
-					...(extraSystemContext
-						? [{ role: "system" as const, content: extraSystemContext }]
-						: []),
-					{
-						role: "user",
-						content: runtimePrompt,
-					},
-				];
-				if (this.plugin.settings.llm.enableStreaming) {
-					this.aiSendAbortController?.abort();
-					this.aiSendAbortController = new AbortController();
-					assistantText = await this.plugin.aiService.chatStream(modelMessages, {
-						modelOverride,
-						signal: this.aiSendAbortController.signal,
-						onDelta: (delta) => {
-							this.aiStreamingPreview += delta;
-							const now = Date.now();
-							if (now - this.aiRuntimeLastRenderAt >= 120) {
-								this.aiRuntimeLastRenderAt = now;
-								this.aiForceScrollToBottomOnce = true;
-								this.syncAiLiveChatShell();
-							}
-						},
-					});
-				} else {
-					assistantText = await this.plugin.aiService.chat(modelMessages, { modelOverride });
-				}
 			}
 
 			const normalizedAssistantText = assistantText.trim() || this.t("ai.runtime.emptyResponse", "(No valid model response)");
@@ -3099,6 +3313,7 @@ export class DailyBoardView extends ItemView {
 			this.aiConversation.push({
 				role: "assistant",
 				content: normalizedAssistantText,
+				...(runtimeTask ? { uiMeta: { taskId: runtimeTask.id } } : {}),
 			});
 			await this.persistConversation();
 		} catch (error) {
@@ -3306,6 +3521,10 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private handleRuntimeProgress(event: RuntimeProgressEvent): void {
+		void recordTaskFromRuntimeProgress(event, this.plugin.agentRuntimeService, this.aiRuntimeProgressTaskIds, {
+			recordAgentTask: (task) => this.recordAgentTask(task),
+			render: () => this.syncAiLiveChatShell(),
+		});
 		if (!this.aiRuntimeExecutionState) {
 			this.aiRuntimePreviewExpanded = false;
 		}
@@ -4395,6 +4614,7 @@ export class DailyBoardView extends ItemView {
 			this.aiSessions = [];
 			this.aiSessionId = "";
 			this.aiQueuedPrompts = [];
+			this.aiAgentTasks = [];
 			return;
 		}
 
@@ -4408,6 +4628,7 @@ export class DailyBoardView extends ItemView {
 			const matched = sessions.find((session) => session.sessionId === this.aiSessionId);
 			if (matched) {
 				this.aiConversation = [...matched.messages];
+				await this.hydrateAgentTasksForCurrentSession();
 				return;
 			}
 		}
@@ -4416,11 +4637,13 @@ export class DailyBoardView extends ItemView {
 		if (latest) {
 			this.aiSessionId = latest.sessionId;
 			this.aiConversation = [...latest.messages];
+			await this.hydrateAgentTasksForCurrentSession();
 			return;
 		}
 
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiConversation = [];
+		this.aiAgentTasks = [];
 	}
 
 	private async persistConversation(): Promise<void> {

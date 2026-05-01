@@ -14,6 +14,7 @@ const fakeVaultPath = path.join(helperDir, "fakeVault.mjs");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
 const turnReplayReaderPath = path.join(projectRoot, "src/core/runtime/TurnReplayReader.ts");
 const mutationPlanStorePath = path.join(projectRoot, "src/core/mutations/MutationPlanStore.ts");
+const agentTaskStorePath = path.join(projectRoot, "src/core/tasks/AgentTaskStore.ts");
 
 async function loadHarnessModules() {
 	const jiti = createJiti(import.meta.url, {
@@ -21,16 +22,18 @@ async function loadHarnessModules() {
 			obsidian: fakeVaultPath,
 		},
 	});
-	const [runtimeModule, fakeVaultModule, replayModule, mutationPlanStoreModule] = await Promise.all([
+	const [runtimeModule, fakeVaultModule, replayModule, mutationPlanStoreModule, agentTaskStoreModule] = await Promise.all([
 		jiti.import(runtimePath),
 		jiti.import(fakeVaultPath),
 		jiti.import(turnReplayReaderPath),
 		jiti.import(mutationPlanStorePath),
+		jiti.import(agentTaskStorePath),
 	]);
 	return {
 		AgentRuntimeService: runtimeModule.AgentRuntimeService,
 		TurnReplayReader: replayModule.TurnReplayReader,
 		MutationPlanStore: mutationPlanStoreModule.MutationPlanStore,
+		AgentTaskStore: agentTaskStoreModule.AgentTaskStore,
 		createFakeVault: fakeVaultModule.createFakeVault,
 		TFile: fakeVaultModule.TFile,
 		TFolder: fakeVaultModule.TFolder,
@@ -143,6 +146,23 @@ export async function runAgentRuntimeScenario(scenario) {
 
 	let runtimeResult;
 	let failure = null;
+	const taskActionResults = [];
+	let cancelOnProgressTriggered = false;
+	const handleProgress = (event) => {
+		progress.push(event);
+		if (
+			scenario.cancelOnProgress &&
+			!cancelOnProgressTriggered &&
+			event.phase === scenario.cancelOnProgress.phase &&
+			(scenario.cancelOnProgress.step == null || scenario.cancelOnProgress.step === event.step)
+		) {
+			cancelOnProgressTriggered = true;
+			const taskId = event.taskId;
+			if (taskId) {
+				void runtime.cancelAgentTask(taskId, scenario.cancelOnProgress.reason ?? "User cancelled task.");
+			}
+		}
+	};
 	try {
 		runtimeResult = await runtime.runTurn({
 			agentId: scenario.agentId ?? "agent",
@@ -152,9 +172,10 @@ export async function runAgentRuntimeScenario(scenario) {
 			depth: scenario.depth ?? 0,
 			currentFilePath: scenario.currentFilePath,
 			extraSystemContext: scenario.extraSystemContext,
+			mentionContext: scenario.mentionContext,
 			allowedTools: scenario.allowedTools,
 			agentMode: scenario.agentMode ?? "ask",
-			onProgress: (event) => progress.push(event),
+			onProgress: handleProgress,
 		});
 	} catch (error) {
 		failure = {
@@ -185,6 +206,40 @@ export async function runAgentRuntimeScenario(scenario) {
 			await runtime.restorePendingMutationPlans();
 			continue;
 		}
+		if (action === "retryFirstTask") {
+			const taskStore = new modules.AgentTaskStore({
+				storePath: runtimeStateStore.getAgentTaskStorePath(),
+			});
+			const firstTask = (await taskStore.list())[0];
+			if (!firstTask) {
+				throw new Error("afterTurnAction retryFirstTask requested an agent task, but none were recorded.");
+			}
+			const result = await runtime.retryAgentTask(firstTask.id, { onProgress: handleProgress });
+			taskActionResults.push({
+				type: "retryFirstTask",
+				result: normalizeRuntimeActionResult(result, modelDriver),
+			});
+			continue;
+		}
+		if (action && typeof action === "object" && action.type === "continueFirstTask") {
+			const taskStore = new modules.AgentTaskStore({
+				storePath: runtimeStateStore.getAgentTaskStorePath(),
+			});
+			const tasks = await taskStore.list();
+			const firstTask = tasks.find((task) => task.status === "waiting_for_user") ?? tasks[0];
+			if (!firstTask) {
+				throw new Error("afterTurnAction continueFirstTask requested an agent task, but none were recorded.");
+			}
+			const result = await runtime.continueAgentTask(firstTask.id, {
+				userPrompt: action.userPrompt ?? "Continue.",
+				onProgress: handleProgress,
+			});
+			taskActionResults.push({
+				type: "continueFirstTask",
+				result: normalizeRuntimeActionResult(result, modelDriver),
+			});
+			continue;
+		}
 		const editPlans = workbenchStateStore.getEditPlans();
 		const firstPlan = editPlans[0];
 		if (!firstPlan) {
@@ -209,6 +264,13 @@ export async function runAgentRuntimeScenario(scenario) {
 		storePath: runtimeStateStore.getMutationPlanStorePath(),
 	});
 	const storedMutations = (await mutationPlanStore.list()).map(normalizeStoredMutation);
+	const agentTaskStore = new modules.AgentTaskStore({
+		storePath: runtimeStateStore.getAgentTaskStorePath(),
+	});
+	const tasks = (await agentTaskStore.list()).map(normalizeAgentTask);
+	const task = tasks.find((item) => item.turnId === runtimeResult.turnId) ??
+		(runtimeResult.task ? normalizeAgentTask(runtimeResult.task) : undefined) ??
+		tasks[0];
 	let reloadedPendingMutations = [];
 	if (scenario.reloadPendingMutations) {
 		workbenchStateStore = createFakeWorkbenchStateStore();
@@ -240,6 +302,9 @@ export async function runAgentRuntimeScenario(scenario) {
 		pendingMutations,
 		storedMutations,
 		reloadedPendingMutations,
+		task,
+		tasks,
+		taskActionResults,
 		files: vault.snapshot(),
 		modelCalls: { ...modelDriver.calls },
 		modelRequests: modelDriver.requests.map(normalizeModelRequest),
@@ -254,6 +319,8 @@ export async function runAgentRuntimeScenario(scenario) {
 }
 
 function normalizeModelRequest(request) {
+	const messages = Array.isArray(request.messages) ? request.messages : [];
+	const fullText = messages.map((message) => String(message.content ?? "")).join("\n");
 	return {
 		channel: request.channel,
 		tools: Array.isArray(request.tools)
@@ -264,8 +331,90 @@ function normalizeModelRequest(request) {
 			}))
 			: [],
 		options: { ...request.options },
-		messageCount: Array.isArray(request.messages) ? request.messages.length : 0,
+		messageCount: messages.length,
+		approximateTokens: approximateTokenCount(fullText),
+		sanitizedText: sanitizeModelRequestText(fullText),
+		toolBoundaryViolations: findToolBoundaryViolations(messages),
 	};
+}
+
+function approximateTokenCount(text) {
+	const value = String(text ?? "");
+	if (!value) {
+		return 0;
+	}
+	let cjkChars = 0;
+	let otherChars = 0;
+	for (const char of Array.from(value)) {
+		const codePoint = char.codePointAt(0) ?? 0;
+		if (
+			(codePoint >= 0x4e00 && codePoint <= 0x9fff) ||
+			(codePoint >= 0x3400 && codePoint <= 0x4dbf) ||
+			(codePoint >= 0x20000 && codePoint <= 0x2a6df) ||
+			(codePoint >= 0x2a700 && codePoint <= 0x2b73f) ||
+			(codePoint >= 0x2b740 && codePoint <= 0x2b81f) ||
+			(codePoint >= 0x2b820 && codePoint <= 0x2ceaf) ||
+			(codePoint >= 0xf900 && codePoint <= 0xfaff)
+		) {
+			cjkChars += 1;
+		} else {
+			otherChars += 1;
+		}
+	}
+	return Math.ceil(otherChars / 4) + Math.ceil(cjkChars / 1.6);
+}
+
+function sanitizeModelRequestText(text) {
+	const redacted = String(text ?? "")
+		.replace(/(authorization|api[_-]?key|token|secret)(\\?":\\?"?)[^\n,}\]]+/gi, "$1$2[REDACTED]")
+		.replace(/sk-[A-Za-z0-9_-]{16,}/g, "[REDACTED_SECRET]");
+	if (redacted.length <= 12000) {
+		return redacted;
+	}
+	const head = redacted.slice(0, 6000);
+	const tail = redacted.slice(-6000);
+	return `${head}\n[...sanitized model request omitted ${redacted.length - 12000} chars...]\n${tail}`;
+}
+
+function findToolBoundaryViolations(messages) {
+	const violations = [];
+	const pending = new Set();
+	for (let index = 0; index < messages.length; index += 1) {
+		const message = messages[index];
+		if (message.role === "assistant") {
+			if (pending.size > 0) {
+				for (const toolCallId of pending) {
+					violations.push({ reason: "dangling_tool_call", toolCallId, index });
+				}
+				pending.clear();
+			}
+			for (const toolCall of message.toolCalls ?? []) {
+				if (toolCall.id) {
+					pending.add(toolCall.id);
+				}
+			}
+			continue;
+		}
+		if (message.role === "tool") {
+			const toolCallId = message.toolCallId;
+			if (!toolCallId || !pending.has(toolCallId)) {
+				violations.push({ reason: "orphan_tool_result", toolCallId, index });
+				continue;
+			}
+			pending.delete(toolCallId);
+			continue;
+		}
+		if (pending.size > 0) {
+			for (const toolCallId of pending) {
+				violations.push({ reason: "dangling_tool_call", toolCallId, index });
+			}
+			pending.clear();
+		}
+	}
+	for (const toolCallId of pending) {
+		violations.push({ reason: "dangling_tool_call", toolCallId, index: messages.length });
+	}
+	return violations;
 }
 
 function createRuntimeStateStore(root) {
@@ -287,6 +436,7 @@ function createRuntimeStateStore(root) {
 				`${safePathSegment(turnId)}.jsonl`,
 			),
 		getMutationPlanStorePath: () => path.join(root, "runtime", "mutation-plans.json"),
+		getAgentTaskStorePath: () => path.join(root, "runtime", "agent-tasks.json"),
 		getApprovalStorePath: (scopeKey = "global") => path.join(root, "approvals", `${scopeKey}.json`),
 		getSoulSnapshotsRoot: (soulId) => path.join(root, "snapshots", soulId),
 		ensureBaseLayout: async () => {
@@ -582,6 +732,40 @@ function normalizeStoredMutation(plan) {
 		toolCallId: plan.toolCallId,
 		riskLevel: plan.riskLevel,
 		summary: plan.summary,
+	};
+}
+
+function normalizeAgentTask(task) {
+	return {
+		id: task.id,
+		conversationId: task.conversationId,
+		turnId: task.turnId,
+		agentId: task.agentId,
+		mode: task.mode,
+		title: task.title,
+		status: task.status,
+		summary: task.summary,
+		failureReason: task.failureReason,
+		waitingForApproval: task.waitingForApproval ? { ...task.waitingForApproval } : undefined,
+		waitingForUser: task.waitingForUser ? { ...task.waitingForUser } : undefined,
+		pendingMutationCount: task.pendingMutationCount,
+		changedFileCount: task.changedFileCount,
+		availableActions: [...(task.availableActions ?? [])],
+		retryOfTaskId: task.retryOfTaskId,
+		continueFromTaskId: task.continueFromTaskId,
+		createdAt: task.createdAt,
+		updatedAt: task.updatedAt,
+	};
+}
+
+function normalizeRuntimeActionResult(result, modelDriver) {
+	return {
+		assistantText: result.assistantText ?? "",
+		traces: result.traces ?? [],
+		task: result.task ? normalizeAgentTask(result.task) : undefined,
+		turnId: result.turnId,
+		parseError: result.parseError,
+		modelRequests: modelDriver.requests.map(normalizeModelRequest),
 	};
 }
 

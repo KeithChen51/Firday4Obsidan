@@ -45,6 +45,7 @@ import { SyncStatusBar } from "./features/sync/SyncStatusBar";
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
+import { AgentKernel, AgentRuntimeFacade } from "./core/agent-kernel/AgentKernel";
 import { normalizeLlmSettings, switchLlmMode } from "./core/llm/LlmSettingsResolver";
 import { SecureStorage } from "./platform/obsidian/SecureStorage";
 import { detectRuntimeProfile } from "./platform/runtime/RuntimeProfile";
@@ -209,6 +210,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	commandExecService!: CommandExecService;
 	inlineEditService!: InlineEditService;
 	agentRuntimeService!: AgentRuntimeService;
+	agentRuntimeFacade!: AgentRuntimeFacade;
 	skillCommandService!: SkillCommandService;
 	slashCommandService!: SlashCommandService;
 	workbenchStateStore!: WorkbenchStateStore;
@@ -427,9 +429,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				() => this.settings,
 			);
 			await this.agentRuntimeService.restorePendingMutationPlans();
+			this.agentRuntimeFacade = new AgentRuntimeFacade(new AgentKernel(this.agentRuntimeService));
 			this.executionOrchestrator = new ExecutionOrchestrator(
 				this.skillCommandService,
-				this.agentRuntimeService,
+				this.agentRuntimeFacade,
 			);
 			if (WIKI_FEATURE_ENABLED) {
 				this.syncService.setPostPullHandler(async (project, pulledFiles, headRevision) => {

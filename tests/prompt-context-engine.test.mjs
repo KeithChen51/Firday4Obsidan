@@ -106,3 +106,47 @@ test("prompt context engine includes structured mention context in prompt and su
 	assert.match(result.prompt, /spec\.md/);
 	assert.match(result.prompt, /folder_structures/);
 });
+
+test("prompt context engine does not leak raw oversized dynamic context outside the compact package", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const wikiSentinel = "RAW_WIKI_SENTINEL_SHOULD_NOT_LEAK";
+	const memorySentinel = "RAW_MEMORY_SENTINEL_SHOULD_NOT_LEAK";
+	const mentionSentinel = "RAW_MENTION_SENTINEL_SHOULD_NOT_LEAK";
+	const longPrefix = "safe evidence ".repeat(900);
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		userPrompt: "Use only compacted context.",
+		fridayMd: "Project rules",
+		agentProfile: "agent",
+		wikiKnowledgeContext: `${longPrefix}${wikiSentinel}`,
+		memoryContext: `${longPrefix}${memorySentinel}`,
+		mentionContext: {
+			resolvedCount: 1,
+			tokenTypes: ["note"],
+			sourceMap: [
+				{ tokenId: "note-1", tokenType: "note", channel: "mentioned_notes", target: "Project/big.md" },
+			],
+			entries: [
+				{
+					tokenId: "note-1",
+					tokenType: "note",
+					channel: "mentioned_notes",
+					title: "big.md",
+					body: `${longPrefix}${mentionSentinel}`,
+				},
+			],
+		},
+		hardLimit: 240,
+	});
+
+	assert.match(result.prompt, /--- Compact context package ---/);
+	assert.match(result.prompt, /Use only compacted context\./);
+	assert.doesNotMatch(result.prompt, new RegExp(wikiSentinel));
+	assert.doesNotMatch(result.prompt, new RegExp(memorySentinel));
+	assert.doesNotMatch(result.prompt, new RegExp(mentionSentinel));
+	assert.ok(result.summary.trimmedChannels.length > 0);
+});

@@ -16,6 +16,7 @@ import { WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import { EventRouter } from "../core/execution/EventRouter";
 import { ExecutionPlanner } from "../core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "../core/execution/ExecutionOrchestrator";
+import type { AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
 import { SyncEventBus } from "../features/sync/SyncEventBus";
 import { SyncRuntimeStore } from "../features/sync/SyncRuntimeStore";
 import { ProjectEntry, ProjectGitCredential, ProjectGroupEntry } from "./project";
@@ -57,6 +58,7 @@ export interface FridayPluginApi {
 	commandExecService: CommandExecService;
 	inlineEditService: InlineEditService;
 	agentRuntimeService: AgentRuntimeService;
+	agentRuntimeFacade: AgentRuntimeFacade;
 	workspaceAccessService: WorkspaceAccessService;
 	skillCommandService: SkillCommandService;
 	slashCommandService: SlashCommandService;

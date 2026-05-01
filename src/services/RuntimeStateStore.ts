@@ -41,6 +41,10 @@ export class RuntimeStateStore {
 		return path.join(this.getRuntimeRoot(), "mutation-plans.json");
 	}
 
+	getAgentTaskStorePath(): string {
+		return path.join(this.getRuntimeRoot(), "agent-tasks.json");
+	}
+
 	getBackupsRoot(): string {
 		return this.localStateRootService.resolveVault("backups");
 	}

@@ -1,6 +1,13 @@
 export interface HistoryMessage {
 	role: "system" | "user" | "assistant" | "tool";
 	content: string;
+	toolCallId?: string;
+	name?: string;
+	toolCalls?: Array<{
+		id?: string;
+		name: string;
+		args: Record<string, unknown>;
+	}>;
 }
 
 export interface HistoryCompactionOptions {
@@ -32,8 +39,11 @@ export class HistoryCompactor {
 				truncatedMessages += 1;
 			}
 			return {
-				role: message.role,
+				...message,
 				content,
+				toolCalls: Array.isArray(message.toolCalls)
+					? message.toolCalls.map((toolCall) => ({ ...toolCall }))
+					: undefined,
 			};
 		});
 

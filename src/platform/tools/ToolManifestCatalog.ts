@@ -1,6 +1,6 @@
 import { ToolRegistry, type ToolManifestContract } from "../../core/tools/ToolRegistry";
 
-export interface ToolManifest extends ToolManifestContract {}
+export type ToolManifest = ToolManifestContract;
 
 export const TOOL_MANIFESTS: ToolManifest[] = ToolRegistry.getInstance().listManifests();
 

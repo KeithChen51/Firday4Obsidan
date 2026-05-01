@@ -55,6 +55,13 @@ export interface TurnReplaySummary extends TurnEventRef {
 		summary: string;
 		reason: string;
 	}>;
+	taskTimeline: Array<{
+		taskId: string;
+		event: "created" | "running" | "waiting_for_approval" | "waiting_for_user" | "failed" | "cancelled" | "completed";
+		status: string;
+		summary: string;
+		reason: string;
+	}>;
 	finalAnswerSummary: string;
 	errors: string[];
 	terminalStatus: "turn_completed" | "turn_failed" | "turn_cancelled" | "open";
@@ -66,6 +73,11 @@ const POST_TURN_REVIEW_EVENTS = new Set([
 	"mutation_rejected",
 	"mutation_conflicted",
 	"mutation_apply_failed",
+	"task_waiting_for_approval",
+	"task_waiting_for_user",
+	"task_failed",
+	"task_cancelled",
+	"task_completed",
 ]);
 
 export class TurnReplayReader {
@@ -165,6 +177,7 @@ export class TurnReplayReader {
 				applyFailed: events.filter((event) => event.type === "mutation_apply_failed").length,
 			},
 			mutationTimeline: this.summarizeMutationTimeline(events),
+			taskTimeline: this.summarizeTaskTimeline(events),
 			finalAnswerSummary: this.getPayloadText(finalAnswer, "summary") || this.getPayloadText(finalAnswer, "text"),
 			errors: events
 				.filter((event) => [
@@ -280,6 +293,30 @@ export class TurnReplayReader {
 			return "apply_failed";
 		}
 		return "planned";
+	}
+
+	private summarizeTaskTimeline(events: TurnEventRecord[]): TurnReplaySummary["taskTimeline"] {
+		return events
+			.filter((event) => [
+				"task_created",
+				"task_running",
+				"task_waiting_for_approval",
+				"task_waiting_for_user",
+				"task_failed",
+				"task_cancelled",
+				"task_completed",
+			].includes(event.type))
+			.map((event) => ({
+				taskId: this.getPayloadText(event, "taskId") || event.taskId || "",
+				event: this.toTaskTimelineEvent(event.type),
+				status: this.getPayloadText(event, "status"),
+				summary: this.getPayloadText(event, "summary"),
+				reason: this.getPayloadText(event, "reason") || this.getPayloadText(event, "error"),
+			}));
+	}
+
+	private toTaskTimelineEvent(type: string): TurnReplaySummary["taskTimeline"][number]["event"] {
+		return type.replace(/^task_/, "") as TurnReplaySummary["taskTimeline"][number]["event"];
 	}
 
 	private getPayloadText(event: TurnEventRecord | undefined, key: string): string {

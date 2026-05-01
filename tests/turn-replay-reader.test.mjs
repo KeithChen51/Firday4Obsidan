@@ -286,3 +286,30 @@ test("TurnReplayReader summarizes failed cancelled safe-stopped approval and mut
 		},
 	]).ok, true);
 });
+
+test("TurnReplayReader summarizes task lifecycle timeline", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-task-"));
+	const resolvePath = resolveTurnPath(root);
+	const ref = { conversationId: "agent", turnId: "turn-task", taskId: "task-1" };
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { summary: "Runtime started" } },
+		{ type: "task_created", payload: { taskId: "task-1", status: "created", summary: "Task created." } },
+		{ type: "task_running", payload: { taskId: "task-1", status: "running", summary: "Runtime started." } },
+		{ type: "task_waiting_for_approval", payload: { taskId: "task-1", status: "waiting_for_approval", summary: "Review changes." } },
+		{ type: "task_cancelled", payload: { taskId: "task-1", status: "cancelled", summary: "User cancelled." } },
+		{ type: "turn_cancelled", payload: { summary: "User cancelled." } },
+	]);
+
+	const summary = await reader.readSummary(ref);
+	assert.equal(summary.status, "cancelled");
+	assert.deepEqual(summary.taskTimeline, [
+		{ taskId: "task-1", event: "created", status: "created", summary: "Task created.", reason: "" },
+		{ taskId: "task-1", event: "running", status: "running", summary: "Runtime started.", reason: "" },
+		{ taskId: "task-1", event: "waiting_for_approval", status: "waiting_for_approval", summary: "Review changes.", reason: "" },
+		{ taskId: "task-1", event: "cancelled", status: "cancelled", summary: "User cancelled.", reason: "" },
+	]);
+});

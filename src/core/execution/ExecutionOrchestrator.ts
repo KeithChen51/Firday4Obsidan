@@ -1,9 +1,9 @@
 import type { ChatMessage } from "../../services/AIService";
 import type {
-	AgentRuntimeService,
+	AgentRuntimeFacade,
 	RuntimeProgressEvent,
 	RuntimeTurnResult,
-} from "../../services/AgentRuntimeService";
+} from "../agent-kernel/AgentKernel";
 import type { SkillCommandService } from "../../services/SkillCommandService";
 import type { ExecutionDecision } from "./ExecutionDecision";
 import type { PromptMentionContext } from "../context/PromptContextEngine";
@@ -17,12 +17,13 @@ export interface ExecutionOrchestratorRunOptions {
 	mentionContext?: PromptMentionContext;
 	allowedTools?: string[];
 	onProgress?: (event: RuntimeProgressEvent) => void;
+	signal?: AbortSignal;
 }
 
 export class ExecutionOrchestrator {
 	constructor(
 		private readonly skillCommandService: SkillCommandService,
-		private readonly agentRuntimeService: AgentRuntimeService,
+		private readonly agentRuntimeFacade: AgentRuntimeFacade,
 	) {}
 
 	async execute(
@@ -35,7 +36,7 @@ export class ExecutionOrchestrator {
 			options.currentFilePath,
 		);
 
-		return this.agentRuntimeService.runTurn({
+		return this.agentRuntimeFacade.runTurn({
 			agentId: options.agentId,
 			conversation: options.conversation,
 			userPrompt: decision.runtimePrompt,
@@ -45,6 +46,7 @@ export class ExecutionOrchestrator {
 			mentionContext: options.mentionContext,
 			allowedTools: decision.allowedTools?.length ? decision.allowedTools : options.allowedTools,
 			onProgress: options.onProgress,
+			signal: options.signal,
 		});
 	}
 

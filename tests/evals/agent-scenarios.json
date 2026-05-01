@@ -1,0 +1,305 @@
+{
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "read-one-file-cites-evidence",
+      "name": "read one file and cite evidence",
+      "files": { "Project/workspace/a.md": "Alpha evidence for Friday." },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } },
+        { "assistant": "Project/workspace/a.md says Alpha evidence for Friday." }
+      ],
+      "expect": {
+        "assistantIncludes": ["Project/workspace/a.md", "Alpha evidence"],
+        "traceTools": ["read"],
+        "traceStatuses": ["ok"],
+        "turnEventsInclude": ["context_built", "tool_completed", "turn_completed"],
+        "finalFiles": { "Project/workspace/a.md": "Alpha evidence for Friday." }
+      }
+    },
+    {
+      "id": "grep-then-read-match",
+      "name": "grep then read matched file",
+      "files": {
+        "Project/workspace/a.md": "Alpha topic",
+        "Project/workspace/b.md": "Beta needle topic"
+      },
+      "modelSteps": [
+        { "tool": { "name": "search_text", "args": { "query": "needle", "path": "Project/workspace" } } },
+        { "tool": { "name": "read", "args": { "path": "Project/workspace/b.md" } } },
+        { "assistant": "The match is in Project/workspace/b.md: Beta needle topic." }
+      ],
+      "expect": {
+        "assistantIncludes": ["Project/workspace/b.md", "needle"],
+        "traceTools": ["search_text", "read"],
+        "traceStatuses": ["ok", "ok"],
+        "turnEventsInclude": ["tool_completed", "turn_completed"]
+      }
+    },
+    {
+      "id": "file-missing-clear-failure",
+      "name": "file missing reports clear failure",
+      "files": {},
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "missing.md" } } },
+        { "assistant": "I could not read missing.md because the file does not exist." }
+      ],
+      "expect": {
+        "assistantIncludes": ["missing.md", "does not exist"],
+        "traceTools": ["read"],
+        "traceStatuses": ["failed"],
+        "turnEventsInclude": ["tool_failed", "turn_completed"]
+      }
+    },
+    {
+      "id": "write-request-creates-mutation-plan",
+      "name": "write request creates mutation plan",
+      "files": { "Project/workspace/a.md": "original" },
+      "modelSteps": [
+        { "tool": { "name": "write", "args": { "path": "Project/workspace/a.md", "content": "changed" } } },
+        { "assistant": "I prepared a reviewed write plan; it is not applied yet." }
+      ],
+      "expect": {
+        "assistantIncludes": ["not applied"],
+        "pendingMutationCount": 1,
+        "pendingMutationOperations": ["write"],
+        "finalFiles": { "Project/workspace/a.md": "original" },
+        "turnEventsInclude": ["mutation_planned", "turn_completed"]
+      }
+    },
+    {
+      "id": "reject-mutation-keeps-file-unchanged",
+      "name": "reject mutation keeps file unchanged",
+      "files": { "Project/workspace/a.md": "original" },
+      "modelSteps": [
+        { "tool": { "name": "write", "args": { "path": "Project/workspace/a.md", "content": "changed" } } },
+        { "assistant": "The write remains in review." }
+      ],
+      "afterTurnActions": ["rejectFirstEditPlan"],
+      "expect": {
+        "pendingMutationCount": 0,
+        "storedMutationStatuses": ["rejected"],
+        "finalFiles": { "Project/workspace/a.md": "original" },
+        "turnEventsInclude": ["mutation_rejected", "turn_completed"]
+      }
+    },
+    {
+      "id": "edit-conflict-becomes-conflicted",
+      "name": "edit conflict becomes conflicted",
+      "files": { "Project/workspace/a.md": "original" },
+      "modelSteps": [
+        { "tool": { "name": "write", "args": { "path": "Project/workspace/a.md", "content": "changed" } } },
+        { "assistant": "The write remains in review." }
+      ],
+      "afterTurnActions": [
+        { "type": "modifyFile", "path": "Project/workspace/a.md", "content": "external change" },
+        "acceptFirstEditPlan"
+      ],
+      "expect": {
+        "pendingMutationCount": 0,
+        "storedMutationStatuses": ["conflicted"],
+        "finalFiles": { "Project/workspace/a.md": "external change" },
+        "turnEventsInclude": ["mutation_conflicted", "turn_completed"]
+      }
+    },
+    {
+      "id": "delete-requires-strict-approval",
+      "name": "delete requires strict approval and review",
+      "files": { "Project/workspace/a.md": "original" },
+      "modelSteps": [
+        { "tool": { "name": "delete", "args": { "path": "Project/workspace/a.md" } } },
+        { "assistant": "I prepared a high-risk delete plan for review." }
+      ],
+      "expect": {
+        "approvalRequestCount": 1,
+        "pendingMutationCount": 1,
+        "pendingMutationOperations": ["delete"],
+        "finalFiles": { "Project/workspace/a.md": "original" },
+        "turnEventsInclude": ["tool_approval_requested", "mutation_planned", "turn_completed"]
+      }
+    },
+    {
+      "id": "organize-mode-plans-links-and-tags",
+      "name": "organize mode proposes link and tag changes",
+      "agentMode": "organize",
+      "files": {
+        "Daily/2026-04-30.md": "project alpha note",
+        "Projects/Alpha.md": "Alpha home"
+      },
+      "modelSteps": [
+        { "tool": { "name": "search_text", "args": { "query": "project alpha", "path": "Daily" } } },
+        { "tool": { "name": "read", "args": { "path": "Daily/2026-04-30.md" } } },
+        {
+          "pendingMutations": [
+            { "operation": "edit", "targetPath": "Daily/2026-04-30.md", "summary": "Add [[Projects/Alpha]] link and #project/alpha tag." }
+          ],
+          "assistant": "I proposed organization changes as pending review plans."
+        }
+      ],
+      "expect": {
+        "assistantIncludes": ["pending review"],
+        "pendingMutationCount": 1,
+        "pendingMutationOperations": ["edit"],
+        "turnEventsInclude": ["mutation_planned", "turn_completed"]
+      }
+    },
+    {
+      "id": "review-mode-detects-structure-issues",
+      "name": "review mode detects duplicates and missing sources",
+      "agentMode": "review",
+      "files": { "Project/review.md": "Claim without source. Duplicate heading\nDuplicate heading" },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "Project/review.md" } } },
+        { "assistant": "Review findings: duplicate heading, missing source, and weak structure in Project/review.md." }
+      ],
+      "expect": {
+        "assistantIncludes": ["duplicate", "missing source", "structure"],
+        "traceTools": ["read"],
+        "traceStatuses": ["ok"]
+      }
+    },
+    {
+      "id": "debug-profile-allows-exec",
+      "name": "debug profile allows allowlisted exec",
+      "agentMode": "debug",
+      "settings": { "agentRuntime": { "enableExecTool": true } },
+      "modelSteps": [
+        { "tool": { "name": "exec", "args": { "command": "npm", "args": ["test"] } } },
+        { "assistant": "Debug exec completed through the allowlist." }
+      ],
+      "expect": {
+        "assistantIncludes": ["allowlist"],
+        "nativeToolsInclude": ["exec"],
+        "traceTools": ["exec"],
+        "traceStatuses": ["ok"],
+        "turnEventsInclude": ["tool_completed", "turn_completed"]
+      }
+    },
+    {
+      "id": "normal-mode-hides-exec",
+      "name": "normal modes hide exec",
+      "agentMode": "ask",
+      "settings": { "agentRuntime": { "enableExecTool": true } },
+      "modelSteps": [
+        { "assistant": "No debug tools are exposed in normal mode." }
+      ],
+      "expect": {
+        "assistantIncludes": ["No debug tools"],
+        "nativeToolsExclude": ["exec"],
+        "traceTools": [],
+        "turnEventsInclude": ["turn_completed"]
+      }
+    },
+    {
+      "id": "retryable-transport-no-prompt-fallback",
+      "name": "retryable transport failure does not fallback to prompt",
+      "settings": { "agentRuntime": { "toolCallingMode": "auto" } },
+      "modelSteps": [
+        { "error": "504 gateway timeout" }
+      ],
+      "expect": {
+        "status": "failed",
+        "terminalStatus": "turn_failed",
+        "modelCalls": { "native": 1, "prompt": 0 },
+        "turnEventsInclude": ["model_failed", "turn_failed"]
+      }
+    },
+    {
+      "id": "oversized-context-triggers-compaction",
+      "name": "oversized context triggers compaction",
+      "wikiKnowledgeContext": {
+        "concat": [
+          { "repeatText": "wiki evidence ", "repeatCount": 900 },
+          "RAW_WIKI_SENTINEL_SHOULD_NOT_LEAK"
+        ]
+      },
+      "memoryContext": {
+        "concat": [
+          { "repeatText": "memory evidence ", "repeatCount": 900 },
+          "RAW_MEMORY_SENTINEL_SHOULD_NOT_LEAK"
+        ]
+      },
+      "mentionContext": {
+        "entries": [
+          {
+            "type": "note",
+            "channel": "note",
+            "title": "Project big note",
+            "tokenId": "note:Project/big.md",
+            "tokenType": "note",
+            "target": "Project/big.md",
+            "path": "Project/big.md",
+            "body": {
+              "concat": [
+                { "repeatText": "mention evidence ", "repeatCount": 900 },
+                "RAW_MENTION_SENTINEL_SHOULD_NOT_LEAK"
+              ]
+            }
+          }
+        ]
+      },
+      "extraSystemContext": "Policy context",
+      "modelSteps": [
+        { "assistant": "I used the compacted context budget." }
+      ],
+      "expect": {
+        "assistantIncludes": ["compacted"],
+        "contextTrimmed": true,
+        "modelRequestExcludes": [
+          "RAW_WIKI_SENTINEL_SHOULD_NOT_LEAK",
+          "RAW_MEMORY_SENTINEL_SHOULD_NOT_LEAK",
+          "RAW_MENTION_SENTINEL_SHOULD_NOT_LEAK"
+        ],
+        "modelRequestMaxApproxTokens": 2600,
+        "turnEventsInclude": ["context_built", "turn_completed"]
+      }
+    },
+    {
+      "id": "dirty-tool-history-is-repaired-before-model-request",
+      "name": "dirty native tool history is repaired",
+      "conversation": [
+        {
+          "role": "assistant",
+          "content": "",
+          "toolCalls": [
+            { "id": "dangling-call", "name": "read", "args": { "path": "Project/workspace/a.md" } }
+          ]
+        },
+        {
+          "role": "tool",
+          "toolCallId": "orphan-call",
+          "name": "read",
+          "content": "TOOL_RESULT orphan"
+        },
+        {
+          "role": "user",
+          "content": "Continue from the repaired history."
+        }
+      ],
+      "modelSteps": [
+        { "assistant": "The repaired history is valid." }
+      ],
+      "expect": {
+        "assistantIncludes": ["repaired history"],
+        "toolBoundaryViolationCount": 0,
+        "turnEventsInclude": ["turn_completed"]
+      }
+    },
+    {
+      "id": "tool-iteration-limit-safe-stop",
+      "name": "tool iteration limit safe stop",
+      "settings": { "agentRuntime": { "maxToolIterations": 1 } },
+      "files": { "Project/workspace/a.md": "alpha" },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } },
+        { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } }
+      ],
+      "expect": {
+        "safeStopped": true,
+        "traceTools": ["read"],
+        "traceStatuses": ["ok"],
+        "turnEventsInclude": ["max_tool_iterations", "turn_completed"]
+      }
+    }
+  ]
+}

@@ -39,9 +39,9 @@ test("chat composer stays editable during work and queues the next prompt", asyn
 test("streaming and runtime progress update the live chat shell without rebuilding the composer", async () => {
 	const source = readSource(viewPath);
 	assert.match(source, /private syncAiLiveChatShell\(\): void/);
-	assert.match(source, /onDelta:\s*\(delta\)\s*=>\s*\{[\s\S]*this\.syncAiLiveChatShell\(\);/);
 	assert.match(source, /private handleRuntimeProgress[\s\S]*this\.syncAiLiveChatShell\(\);/);
 	assert.match(source, /private async streamAssistantText[\s\S]*this\.syncAiLiveChatShell\(\);/);
+	assert.doesNotMatch(source, /plugin\.aiService\.chatStream\(modelMessages/);
 });
 
 test("busy send affordance can either queue or interrupt the current turn", async () => {

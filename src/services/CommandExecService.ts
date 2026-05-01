@@ -1,6 +1,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import { CapabilityPolicy } from "../core/policy/CapabilityPolicy";
+import type { AgentMode } from "../core/tools/ToolRegistry";
 import { FridaySettings } from "../types/settings";
 
 const MAX_EXEC_OUTPUT_CHARS = 8000;
@@ -15,6 +16,13 @@ export interface ExecResult {
 	args: string[];
 }
 
+export interface CommandExecOptions {
+	cwd?: string;
+	timeout?: number;
+	stdin?: string;
+	agentMode?: AgentMode;
+}
+
 export class CommandExecService {
 	constructor(
 		private readonly getVaultBasePath: () => string,
@@ -24,7 +32,7 @@ export class CommandExecService {
 	async exec(
 		command: string,
 		args: string[] = [],
-		options?: { cwd?: string; timeout?: number; stdin?: string },
+		options?: CommandExecOptions,
 	): Promise<ExecResult> {
 		const settings = this.getSettings();
 
@@ -35,7 +43,7 @@ export class CommandExecService {
 		const timeout = options?.timeout ?? settings.agentRuntime.execTimeout;
 		const cwd = this.resolveCwd(options?.cwd);
 		const policyDecision = new CapabilityPolicy().evaluateExecRequest({
-			agentMode: "debug",
+			agentMode: options?.agentMode ?? "ask",
 			enableExecTool: settings.agentRuntime.enableExecTool,
 			command,
 			args,

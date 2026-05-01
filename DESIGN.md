@@ -66,6 +66,8 @@ FRIDAY is currently shipped as an Obsidian plugin. The product should feel nativ
 
 The operating rule is simple: use Obsidian's design system for everyday work surfaces, and use FRIDAY branding only at clear identity moments.
 
+Implementation details for plugin UI are defined in `docs/design/obsidian-plugin-ui-contract.md`. Read that contract before changing settings pages, side panes, modals, empty states, assistant UI, Studio controls, or any shared CSS pattern.
+
 ## Overview
 
 FRIDAY is a local AI work partner centered on Obsidian. It should reduce context friction without asking users to adopt a visually foreign workspace. In plugin UI, FRIDAY should behave like a well-made Obsidian-native feature: compact, theme-aware, quiet, and predictable.
@@ -256,9 +258,9 @@ Do not:
 
 ## References
 
+- Plugin UI execution contract: `docs/design/obsidian-plugin-ui-contract.md`
 - Full brand asset package: `brand/`
 - Logo SVG sources: `brand/logo/`
 - Visual identity standards: `brand/guidelines/FRIDAY-VI-STANDARDS.zh-CN.md`
 - HTML brand system manual: `brand/guidelines/friday-brand-assets-guide.zh-CN.html`
 - Logo asset catalog: `brand/guidelines/LOGO-ASSET-CATALOG.zh-CN.md`
-

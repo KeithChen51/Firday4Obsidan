@@ -12,6 +12,7 @@ interface SessionLine {
 	index: number;
 	role: ChatMessage["role"];
 	content: string;
+	uiMeta?: ChatMessage["uiMeta"];
 	ts: string;
 }
 
@@ -82,6 +83,7 @@ export class ConversationService {
 				index,
 				role: message.role,
 				content: message.content,
+				...(message.uiMeta ? { uiMeta: message.uiMeta } : {}),
 				ts: now,
 			} satisfies SessionLine),
 		);
@@ -245,7 +247,11 @@ export class ConversationService {
 				const role = typeof parsed.role === "string" ? parsed.role : "";
 				const content = typeof parsed.content === "string" ? parsed.content : "";
 				if ((role === "system" || role === "user" || role === "assistant") && content) {
-					messages.push({ role, content });
+					const message: ChatMessage = { role, content };
+					if (parsed.uiMeta && typeof parsed.uiMeta === "object") {
+						message.uiMeta = parsed.uiMeta as ChatMessage["uiMeta"];
+					}
+					messages.push(message);
 				}
 			} catch {
 				const fallback = parseYaml(line);

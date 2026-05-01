@@ -25,6 +25,7 @@ import { PolicyResolverCore } from "../core/security/policy-resolver/PolicyResol
 import { buildPolicyMatrix, PolicyMatrixRow } from "../core/security/policy-resolver/PolicyMatrix";
 import { PolicyEffect, PolicyRule } from "../core/security/policy-resolver/types";
 import { HistoryCompactor } from "../core/context/HistoryCompactor";
+import { ToolBoundaryFilter } from "../core/context/ToolBoundaryFilter";
 import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
 import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
 import type { MemoryWriteInput } from "../core/memory/MemoryTypes";
@@ -49,6 +50,8 @@ import {
 } from "../core/mutations/MutationPlan";
 import { MutationApplier } from "../core/mutations/MutationApplier";
 import { MutationPlanStore } from "../core/mutations/MutationPlanStore";
+import type { AgentTask, AgentTaskRunInputSnapshot } from "../core/tasks/AgentTask";
+import { AgentTaskStore } from "../core/tasks/AgentTaskStore";
 import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
@@ -140,6 +143,7 @@ export interface RuntimeTurnResult {
 	stepTraces?: StepTraceEvent[];
 	runtimeProfile?: RuntimeProfile;
 	contextSummary?: RuntimeContextSummary;
+	task?: AgentTask;
 	parseError?: string;
 }
 
@@ -148,6 +152,7 @@ export interface RuntimeContextSummary {
 	softLimit: number;
 	hardLimit: number;
 	trimmedChannels: string[];
+	overflowChannels?: string[];
 	hasWikiContext: boolean;
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
@@ -183,6 +188,7 @@ export interface RuntimeProgressEvent {
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
+	taskId?: string;
 	message: string;
 }
 
@@ -199,7 +205,7 @@ export interface RuntimeWikiCompileSummary {
 	updatedLog: string;
 }
 
-interface RuntimeTurnInput {
+export interface RuntimeTurnInput {
 	agentId: string;
 	conversation: ChatMessage[];
 	userPrompt: string;
@@ -211,6 +217,15 @@ interface RuntimeTurnInput {
 	allowedTools?: string[];
 	agentMode?: AgentMode;
 	onProgress?: (event: RuntimeProgressEvent) => void;
+	signal?: AbortSignal;
+	retryOfTaskId?: string;
+	continueFromTaskId?: string;
+}
+
+interface RuntimeTaskResumeOptions {
+	userPrompt?: string;
+	onProgress?: (event: RuntimeProgressEvent) => void;
+	signal?: AbortSignal;
 }
 
 interface BuiltinSkillRunInput {
@@ -236,6 +251,7 @@ export class AgentRuntimeService {
 	private readonly stepTraceStore: StepTraceStore;
 	private readonly turnEventLog: TurnEventLog;
 	private readonly historyCompactor: HistoryCompactor;
+	private readonly toolBoundaryFilter: ToolBoundaryFilter;
 	private readonly promptContextEngine: PromptContextEngine;
 	private readonly memoryStore: MemoryStoreV1;
 	private readonly wikiKnowledgeProvider: WikiKnowledgeProvider;
@@ -247,12 +263,16 @@ export class AgentRuntimeService {
 	private readonly toolGateway: ToolGateway;
 	private readonly mutationApplier: MutationApplier;
 	private readonly mutationPlanStore: MutationPlanStore;
+	private readonly agentTaskStore: AgentTaskStore;
 	private activeTurnId = "";
 	private activeConversationId = "default";
 	private activeTaskId: string | undefined;
+	private activeTaskAbortController: AbortController | undefined;
+	private readonly taskAbortControllers = new Map<string, AbortController>();
 	private activeTurnSideEvents: TurnEventInput[] = [];
 	private activeTurnStateMachine: TurnStateMachine | null = null;
 	private activeRuntimeProfile: RuntimeProfile = detectRuntimeProfile();
+	private activeAgentMode: AgentMode = "ask";
 	private lastContextSummary: RuntimeContextSummary | null = null;
 
 	constructor(
@@ -285,6 +305,7 @@ export class AgentRuntimeService {
 				this.runtimeStateStore.getTurnEventLogPath(conversationId, turnId),
 		});
 		this.historyCompactor = new HistoryCompactor();
+		this.toolBoundaryFilter = new ToolBoundaryFilter();
 		this.promptContextEngine = new PromptContextEngine();
 		this.memoryStore = new MemoryStoreV1({ vault: this.vault });
 		this.wikiKnowledgeProvider = new WikiKnowledgeProvider();
@@ -293,6 +314,9 @@ export class AgentRuntimeService {
 		this.toolGateway = new ToolGateway(this.capabilityPolicy);
 		this.mutationPlanStore = new MutationPlanStore({
 			storePath: () => this.runtimeStateStore.getMutationPlanStorePath(),
+		});
+		this.agentTaskStore = new AgentTaskStore({
+			storePath: () => this.runtimeStateStore.getAgentTaskStorePath(),
 		});
 		this.mutationApplier = new MutationApplier(
 			{
@@ -325,9 +349,22 @@ export class AgentRuntimeService {
 		this.activeTurnId = turnId;
 		this.activeConversationId = conversationId;
 		this.activeTaskId = undefined;
+		this.activeTaskAbortController = new AbortController();
 		this.activeTurnSideEvents = [];
 		this.activeTurnStateMachine = new TurnStateMachine(turnId);
 		this.activeRuntimeProfile = detectRuntimeProfile();
+		this.activeAgentMode = this.resolveAgentMode(input);
+		const abortInputListener = () => this.activeTaskAbortController?.abort();
+		if (input.signal?.aborted) {
+			this.activeTaskAbortController.abort();
+		} else {
+			input.signal?.addEventListener("abort", abortInputListener, { once: true });
+		}
+		const activeTask = await this.startAgentTaskForTurn(input, turnId, conversationId);
+		if (this.activeTaskAbortController) {
+			this.taskAbortControllers.set(activeTask.id, this.activeTaskAbortController);
+		}
+		this.assertActiveTaskNotCancelled();
 		this.reportProgress(input, {
 			phase: "start",
 			depth,
@@ -340,7 +377,7 @@ export class AgentRuntimeService {
 				depth,
 				message: `Runtime blocked: ${gateDecision.reason}`,
 			});
-			return this.finalizeTurnResult(
+			return await this.finalizeTurnResult(
 				turnId,
 				{
 					assistantText: gateDecision.reason,
@@ -360,7 +397,7 @@ export class AgentRuntimeService {
 					depth,
 					message: `Runtime finished (tool traces=${result.traces.length})`,
 				});
-				return this.finalizeTurnResult(turnId, result, input.userPrompt);
+				return await this.finalizeTurnResult(turnId, result, input.userPrompt);
 			}
 			if (mode === "native") {
 				const result = await this.runTurnNative(input);
@@ -369,7 +406,7 @@ export class AgentRuntimeService {
 					depth,
 					message: `Runtime finished (tool traces=${result.traces.length})`,
 				});
-				return this.finalizeTurnResult(turnId, result, input.userPrompt);
+				return await this.finalizeTurnResult(turnId, result, input.userPrompt);
 			}
 			try {
 				const result = await this.runTurnNative(input);
@@ -378,7 +415,7 @@ export class AgentRuntimeService {
 					depth,
 					message: `Runtime finished (tool traces=${result.traces.length})`,
 				});
-				return this.finalizeTurnResult(turnId, result, input.userPrompt);
+				return await this.finalizeTurnResult(turnId, result, input.userPrompt);
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error ?? "");
 				if (this.toolGovernor.isRetryableTransportFailure(message)) {
@@ -405,7 +442,7 @@ export class AgentRuntimeService {
 					depth,
 					message: `Runtime finished (tool traces=${result.traces.length}, fallback)`,
 				});
-				return this.finalizeTurnResult(turnId, result, input.userPrompt);
+				return await this.finalizeTurnResult(turnId, result, input.userPrompt);
 			}
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error ?? "");
@@ -414,19 +451,26 @@ export class AgentRuntimeService {
 				depth,
 				message: `Runtime failed: ${this.truncateText(message, 220)}`,
 			});
+			await this.markActiveTaskFailure(message);
 			await this.persistTurnEvents(
 				turnId,
 				conversationId,
 				this.activeTurnStateMachine?.snapshot() ?? [],
-				{ failureMessage: message },
+				{ failureMessage: message, taskId: this.activeTaskId },
 			);
 			throw error;
 		} finally {
 			this.activeTurnId = "";
 			this.activeConversationId = "default";
+			if (this.activeTaskId) {
+				this.taskAbortControllers.delete(this.activeTaskId);
+			}
+			input.signal?.removeEventListener("abort", abortInputListener);
 			this.activeTaskId = undefined;
+			this.activeTaskAbortController = undefined;
 			this.activeTurnSideEvents = [];
 			this.activeTurnStateMachine = null;
+			this.activeAgentMode = "ask";
 		}
 	}
 
@@ -472,7 +516,7 @@ export class AgentRuntimeService {
 				error: message,
 			};
 			await this.persistToolRun(trace, startedAt, new Date().toISOString());
-			return this.finalizeTurnResult(
+			return await this.finalizeTurnResult(
 				turnId,
 				{
 					assistantText: message,
@@ -511,7 +555,7 @@ export class AgentRuntimeService {
 				tool: `skill:${input.skillName}`,
 				message: gateDecision.reason,
 			});
-			return this.finalizeTurnResult(
+			return await this.finalizeTurnResult(
 				turnId,
 				{
 					assistantText: gateDecision.reason,
@@ -594,13 +638,317 @@ export class AgentRuntimeService {
 	}
 
 	private reportProgress(input: RuntimeTurnInput, event: RuntimeProgressEvent): void {
+		const eventWithTask = this.activeTaskId && !event.taskId
+			? { ...event, taskId: this.activeTaskId }
+			: event;
 		if (this.activeTurnStateMachine) {
-			this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, event);
+			this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, eventWithTask);
 		}
 		try {
-			input.onProgress?.(event);
+			input.onProgress?.(eventWithTask);
 		} catch {
 			// Ignore observer errors to avoid blocking runtime execution.
+		}
+	}
+
+	private async startAgentTaskForTurn(
+		input: RuntimeTurnInput,
+		turnId: string,
+		conversationId: string,
+	): Promise<AgentTask> {
+		const task = await this.agentTaskStore.create({
+			agentId: input.agentId,
+			conversationId,
+			turnId,
+			mode: input.agentMode ?? "ask",
+			title: input.userPrompt,
+			summary: "Task created.",
+			retryOfTaskId: input.retryOfTaskId,
+			continueFromTaskId: input.continueFromTaskId,
+			runInput: this.createTaskRunInputSnapshot(input),
+		});
+		this.activeTaskId = task.id;
+		await this.recordTaskLifecycleEvent(task);
+		const runningTask = await this.agentTaskStore.markRunning(task.id, {
+			summary: `Runtime started for ${input.agentMode ?? "ask"} mode.`,
+		});
+		await this.recordTaskLifecycleEvent(runningTask);
+		return runningTask;
+	}
+
+	private async finalizeActiveTask(result: RuntimeTurnResult): Promise<AgentTask | undefined> {
+		if (!this.activeTaskId) {
+			return undefined;
+		}
+		const currentTask = await this.agentTaskStore.get(this.activeTaskId);
+		if (
+			currentTask?.status === "failed" ||
+			currentTask?.status === "cancelled" ||
+			currentTask?.status === "completed"
+		) {
+			return currentTask;
+		}
+		const pendingPlans = this.getPendingMutationRecordsForActiveTurn();
+		const pendingMutationCount = pendingPlans.reduce(
+			(total, plan) => total + plan.items.filter((item) => item.status === "pending").length,
+			0,
+		);
+		if (pendingMutationCount > 0) {
+			const firstPlan = pendingPlans[0];
+			const firstItem = firstPlan?.items[0];
+			const task = await this.agentTaskStore.markWaitingForApproval(this.activeTaskId, {
+				summary: `Waiting for review of ${pendingMutationCount} pending file change(s).`,
+				waitingForApproval: {
+					kind: "mutation",
+					tool: firstPlan?.tool ?? "mutation",
+					targetPath: firstItem?.path ?? "",
+					summary: firstItem?.summary ?? "Review pending file changes.",
+					mutationPlanIds: pendingPlans.map((plan) => plan.id),
+				},
+				pendingMutationCount,
+				changedFileCount: pendingMutationCount,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return task;
+		}
+		if (result.parseError && result.assistantText === result.parseError) {
+			const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
+				summary: this.truncateText(result.parseError, 240),
+				failureReason: result.parseError,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return task;
+		}
+		if (this.isMaxToolIterationStop(result.assistantText)) {
+			const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
+				summary: "Runtime stopped at the maximum tool iteration limit.",
+				failureReason: result.assistantText,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return task;
+		}
+		const task = await this.agentTaskStore.markCompleted(this.activeTaskId, {
+			summary: "Final answer delivered.",
+		});
+		await this.recordTaskLifecycleEvent(task);
+		return task;
+	}
+
+	private async markActiveTaskFailure(message: string): Promise<void> {
+		if (!this.activeTaskId) {
+			return;
+		}
+		if (this.isCancellationFailure(message)) {
+			const current = await this.agentTaskStore.get(this.activeTaskId);
+			if (current?.status === "cancelled") {
+				return;
+			}
+			const task = await this.agentTaskStore.cancelTask(this.activeTaskId, {
+				summary: this.truncateText(message, 240),
+				failureReason: message,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return;
+		}
+		const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
+			summary: this.truncateText(message, 240),
+			failureReason: message,
+		});
+		await this.recordTaskLifecycleEvent(task);
+	}
+
+	private async markActiveTaskWaitingForToolApproval(
+		tool: string,
+		targetPath: string,
+	): Promise<void> {
+		if (!this.activeTaskId) {
+			return;
+		}
+		const current = await this.agentTaskStore.get(this.activeTaskId);
+		if (current?.status !== "running") {
+			return;
+		}
+		const task = await this.agentTaskStore.markWaitingForApproval(this.activeTaskId, {
+			summary: `Waiting for approval to run ${tool}.`,
+			waitingForApproval: {
+				kind: "tool",
+				tool,
+				targetPath,
+				summary: `Approve ${tool}${targetPath ? ` on ${targetPath}` : ""}.`,
+			},
+			pendingMutationCount: 0,
+		});
+		await this.recordTaskLifecycleEvent(task);
+	}
+
+	private async markActiveTaskToolApprovalResolved(
+		tool: string,
+		approved: boolean,
+		reason: string,
+	): Promise<void> {
+		if (!this.activeTaskId) {
+			return;
+		}
+		const current = await this.agentTaskStore.get(this.activeTaskId);
+		if (current?.status !== "waiting_for_approval" || current.waitingForApproval?.kind !== "tool") {
+			return;
+		}
+		if (!approved) {
+			const summary = `Tool approval denied for ${tool}.`;
+			const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
+				summary,
+				failureReason: reason || summary,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return;
+		}
+		const task = await this.agentTaskStore.markRunning(this.activeTaskId, {
+			summary: `Tool approval resolved for ${tool}.`,
+			pendingMutationCount: 0,
+		});
+		await this.recordTaskLifecycleEvent(task);
+	}
+
+	private getPendingMutationRecordsForActiveTurn(): EditPlanRecord[] {
+		return this.workbenchStateStore
+			.getEditPlans()
+			.filter((plan) =>
+				plan.originConversationId === this.activeConversationId &&
+				plan.originTurnId === this.activeTurnId &&
+				plan.items.some((item) => item.status === "pending")
+			);
+	}
+
+	private async updateTaskAfterMutationReview(
+		record: EditPlanRecord,
+		status: MutationApplyStatus | "rejected",
+		reason?: string,
+	): Promise<void> {
+		const taskId = record.originTaskId;
+		if (!taskId) {
+			return;
+		}
+		if (status === "failed") {
+			const task = await this.agentTaskStore.markFailed(taskId, {
+				summary: reason ?? "Mutation apply failed.",
+				failureReason: reason ?? "Mutation apply failed.",
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return;
+		}
+		if (status === "conflicted") {
+			const task = await this.agentTaskStore.markWaitingForUser(taskId, {
+				summary: reason ?? "File changed before apply. Review the conflict before continuing.",
+				waitingForUser: {
+					prompt: reason ?? "Resolve the mutation conflict.",
+				},
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return;
+		}
+		const remainingPendingCount = await this.countPendingMutationPlansForTask(taskId);
+		if (remainingPendingCount > 0) {
+			const task = await this.agentTaskStore.markWaitingForApproval(taskId, {
+				summary: `Waiting for review of ${remainingPendingCount} pending file change(s).`,
+				waitingForApproval: {
+					kind: "mutation",
+					tool: record.tool,
+					targetPath: record.items[0]?.path ?? "",
+					summary: "Review remaining pending file changes.",
+				},
+				pendingMutationCount: remainingPendingCount,
+				changedFileCount: remainingPendingCount,
+			});
+			await this.recordTaskLifecycleEvent(task);
+			return;
+		}
+		const task = await this.agentTaskStore.markCompleted(taskId, {
+			summary: status === "rejected"
+				? "Pending file changes were rejected."
+				: "Pending file changes were applied.",
+			pendingMutationCount: 0,
+		});
+		await this.recordTaskLifecycleEvent(task);
+	}
+
+	private async countPendingMutationPlansForTask(taskId: string): Promise<number> {
+		const plans = await this.mutationPlanStore.list();
+		return plans
+			.filter((plan) => plan.taskId === taskId && plan.status === "pending")
+			.reduce((total, plan) => total + plan.items.filter((item) => item.status === "pending").length, 0);
+	}
+
+	private createTaskRunInputSnapshot(input: RuntimeTurnInput): AgentTaskRunInputSnapshot {
+		return {
+			agentId: input.agentId,
+			userPrompt: input.userPrompt,
+			...(input.modelOverride ? { modelOverride: input.modelOverride } : {}),
+			...(input.depth !== undefined ? { depth: input.depth } : {}),
+			...(input.currentFilePath ? { currentFilePath: input.currentFilePath } : {}),
+			...(input.extraSystemContext ? { extraSystemContext: input.extraSystemContext } : {}),
+			...(input.allowedTools ? { allowedTools: [...input.allowedTools] } : {}),
+			...(input.agentMode ? { agentMode: input.agentMode } : {}),
+		};
+	}
+
+	private async recordTaskLifecycleEvent(task: AgentTask): Promise<void> {
+		const event = this.buildTaskLifecycleEvent(task);
+		if (!event) {
+			return;
+		}
+		if (this.activeTurnStateMachine || this.activeTurnId) {
+			this.activeTurnSideEvents.push(event);
+			return;
+		}
+		if (!task.turnId) {
+			return;
+		}
+		try {
+			await this.turnEventLog.append(
+				{ conversationId: task.conversationId, turnId: task.turnId, taskId: task.id },
+				event,
+			);
+		} catch {
+			// Task lifecycle replay should not block user-facing actions.
+		}
+	}
+
+	private buildTaskLifecycleEvent(task: AgentTask): TurnEventInput | null {
+		const type = this.toTaskEventType(task.status);
+		if (!type) {
+			return null;
+		}
+		return {
+			type,
+			payload: {
+				taskId: task.id,
+				status: task.status,
+				summary: task.summary,
+				...(task.failureReason ? { reason: task.failureReason } : {}),
+				...(task.pendingMutationCount ? { pendingMutationCount: task.pendingMutationCount } : {}),
+				...(task.changedFileCount ? { changedFileCount: task.changedFileCount } : {}),
+			},
+		};
+	}
+
+	private toTaskEventType(status: AgentTask["status"]): TurnEventInput["type"] | null {
+		switch (status) {
+			case "created":
+				return "task_created";
+			case "running":
+				return "task_running";
+			case "waiting_for_approval":
+				return "task_waiting_for_approval";
+			case "waiting_for_user":
+				return "task_waiting_for_user";
+			case "failed":
+				return "task_failed";
+			case "cancelled":
+				return "task_cancelled";
+			case "completed":
+				return "task_completed";
+			default:
+				return null;
 		}
 	}
 
@@ -670,13 +1018,14 @@ export class AgentRuntimeService {
 		const finalResult = this.withPendingMutationNotice(result);
 		const stepTraces = this.activeTurnStateMachine?.snapshot() ?? [];
 		const conversationId = this.activeConversationId;
+		const task = await this.finalizeActiveTask(finalResult);
 		const sideEvents = [...this.activeTurnSideEvents];
 		try {
 			await this.stepTraceStore.appendMany(stepTraces);
 		} catch {
 			// Keep runtime response available even if trace persistence fails.
 		}
-		await this.persistTurnEvents(turnId, conversationId, stepTraces, { result: finalResult, sideEvents });
+		await this.persistTurnEvents(turnId, conversationId, stepTraces, { result: finalResult, sideEvents, taskId: task?.id });
 		void userPrompt;
 		return {
 			...finalResult,
@@ -684,6 +1033,7 @@ export class AgentRuntimeService {
 			stepTraces,
 			runtimeProfile: this.activeRuntimeProfile,
 			contextSummary: this.lastContextSummary ?? undefined,
+			...(task ? { task } : {}),
 		};
 	}
 
@@ -716,14 +1066,14 @@ export class AgentRuntimeService {
 		turnId: string,
 		conversationId: string,
 		stepTraces: StepTraceEvent[],
-		options: { result?: RuntimeTurnResult; failureMessage?: string; sideEvents?: TurnEventInput[] },
+		options: { result?: RuntimeTurnResult; failureMessage?: string; sideEvents?: TurnEventInput[]; taskId?: string },
 	): Promise<void> {
 		const events = this.buildTurnEvents(stepTraces, options);
 		if (events.length === 0) {
 			return;
 		}
 		try {
-			await this.turnEventLog.appendMany({ conversationId, turnId, taskId: this.activeTaskId }, events);
+			await this.turnEventLog.appendMany({ conversationId, turnId, taskId: options.taskId ?? this.activeTaskId }, events);
 		} catch {
 			// Event replay must not block the user-facing runtime result.
 		}
@@ -873,6 +1223,7 @@ export class AgentRuntimeService {
 			payload.softLimit = this.lastContextSummary.softLimit;
 			payload.hardLimit = this.lastContextSummary.hardLimit;
 			payload.trimmedChannels = [...this.lastContextSummary.trimmedChannels];
+			payload.overflowChannels = [...(this.lastContextSummary.overflowChannels ?? [])];
 		}
 		if (trace.targetPath) {
 			payload.targetPath = trace.targetPath;
@@ -969,6 +1320,16 @@ export class AgentRuntimeService {
 		return /cancelled|canceled|aborted|abort/i.test(message);
 	}
 
+	private assertActiveTaskNotCancelled(): void {
+		if (this.activeTaskAbortController?.signal.aborted) {
+			throw new Error("Task cancelled.");
+		}
+	}
+
+	private getActiveTaskSignal(): AbortSignal | undefined {
+		return this.activeTaskAbortController?.signal;
+	}
+
 	private buildFailureDiagnostics(
 		message: string,
 		failureClassOverride?: RuntimeFailureClass,
@@ -1037,6 +1398,86 @@ export class AgentRuntimeService {
 		return this.mutationPlanStore.getByConversationId(conversationId);
 	}
 
+	async listAgentTasks(limit = 50): Promise<AgentTask[]> {
+		const tasks = await this.agentTaskStore.list();
+		return tasks.slice(Math.max(0, tasks.length - limit));
+	}
+
+	async listAgentTasksByConversationId(conversationId: string): Promise<AgentTask[]> {
+		return this.agentTaskStore.getByConversationId(conversationId);
+	}
+
+	async getAgentTask(taskId: string): Promise<AgentTask | undefined> {
+		return this.agentTaskStore.get(taskId);
+	}
+
+	async cancelAgentTask(taskId: string, reason = "User cancelled task."): Promise<AgentTask> {
+		this.taskAbortControllers.get(taskId)?.abort();
+		const task = await this.agentTaskStore.cancelTask(taskId, {
+			summary: reason,
+			failureReason: reason,
+		});
+		await this.recordTaskLifecycleEvent(task);
+		return task;
+	}
+
+	async retryAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
+		const original = await this.getRequiredAgentTask(taskId);
+		const input = this.buildResumeTurnInput(original, "retry", options);
+		return this.runTurn({
+			...input,
+			retryOfTaskId: original.id,
+		});
+	}
+
+	async continueAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
+		const original = await this.getRequiredAgentTask(taskId);
+		const input = this.buildResumeTurnInput(original, "continue", options);
+		return this.runTurn({
+			...input,
+			continueFromTaskId: original.id,
+		});
+	}
+
+	private async getRequiredAgentTask(taskId: string): Promise<AgentTask> {
+		const task = await this.agentTaskStore.get(taskId);
+		if (!task) {
+			throw new Error(`Agent task not found: ${taskId}`);
+		}
+		return task;
+	}
+
+	private buildResumeTurnInput(
+		task: AgentTask,
+		kind: "retry" | "continue",
+		options: RuntimeTaskResumeOptions,
+	): RuntimeTurnInput {
+		const snapshot = task.runInput;
+		if (!snapshot) {
+			throw new Error(`Agent task ${task.id} cannot be ${kind === "retry" ? "retried" : "continued"} because its original turn input was not recorded.`);
+		}
+		const continuationText = options.userPrompt?.trim() || "";
+		const userPrompt = kind === "continue"
+			? [
+				snapshot.userPrompt,
+				continuationText ? `User continuation: ${continuationText}` : "User continuation: Continue from the current task state.",
+			].join("\n\n")
+			: snapshot.userPrompt;
+		return {
+			agentId: snapshot.agentId || task.agentId || task.conversationId,
+			conversation: [],
+			userPrompt,
+			modelOverride: snapshot.modelOverride,
+			depth: snapshot.depth,
+			currentFilePath: snapshot.currentFilePath,
+			extraSystemContext: snapshot.extraSystemContext,
+			allowedTools: snapshot.allowedTools,
+			agentMode: snapshot.agentMode as AgentMode | undefined,
+			onProgress: options.onProgress,
+			signal: options.signal,
+		};
+	}
+
 	async acceptEditPlan(planId: string): Promise<MutationApplyStatus> {
 		const record = await this.getEditPlanRecord(planId);
 		const storedPlan = await this.mutationPlanStore.get(planId);
@@ -1045,6 +1486,7 @@ export class AgentRuntimeService {
 		if (result.status === "failed") {
 			this.workbenchStateStore.replaceEditPlan(record);
 			await this.persistMutationReviewEvent(record, "mutation_apply_failed", result.reason);
+			await this.updateTaskAfterMutationReview(record, "failed", result.reason);
 			return result.status;
 		}
 		const nextRecord = this.withEditPlanStatus(record, result.status);
@@ -1054,6 +1496,7 @@ export class AgentRuntimeService {
 			result.status === "conflicted" ? "mutation_conflicted" : "mutation_applied",
 			result.reason,
 		);
+		await this.updateTaskAfterMutationReview(nextRecord, result.status, result.reason);
 		return result.status;
 	}
 
@@ -1072,6 +1515,7 @@ export class AgentRuntimeService {
 		const nextRecord = this.withEditPlanStatus(record, "rejected");
 		this.workbenchStateStore.replaceEditPlan(nextRecord);
 		await this.persistMutationReviewEvent(nextRecord, "mutation_rejected");
+		await this.updateTaskAfterMutationReview(nextRecord, "rejected");
 	}
 
 	async rollbackEditPlan(planId: string, nextStatus: "rejected" | "rolled_back" = "rolled_back"): Promise<void> {
@@ -1090,6 +1534,7 @@ export class AgentRuntimeService {
 		this.workbenchStateStore.replaceEditPlan(record);
 		await this.mutationPlanStore.replace(setMutationPlanStatus(this.toMutationPlan(record), "rejected"));
 		await this.persistMutationReviewEvent(record, "mutation_rejected");
+		await this.updateTaskAfterMutationReview(record, "rejected");
 	}
 
 	private async getEditPlanRecord(planId: string): Promise<EditPlanRecord> {
@@ -1186,6 +1631,7 @@ export class AgentRuntimeService {
 
 		let finalReply = "";
 		for (let step = 1; step <= maxSteps; step += 1) {
+			this.assertActiveTaskNotCancelled();
 			this.reportProgress(input, {
 				phase: "model_request",
 				depth,
@@ -1194,7 +1640,9 @@ export class AgentRuntimeService {
 			});
 			const reply = await this.aiService.chat(modelMessages, {
 				modelOverride: input.modelOverride?.trim() || undefined,
+				signal: this.getActiveTaskSignal(),
 			});
+			this.assertActiveTaskNotCancelled();
 			finalReply = reply.trim();
 			this.reportProgress(input, {
 				phase: "model_response",
@@ -1253,6 +1701,7 @@ export class AgentRuntimeService {
 					message: `Step ${step}: calling tool ${tool.name}`,
 				});
 				const executedResult = await this.executeTool(step, input, tool, allowedToolSet);
+				this.assertActiveTaskNotCancelled();
 				traces.push(executedResult.trace);
 				this.reportProgress(input, {
 					phase: "tool_result",
@@ -1317,6 +1766,7 @@ export class AgentRuntimeService {
 		let finalReply = "";
 		let lastToolPayload: RuntimeToolResultPayload | null = null;
 		for (let step = 1; step <= maxSteps; step += 1) {
+			this.assertActiveTaskNotCancelled();
 			this.reportProgress(input, {
 				phase: "model_request",
 				depth,
@@ -1325,7 +1775,9 @@ export class AgentRuntimeService {
 			});
 			const response = await this.aiService.chatWithTools(modelMessages, tools, {
 				modelOverride: input.modelOverride?.trim() || undefined,
+				signal: this.getActiveTaskSignal(),
 			});
+			this.assertActiveTaskNotCancelled();
 			const assistantStepText = response.assistantText?.trim() || "";
 			if (assistantStepText) {
 				finalReply = assistantStepText;
@@ -1390,6 +1842,7 @@ export class AgentRuntimeService {
 					message: `Step ${step}: calling tool ${tool.name} (JSON envelope fallback)`,
 				});
 				const toolResult = await this.executeTool(step, input, tool, allowedToolSet);
+				this.assertActiveTaskNotCancelled();
 				traces.push(toolResult.trace);
 				lastToolPayload = toolResult.payload;
 				this.reportProgress(input, {
@@ -1428,6 +1881,7 @@ export class AgentRuntimeService {
 			const toolResultMessages: ChatMessage[] = [];
 			const loadedSkillContexts: string[] = [];
 			for (const toolCall of toolCalls) {
+				this.assertActiveTaskNotCancelled();
 				this.reportProgress(input, {
 					phase: "tool_call",
 					depth,
@@ -1440,6 +1894,7 @@ export class AgentRuntimeService {
 					name: toolCall.name,
 					args: toolCall.args,
 				}, allowedToolSet);
+				this.assertActiveTaskNotCancelled();
 				traces.push(toolResult.trace);
 				lastToolPayload = toolResult.payload;
 				this.reportProgress(input, {
@@ -1485,11 +1940,14 @@ export class AgentRuntimeService {
 	}
 
 	private buildRuntimeHistory(conversation: ChatMessage[]): ChatMessage[] {
-		return this.historyCompactor.compact(conversation, {
+		const compacted = this.historyCompactor.compact(conversation, {
 			preserveRecent: true,
 			maxMessages: 12,
 			maxCharsPerMessage: 1800,
-		}).messages;
+		}).messages as ChatMessage[];
+		return this.toolBoundaryFilter.repair(compacted, {
+			maxToolResultTokens: 900,
+		}).messages as ChatMessage[];
 	}
 
 	private async buildSystemPrompt(
@@ -1693,6 +2151,7 @@ export class AgentRuntimeService {
 		tool: RuntimeToolCall,
 		allowedTools: Set<string> | null,
 	): Promise<{ trace: RuntimeToolTrace; payload: RuntimeToolResultPayload }> {
+		this.assertActiveTaskNotCancelled();
 		const startedAt = new Date().toISOString();
 		const depth = input.depth ?? 0;
 		const agentId = input.agentId;
@@ -1704,8 +2163,12 @@ export class AgentRuntimeService {
 		const shouldReportApproval = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
 		const settings = this.getSettings();
 		const gatewayPolicy = this.resolveToolPolicy(name);
+		const shouldRequestToolApproval = shouldReportApproval && gatewayPolicy.effect === "ask";
 		if (shouldReportApproval) {
 			const target = targetPath ? `（${targetPath}）` : "";
+			if (shouldRequestToolApproval) {
+				await this.markActiveTaskWaitingForToolApproval(name, targetPath);
+			}
 			this.reportProgress(input, {
 				phase: "tool_approval",
 				depth,
@@ -1744,10 +2207,21 @@ export class AgentRuntimeService {
 					reason: `Policy allow (source=${gatewayPolicy.source})`,
 				})
 				: (request) => this.approvalService.requestApproval(request),
-			execute: () => this.runToolByName(name, args, agentId, runId),
+			execute: () => {
+				this.assertActiveTaskNotCancelled();
+				return this.runToolByName(name, args, agentId, runId);
+			},
 		});
+		this.assertActiveTaskNotCancelled();
 		const gatewayApproval = gatewayResult.approval;
 		const gatewayApprovalReason = gatewayApproval?.reason ?? gatewayResult.decision.reason;
+		if (shouldRequestToolApproval) {
+			await this.markActiveTaskToolApprovalResolved(
+				name,
+				Boolean(gatewayApproval?.allowed ?? gatewayResult.status !== "denied"),
+				gatewayApprovalReason,
+			);
+		}
 
 		if (shouldReportApproval) {
 			if (gatewayResult.status === "denied") {
@@ -2610,7 +3084,7 @@ export class AgentRuntimeService {
 		}
 		const cwd = this.getStringArg(args, "cwd") || undefined;
 
-		const result = await this.commandExecService.exec(command, cmdArgs, { cwd });
+		const result = await this.commandExecService.exec(command, cmdArgs, { cwd, agentMode: this.activeAgentMode });
 		return {
 			exitCode: result.exitCode,
 			stdout: result.stdout,

@@ -1509,6 +1509,70 @@
 	width: min(720px, 100%);
 }
 
+.friday-agent-task-panel {
+	width: min(720px, 100%);
+	border-left: 4px solid color-mix(in srgb, var(--interactive-accent) 62%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+}
+
+.friday-agent-task-panel.is-failed {
+	border-left-color: color-mix(in srgb, var(--color-red) 72%, var(--interactive-accent));
+	background: color-mix(in srgb, var(--color-red) 8%, var(--background-primary));
+}
+
+.friday-agent-task-panel.is-waiting_for_approval,
+.friday-agent-task-panel.is-waiting_for_user {
+	border-left-color: color-mix(in srgb, var(--color-orange) 72%, var(--interactive-accent));
+	background: color-mix(in srgb, var(--color-orange) 8%, var(--background-primary));
+}
+
+.friday-agent-task-header {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 10px;
+}
+
+.friday-agent-task-title {
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.friday-agent-task-status {
+	flex: 0 0 auto;
+	border-radius: 999px;
+	padding: 2px 8px;
+	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+	font-size: 0.76em;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.friday-agent-task-summary,
+.friday-agent-task-waiting,
+.friday-agent-task-mutations {
+	margin-top: 6px;
+	font-size: 0.86em;
+	line-height: 1.5;
+	color: var(--text-muted);
+}
+
+.friday-agent-task-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 10px;
+}
+
+.friday-agent-task-action {
+	min-height: 30px;
+	padding: 0 10px;
+	border-radius: 8px;
+	font-size: 0.82em;
+	font-weight: 700;
+}
+
 .friday-ai-approval-content {
 	display: flex;
 	flex-direction: column;
@@ -1640,6 +1704,35 @@
 	text-decoration: line-through;
 	border-radius: 2px;
 	padding: 0 2px;
+}
+
+.friday-mutation-review-diff {
+	margin-top: 8px;
+	padding: 7px 9px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-secondary);
+	font-family: var(--font-monospace);
+	font-size: 0.8em;
+	line-height: 1.45;
+	overflow-x: auto;
+}
+
+.friday-mutation-review-diff-line {
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+.friday-mutation-review-diff-line.is-add {
+	color: var(--text-success);
+}
+
+.friday-mutation-review-diff-line.is-remove {
+	color: var(--text-error);
+}
+
+.friday-mutation-review-diff-line.is-omitted {
+	color: var(--text-muted);
 }
 
 /* ========== Exec Output ========== */
