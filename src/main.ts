@@ -10,6 +10,7 @@ import { WIKI_FEATURE_ENABLED } from "./constants/wikiFeature";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
 import { AgentActionService } from "./services/AgentActionService";
+import { LegacyAgentRuntimeAdapter } from "./services/LegacyAgentRuntimeAdapter";
 import { AgentRuntimeService } from "./services/AgentRuntimeService";
 import { AgentService } from "./services/AgentService";
 import { AIService } from "./services/AIService";
@@ -429,7 +430,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				() => this.settings,
 			);
 			await this.agentRuntimeService.restorePendingMutationPlans();
-			this.agentRuntimeFacade = new AgentRuntimeFacade(new AgentKernel(this.agentRuntimeService));
+			this.agentRuntimeFacade = new AgentRuntimeFacade(
+				new AgentKernel(new LegacyAgentRuntimeAdapter(this.agentRuntimeService)),
+			);
 			this.executionOrchestrator = new ExecutionOrchestrator(
 				this.skillCommandService,
 				this.agentRuntimeFacade,

@@ -206,6 +206,8 @@ export interface RuntimeWikiCompileSummary {
 }
 
 export interface RuntimeTurnInput {
+	turnId?: string;
+	conversationId?: string;
 	agentId: string;
 	conversation: ChatMessage[];
 	userPrompt: string;
@@ -341,8 +343,8 @@ export class AgentRuntimeService {
 	}
 
 	async runTurn(input: RuntimeTurnInput): Promise<RuntimeTurnResult> {
-		const turnId = this.createTurnId();
-		const conversationId = this.resolveConversationId(input.agentId);
+		const turnId = input.turnId?.trim() || this.createTurnId();
+		const conversationId = input.conversationId?.trim() || this.resolveConversationId(input.agentId);
 		const depth = input.depth ?? 0;
 		const mode = this.getSettings().agentRuntime.toolCallingMode ?? "auto";
 		this.lastContextSummary = null;
