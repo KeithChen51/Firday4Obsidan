@@ -13,6 +13,7 @@ export const AGENT_TURN_EVENT_TYPES = [
 	"mutation_applied",
 	"mutation_rejected",
 	"context_compacted",
+	"fallback",
 	"task_updated",
 	"turn_completed",
 	"turn_failed",

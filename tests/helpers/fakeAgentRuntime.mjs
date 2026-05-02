@@ -12,6 +12,7 @@ const helperDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(helperDir, "../..");
 const fakeVaultPath = path.join(helperDir, "fakeVault.mjs");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
 const turnReplayReaderPath = path.join(projectRoot, "src/core/runtime/TurnReplayReader.ts");
 const mutationPlanStorePath = path.join(projectRoot, "src/core/mutations/MutationPlanStore.ts");
 const agentTaskStorePath = path.join(projectRoot, "src/core/tasks/AgentTaskStore.ts");
@@ -22,8 +23,9 @@ async function loadHarnessModules() {
 			obsidian: fakeVaultPath,
 		},
 	});
-	const [runtimeModule, fakeVaultModule, replayModule, mutationPlanStoreModule, agentTaskStoreModule] = await Promise.all([
+	const [runtimeModule, kernelModule, fakeVaultModule, replayModule, mutationPlanStoreModule, agentTaskStoreModule] = await Promise.all([
 		jiti.import(runtimePath),
+		jiti.import(kernelPath),
 		jiti.import(fakeVaultPath),
 		jiti.import(turnReplayReaderPath),
 		jiti.import(mutationPlanStorePath),
@@ -31,6 +33,8 @@ async function loadHarnessModules() {
 	]);
 	return {
 		AgentRuntimeService: runtimeModule.AgentRuntimeService,
+		AgentKernel: kernelModule.AgentKernel,
+		AgentRuntimeFacade: kernelModule.AgentRuntimeFacade,
 		TurnReplayReader: replayModule.TurnReplayReader,
 		MutationPlanStore: mutationPlanStoreModule.MutationPlanStore,
 		AgentTaskStore: agentTaskStoreModule.AgentTaskStore,
@@ -143,6 +147,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		return nextRuntime;
 	};
 	let runtime = createRuntime();
+	let runtimeFacade = createRuntimeFacade(modules, runtime);
 
 	let runtimeResult;
 	let failure = null;
@@ -164,7 +169,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		}
 	};
 	try {
-		runtimeResult = await runtime.runTurn({
+		runtimeResult = await runtimeFacade.runTurn({
 			agentId: scenario.agentId ?? "agent",
 			conversation: scenario.conversation ?? [],
 			userPrompt: scenario.userPrompt ?? scenario.name ?? "Run scripted Agent scenario.",
@@ -188,6 +193,15 @@ export async function runAgentRuntimeScenario(scenario) {
 			parseError: failure.message,
 		};
 	}
+	if (!failure && (runtimeResult.status === "failed" || runtimeResult.status === "cancelled")) {
+		failure = {
+			message: runtimeResult.failure?.technicalMessage ??
+				runtimeResult.failure?.userMessage ??
+				runtimeResult.parseError ??
+				runtimeResult.assistantText ??
+				"Agent turn failed.",
+		};
+	}
 
 	for (const action of scenario.afterTurnActions ?? []) {
 		if (action && typeof action === "object" && action.type === "modifyFile") {
@@ -203,6 +217,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		if (action === "reloadPendingMutations") {
 			workbenchStateStore = createFakeWorkbenchStateStore();
 			runtime = createRuntime();
+			runtimeFacade = createRuntimeFacade(modules, runtime);
 			await runtime.restorePendingMutationPlans();
 			continue;
 		}
@@ -316,6 +331,12 @@ export async function runAgentRuntimeScenario(scenario) {
 		approvalRequests: approvalService.requests,
 		agentMode: scenario.agentMode ?? "ask",
 	};
+}
+
+function createRuntimeFacade(modules, runtime) {
+	return new modules.AgentRuntimeFacade(
+		new modules.AgentKernel(runtime.createAgentLoopController()),
+	);
 }
 
 function normalizeModelRequest(request) {

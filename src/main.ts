@@ -10,7 +10,6 @@ import { WIKI_FEATURE_ENABLED } from "./constants/wikiFeature";
 import { resolveLocale, translate } from "./i18n";
 import { I18nParams, LocaleCode } from "./i18n/types";
 import { AgentActionService } from "./services/AgentActionService";
-import { LegacyAgentRuntimeAdapter } from "./services/LegacyAgentRuntimeAdapter";
 import { AgentRuntimeService } from "./services/AgentRuntimeService";
 import { AgentService } from "./services/AgentService";
 import { AIService } from "./services/AIService";
@@ -46,6 +45,7 @@ import { SyncStatusBar } from "./features/sync/SyncStatusBar";
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
+import { AgentLoopController } from "./core/agent-kernel/AgentLoopController";
 import { AgentKernel, AgentRuntimeFacade } from "./core/agent-kernel/AgentKernel";
 import { normalizeLlmSettings, switchLlmMode } from "./core/llm/LlmSettingsResolver";
 import { SecureStorage } from "./platform/obsidian/SecureStorage";
@@ -430,8 +430,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				() => this.settings,
 			);
 			await this.agentRuntimeService.restorePendingMutationPlans();
+			const agentLoopController: AgentLoopController = this.agentRuntimeService.createAgentLoopController();
 			this.agentRuntimeFacade = new AgentRuntimeFacade(
-				new AgentKernel(new LegacyAgentRuntimeAdapter(this.agentRuntimeService)),
+				new AgentKernel(agentLoopController),
 			);
 			this.executionOrchestrator = new ExecutionOrchestrator(
 				this.skillCommandService,

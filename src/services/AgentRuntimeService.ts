@@ -8,6 +8,8 @@ import {
 	Vault,
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
+import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
+import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
 import { AgentActionType } from "../types/action";
 import { FridaySettings } from "../types/settings";
 import { AgentActionService } from "./AgentActionService";
@@ -339,6 +341,12 @@ export class AgentRuntimeService {
 		this.gitConflictCapability = new GitConflictCapability(
 			this.vault,
 			() => this.projectBoundaryService.getActiveProject(),
+		);
+	}
+
+	createAgentLoopController(): AgentLoopController {
+		return createObsidianAgentLoopController(
+			this as unknown as Parameters<typeof createObsidianAgentLoopController>[0],
 		);
 	}
 

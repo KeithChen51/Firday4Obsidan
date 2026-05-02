@@ -177,7 +177,7 @@ function mergeEvents(first: AgentTurnEvent[], second: AgentTurnEvent[]): AgentTu
 	const merged: AgentTurnEvent[] = [];
 	const seen = new Set<string>();
 	for (const event of [...first, ...second]) {
-		const key = `${event.type}:${event.turnId}:${event.at}`;
+		const key = `${event.type}:${event.turnId}:${event.at}:${JSON.stringify(event.payload ?? {})}:${event.status ?? ""}`;
 		if (seen.has(key)) {
 			continue;
 		}

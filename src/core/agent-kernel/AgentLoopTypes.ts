@@ -1,0 +1,22 @@
+import type { AgentExecutionContext } from "./AgentExecutionContext";
+import type { AgentTurnInput, AgentTurnResult, RuntimeProgressEvent } from "./contracts";
+
+export interface AgentLoopProgressPort {
+	report(input: AgentTurnInput, event: RuntimeProgressEvent): void;
+}
+
+export interface AgentLoopLifecyclePort {
+	begin?(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentTurnResult | void>;
+	complete?(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		result: AgentTurnResult,
+	): Promise<AgentTurnResult>;
+	fail?(input: AgentTurnInput, context: AgentExecutionContext, error: unknown): Promise<void>;
+	cleanup?(input: AgentTurnInput, context: AgentExecutionContext): Promise<void>;
+}
+
+export interface AgentLoopFallbackPolicy {
+	isRetryableTransportFailure(message: string): boolean;
+	shouldFallbackToPrompt(message: string): boolean;
+}
