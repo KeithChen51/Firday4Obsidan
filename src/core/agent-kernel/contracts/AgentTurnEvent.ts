@@ -25,6 +25,8 @@ export interface AgentTurnEvent {
 	type: AgentTurnEventType;
 	turnId: string;
 	at: string;
+	taskId?: string;
+	traceId?: string;
 	conversationId?: string;
 	agentId?: string;
 	status?: AgentTurnStatus;

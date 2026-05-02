@@ -99,8 +99,36 @@ export interface RuntimeContextSummary {
 
 export type RuntimeProfileSummary = RuntimeProfile;
 
+export interface AgentExecutionBudget {
+	token?: {
+		used?: number;
+		softLimit?: number;
+		hardLimit?: number;
+		maxTokens?: number;
+	};
+	turn?: {
+		depth?: number;
+		maxDepth?: number;
+		maxTurns?: number;
+		remainingTurns?: number;
+	};
+	tool?: {
+		usedIterations?: number;
+		maxIterations?: number;
+		maxToolResultTokens?: number;
+	};
+	time?: {
+		startedAt?: string;
+		elapsedMs?: number;
+		timeoutMs?: number;
+		deadlineAt?: string;
+	};
+}
+
 export interface AgentTurnInput {
 	turnId?: string;
+	taskId?: string;
+	traceId?: string;
 	conversationId: string;
 	agentId: string;
 	userPrompt: string;
@@ -112,6 +140,7 @@ export interface AgentTurnInput {
 	extraSystemContext?: string;
 	depth?: number;
 	signal?: AbortSignal;
+	budget?: AgentExecutionBudget;
 	metadata?: Record<string, unknown>;
 	mentionContext?: unknown;
 	onProgress?: (event: RuntimeProgressEvent) => void;
@@ -127,12 +156,15 @@ export interface AgentRuntimeFacadeInput extends Omit<AgentTurnInput, "conversat
 
 export interface AgentTurnResult {
 	turnId: string;
+	taskId?: string;
+	traceId?: string;
 	conversationId: string;
 	status: AgentTurnStatus;
 	assistantText: string;
 	events: AgentTurnEvent[];
 	traces: RuntimeToolTrace[];
 	rawFinalReply: string;
+	budget?: AgentExecutionBudget;
 	pendingMutations?: RuntimeMutationPlan[];
 	task?: AgentTask;
 	failure?: AgentFailure;

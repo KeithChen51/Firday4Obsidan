@@ -18,6 +18,14 @@ test("AgentExecutionContext captures stable turn identity and metadata", async (
 		conversationId: "conversation-1",
 		agentId: "agent-1",
 		mode: "ask",
+		taskId: "task-1",
+		traceId: "trace-1",
+		budget: {
+			token: { used: 12, softLimit: 100, hardLimit: 120 },
+			turn: { depth: 1, maxDepth: 4 },
+			tool: { usedIterations: 0, maxIterations: 6 },
+			time: { timeoutMs: 30_000 },
+		},
 		metadata: { source: "test" },
 	});
 
@@ -25,9 +33,40 @@ test("AgentExecutionContext captures stable turn identity and metadata", async (
 	assert.equal(context.conversationId, "conversation-1");
 	assert.equal(context.agentId, "agent-1");
 	assert.equal(context.mode, "ask");
+	assert.equal(context.taskId, "task-1");
+	assert.equal(context.traceId, "trace-1");
+	assert.deepEqual(context.budget, {
+		token: { used: 12, softLimit: 100, hardLimit: 120 },
+		turn: { depth: 1, maxDepth: 4 },
+		tool: { usedIterations: 0, maxIterations: 6 },
+		time: { timeoutMs: 30_000 },
+	});
 	assert.equal(context.metadata.source, "test");
 	assert.ok(context.startedAt);
 	assert.equal(context.signal.aborted, false);
+});
+
+test("AgentExecutionContext defaults trace id and can attach task id when legacy runtime creates one later", async () => {
+	const { AgentExecutionContext } = await jiti.import(contextPath);
+	const context = new AgentExecutionContext({
+		turnId: "turn-with-task-later",
+		conversationId: "conversation-task",
+		agentId: "agent-task",
+		mode: "ask",
+	});
+
+	assert.equal(context.traceId, "turn-with-task-later");
+	assert.equal(context.taskId, undefined);
+
+	context.setTaskId("task-created-later");
+	assert.equal(context.taskId, "task-created-later");
+
+	const emitted = context.emit({
+		type: "task_updated",
+		payload: { status: "running" },
+	});
+	assert.equal(emitted.taskId, "task-created-later");
+	assert.equal(emitted.traceId, "turn-with-task-later");
 });
 
 test("AgentExecutionContext emits normalized events and returns immutable snapshots", async () => {

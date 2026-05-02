@@ -24,15 +24,21 @@ export class AgentKernel {
 		const normalizedInput = normalizeTurnInput(input);
 		const context = new AgentExecutionContext({
 			turnId: normalizedInput.turnId ?? createKernelTurnId(),
+			taskId: normalizedInput.taskId,
+			traceId: normalizedInput.traceId,
 			conversationId: normalizedInput.conversationId,
 			agentId: normalizedInput.agentId,
 			mode: normalizedInput.mode,
 			signal: normalizedInput.signal,
+			budget: normalizedInput.budget,
 			metadata: normalizedInput.metadata,
 		});
 		const kernelInput: AgentTurnInput = {
 			...normalizedInput,
 			turnId: context.turnId,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			budget: context.budget,
 		};
 		context.emit({
 			type: "turn_started",
@@ -46,17 +52,21 @@ export class AgentKernel {
 			context.emit({ type: "turn_cancelled", status: "cancelled", failure });
 			return {
 				turnId: context.turnId,
+				taskId: context.taskId,
+				traceId: context.traceId,
 				conversationId: context.conversationId,
 				status: "cancelled",
 				assistantText: failure.userMessage,
 				events: context.snapshotEvents(),
 				traces: [],
 				rawFinalReply: "",
+				budget: context.budget,
 				failure,
 			};
 		}
 		try {
 			const result = await this.executor.execute(kernelInput, context);
+			context.setTaskId(result.taskId ?? result.task?.id);
 			const status = normalizeTurnStatus(result, context);
 			const failure = status === "failed" || status === "cancelled"
 				? result.failure ?? this.failureClassifier.classify(undefined, { ...result, status })
@@ -77,12 +87,15 @@ export class AgentKernel {
 			});
 			return {
 				turnId: context.turnId,
+				taskId: context.taskId,
+				traceId: context.traceId,
 				conversationId: context.conversationId,
 				status,
 				assistantText: failure.userMessage,
 				events: context.snapshotEvents(),
 				traces: [],
 				rawFinalReply: "",
+				budget: context.budget,
 				failure,
 				raw: error,
 			};
@@ -105,12 +118,19 @@ function normalizeTurnInput(input: AgentTurnInput | AgentRuntimeFacadeInput): Ag
 	return {
 		...input,
 		agentId,
+		taskId: normalizeOptionalString(input.taskId),
+		traceId: normalizeOptionalString(input.traceId),
 		conversationId: input.conversationId?.trim() || agentId,
 		conversation: input.conversation ?? [],
 		userPrompt: input.userPrompt ?? "",
 		mode,
 		metadata: { ...(input.metadata ?? {}) },
 	};
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+	const normalized = value?.trim();
+	return normalized || undefined;
 }
 
 function normalizeTurnStatus(result: AgentTurnResult, context: AgentExecutionContext): AgentTurnStatus {
@@ -130,12 +150,15 @@ function normalizeTurnResult(
 	return {
 		...result,
 		turnId: result.turnId || context.turnId,
+		taskId: result.taskId ?? result.task?.id ?? context.taskId,
+		traceId: result.traceId ?? context.traceId,
 		conversationId: result.conversationId || input.conversationId,
 		status,
 		assistantText: result.assistantText ?? "",
 		events: mergeEvents(result.events ?? [], context.snapshotEvents()),
 		traces: result.traces ?? [],
 		rawFinalReply: result.rawFinalReply ?? result.assistantText ?? "",
+		budget: result.budget ?? context.budget,
 		...(failure ? { failure } : {}),
 	};
 }

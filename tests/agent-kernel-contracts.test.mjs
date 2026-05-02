@@ -13,6 +13,8 @@ const jiti = createJiti(import.meta.url);
 const kernelDir = path.join(projectRoot, "src/core/agent-kernel");
 const contractsDir = path.join(kernelDir, "contracts");
 const contractsIndexPath = path.join(contractsDir, "index.ts");
+const agentTurnPath = path.join(contractsDir, "AgentTurn.ts");
+const agentTurnEventPath = path.join(contractsDir, "AgentTurnEvent.ts");
 const classifierPath = path.join(kernelDir, "AgentFailureClassifier.ts");
 
 const requiredContractFiles = [
@@ -69,6 +71,25 @@ test("Agent Kernel contracts export stable statuses, event types, and failure ca
 		"max_iterations",
 		"unknown",
 	]);
+});
+
+test("Agent Kernel turn contracts expose task trace and budget as first-class fields", () => {
+	const agentTurnSource = fs.readFileSync(agentTurnPath, "utf8");
+	const eventSource = fs.readFileSync(agentTurnEventPath, "utf8");
+
+	assert.match(agentTurnSource, /export interface AgentExecutionBudget/);
+	assert.match(agentTurnSource, /token\?:\s*\{[\s\S]*hardLimit\?:\s*number;/);
+	assert.match(agentTurnSource, /turn\?:\s*\{[\s\S]*maxDepth\?:\s*number;/);
+	assert.match(agentTurnSource, /tool\?:\s*\{[\s\S]*maxIterations\?:\s*number;/);
+	assert.match(agentTurnSource, /time\?:\s*\{[\s\S]*timeoutMs\?:\s*number;/);
+	assert.match(agentTurnSource, /export interface AgentTurnInput[\s\S]*\n\ttaskId\?:\s*string;/);
+	assert.match(agentTurnSource, /export interface AgentTurnInput[\s\S]*\n\ttraceId\?:\s*string;/);
+	assert.match(agentTurnSource, /export interface AgentTurnInput[\s\S]*\n\tbudget\?:\s*AgentExecutionBudget;/);
+	assert.match(agentTurnSource, /export interface AgentTurnResult[\s\S]*\n\ttaskId\?:\s*string;/);
+	assert.match(agentTurnSource, /export interface AgentTurnResult[\s\S]*\n\ttraceId\?:\s*string;/);
+	assert.match(agentTurnSource, /export interface AgentTurnResult[\s\S]*\n\tbudget\?:\s*AgentExecutionBudget;/);
+	assert.match(eventSource, /taskId\?:\s*string;/);
+	assert.match(eventSource, /traceId\?:\s*string;/);
 });
 
 test("AgentFailureClassifier maps legacy failure signals into kernel taxonomy", async () => {

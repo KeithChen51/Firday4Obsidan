@@ -27,12 +27,15 @@ export class LegacyAgentRuntimeAdapter implements RuntimeTurnExecutorPort {
 			const status: AgentTurnStatus = failure.category === "cancelled" ? "cancelled" : "failed";
 			return {
 				turnId: context.turnId,
+				taskId: context.taskId,
+				traceId: context.traceId,
 				conversationId: input.conversationId,
 				status,
 				assistantText: failure.userMessage,
 				events: context.snapshotEvents(),
 				traces: [],
 				rawFinalReply: "",
+				budget: context.budget,
 				failure,
 				parseError: failure.technicalMessage,
 				raw: error,
@@ -67,6 +70,7 @@ export class LegacyAgentRuntimeAdapter implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 	): AgentTurnResult {
 		const status = this.resolveStatus(result, context);
+		context.setTaskId(result.task?.id);
 		const failure = status === "failed" || status === "cancelled"
 			? this.failureClassifier.classify(undefined, {
 				...result,
@@ -78,12 +82,15 @@ export class LegacyAgentRuntimeAdapter implements RuntimeTurnExecutorPort {
 		return {
 			...result,
 			turnId: result.turnId ?? context.turnId,
+			taskId: result.task?.id ?? context.taskId,
+			traceId: context.traceId,
 			conversationId: input.conversationId,
 			status,
 			assistantText: result.assistantText ?? "",
 			events: context.snapshotEvents(),
 			traces: result.traces ?? [],
 			rawFinalReply: result.rawFinalReply ?? result.assistantText ?? "",
+			budget: context.budget,
 			pendingMutations: result.pendingMutations,
 			task: result.task,
 			stepTraces: result.stepTraces,
