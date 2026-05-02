@@ -41,6 +41,13 @@ function normalizeLineEndings(value) {
 	return value.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 }
 
+function writeFileIfChanged(filePath, content) {
+	if (fs.existsSync(filePath) && fs.readFileSync(filePath, "utf8") === content) {
+		return;
+	}
+	fs.writeFileSync(filePath, content, "utf8");
+}
+
 function buildStudioChangelog(raw) {
 	const normalized = normalizeLineEndings(raw).trim();
 	if (!normalized) {
@@ -127,4 +134,4 @@ const entries = studioSnapshot.map((entry) => {
 
 const body = `export const STUDIO_CONTENT_SNAPSHOT: readonly StudioSnapshotEntry[] = [\n${entries}\n];\n`;
 
-fs.writeFileSync(outputPath, `${header}${body}`, "utf8");
+writeFileIfChanged(outputPath, `${header}${body}`);
