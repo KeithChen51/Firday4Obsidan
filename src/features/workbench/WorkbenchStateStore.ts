@@ -23,6 +23,7 @@ export interface EditPlanRecord {
 	originConversationId?: string;
 	originTurnId?: string;
 	originTaskId?: string;
+	originTraceId?: string;
 	toolCallId?: string;
 	tool: string;
 	recordedAt: string;

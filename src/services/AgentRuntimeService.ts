@@ -9,7 +9,10 @@ import {
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
+import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
+import type { AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
 import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
+import { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
 import { AgentActionType } from "../types/action";
 import { FridaySettings } from "../types/settings";
 import { AgentActionService } from "./AgentActionService";
@@ -268,8 +271,10 @@ export class AgentRuntimeService {
 	private readonly mutationApplier: MutationApplier;
 	private readonly mutationPlanStore: MutationPlanStore;
 	private readonly agentTaskStore: AgentTaskStore;
+	private readonly agentStateAdapter: ObsidianAgentStateAdapter;
 	private activeTurnId = "";
 	private activeConversationId = "default";
+	private activeTraceId = "";
 	private activeTaskId: string | undefined;
 	private activeTaskAbortController: AbortController | undefined;
 	private readonly taskAbortControllers = new Map<string, AbortController>();
@@ -277,6 +282,7 @@ export class AgentRuntimeService {
 	private activeTurnStateMachine: TurnStateMachine | null = null;
 	private activeRuntimeProfile: RuntimeProfile = detectRuntimeProfile();
 	private activeAgentMode: AgentMode = "ask";
+	private kernelStateOwnsTaskLifecycle = false;
 	private lastContextSummary: RuntimeContextSummary | null = null;
 
 	constructor(
@@ -332,6 +338,13 @@ export class AgentRuntimeService {
 				validatePath: (targetPath) => this.validateMutationApplyPath(targetPath),
 			},
 		);
+		this.agentStateAdapter = new ObsidianAgentStateAdapter({
+			taskStore: this.agentTaskStore,
+			eventLog: this.turnEventLog,
+			mutationStore: this.mutationPlanStore,
+			workbenchStateStore: this.workbenchStateStore,
+			runTurn: async (input) => this.runKernelTurn(input as RuntimeTurnInput) as unknown as KernelAgentTurnResult,
+		});
 		this.wikiCompileCapability = new WikiCompileCapability(this.compileWikiForActiveProject);
 		this.wikiLookupCapability = new WikiLookupCapability(
 			this.vault,
@@ -348,6 +361,15 @@ export class AgentRuntimeService {
 		return createObsidianAgentLoopController(
 			this as unknown as Parameters<typeof createObsidianAgentLoopController>[0],
 		);
+	}
+
+	getAgentStateAdapter(): ObsidianAgentStateAdapter {
+		return this.agentStateAdapter;
+	}
+
+	private runKernelTurn(input: RuntimeTurnInput): Promise<RuntimeTurnResult> {
+		const facade = new AgentRuntimeFacade(new AgentKernel(this.createAgentLoopController()));
+		return facade.runTurn(input);
 	}
 
 	async runTurn(input: RuntimeTurnInput): Promise<RuntimeTurnResult> {
@@ -771,6 +793,9 @@ export class AgentRuntimeService {
 		tool: string,
 		targetPath: string,
 	): Promise<void> {
+		if (this.kernelStateOwnsTaskLifecycle) {
+			return;
+		}
 		if (!this.activeTaskId) {
 			return;
 		}
@@ -796,6 +821,9 @@ export class AgentRuntimeService {
 		approved: boolean,
 		reason: string,
 	): Promise<void> {
+		if (this.kernelStateOwnsTaskLifecycle) {
+			return;
+		}
 		if (!this.activeTaskId) {
 			return;
 		}
@@ -1423,30 +1451,17 @@ export class AgentRuntimeService {
 
 	async cancelAgentTask(taskId: string, reason = "User cancelled task."): Promise<AgentTask> {
 		this.taskAbortControllers.get(taskId)?.abort();
-		const task = await this.agentTaskStore.cancelTask(taskId, {
-			summary: reason,
-			failureReason: reason,
-		});
+		const task = await this.agentStateAdapter.resumeController.cancelTask(taskId, reason);
 		await this.recordTaskLifecycleEvent(task);
 		return task;
 	}
 
 	async retryAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
-		const original = await this.getRequiredAgentTask(taskId);
-		const input = this.buildResumeTurnInput(original, "retry", options);
-		return this.runTurn({
-			...input,
-			retryOfTaskId: original.id,
-		});
+		return (await this.agentStateAdapter.resumeController.retryTask(taskId, options)).result;
 	}
 
 	async continueAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
-		const original = await this.getRequiredAgentTask(taskId);
-		const input = this.buildResumeTurnInput(original, "continue", options);
-		return this.runTurn({
-			...input,
-			continueFromTaskId: original.id,
-		});
+		return (await this.agentStateAdapter.resumeController.continueTask(taskId, options)).result;
 	}
 
 	private async getRequiredAgentTask(taskId: string): Promise<AgentTask> {
@@ -2756,6 +2771,7 @@ export class AgentRuntimeService {
 			conversationId: this.activeConversationId,
 			turnId: this.activeTurnId,
 			taskId: this.activeTaskId,
+			traceId: this.activeTraceId || undefined,
 			toolCallId: input.toolCallId,
 			operation,
 			targetPath: input.path,
@@ -2770,6 +2786,7 @@ export class AgentRuntimeService {
 			originConversationId: plan.conversationId,
 			originTurnId: plan.turnId,
 			originTaskId: plan.taskId,
+			originTraceId: plan.traceId,
 			toolCallId: plan.toolCallId,
 			tool: input.tool,
 			recordedAt: plan.createdAt,
@@ -2838,6 +2855,7 @@ export class AgentRuntimeService {
 			...(record.originConversationId ? { conversationId: record.originConversationId } : {}),
 			...(record.originTurnId ? { turnId: record.originTurnId } : {}),
 			...(record.originTaskId ? { taskId: record.originTaskId } : {}),
+			...(record.originTraceId ? { traceId: record.originTraceId } : {}),
 			...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
 			operation: this.resolveMutationOperation(record.tool),
 			targetPath: firstItem?.path ?? "",
@@ -2858,6 +2876,7 @@ export class AgentRuntimeService {
 			originConversationId: plan.conversationId,
 			originTurnId: plan.turnId,
 			originTaskId: plan.taskId,
+			originTraceId: plan.traceId,
 			toolCallId: plan.toolCallId,
 			tool: plan.operation,
 			recordedAt: plan.createdAt,
@@ -2955,6 +2974,7 @@ export class AgentRuntimeService {
 			id: record.id,
 			...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
 			...(record.originTaskId ? { taskId: record.originTaskId } : {}),
+			...(record.originTraceId ? { traceId: record.originTraceId } : {}),
 			tool: record.tool,
 			status,
 			operation: this.resolveMutationOperation(record.tool),

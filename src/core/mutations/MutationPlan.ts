@@ -42,6 +42,7 @@ export interface MutationPlan {
 	conversationId?: string;
 	turnId?: string;
 	taskId?: string;
+	traceId?: string;
 	toolCallId?: string;
 	operation: MutationOperation;
 	targetPath: string;
@@ -60,6 +61,7 @@ export interface CreateMutationPlanInput {
 	conversationId?: string;
 	turnId?: string;
 	taskId?: string;
+	traceId?: string;
 	toolCallId?: string;
 	operation: MutationOperation;
 	targetPath: string;
@@ -82,6 +84,7 @@ export function createMutationPlan(input: CreateMutationPlanInput): MutationPlan
 		...(input.conversationId ? { conversationId: input.conversationId } : {}),
 		...(input.turnId ? { turnId: input.turnId } : {}),
 		...(input.taskId ? { taskId: input.taskId } : {}),
+		...(input.traceId ? { traceId: input.traceId } : {}),
 		...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
 		operation: input.operation,
 		targetPath: input.targetPath,

@@ -359,6 +359,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				status: result.trace.status,
 				summary: result.trace.summary,
 				targetPath: result.trace.targetPath,
+				error: result.trace.error,
+				failureClass: result.trace.failureClass,
+				recoverable: result.trace.failureClass === "transport_unstable",
+				retryable: result.trace.failureClass === "transport_unstable",
 			},
 		});
 		this.report(input, {

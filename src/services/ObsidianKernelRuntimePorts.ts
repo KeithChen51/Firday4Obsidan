@@ -16,6 +16,8 @@ import type { ToolDefinition } from "../types/tools";
 import type { ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import type { ExecutionGate } from "../core/execution/ExecutionGate";
 import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
+import type { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
+import type { TurnEventInput } from "../core/runtime/TurnEventLog";
 
 interface ObsidianKernelRuntimeHost {
 	aiService: AIServiceModelDriver;
@@ -23,11 +25,13 @@ interface ObsidianKernelRuntimeHost {
 	activeTurnId: string;
 	activeConversationId: string;
 	activeTaskId: string | undefined;
+	activeTraceId: string;
 	activeTaskAbortController: AbortController | undefined;
 	activeTurnSideEvents: unknown[];
 	activeTurnStateMachine: TurnStateMachine | null;
 	activeRuntimeProfile: RuntimeProfile;
 	activeAgentMode: AgentMode;
+	kernelStateOwnsTaskLifecycle: boolean;
 	taskAbortControllers: Map<string, AbortController>;
 	toolGovernor: ToolGovernor;
 	executionGate: ExecutionGate;
@@ -55,23 +59,17 @@ interface ObsidianKernelRuntimeHost {
 	buildRuntimeHistory(conversation: ChatMessage[]): ChatMessage[];
 	buildSystemPrompt(input: RuntimeTurnInput, depth: number): Promise<string>;
 	reportProgress(input: RuntimeTurnInput, event: RuntimeProgressEvent): void;
-	startAgentTaskForTurn(input: RuntimeTurnInput, turnId: string, conversationId: string): Promise<{ id: string }>;
 	assertActiveTaskNotCancelled(): void;
 	buildRuntimeTurnInvocation(input: RuntimeTurnInput): ResolvedInvocation;
-	finalizeTurnResult(turnId: string, result: RuntimeTurnResult, userPrompt: string): Promise<RuntimeTurnResult>;
-	markActiveTaskFailure(message: string): Promise<void>;
-	persistTurnEvents(
-		turnId: string,
-		conversationId: string,
-		stepTraces: unknown[],
-		options: { failureMessage?: string; taskId?: string },
-	): Promise<void>;
 	truncateText(text: string, maxLength: number): string;
+	getAgentStateAdapter(): ObsidianAgentStateAdapter;
 }
 
 export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntimeHost): AgentLoopController {
 	let contextAbortListener: (() => void) | undefined;
 	let activeAbortListener: (() => void) | undefined;
+	let activeContext: AgentExecutionContext | undefined;
+	const stateAdapter = runtime.getAgentStateAdapter();
 	const modelDriver = new AIServiceModelDriverAdapter(runtime.aiService);
 	const toolExecution = new ToolExecutionAdapter({
 		listNativeTools: async ({ input }) => {
@@ -83,10 +81,24 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 		executeTool: async ({ input, step, tool }) => {
 			const runtimeInput = toRuntimeTurnInput(input);
 			const allowedToolSet = runtime.buildAllowedToolSet(runtimeInput.allowedTools);
+			if (activeContext && shouldTrackHumanApproval(tool.name)) {
+				await stateAdapter.taskManager.requestApproval(activeContext, {
+					kind: "tool",
+					tool: tool.name,
+					summary: `Approve ${tool.name}.`,
+				});
+			}
 			const result = await runtime.executeTool(step, runtimeInput, {
 				name: tool.name,
 				args: tool.args,
 			}, allowedToolSet);
+			if (activeContext && shouldTrackHumanApproval(tool.name)) {
+				await stateAdapter.taskManager.resolveApproval(activeContext, {
+					tool: tool.name,
+					approved: result.trace.status !== "denied",
+					reason: result.trace.approvalReason,
+				});
+			}
 			return {
 				...result,
 				modelResultText: runtime.formatToolResultForModel(result.payload),
@@ -131,7 +143,11 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 		modelDriver,
 		toolExecution,
 		progress: {
-			report: (input, event) => runtime.reportProgress(toRuntimeTurnInput(input), event),
+			report: (input, event) => {
+				runtime.reportProgress(toRuntimeTurnInput(input), activeContext?.taskId && !event.taskId
+					? { ...event, taskId: activeContext.taskId }
+					: event);
+			},
 		},
 		fallbackPolicy: {
 			isRetryableTransportFailure: (message) => runtime.toolGovernor.isRetryableTransportFailure(message),
@@ -140,15 +156,18 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 		lifecycle: {
 			begin: async (input, context) => {
 				const runtimeInput = toRuntimeTurnInput(input);
+				activeContext = context;
 				runtime.lastContextSummary = null;
 				runtime.activeTurnId = context.turnId;
 				runtime.activeConversationId = context.conversationId;
+				runtime.activeTraceId = context.traceId;
 				runtime.activeTaskId = undefined;
 				runtime.activeTaskAbortController = new AbortController();
 				runtime.activeTurnSideEvents = [];
 				runtime.activeTurnStateMachine = new TurnStateMachine(context.turnId);
 				runtime.activeRuntimeProfile = detectRuntimeProfile();
 				runtime.activeAgentMode = runtime.resolveAgentMode(runtimeInput);
+				runtime.kernelStateOwnsTaskLifecycle = true;
 				contextAbortListener = () => runtime.activeTaskAbortController?.abort(context.getCancelReason());
 				activeAbortListener = () => context.cancel(runtime.activeTaskAbortController?.signal.reason);
 				if (context.signal.aborted) {
@@ -157,8 +176,10 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 					context.signal.addEventListener("abort", contextAbortListener, { once: true });
 				}
 				runtime.activeTaskAbortController.signal.addEventListener("abort", activeAbortListener, { once: true });
-				const activeTask = await runtime.startAgentTaskForTurn(runtimeInput, context.turnId, context.conversationId);
+				const activeTask = await stateAdapter.beginTurn(input, context);
 				context.setTaskId(activeTask.id);
+				// Compatibility bridge for legacy Obsidian tool IO helpers; task transitions are kernel-owned above.
+				runtime.activeTaskId = activeTask.id;
 				if (runtime.activeTaskAbortController) {
 					runtime.taskAbortControllers.set(activeTask.id, runtime.activeTaskAbortController);
 				}
@@ -175,22 +196,34 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 						depth: runtimeInput.depth ?? 0,
 						message: `Runtime blocked: ${gateDecision.reason}`,
 					});
-					return withKernelStatus(await runtime.finalizeTurnResult(
-						context.turnId,
-						{
+					return withKernelStatus(await stateAdapter.completeTurn(input, context, {
 							assistantText: gateDecision.reason,
 							traces: [],
 							rawFinalReply: gateDecision.reason,
 							parseError: gateDecision.reason,
-						},
-						runtimeInput.userPrompt,
-					), context);
+							turnId: context.turnId,
+							taskId: context.taskId,
+							traceId: context.traceId,
+							conversationId: context.conversationId,
+							status: "failed",
+							events: context.snapshotEvents(),
+							budget: context.budget,
+						}, {
+							stepTraces: runtime.activeTurnStateMachine?.snapshot() ?? [],
+							sideEvents: filterKernelCompatibleSideEvents(runtime.activeTurnSideEvents),
+							runtimeProfile: runtime.activeRuntimeProfile,
+							contextSummary: runtime.lastContextSummary ?? undefined,
+						}), context);
 				}
 				return undefined;
 			},
 			complete: async (input, context, result) => {
-				const runtimeInput = toRuntimeTurnInput(input);
-				const finalized = await runtime.finalizeTurnResult(context.turnId, result, runtimeInput.userPrompt);
+				const finalized = await stateAdapter.completeTurn(input, context, result, {
+					stepTraces: runtime.activeTurnStateMachine?.snapshot() ?? [],
+					sideEvents: filterKernelCompatibleSideEvents(runtime.activeTurnSideEvents),
+					runtimeProfile: runtime.activeRuntimeProfile,
+					contextSummary: runtime.lastContextSummary ?? undefined,
+				});
 				return withKernelStatus(finalized, context);
 			},
 			fail: async (input, context, error) => {
@@ -201,13 +234,10 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 					depth: runtimeInput.depth ?? 0,
 					message: `Runtime failed: ${runtime.truncateText(message, 220)}`,
 				});
-				await runtime.markActiveTaskFailure(message);
-				await runtime.persistTurnEvents(
-					context.turnId,
-					context.conversationId,
-					runtime.activeTurnStateMachine?.snapshot() ?? [],
-					{ failureMessage: message, taskId: runtime.activeTaskId },
-				);
+				await stateAdapter.failTurn(error, context, {
+					stepTraces: runtime.activeTurnStateMachine?.snapshot() ?? [],
+					sideEvents: filterKernelCompatibleSideEvents(runtime.activeTurnSideEvents),
+				});
 			},
 			cleanup: async (_input, context) => {
 				if (contextAbortListener) {
@@ -218,6 +248,7 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 				}
 				runtime.activeTurnId = "";
 				runtime.activeConversationId = "default";
+				runtime.activeTraceId = "";
 				if (runtime.activeTaskId) {
 					runtime.taskAbortControllers.delete(runtime.activeTaskId);
 				}
@@ -226,8 +257,24 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 				runtime.activeTurnSideEvents = [];
 				runtime.activeTurnStateMachine = null;
 				runtime.activeAgentMode = "ask";
+				runtime.kernelStateOwnsTaskLifecycle = false;
+				activeContext = undefined;
 			},
 		},
+	});
+}
+
+function shouldTrackHumanApproval(toolName: string): boolean {
+	return !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(toolName.trim().toLowerCase());
+}
+
+function filterKernelCompatibleSideEvents(events: unknown[]): TurnEventInput[] {
+	return events.filter((event): event is TurnEventInput => {
+		if (!event || typeof event !== "object") {
+			return false;
+		}
+		const type = (event as { type?: unknown }).type;
+		return typeof type === "string" && type.startsWith("mutation_");
 	});
 }
 
