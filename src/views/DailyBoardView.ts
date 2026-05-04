@@ -33,6 +33,7 @@ import { ConversationSession } from "../services/ConversationService";
 import type { AgentTask, AgentTaskStatus as CoreAgentTaskStatus } from "../core/tasks/AgentTask";
 import type { AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
 import { LiveTrajectoryStore } from "../core/trajectory/LiveTrajectoryStore";
+import { projectReplaySummary } from "../core/trajectory/AgentTrajectoryProjector";
 import {
 	RuntimeProgressEvent,
 	RuntimeTurnResult,
@@ -3063,6 +3064,36 @@ export class DailyBoardView extends ItemView {
 		});
 	}
 
+	private async buildCompletedTrajectorySnapshot(result: RuntimeTurnResult): Promise<AgentTrajectorySnapshot | null> {
+		const resultIdentity = result as RuntimeTurnResult & {
+			conversationId?: string;
+			taskId?: string;
+			traceId?: string;
+			agentId?: string;
+		};
+		const turnId = resultIdentity.turnId?.trim();
+		if (!turnId) {
+			return this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+		}
+		const conversationId = resultIdentity.conversationId?.trim() ||
+			this.plugin.getActiveSoul()?.id ||
+			this.aiSessionId ||
+			"default";
+		try {
+			const summary = await this.plugin.agentRuntimeService.readTurnReplaySummary({
+				conversationId,
+				turnId,
+				taskId: resultIdentity.taskId ?? result.task?.id,
+			});
+			if (summary.totalEvents > 0) {
+				return projectReplaySummary(summary);
+			}
+		} catch (error) {
+			console.warn("[Friday] Failed to rebuild trajectory replay summary:", error);
+		}
+		return this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+	}
+
 	private async submitAiPrompt(snapshotOverride?: MentionComposerSnapshot): Promise<void> {
 		const draftSnapshot = snapshotOverride ? this.cloneComposerSnapshot(snapshotOverride) : this.getComposerSnapshot();
 		const draftDocument = this.getStructuredPromptDocument(draftSnapshot);
@@ -3198,7 +3229,7 @@ export class DailyBoardView extends ItemView {
 			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(normalizedAssistantText);
 			}
-			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+			this.aiLastCompletedTrajectorySnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
 
 			this.aiConversation.push({
 				role: "assistant",
@@ -3281,7 +3312,7 @@ export class DailyBoardView extends ItemView {
 			if (this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(reply);
 			}
-			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+			this.aiLastCompletedTrajectorySnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
 			this.aiConversation.push({ role: "assistant", content: reply });
 			try {
 				await this.persistConversation();

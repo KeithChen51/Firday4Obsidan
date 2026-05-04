@@ -44,6 +44,7 @@ import {
 	type AgentMode,
 } from "../core/tools/ToolRegistry";
 import { TurnEventLog, type TurnEventInput } from "../core/runtime/TurnEventLog";
+import { TurnReplayReader, type TurnReplaySummary } from "../core/runtime/TurnReplayReader";
 import {
 	createMutationPlan,
 	hashMutationContent,
@@ -1454,6 +1455,13 @@ export class AgentRuntimeService {
 
 	async getAgentTask(taskId: string): Promise<AgentTask | undefined> {
 		return this.agentTaskStore.get(taskId);
+	}
+
+	async readTurnReplaySummary(ref: { conversationId: string; turnId: string; taskId?: string }): Promise<TurnReplaySummary> {
+		const reader = new TurnReplayReader({
+			resolveTurnPath: ({ conversationId, turnId }) => this.runtimeStateStore.getTurnEventLogPath(conversationId, turnId),
+		});
+		return reader.readSummary(ref);
 	}
 
 	async cancelAgentTask(taskId: string, reason = "User cancelled task."): Promise<AgentTask> {

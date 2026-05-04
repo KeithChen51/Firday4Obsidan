@@ -313,3 +313,22 @@ test("TurnReplayReader summarizes task lifecycle timeline", async () => {
 		{ taskId: "task-1", event: "cancelled", status: "cancelled", summary: "User cancelled.", reason: "" },
 	]);
 });
+
+test("TurnReplayReader preserves trace and agent identity from replay payloads", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-identity-"));
+	const resolvePath = resolveTurnPath(root);
+	const ref = { conversationId: "agent", turnId: "turn-identity", taskId: "task-identity" };
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { traceId: "trace-identity", agentId: "soul-1" } },
+		{ type: "model_requested", payload: { step: 1, traceId: "trace-identity" } },
+		{ type: "turn_completed", payload: { status: "completed", traceId: "trace-identity" } },
+	]);
+
+	const summary = await reader.readSummary(ref);
+	assert.equal(summary.traceId, "trace-identity");
+	assert.equal(summary.agentId, "soul-1");
+});

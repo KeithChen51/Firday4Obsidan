@@ -12,6 +12,8 @@ export interface TurnReplayValidation {
 }
 
 export interface TurnReplaySummary extends TurnEventRef {
+	traceId?: string;
+	agentId?: string;
 	totalEvents: number;
 	eventTypes: string[];
 	status: "completed" | "failed" | "cancelled" | "safe_stopped" | "open";
@@ -144,6 +146,8 @@ export class TurnReplayReader {
 			conversationId: first?.conversationId ?? "",
 			turnId: first?.turnId ?? "",
 			taskId: first?.taskId,
+			traceId: this.findPayloadText(events, "traceId") || undefined,
+			agentId: this.findPayloadText(events, "agentId") || undefined,
 			totalEvents: events.length,
 			eventTypes: events.map((event) => event.type),
 			status,
@@ -322,6 +326,16 @@ export class TurnReplayReader {
 	private getPayloadText(event: TurnEventRecord | undefined, key: string): string {
 		const value = event?.payload?.[key];
 		return typeof value === "string" ? value : "";
+	}
+
+	private findPayloadText(events: TurnEventRecord[], key: string): string {
+		for (const event of events) {
+			const value = this.getPayloadText(event, key);
+			if (value) {
+				return value;
+			}
+		}
+		return "";
 	}
 
 	private getPayloadNumber(event: TurnEventRecord, key: string): number {

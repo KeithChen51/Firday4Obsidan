@@ -37,6 +37,17 @@ test("DailyBoard live process UI is wired to trajectory snapshots instead of run
 	assert.doesNotMatch(progressBlock, /buildRuntimeExecutionState/);
 });
 
+test("DailyBoard completed process disclosure is rebuilt from replay summary when available", () => {
+	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
+
+	assert.match(source, /projectReplaySummary/);
+	assert.match(source, /readTurnReplaySummary/);
+	assert.match(source, /private async buildCompletedTrajectorySnapshot\(/);
+	assert.match(source, /const summary = await this\.plugin\.agentRuntimeService\.readTurnReplaySummary/);
+	assert.match(source, /return projectReplaySummary\(summary\)/);
+	assert.match(source, /this\.aiLastCompletedTrajectorySnapshot = await this\.buildCompletedTrajectorySnapshot\(runtimeResult\)/);
+});
+
 test("renderAgentTrajectoryCard collapsed view shows headline and last three trajectory items", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
