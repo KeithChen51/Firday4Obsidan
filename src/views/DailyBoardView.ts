@@ -3192,6 +3192,7 @@ export class DailyBoardView extends ItemView {
 			let allowedModels: string[] | undefined;
 			let assistantText = "";
 			let runtimeTask: AgentTask | undefined;
+			let runtimeResult: RuntimeTurnResult | null = null;
 			let shouldStreamFinalText = false;
 			if (resolution.type === "catalog") {
 				const skills = await this.plugin.skillCommandService.listSkills();
@@ -3202,7 +3203,7 @@ export class DailyBoardView extends ItemView {
 				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
 				if (!assistantText) {
-					const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
+					runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeSoul.id,
 						conversation: history,
 						modelOverride,
@@ -3229,7 +3230,9 @@ export class DailyBoardView extends ItemView {
 			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(normalizedAssistantText);
 			}
-			this.aiLastCompletedTrajectorySnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
+			this.aiLastCompletedTrajectorySnapshot = runtimeResult
+				? await this.buildCompletedTrajectorySnapshot(runtimeResult)
+				: null;
 
 			this.aiConversation.push({
 				role: "assistant",
