@@ -228,7 +228,7 @@ test("projector derives trajectory actions from running failed approval mutation
 		{ phase: "tool_approval", depth: 0, step: 1, tool: "write", targetPath: "Notes/today.md", message: "Approve write." },
 	]);
 	assert.deepEqual(approval.actions.map((action) => action.id), ["approve", "reject"]);
-	assert.ok(approval.actions.every((action) => action.enabled && action.targetId));
+	assert.ok(approval.actions.every((action) => !action.enabled && action.reason));
 
 	const mutation = projectReplaySummary(makeReplaySummary({
 		status: "open",

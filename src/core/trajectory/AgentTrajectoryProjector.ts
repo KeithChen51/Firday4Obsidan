@@ -500,13 +500,15 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 			{
 				id: "approve",
 				label: "Approve",
-				enabled: true,
+				enabled: false,
+				reason: "Use the approval controls in the conversation.",
 				targetId: approvalTarget,
 			},
 			{
 				id: "reject",
 				label: "Reject",
-				enabled: true,
+				enabled: false,
+				reason: "Use the approval controls in the conversation.",
 				targetId: approvalTarget,
 			},
 		);

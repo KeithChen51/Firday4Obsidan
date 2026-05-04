@@ -23,6 +23,8 @@ test("DailyBoard live process UI is wired to trajectory snapshots instead of run
 	assert.match(source, /LiveTrajectoryStore/);
 	assert.match(source, /AgentTrajectorySnapshot/);
 	assert.match(source, /renderAgentTrajectoryCard/);
+	assert.match(source, /onAction: \(action\) => this\.handleTrajectoryAction\(snapshot, action\)/);
+	assert.match(source, /private handleTrajectoryAction\(\s*snapshot: AgentTrajectorySnapshot,\s*action: AgentTrajectoryAction,/);
 	assert.match(source, /private aiRuntimeTrajectoryStore = new LiveTrajectoryStore\(\)/);
 	assert.match(source, /private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot \| null = null/);
 	assert.match(source, /private aiLastCompletedTrajectorySnapshot: AgentTrajectorySnapshot \| null = null/);

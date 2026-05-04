@@ -31,7 +31,7 @@ import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/o
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
 import type { AgentTask, AgentTaskStatus as CoreAgentTaskStatus } from "../core/tasks/AgentTask";
-import type { AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
+import type { AgentTrajectoryAction, AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
 import { LiveTrajectoryStore } from "../core/trajectory/LiveTrajectoryStore";
 import { projectReplaySummary } from "../core/trajectory/AgentTrajectoryProjector";
 import {
@@ -3059,9 +3059,40 @@ export class DailyBoardView extends ItemView {
 				this.aiRuntimePreviewExpanded = !this.aiRuntimePreviewExpanded;
 				this.renderBoard();
 			},
+			onAction: (action) => this.handleTrajectoryAction(snapshot, action),
 			translate: (key, fallback, params) => this.t(key, fallback, params),
 			renderAssistantAvatar: (metaEl) => this.renderAssistantAvatar(metaEl),
 		});
+	}
+
+	private handleTrajectoryAction(
+		snapshot: AgentTrajectorySnapshot,
+		action: AgentTrajectoryAction,
+	): void {
+		if (!action.enabled) {
+			return;
+		}
+		if (action.id === "view_replay") {
+			this.aiRuntimePreviewExpanded = true;
+			this.renderBoard();
+			return;
+		}
+		const taskId = snapshot.identity.taskId;
+		if (!taskId) {
+			return;
+		}
+		const taskActions = this.createAgentTaskPanelActionHandlers(taskId);
+		if (action.id === "retry") {
+			void taskActions.retry();
+		} else if (action.id === "cancel") {
+			void taskActions.cancel();
+		} else if (action.id === "continue") {
+			void taskActions.continue();
+		} else if (action.id === "apply") {
+			void taskActions.apply(action.targetId);
+		} else if (action.id === "reject") {
+			void taskActions.reject(action.targetId);
+		}
 	}
 
 	private async buildCompletedTrajectorySnapshot(result: RuntimeTurnResult): Promise<AgentTrajectorySnapshot | null> {
