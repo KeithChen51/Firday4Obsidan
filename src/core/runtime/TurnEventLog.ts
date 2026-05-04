@@ -5,6 +5,7 @@ export type TurnEventType =
 	| "turn_started"
 	| "context_built"
 	| "model_requested"
+	| "model_retry"
 	| "model_completed"
 	| "model_failed"
 	| "tool_requested"

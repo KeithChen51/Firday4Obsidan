@@ -62,7 +62,7 @@ test("connection probe accepts reasoning-only successful chat completion as conn
 
 test("connection probe uses an English prompt with a larger token budget", () => {
 	const source = readAiServiceSource();
-	const checkConnectionBlock = source.match(/async checkConnection\(\): Promise<string> \{([\s\S]*?)\n\t\}/);
+	const checkConnectionBlock = source.match(/async checkConnection\([^)]*\): Promise<string> \{([\s\S]*?)\n\t\}/);
 	assert.ok(checkConnectionBlock, "checkConnection method should exist");
 	const body = checkConnectionBlock[1] ?? "";
 	assert.match(body, /Reply exactly OK\./);

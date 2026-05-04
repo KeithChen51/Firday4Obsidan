@@ -1,13 +1,14 @@
 import type { ChatMessage, ChatWithToolsResult } from "./AIService";
 import type { ModelDriverPort, ModelDriverRequest, ModelDriverResponse, ModelDriverToolRequest } from "../core/agent-kernel/ModelDriverPort";
+import type { LlmTransportObserver } from "../core/llm/LlmTransportTelemetry";
 import type { ToolDefinition } from "../types/tools";
 
 export interface AIServiceModelDriver {
-	chat(messages: ChatMessage[], options?: { modelOverride?: string; signal?: AbortSignal }): Promise<string>;
+	chat(messages: ChatMessage[], options?: { modelOverride?: string; signal?: AbortSignal } & LlmTransportObserver): Promise<string>;
 	chatWithTools(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
-		options?: { modelOverride?: string; signal?: AbortSignal; toolChoice?: "auto" | "none" },
+		options?: { modelOverride?: string; signal?: AbortSignal; toolChoice?: "auto" | "none" } & LlmTransportObserver,
 	): Promise<ChatWithToolsResult>;
 }
 
@@ -18,6 +19,7 @@ export class AIServiceModelDriverAdapter implements ModelDriverPort {
 		const assistantText = await this.aiService.chat(input.messages as ChatMessage[], {
 			modelOverride: input.modelOverride,
 			signal: input.signal,
+			onTransportEvent: input.onTransportEvent,
 		});
 		return {
 			assistantText,
@@ -31,6 +33,7 @@ export class AIServiceModelDriverAdapter implements ModelDriverPort {
 		const result = await this.aiService.chatWithTools(input.messages as ChatMessage[], input.tools, {
 			modelOverride: input.modelOverride,
 			signal: input.signal,
+			onTransportEvent: input.onTransportEvent,
 		});
 		return {
 			assistantText: result.assistantText,

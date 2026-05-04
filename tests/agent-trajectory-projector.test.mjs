@@ -25,6 +25,8 @@ function makeReplaySummary(overrides = {}) {
 		eventTypes: [],
 		status: "completed",
 		modelCalls: { requested: 1, completed: 1, failed: 0 },
+		transport: { retries: 0, exhausted: 0, lastMessage: "" },
+		transportTimeline: [],
 		toolEvents: { requested: 1, completed: 1, failed: 0, denied: 0 },
 		toolCalls: [
 			{ step: 1, tool: "read", toolCallId: "tool-1", status: "ok", targetPath: "Notes/today.md" },
@@ -158,6 +160,42 @@ test("projectRuntimeProgress turns approval progress into a waiting approval sna
 	assert.equal(approval?.targetPath, "Notes/today.md");
 });
 
+test("projectRuntimeProgress projects model retry progress into a running transport item", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-transport-live", taskId: "task-transport-live" },
+		{ phase: "model_request", depth: 0, step: 1, message: "Requesting model decision." },
+		{
+			phase: "model_retry",
+			depth: 0,
+			step: 1,
+			message: "Model request retry scheduled after HTTP 504 (attempt 1/4, retrying in 700ms)",
+			transport: {
+				type: "retry_scheduled",
+				requestId: "llm-live-1",
+				attempt: 1,
+				maxAttempts: 4,
+				delayMs: 700,
+				httpStatus: 504,
+				retryable: true,
+				channel: "chat_with_tools",
+				endpointIndex: 0,
+				endpointCount: 1,
+			},
+		},
+	]);
+
+	assert.equal(snapshot.status, "running");
+	assert.equal(snapshot.headline, "Reconnecting to model");
+	assert.match(snapshot.summary, /attempt 1\/4/);
+	const transportItem = snapshot.items.find((item) => item.kind === "transport");
+	assert.equal(transportItem?.status, "running");
+	assert.equal(transportItem?.step, 1);
+	assert.equal(transportItem?.rawEventType, "retry_scheduled");
+	assert.match(transportItem?.detail ?? "", /700ms/);
+});
+
 test("projectReplaySummary projects tool mutation and task timelines into a completed snapshot", async () => {
 	const { projectReplaySummary } = await loadProjector();
 
@@ -257,12 +295,60 @@ test("projectReplaySummary maps failed cancelled and safe stopped terminal state
 	assert.equal(projectReplaySummary(makeReplaySummary({ status: "safe_stopped", terminalStatus: "turn_completed" })).status, "safe_stopped");
 });
 
+test("projectReplaySummary projects exhausted transport replay as retryable model transport failure", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		status: "failed",
+		terminalStatus: "turn_failed",
+		modelCalls: { requested: 1, completed: 0, failed: 1 },
+		transport: {
+			retries: 1,
+			exhausted: 1,
+			lastStatus: 504,
+			lastMessage: "Retries exhausted",
+		},
+		transportTimeline: [
+			{
+				type: "request_exhausted",
+				step: 1,
+				attempt: 4,
+				maxAttempts: 4,
+				httpStatus: 504,
+				message: "Retries exhausted",
+			},
+		],
+		errors: ["504 Gateway Timeout"],
+	}));
+
+	assert.equal(snapshot.status, "failed");
+	assert.equal(snapshot.failure?.class, "model_transport");
+	assert.equal(snapshot.failure?.retryable, true);
+	assert.equal(snapshot.failure?.recoverable, true);
+	const transportItem = snapshot.items.find((item) => item.kind === "transport");
+	assert.equal(transportItem?.status, "failed");
+	assert.equal(transportItem?.rawEventType, "request_exhausted");
+	assert.match(transportItem?.detail ?? "", /attempt 4\/4/);
+});
+
 test("projectReplaySummary prefers task waiting states over open terminal status", async () => {
 	const { projectReplaySummary } = await loadProjector();
 
 	const snapshot = projectReplaySummary(makeReplaySummary({
 		status: "open",
 		terminalStatus: "open",
+		transport: { retries: 1, exhausted: 0, lastStatus: 504, lastMessage: "Retry scheduled" },
+		transportTimeline: [
+			{
+				type: "retry_scheduled",
+				step: 1,
+				attempt: 1,
+				maxAttempts: 4,
+				delayMs: 700,
+				httpStatus: 504,
+				message: "Retry scheduled",
+			},
+		],
 		taskTimeline: [
 			{ taskId: "task-replay", event: "running", status: "running", summary: "Runtime started.", reason: "" },
 			{
@@ -278,6 +364,7 @@ test("projectReplaySummary prefers task waiting states over open terminal status
 	assert.equal(snapshot.status, "waiting_for_user");
 	assert.equal(snapshot.failure, undefined);
 	assert.ok(snapshot.items.some((item) => item.kind === "task" && item.status === "waiting"));
+	assert.ok(snapshot.items.some((item) => item.kind === "transport" && item.status === "running"));
 });
 
 test("projector derives trajectory actions from running failed approval mutation and replay states", async () => {

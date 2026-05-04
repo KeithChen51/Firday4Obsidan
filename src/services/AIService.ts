@@ -8,6 +8,13 @@ import {
 	isRetryableLlmFailure,
 	shouldRetryLlmRequest,
 } from "../core/llm/LlmTransportPolicy";
+import {
+	createLlmTransportEvent,
+	createLlmTransportRequestId,
+	type LlmTransportChannel,
+	type LlmTransportEventInput,
+	type LlmTransportObserver,
+} from "../core/llm/LlmTransportTelemetry";
 
 export interface ChatMessage {
 	role: "system" | "user" | "assistant" | "tool";
@@ -61,7 +68,7 @@ export type ChatMessagePart =
 			};
 	  };
 
-interface ChatOptions {
+interface ChatOptions extends LlmTransportObserver {
 	temperature?: number;
 	maxTokens?: number;
 	modelOverride?: string;
@@ -74,7 +81,6 @@ interface ChatWithToolsOptions extends ChatOptions {
 
 interface ChatStreamOptions extends ChatOptions {
 	onDelta?: (delta: string) => void;
-	signal?: AbortSignal;
 }
 
 interface ResponseTextPart {
@@ -673,6 +679,130 @@ export class AIService {
 		);
 	}
 
+	private getTransportMaxAttempts(): number {
+		return AIService.MAX_RETRY_ATTEMPTS + 1;
+	}
+
+	private emitTransportEvent(
+		observer: LlmTransportObserver | undefined,
+		input: LlmTransportEventInput,
+	): void {
+		try {
+			observer?.onTransportEvent?.(createLlmTransportEvent(input));
+		} catch {
+			// Telemetry observers must not affect model request behavior.
+		}
+	}
+
+	private emitTransportRequestStarted(
+		observer: LlmTransportObserver | undefined,
+		channel: LlmTransportChannel,
+		requestId: string,
+		endpoints: string[],
+		endpointIndex: number,
+	): void {
+		this.emitTransportEvent(observer, {
+			type: "request_started",
+			requestId,
+			channel,
+			endpointIndex,
+			endpointCount: endpoints.length,
+			attempt: 1,
+			maxAttempts: this.getTransportMaxAttempts(),
+			retryable: false,
+			message: "Model request started",
+		});
+	}
+
+	private emitTransportRetryStarted(
+		observer: LlmTransportObserver | undefined,
+		channel: LlmTransportChannel,
+		requestId: string,
+		endpoints: string[],
+		endpointIndex: number,
+		attempt: number,
+	): void {
+		this.emitTransportEvent(observer, {
+			type: "retry_started",
+			requestId,
+			channel,
+			endpointIndex,
+			endpointCount: endpoints.length,
+			attempt: attempt + 1,
+			maxAttempts: this.getTransportMaxAttempts(),
+			retryable: true,
+			message: "Retrying model request",
+		});
+	}
+
+	private emitTransportRequestSucceeded(
+		observer: LlmTransportObserver | undefined,
+		channel: LlmTransportChannel,
+		requestId: string,
+		endpoints: string[],
+		endpointIndex: number,
+		attempt: number,
+	): void {
+		this.emitTransportEvent(observer, {
+			type: "request_succeeded",
+			requestId,
+			channel,
+			endpointIndex,
+			endpointCount: endpoints.length,
+			attempt: attempt + 1,
+			maxAttempts: this.getTransportMaxAttempts(),
+			retryable: false,
+			message: "Model request succeeded",
+		});
+	}
+
+	private emitTransportRetryScheduled(
+		observer: LlmTransportObserver | undefined,
+		channel: LlmTransportChannel,
+		requestId: string,
+		endpoints: string[],
+		endpointIndex: number,
+		attempt: number,
+		delayMs: number,
+		error: unknown,
+	): void {
+		this.emitTransportEvent(observer, {
+			type: "retry_scheduled",
+			requestId,
+			channel,
+			endpointIndex,
+			endpointCount: endpoints.length,
+			attempt: attempt + 1,
+			maxAttempts: this.getTransportMaxAttempts(),
+			delayMs,
+			retryable: true,
+			error,
+		});
+	}
+
+	private emitTransportRequestFailed(
+		observer: LlmTransportObserver | undefined,
+		channel: LlmTransportChannel,
+		requestId: string,
+		endpoints: string[],
+		endpointIndex: number,
+		attempt: number,
+		error: unknown,
+	): void {
+		const type = isRetryableLlmFailure(error) ? "request_exhausted" : "request_failed";
+		this.emitTransportEvent(observer, {
+			type,
+			requestId,
+			channel,
+			endpointIndex,
+			endpointCount: endpoints.length,
+			attempt: attempt + 1,
+			maxAttempts: this.getTransportMaxAttempts(),
+			retryable: type !== "request_failed",
+			error,
+		});
+	}
+
 	async chat(messages: ChatMessage[], options?: ChatOptions): Promise<string> {
 		const config = this.getConfig();
 		const modelOverride = options?.modelOverride?.trim() ?? "";
@@ -693,14 +823,19 @@ export class AIService {
 
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
+		const requestId = createLlmTransportRequestId("llm-chat");
 
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
 			let attempt = 0;
+			this.emitTransportRequestStarted(options, "chat", requestId, endpoints, index);
 
 			while (true) {
 				this.throwIfAborted(options?.signal);
+				if (attempt > 0) {
+					this.emitTransportRetryStarted(options, "chat", requestId, endpoints, index, attempt);
+				}
 				const payload = this.buildPayload(messages, endpoint, options);
 				try {
 					const response = await requestUrl({
@@ -710,7 +845,9 @@ export class AIService {
 						body: JSON.stringify(payload),
 					});
 					this.throwIfAborted(options?.signal);
-					return this.extractMessageContent(response.json as ChatResponseBody);
+					const text = this.extractMessageContent(response.json as ChatResponseBody);
+					this.emitTransportRequestSucceeded(options, "chat", requestId, endpoints, index, attempt);
+					return text;
 				} catch (error) {
 					lastError = error;
 					const status = extractHttpStatus(error);
@@ -722,10 +859,13 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
+						const delayMs = getLlmRetryDelayMs(attempt);
+						this.emitTransportRetryScheduled(options, "chat", requestId, endpoints, index, attempt, delayMs, error);
+						await this.delay(delayMs, options?.signal);
 						attempt += 1;
 						continue;
 					}
+					this.emitTransportRequestFailed(options, "chat", requestId, endpoints, index, attempt, error);
 					throw this.normalizeError(error, endpoint, triedEndpoints);
 				}
 			}
@@ -753,13 +893,18 @@ export class AIService {
 		const headers = buildLlmHeaders(config.apiKey, config.extraHeaders);
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
+		const requestId = createLlmTransportRequestId("llm-stream");
 
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
 			let attempt = 0;
+			this.emitTransportRequestStarted(options, "chat_stream", requestId, endpoints, index);
 
 			while (true) {
+				if (attempt > 0) {
+					this.emitTransportRetryStarted(options, "chat_stream", requestId, endpoints, index, attempt);
+				}
 				const payload = this.buildPayload(messages, endpoint, options);
 				payload.stream = true;
 
@@ -781,6 +926,7 @@ export class AIService {
 						if (text) {
 							options?.onDelta?.(text);
 						}
+						this.emitTransportRequestSucceeded(options, "chat_stream", requestId, endpoints, index, attempt);
 						return text;
 					}
 
@@ -845,6 +991,7 @@ export class AIService {
 					}
 
 					if (fullText.trim()) {
+						this.emitTransportRequestSucceeded(options, "chat_stream", requestId, endpoints, index, attempt);
 						return fullText;
 					}
 
@@ -857,20 +1004,25 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
+						const delayMs = getLlmRetryDelayMs(attempt);
+						this.emitTransportRetryScheduled(options, "chat_stream", requestId, endpoints, index, attempt, delayMs, error);
+						await this.delay(delayMs, options?.signal);
 						attempt += 1;
 						continue;
 					}
 					if (status != null) {
+						this.emitTransportRequestFailed(options, "chat_stream", requestId, endpoints, index, attempt, error);
 						throw this.normalizeError(error, endpoint, triedEndpoints);
 					}
 					if (isRetryableLlmFailure(error)) {
+						this.emitTransportRequestFailed(options, "chat_stream", requestId, endpoints, index, attempt, error);
 						throw this.normalizeError(error, endpoint, triedEndpoints);
 					}
 
 					try {
 						return await this.chat(messages, options);
 					} catch (fallbackError) {
+						this.emitTransportRequestFailed(options, "chat_stream", requestId, endpoints, index, attempt, fallbackError);
 						throw this.normalizeError(fallbackError, endpoint, triedEndpoints);
 					}
 				}
@@ -985,13 +1137,18 @@ export class AIService {
 
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
+		const requestId = createLlmTransportRequestId("llm-tools");
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
 			let attempt = 0;
+			this.emitTransportRequestStarted(options, "chat_with_tools", requestId, endpoints, index);
 
 			while (true) {
 				this.throwIfAborted(options?.signal);
+				if (attempt > 0) {
+					this.emitTransportRetryStarted(options, "chat_with_tools", requestId, endpoints, index, attempt);
+				}
 				const payload = this.buildToolPayload(messages, tools, options);
 				try {
 					const response = await requestUrl({
@@ -1004,6 +1161,7 @@ export class AIService {
 					const body = response.json as ChatResponseBody;
 					const assistantText = this.extractMessageContent(body, true);
 					const toolCalls = this.extractToolCalls(body);
+					this.emitTransportRequestSucceeded(options, "chat_with_tools", requestId, endpoints, index, attempt);
 					return {
 						assistantText,
 						toolCalls,
@@ -1018,10 +1176,13 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt), options?.signal);
+						const delayMs = getLlmRetryDelayMs(attempt);
+						this.emitTransportRetryScheduled(options, "chat_with_tools", requestId, endpoints, index, attempt, delayMs, error);
+						await this.delay(delayMs, options?.signal);
 						attempt += 1;
 						continue;
 					}
+					this.emitTransportRequestFailed(options, "chat_with_tools", requestId, endpoints, index, attempt, error);
 					throw this.normalizeError(error, endpoint, triedEndpoints);
 				}
 			}
@@ -1030,7 +1191,7 @@ export class AIService {
 		throw this.normalizeError(lastError, endpoints[endpoints.length - 1]!, triedEndpoints);
 	}
 
-	async checkConnection(): Promise<string> {
+	async checkConnection(options?: LlmTransportObserver): Promise<string> {
 		const config = this.getConfig();
 		const effectiveModel = config.model.trim();
 		if (!this.isConfigured()) {
@@ -1054,13 +1215,18 @@ export class AIService {
 		];
 		const triedEndpoints: string[] = [];
 		let lastError: unknown = null;
+		const requestId = createLlmTransportRequestId("llm-check");
 
 		for (let index = 0; index < endpoints.length; index += 1) {
 			const endpoint = endpoints[index]!;
 			triedEndpoints.push(endpoint);
 			let attempt = 0;
+			this.emitTransportRequestStarted(options, "connection_check", requestId, endpoints, index);
 
 			while (true) {
+				if (attempt > 0) {
+					this.emitTransportRetryStarted(options, "connection_check", requestId, endpoints, index, attempt);
+				}
 				const payload = this.buildPayload(messages, endpoint, { maxTokens: 256 });
 				try {
 					const response = await requestUrl({
@@ -1069,7 +1235,9 @@ export class AIService {
 						headers,
 						body: JSON.stringify(payload),
 					});
-					return this.extractConnectionProbeText(response.json as ChatResponseBody).trim();
+					const probeText = this.extractConnectionProbeText(response.json as ChatResponseBody).trim();
+					this.emitTransportRequestSucceeded(options, "connection_check", requestId, endpoints, index, attempt);
+					return probeText;
 				} catch (error) {
 					lastError = error;
 					const status = extractHttpStatus(error);
@@ -1081,10 +1249,13 @@ export class AIService {
 						break;
 					}
 					if (shouldRetryLlmRequest(error, attempt, AIService.MAX_RETRY_ATTEMPTS)) {
-						await this.delay(getLlmRetryDelayMs(attempt));
+						const delayMs = getLlmRetryDelayMs(attempt);
+						this.emitTransportRetryScheduled(options, "connection_check", requestId, endpoints, index, attempt, delayMs, error);
+						await this.delay(delayMs);
 						attempt += 1;
 						continue;
 					}
+					this.emitTransportRequestFailed(options, "connection_check", requestId, endpoints, index, attempt, error);
 					throw this.normalizeError(error, endpoint, triedEndpoints);
 				}
 			}

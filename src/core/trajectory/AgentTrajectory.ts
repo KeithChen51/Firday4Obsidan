@@ -11,6 +11,7 @@ export type AgentTrajectoryStatus =
 export type AgentTrajectoryItemKind =
 	| "context"
 	| "model"
+	| "transport"
 	| "tool"
 	| "approval"
 	| "mutation"
@@ -77,7 +78,7 @@ export interface AgentTrajectoryMutation {
 }
 
 export interface AgentTrajectoryFailure {
-	class: "model" | "tool" | "approval" | "mutation" | "runtime" | "cancelled" | "unknown";
+	class: "model" | "model_transport" | "tool" | "approval" | "mutation" | "runtime" | "cancelled" | "unknown";
 	message: string;
 	retryable: boolean;
 	recoverable: boolean;

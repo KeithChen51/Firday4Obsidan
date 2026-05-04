@@ -1,4 +1,5 @@
 import type { ToolCall, ToolDefinition } from "../../types/tools";
+import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
 import type { AgentChatMessage, AgentExecutionBudget } from "./contracts";
 
 export interface ModelDriverRequest {
@@ -9,6 +10,7 @@ export interface ModelDriverRequest {
 	taskId?: string;
 	traceId?: string;
 	budget?: AgentExecutionBudget;
+	onTransportEvent?: (event: LlmTransportEvent) => void;
 }
 
 export interface ModelDriverToolRequest extends ModelDriverRequest {

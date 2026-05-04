@@ -1,4 +1,5 @@
 import type { ToolCall } from "../../types/tools";
+import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import { AgentFailureClassifier } from "./AgentFailureClassifier";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "./AgentKernelPorts";
@@ -107,6 +108,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				taskId: context.taskId,
 				traceId: context.traceId,
 				budget: context.budget,
+				onTransportEvent: (event) => this.emitModelTransport(input, context, step, event),
 			});
 			finalReply = response.assistantText.trim();
 			this.emitModelResponse(input, context, step, "prompt", response.assistantText);
@@ -195,6 +197,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				taskId: context.taskId,
 				traceId: context.traceId,
 				budget: context.budget,
+				onTransportEvent: (event) => this.emitModelTransport(input, context, step, event),
 			});
 			const assistantStepText = response.assistantText?.trim() || "";
 			if (assistantStepText) {
@@ -440,6 +443,32 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		});
 	}
 
+	private emitModelTransport(
+		input: AgentTurnInput,
+		_context: AgentExecutionContext,
+		step: number,
+		event: LlmTransportEvent,
+	): void {
+		this.report(input, {
+			phase: "model_retry",
+			depth: input.depth ?? 0,
+			step,
+			transport: {
+				type: event.type,
+				requestId: event.requestId,
+				attempt: event.attempt,
+				maxAttempts: event.maxAttempts,
+				...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+				...(event.httpStatus !== undefined ? { httpStatus: event.httpStatus } : {}),
+				retryable: event.retryable,
+				channel: event.channel,
+				endpointIndex: event.endpointIndex,
+				endpointCount: event.endpointCount,
+			},
+			message: this.formatTransportProgressMessage(event),
+		});
+	}
+
 	private emitFallback(input: AgentTurnInput, context: AgentExecutionContext, message: string): void {
 		context.emit({
 			type: "fallback" as AgentTurnEvent["type"],
@@ -450,6 +479,29 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			depth: input.depth ?? 0,
 			message: `Native tool calling incompatible, fallback to prompt mode (replays current step once): ${message.slice(0, 180)}`,
 		});
+	}
+
+	private formatTransportProgressMessage(event: LlmTransportEvent): string {
+		const attempt = `attempt ${event.attempt}/${event.maxAttempts}`;
+		const status = event.httpStatus !== undefined ? `HTTP ${event.httpStatus}` : event.message;
+		const suffix = status ? ` after ${status}` : "";
+		switch (event.type) {
+			case "retry_scheduled": {
+				const backoff = event.delayMs !== undefined ? `, retrying in ${event.delayMs}ms` : "";
+				return `Model request retry scheduled${suffix} (${attempt}${backoff})`;
+			}
+			case "retry_started":
+				return `Model request retry started (${attempt})`;
+			case "request_exhausted":
+				return `Model request retries exhausted${suffix} (${attempt})`;
+			case "request_failed":
+				return `Model request failed${suffix} (${attempt})`;
+			case "request_succeeded":
+				return `Model request succeeded (${attempt})`;
+			case "request_started":
+			default:
+				return `Model request started (${attempt})`;
+		}
 	}
 
 	private async recordMutationPlans(envelope: RuntimeEnvelope, context: AgentExecutionContext): Promise<RuntimeMutationPlan[]> {

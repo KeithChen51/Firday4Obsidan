@@ -22,6 +22,21 @@ export interface TurnReplaySummary extends TurnEventRef {
 		completed: number;
 		failed: number;
 	};
+	transport: {
+		retries: number;
+		exhausted: number;
+		lastStatus?: number;
+		lastMessage: string;
+	};
+	transportTimeline: Array<{
+		type: "retry_scheduled" | "retry_started" | "request_exhausted";
+		step: number;
+		attempt: number;
+		maxAttempts: number;
+		delayMs?: number;
+		httpStatus?: number;
+		message: string;
+	}>;
 	toolEvents: {
 		requested: number;
 		completed: number;
@@ -142,6 +157,8 @@ export class TurnReplayReader {
 		const status = this.resolveStatus(terminal);
 		const finalAnswer = [...events].reverse().find((event) => event.type === "assistant_final");
 		const toolCalls = this.summarizeToolCalls(events);
+		const transportTimeline = this.summarizeTransportTimeline(events);
+		const lastTransport = transportTimeline[transportTimeline.length - 1];
 		return {
 			conversationId: first?.conversationId ?? "",
 			turnId: first?.turnId ?? "",
@@ -156,6 +173,13 @@ export class TurnReplayReader {
 				completed: events.filter((event) => event.type === "model_completed").length,
 				failed: events.filter((event) => event.type === "model_failed").length,
 			},
+			transport: {
+				retries: transportTimeline.filter((event) => event.type === "retry_scheduled").length,
+				exhausted: transportTimeline.filter((event) => event.type === "request_exhausted").length,
+				...(lastTransport?.httpStatus !== undefined ? { lastStatus: lastTransport.httpStatus } : {}),
+				lastMessage: lastTransport?.message ?? "",
+			},
+			transportTimeline,
 			toolEvents: {
 				requested: events.filter((event) => event.type === "tool_requested").length,
 				completed: events.filter((event) => event.type === "tool_completed").length,
@@ -261,6 +285,34 @@ export class TurnReplayReader {
 		return calls;
 	}
 
+	private summarizeTransportTimeline(events: TurnEventRecord[]): TurnReplaySummary["transportTimeline"] {
+		const timeline: TurnReplaySummary["transportTimeline"] = [];
+		for (const event of events) {
+			if (event.type !== "model_retry") {
+				continue;
+			}
+			const transport = this.getPayloadRecord(event, "transport");
+			const type = this.getRecordText(transport, "type");
+			if (type !== "retry_scheduled" && type !== "retry_started" && type !== "request_exhausted") {
+				continue;
+			}
+			const delayMs = this.getRecordOptionalNumber(transport, "delayMs");
+			const httpStatus = this.getRecordOptionalNumber(transport, "httpStatus");
+			timeline.push({
+				type,
+				step: this.getPayloadNumber(event, "step"),
+				attempt: this.getRecordNumber(transport, "attempt"),
+				maxAttempts: this.getRecordNumber(transport, "maxAttempts"),
+				...(delayMs !== undefined ? { delayMs } : {}),
+				...(httpStatus !== undefined ? { httpStatus } : {}),
+				message: this.getPayloadText(event, "summary") ||
+					this.getPayloadText(event, "message") ||
+					this.getRecordText(transport, "message"),
+			});
+		}
+		return timeline;
+	}
+
 	private summarizeMutationTimeline(events: TurnEventRecord[]): TurnReplaySummary["mutationTimeline"] {
 		return events
 			.filter((event) => [
@@ -341,6 +393,28 @@ export class TurnReplayReader {
 	private getPayloadNumber(event: TurnEventRecord, key: string): number {
 		const value = event.payload[key];
 		return typeof value === "number" ? value : 0;
+	}
+
+	private getPayloadRecord(event: TurnEventRecord, key: string): Record<string, unknown> {
+		const value = event.payload[key];
+		return value && typeof value === "object" && !Array.isArray(value)
+			? value as Record<string, unknown>
+			: {};
+	}
+
+	private getRecordText(record: Record<string, unknown>, key: string): string {
+		const value = record[key];
+		return typeof value === "string" ? value : "";
+	}
+
+	private getRecordNumber(record: Record<string, unknown>, key: string): number {
+		const value = record[key];
+		return typeof value === "number" ? value : 0;
+	}
+
+	private getRecordOptionalNumber(record: Record<string, unknown>, key: string): number | undefined {
+		const value = record[key];
+		return typeof value === "number" ? value : undefined;
 	}
 }
 

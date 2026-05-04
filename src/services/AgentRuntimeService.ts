@@ -73,6 +73,7 @@ import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/Runtim
 import { StepTraceStore } from "../platform/tools/StepTraceStore";
 import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { ToolRunAuditStore } from "../platform/tools/ToolRunAuditStore";
+import type { LlmTransportChannel, LlmTransportEvent, LlmTransportEventType } from "../core/llm/LlmTransportTelemetry";
 import { SoulStore } from "./SoulStore";
 import { RuntimeStateStore } from "./RuntimeStateStore";
 import {
@@ -181,6 +182,7 @@ export interface RuntimeProgressEvent {
 		| "start"
 		| "context"
 		| "model_request"
+		| "model_retry"
 		| "model_response"
 		| "tool_approval"
 		| "tool_call"
@@ -196,7 +198,21 @@ export interface RuntimeProgressEvent {
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
 	taskId?: string;
+	transport?: RuntimeTransportProgress;
 	message: string;
+}
+
+export interface RuntimeTransportProgress {
+	type: LlmTransportEventType;
+	requestId: string;
+	attempt: number;
+	maxAttempts: number;
+	delayMs?: number;
+	httpStatus?: number;
+	retryable: boolean;
+	channel: LlmTransportChannel;
+	endpointIndex: number;
+	endpointCount: number;
 }
 
 export interface RuntimeWikiCompileSummary {
@@ -688,6 +704,55 @@ export class AgentRuntimeService {
 			input.onProgress?.(eventWithTask);
 		} catch {
 			// Ignore observer errors to avoid blocking runtime execution.
+		}
+	}
+
+	private reportModelTransportProgress(
+		input: RuntimeTurnInput,
+		depth: number,
+		step: number,
+		event: LlmTransportEvent,
+	): void {
+		this.reportProgress(input, {
+			phase: "model_retry",
+			depth,
+			step,
+			transport: {
+				type: event.type,
+				requestId: event.requestId,
+				attempt: event.attempt,
+				maxAttempts: event.maxAttempts,
+				...(event.delayMs !== undefined ? { delayMs: event.delayMs } : {}),
+				...(event.httpStatus !== undefined ? { httpStatus: event.httpStatus } : {}),
+				retryable: event.retryable,
+				channel: event.channel,
+				endpointIndex: event.endpointIndex,
+				endpointCount: event.endpointCount,
+			},
+			message: this.formatModelTransportProgressMessage(event),
+		});
+	}
+
+	private formatModelTransportProgressMessage(event: LlmTransportEvent): string {
+		const attempt = `attempt ${event.attempt}/${event.maxAttempts}`;
+		const status = event.httpStatus !== undefined ? `HTTP ${event.httpStatus}` : event.message;
+		const suffix = status ? ` after ${status}` : "";
+		switch (event.type) {
+			case "retry_scheduled": {
+				const backoff = event.delayMs !== undefined ? `, retrying in ${event.delayMs}ms` : "";
+				return `Model request retry scheduled${suffix} (${attempt}${backoff})`;
+			}
+			case "retry_started":
+				return `Model request retry started (${attempt})`;
+			case "request_exhausted":
+				return `Model request retries exhausted${suffix} (${attempt})`;
+			case "request_failed":
+				return `Model request failed${suffix} (${attempt})`;
+			case "request_succeeded":
+				return `Model request succeeded (${attempt})`;
+			case "request_started":
+			default:
+				return `Model request started (${attempt})`;
 		}
 	}
 
@@ -1212,6 +1277,8 @@ export class AgentRuntimeService {
 				return [{ type: "context_built", payload }];
 			case "STEP_MODEL_REQUEST":
 				return [{ type: "model_requested", payload }];
+			case "STEP_MODEL_RETRY":
+				return [{ type: "model_retry", payload }];
 			case "STEP_MODEL_RESPONSE":
 				return [{ type: "model_completed", payload }];
 			case "STEP_TOOL_CALL":
@@ -1276,6 +1343,20 @@ export class AgentRuntimeService {
 		}
 		if (trace.status) {
 			payload.status = trace.status;
+		}
+		if (trace.transport) {
+			payload.transport = {
+				type: trace.transport.type,
+				requestId: trace.transport.requestId,
+				attempt: trace.transport.attempt,
+				maxAttempts: trace.transport.maxAttempts,
+				...(trace.transport.delayMs !== undefined ? { delayMs: trace.transport.delayMs } : {}),
+				...(trace.transport.httpStatus !== undefined ? { httpStatus: trace.transport.httpStatus } : {}),
+				retryable: trace.transport.retryable,
+				channel: trace.transport.channel,
+				endpointIndex: trace.transport.endpointIndex,
+				endpointCount: trace.transport.endpointCount,
+			};
 		}
 		if ((trace.status === "failed" || toolTrace?.status === "failed") && (toolTrace?.error || trace.summary || trace.message)) {
 			Object.assign(
@@ -1693,6 +1774,7 @@ export class AgentRuntimeService {
 			const reply = await this.aiService.chat(modelMessages, {
 				modelOverride: input.modelOverride?.trim() || undefined,
 				signal: this.getActiveTaskSignal(),
+				onTransportEvent: (event) => this.reportModelTransportProgress(input, depth, step, event),
 			});
 			this.assertActiveTaskNotCancelled();
 			finalReply = reply.trim();
@@ -1828,6 +1910,7 @@ export class AgentRuntimeService {
 			const response = await this.aiService.chatWithTools(modelMessages, tools, {
 				modelOverride: input.modelOverride?.trim() || undefined,
 				signal: this.getActiveTaskSignal(),
+				onTransportEvent: (event) => this.reportModelTransportProgress(input, depth, step, event),
 			});
 			this.assertActiveTaskNotCancelled();
 			const assistantStepText = response.assistantText?.trim() || "";

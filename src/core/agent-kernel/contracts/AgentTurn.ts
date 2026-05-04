@@ -1,4 +1,5 @@
 import type { StepTraceEvent } from "../../turn-state/TurnStateMachine";
+import type { LlmTransportChannel, LlmTransportEventType } from "../../llm/LlmTransportTelemetry";
 import type { AgentMode } from "../../tools/ToolRegistry";
 import type { AgentTask } from "../../tasks/AgentTask";
 import type { RuntimeProfile } from "../../../platform/runtime/RuntimeProfile";
@@ -31,6 +32,7 @@ export interface RuntimeProgressEvent {
 		| "start"
 		| "context"
 		| "model_request"
+		| "model_retry"
 		| "model_response"
 		| "tool_approval"
 		| "tool_call"
@@ -46,7 +48,21 @@ export interface RuntimeProgressEvent {
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
 	taskId?: string;
+	transport?: RuntimeTransportProgress;
 	message: string;
+}
+
+export interface RuntimeTransportProgress {
+	type: LlmTransportEventType;
+	requestId: string;
+	attempt: number;
+	maxAttempts: number;
+	delayMs?: number;
+	httpStatus?: number;
+	retryable: boolean;
+	channel: LlmTransportChannel;
+	endpointIndex: number;
+	endpointCount: number;
 }
 
 export interface RuntimeMutationPlan {

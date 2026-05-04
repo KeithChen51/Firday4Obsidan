@@ -100,6 +100,18 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		});
 	}
 
+	for (const [index, transport] of replaySummary.transportTimeline.entries()) {
+		upsertItem(snapshot, "reasoning", {
+			id: `replay:transport:${transport.step}:${index}:${transport.type}`,
+			kind: "transport",
+			title: "Model transport",
+			detail: formatReplayTransportDetail(transport),
+			status: mapReplayTransportStatus(transport.type, snapshot.status),
+			step: transport.step,
+			rawEventType: transport.type,
+		});
+	}
+
 	if (replaySummary.approvals.requested > 0) {
 		const waiting = replaySummary.approvals.requested > replaySummary.approvals.resolved;
 		upsertItem(snapshot, "review", {
@@ -238,6 +250,34 @@ function applyRuntimeProgress(
 				rawEventType: event.phase,
 			});
 			break;
+		case "model_retry": {
+			const transport = event.transport;
+			const itemStatus = transport?.type === "request_exhausted" ? "failed" : "running";
+			if (!isWaitingStatus(snapshot.status)) {
+				snapshot.status = itemStatus === "failed" ? "failed" : "running";
+				snapshot.headline = "Reconnecting to model";
+			}
+			snapshot.summary = formatRuntimeTransportDetail(event);
+			setStageStatus(snapshot, "reasoning", itemStatus);
+			upsertItem(snapshot, "reasoning", {
+				id: `live:transport:${transport?.requestId ?? "unknown"}:${step}`,
+				kind: "transport",
+				title: "Model transport",
+				detail: snapshot.summary,
+				status: itemStatus,
+				step,
+				rawEventType: transport?.type ?? event.phase,
+			});
+			if (itemStatus === "failed") {
+				snapshot.failure = {
+					class: "model_transport",
+					message: snapshot.summary || "Model transport retries exhausted.",
+					retryable: true,
+					recoverable: true,
+				};
+			}
+			break;
+		}
 		case "tool_approval":
 			snapshot.status = "waiting_for_approval";
 			snapshot.headline = "Waiting for approval";
@@ -619,6 +659,14 @@ function buildReplayFailure(
 			recoverable: true,
 		};
 	}
+	if (status === "failed" && summary.transport.exhausted > 0) {
+		return {
+			class: "model_transport",
+			message: safeText(summary.transport.lastMessage || summary.errors[0] || "Model transport retries exhausted."),
+			retryable: true,
+			recoverable: true,
+		};
+	}
 	if (status !== "failed" || summary.errors.length === 0) {
 		return undefined;
 	}
@@ -636,6 +684,7 @@ function stageForKind(kind: AgentTrajectoryItemKind): AgentTrajectoryStage["key"
 		case "task":
 			return "context";
 		case "model":
+		case "transport":
 		case "system":
 			return "reasoning";
 		case "tool":
@@ -662,6 +711,47 @@ function mapReplayToolStatus(status: TurnReplaySummary["toolCalls"][number]["sta
 		default:
 			return "running";
 	}
+}
+
+function mapReplayTransportStatus(
+	type: TurnReplaySummary["transportTimeline"][number]["type"],
+	snapshotStatus: AgentTrajectoryStatus,
+): AgentTrajectoryItemStatus {
+	if (type === "request_exhausted") {
+		return "failed";
+	}
+	if (snapshotStatus === "completed" || snapshotStatus === "safe_stopped") {
+		return "ok";
+	}
+	return "running";
+}
+
+function formatRuntimeTransportDetail(event: RuntimeProgressEvent): string {
+	const transport = event.transport;
+	if (!transport) {
+		return safeText(event.message);
+	}
+	const parts = [
+		event.message,
+		`attempt ${transport.attempt}/${transport.maxAttempts}`,
+		transport.delayMs !== undefined ? `backoff ${transport.delayMs}ms` : "",
+		transport.httpStatus !== undefined ? `HTTP ${transport.httpStatus}` : "",
+	].filter((part) => part.length > 0);
+	return safeText(parts.join("; "));
+}
+
+function formatReplayTransportDetail(transport: TurnReplaySummary["transportTimeline"][number]): string {
+	const parts = [
+		transport.message,
+		`attempt ${transport.attempt}/${transport.maxAttempts}`,
+		transport.delayMs !== undefined ? `backoff ${transport.delayMs}ms` : "",
+		transport.httpStatus !== undefined ? `HTTP ${transport.httpStatus}` : "",
+	].filter((part) => part.length > 0);
+	return safeText(parts.join("; "));
+}
+
+function isWaitingStatus(status: AgentTrajectoryStatus): boolean {
+	return status === "waiting_for_approval" || status === "waiting_for_user";
 }
 
 function mapMutationStatus(event: AgentTrajectoryMutation["event"]): AgentTrajectoryItemStatus {

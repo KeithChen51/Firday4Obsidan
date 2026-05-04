@@ -2,6 +2,7 @@ export type StepEventName =
 	| "STEP_START"
 	| "STEP_CONTEXT"
 	| "STEP_MODEL_REQUEST"
+	| "STEP_MODEL_RETRY"
 	| "STEP_MODEL_RESPONSE"
 	| "STEP_TOOL_APPROVAL"
 	| "STEP_TOOL_CALL"
@@ -22,6 +23,18 @@ export interface StepTraceEvent {
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
+	transport?: {
+		type: string;
+		requestId: string;
+		attempt: number;
+		maxAttempts: number;
+		delayMs?: number;
+		httpStatus?: number;
+		retryable: boolean;
+		channel: string;
+		endpointIndex: number;
+		endpointCount: number;
+	};
 	message: string;
 }
 

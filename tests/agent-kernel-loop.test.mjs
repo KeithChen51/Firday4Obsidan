@@ -185,6 +185,178 @@ test("AgentLoopController keeps retryable native transport failures out of promp
 	);
 });
 
+test("AgentLoopController forwards model driver transport telemetry as model_retry progress", async () => {
+	const { AgentLoopController } = await jiti.import(loopPath);
+	const progressEvents = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 1,
+					messages: [{ role: "user", content: "test" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				input.onTransportEvent({
+					type: "retry_scheduled",
+					requestId: "llm-kernel-1",
+					channel: "chat_with_tools",
+					endpointIndex: 0,
+					endpointCount: 1,
+					attempt: 1,
+					maxAttempts: 4,
+					delayMs: 700,
+					httpStatus: 504,
+					retryable: true,
+					message: "504 Gateway Timeout",
+				});
+				return {
+					assistantText: "Recovered",
+					toolCalls: [],
+					reasoningContent: "",
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool() {
+				throw new Error("tool should not run");
+			},
+		},
+		progress: {
+			report(_input, event) {
+				progressEvents.push(event);
+			},
+		},
+	});
+
+	const result = await controller.execute({
+		turnId: "turn-transport-progress",
+		taskId: "task-transport-progress",
+		traceId: "trace-transport-progress",
+		conversationId: "conversation-h",
+		agentId: "agent-h",
+		conversation: [],
+		userPrompt: "recover",
+		mode: "ask",
+	}, {
+		turnId: "turn-transport-progress",
+		taskId: "task-transport-progress",
+		traceId: "trace-transport-progress",
+		conversationId: "conversation-h",
+		agentId: "agent-h",
+		mode: "ask",
+		budget: {},
+		emit() {},
+		snapshotEvents() { return []; },
+		get signal() { return undefined; },
+	});
+
+	const retryProgress = progressEvents.find((event) => event.phase === "model_retry");
+	assert.equal(result.status, "completed");
+	assert.ok(retryProgress, "expected model_retry progress");
+	assert.equal(retryProgress.depth, 0);
+	assert.equal(retryProgress.step, 1);
+	assert.equal(retryProgress.transport.type, "retry_scheduled");
+	assert.equal(retryProgress.transport.requestId, "llm-kernel-1");
+	assert.equal(retryProgress.transport.attempt, 1);
+	assert.equal(retryProgress.transport.maxAttempts, 4);
+	assert.equal(retryProgress.transport.delayMs, 700);
+	assert.equal(retryProgress.transport.httpStatus, 504);
+	assert.equal(retryProgress.transport.retryable, true);
+	assert.match(retryProgress.message, /attempt 1\/4/);
+	assert.equal(progressEvents.some((event) => event.phase === "error"), false);
+});
+
+test("AgentLoopController keeps retryable transport telemetry failures out of prompt fallback", async () => {
+	const { AgentLoopController } = await jiti.import(loopPath);
+	const progressEvents = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "auto",
+					maxIterations: 1,
+					messages: [{ role: "user", content: "test" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt fallback must not run");
+			},
+			async requestWithTools(input) {
+				input.onTransportEvent({
+					type: "request_exhausted",
+					requestId: "llm-kernel-2",
+					channel: "chat_with_tools",
+					endpointIndex: 0,
+					endpointCount: 1,
+					attempt: 4,
+					maxAttempts: 4,
+					httpStatus: 504,
+					retryable: false,
+					message: "504 Gateway Timeout",
+				});
+				throw new Error("504 gateway timeout");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool() {
+				throw new Error("tool should not run");
+			},
+		},
+		progress: {
+			report(_input, event) {
+				progressEvents.push(event);
+			},
+		},
+		fallbackPolicy: {
+			isRetryableTransportFailure: (message) => /504|timeout/i.test(message),
+			shouldFallbackToPrompt: () => true,
+		},
+	});
+
+	await assert.rejects(
+		() => controller.execute({
+			turnId: "turn-transport-failure",
+			conversationId: "conversation-h",
+			agentId: "agent-h",
+			conversation: [],
+			userPrompt: "fail",
+			mode: "ask",
+		}, {
+			turnId: "turn-transport-failure",
+			traceId: "trace-transport-failure",
+			conversationId: "conversation-h",
+			agentId: "agent-h",
+			mode: "ask",
+			budget: {},
+			emit() {},
+			snapshotEvents() { return []; },
+			get signal() { return undefined; },
+		}),
+		/504 gateway timeout/,
+	);
+
+	const retryProgress = progressEvents.find((event) => event.phase === "model_retry");
+	assert.ok(retryProgress, "expected model_retry progress before failure");
+	assert.equal(retryProgress.transport.type, "request_exhausted");
+	assert.equal(retryProgress.transport.retryable, false);
+});
+
 test("main wires AgentKernel to AgentLoopController by default instead of LegacyAgentRuntimeAdapter", () => {
 	const source = fs.readFileSync(mainPath, "utf8");
 	assert.match(source, /AgentLoopController/);

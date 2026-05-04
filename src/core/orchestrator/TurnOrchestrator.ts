@@ -5,6 +5,7 @@ const PHASE_TO_STEP_EVENT: Record<RuntimeProgressEvent["phase"], StepEventName> 
 	start: "STEP_START",
 	context: "STEP_CONTEXT",
 	model_request: "STEP_MODEL_REQUEST",
+	model_retry: "STEP_MODEL_RETRY",
 	model_response: "STEP_MODEL_RESPONSE",
 	tool_approval: "STEP_TOOL_APPROVAL",
 	tool_call: "STEP_TOOL_CALL",
@@ -25,6 +26,7 @@ export class TurnOrchestrator {
 			targetPath: event.targetPath,
 			status: event.status,
 			summary: event.summary,
+			transport: event.transport,
 			message: event.message,
 		});
 	}
