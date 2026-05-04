@@ -31,6 +31,8 @@ import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/o
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import { ConversationSession } from "../services/ConversationService";
 import type { AgentTask, AgentTaskStatus as CoreAgentTaskStatus } from "../core/tasks/AgentTask";
+import type { AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
+import { LiveTrajectoryStore } from "../core/trajectory/LiveTrajectoryStore";
 import {
 	RuntimeProgressEvent,
 	RuntimeTurnResult,
@@ -76,39 +78,14 @@ import {
 	createAgentTaskPanelActionHandlers,
 	recordTaskFromRuntimeProgress,
 } from "./agentTaskPanelActions";
+import { renderAgentTrajectoryCard } from "./agentTrajectoryRenderer";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 
-type RuntimeExecutionStatus = "pending" | "running" | "ok" | "failed";
-type RuntimeExecutionStageKey = "context" | "analysis" | "tools" | "finalize";
-type RuntimeExecutionEntryKind = "context" | "model" | "tool" | "system";
 type AgentTaskStatus = CoreAgentTaskStatus;
-
-interface RuntimeExecutionStage {
-	key: RuntimeExecutionStageKey;
-	label: string;
-	status: RuntimeExecutionStatus;
-}
-
-interface RuntimeExecutionEntry {
-	key: string;
-	label: string;
-	detail: string;
-	status: RuntimeExecutionStatus;
-	kind: RuntimeExecutionEntryKind;
-	step?: number;
-}
-
-interface RuntimeExecutionState {
-	heading: string;
-	summary: string;
-	stages: RuntimeExecutionStage[];
-	entries: RuntimeExecutionEntry[];
-	activeContextEntryKey: string | null;
-}
 
 interface AgentTaskViewState {
 	id: string;
@@ -155,8 +132,9 @@ export class DailyBoardView extends ItemView {
 	private aiBusy = false;
 	private aiLastError = "";
 	private aiStreamingPreview = "";
-	private aiRuntimeExecutionState: RuntimeExecutionState | null = null;
-	private aiLastCompletedRuntimeExecutionState: RuntimeExecutionState | null = null;
+	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
+	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
+	private aiLastCompletedTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
 	private aiAgentTasks: AgentTaskViewState[] = [];
 	private aiRuntimePreviewExpanded = false;
 	private aiMessageListScrollTop = 0;
@@ -2310,8 +2288,9 @@ export class DailyBoardView extends ItemView {
 		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
-		this.aiRuntimeExecutionState = null;
-		this.aiLastCompletedRuntimeExecutionState = null;
+		this.aiRuntimeTrajectoryStore.reset();
+		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiLastCompletedTrajectorySnapshot = null;
 		this.aiAgentTasks = [];
 		this.aiRuntimePreviewExpanded = false;
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
@@ -2348,8 +2327,9 @@ export class DailyBoardView extends ItemView {
 		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
-		this.aiRuntimeExecutionState = null;
-		this.aiLastCompletedRuntimeExecutionState = null;
+		this.aiRuntimeTrajectoryStore.reset();
+		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiLastCompletedTrajectorySnapshot = null;
 		this.aiRuntimePreviewExpanded = false;
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
@@ -2450,7 +2430,7 @@ export class DailyBoardView extends ItemView {
 		if (this.aiSessionId === sessionId) {
 			this.aiSessionId = "";
 			await this.ensureAiSessionLoaded();
-			this.aiLastCompletedRuntimeExecutionState = null;
+			this.aiLastCompletedTrajectorySnapshot = null;
 		}
 		this.renderBoard();
 	}
@@ -2476,7 +2456,7 @@ export class DailyBoardView extends ItemView {
 		if (activeDeleted) {
 			this.aiSessionId = "";
 			await this.ensureAiSessionLoaded();
-			this.aiLastCompletedRuntimeExecutionState = null;
+			this.aiLastCompletedTrajectorySnapshot = null;
 		}
 		this.renderBoard();
 	}
@@ -2671,7 +2651,7 @@ export class DailyBoardView extends ItemView {
 		if (
 			this.aiConversation.length === 0 &&
 			!this.aiStreamingPreview &&
-			!this.aiRuntimeExecutionState &&
+			!this.aiRuntimeTrajectorySnapshot &&
 			pendingApprovals.length === 0 &&
 			this.aiAgentTasks.length === 0
 		) {
@@ -2682,7 +2662,7 @@ export class DailyBoardView extends ItemView {
 		for (const message of this.aiConversation) {
 			this.renderAiMessage(containerEl, message);
 		}
-		if (this.aiRuntimeExecutionState) {
+		if (this.aiRuntimeTrajectorySnapshot) {
 			this.renderRuntimeExecutionPreview(containerEl);
 		} else if (this.aiStreamingPreview) {
 			this.renderAiMessage(
@@ -2700,7 +2680,7 @@ export class DailyBoardView extends ItemView {
 		for (const item of pendingApprovals) {
 			this.renderApprovalMessage(containerEl, item);
 		}
-		if (!this.aiBusy && this.aiLastCompletedRuntimeExecutionState) {
+		if (!this.aiBusy && this.aiLastCompletedTrajectorySnapshot) {
 			this.renderCompletedRuntimeDisclosure(containerEl);
 		}
 	}
@@ -3051,127 +3031,36 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private renderRuntimeExecutionPreview(containerEl: HTMLElement): void {
-		const state = this.aiRuntimeExecutionState;
-		if (!state) {
+		if (!this.aiRuntimeTrajectorySnapshot) {
 			return;
 		}
-		this.renderRuntimeExecutionCard(containerEl, state, "live");
+		this.renderTrajectoryCard(containerEl, this.aiRuntimeTrajectorySnapshot, "live");
 	}
 
 	private renderCompletedRuntimeDisclosure(containerEl: HTMLElement): void {
-		if (!this.aiLastCompletedRuntimeExecutionState) {
+		if (!this.aiLastCompletedTrajectorySnapshot) {
 			return;
 		}
-		this.renderRuntimeExecutionCard(containerEl, this.aiLastCompletedRuntimeExecutionState, "completed");
+		this.renderTrajectoryCard(containerEl, this.aiLastCompletedTrajectorySnapshot, "completed");
 	}
 
-	private renderRuntimeExecutionCard(
+	private renderTrajectoryCard(
 		containerEl: HTMLElement,
-		state: RuntimeExecutionState,
+		snapshot: AgentTrajectorySnapshot,
 		variant: "live" | "completed",
 	): void {
-		const rowEl = containerEl.createDiv({
-			cls: "friday-ai-message-row is-assistant",
+		renderAgentTrajectoryCard({
+			containerEl,
+			snapshot,
+			variant,
+			expanded: this.aiRuntimePreviewExpanded,
+			onToggle: () => {
+				this.aiRuntimePreviewExpanded = !this.aiRuntimePreviewExpanded;
+				this.renderBoard();
+			},
+			translate: (key, fallback, params) => this.t(key, fallback, params),
+			renderAssistantAvatar: (metaEl) => this.renderAssistantAvatar(metaEl),
 		});
-		const bubbleEl = rowEl.createDiv({
-			cls: `friday-ai-message is-assistant friday-ai-runtime-preview is-${variant}`,
-		});
-		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		this.renderAssistantAvatar(metaEl);
-		const roleEl = metaEl.createSpan({
-			cls: "friday-ai-message-role friday-wordmark",
-			text: this.plugin.t("ai.role.assistant"),
-		});
-		roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
-		const contentEl = bubbleEl.createDiv({
-			cls: `friday-ai-message-content friday-ai-runtime-card-content${this.aiRuntimePreviewExpanded ? "" : " is-streaming"}`,
-		});
-		const cardEl = contentEl.createDiv({ cls: "friday-runtime-card" });
-		const headerEl = cardEl.createDiv({ cls: "friday-runtime-card-header" });
-		headerEl.createDiv({
-			cls: "friday-runtime-card-brand",
-			text: variant === "completed"
-				? this.t("ai.runtime.summary.completed", "本轮工具调用记录")
-				: this.t("ai.runtime.summary.title", "工具执行摘要"),
-		});
-		const toggleButton = headerEl.createEl("button", {
-			cls: `friday-runtime-card-toggle${variant === "completed" ? " is-completed" : ""}`,
-			text: this.aiRuntimePreviewExpanded
-				? this.t("ai.runtime.summary.collapse", "收起")
-				: variant === "completed"
-					? this.t("ai.runtime.summary.viewFlow", "查看完整流程")
-					: this.t("ai.runtime.summary.expand", "展开"),
-		});
-		toggleButton.type = "button";
-		toggleButton.onclick = () => {
-			this.aiRuntimePreviewExpanded = !this.aiRuntimePreviewExpanded;
-			this.renderBoard();
-		};
-		cardEl.createEl("h4", {
-			cls: "friday-runtime-card-title",
-			text: state.heading,
-		});
-		if (state.summary) {
-			cardEl.createEl("p", {
-				cls: "friday-runtime-card-summary",
-				text: state.summary,
-			});
-		}
-		if (!this.aiRuntimePreviewExpanded) {
-			const collapsedMeta = cardEl.createDiv({ cls: "friday-runtime-card-collapsed" });
-			for (const entry of state.entries.slice(-3)) {
-				collapsedMeta.createSpan({
-					cls: `friday-runtime-pill is-${entry.status}`,
-					text: entry.label,
-				});
-			}
-			return;
-		}
-		const stageRailEl = cardEl.createDiv({ cls: "friday-runtime-stage-rail" });
-		for (const stage of state.stages) {
-			stageRailEl.createDiv({
-				cls: `friday-runtime-stage is-${stage.status}`,
-				text: stage.label,
-			});
-		}
-		if (state.entries.length > 0) {
-			const timelineEl = cardEl.createDiv({ cls: "friday-runtime-timeline" });
-			for (const entry of state.entries.slice(-10)) {
-				const rowEl = timelineEl.createDiv({
-					cls: `friday-runtime-entry is-${entry.status} is-${entry.kind}`,
-				});
-				rowEl.createDiv({ cls: "friday-runtime-entry-dot" });
-				const bodyEl = rowEl.createDiv({ cls: "friday-runtime-entry-body" });
-				const headerEl = bodyEl.createDiv({ cls: "friday-runtime-entry-header" });
-				headerEl.createSpan({
-					cls: "friday-runtime-entry-label",
-					text: entry.label,
-				});
-				if (typeof entry.step === "number" && entry.step > 0) {
-					headerEl.createSpan({
-						cls: "friday-runtime-entry-step",
-						text: this.t("ai.runtime.execution.stepBadge", "步骤 {step}", { step: entry.step }),
-					});
-				}
-				bodyEl.createDiv({
-					cls: "friday-runtime-entry-detail",
-					text: entry.detail,
-				});
-			}
-		}
-	}
-
-	private cloneRuntimeExecutionState(state: RuntimeExecutionState | null): RuntimeExecutionState | null {
-		if (!state) {
-			return null;
-		}
-		return {
-			heading: state.heading,
-			summary: state.summary,
-			activeContextEntryKey: state.activeContextEntryKey,
-			stages: state.stages.map((stage) => ({ ...stage })),
-			entries: state.entries.map((entry) => ({ ...entry })),
-		};
 	}
 
 	private async submitAiPrompt(snapshotOverride?: MentionComposerSnapshot): Promise<void> {
@@ -3255,7 +3144,8 @@ export class DailyBoardView extends ItemView {
 		this.composer?.replaceSnapshot(this.aiComposerSnapshot);
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
-		this.aiRuntimeExecutionState = null;
+		this.aiRuntimeTrajectoryStore.reset();
+		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimePreviewExpanded = false;
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
@@ -3308,7 +3198,7 @@ export class DailyBoardView extends ItemView {
 			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(normalizedAssistantText);
 			}
-			this.aiLastCompletedRuntimeExecutionState = this.cloneRuntimeExecutionState(this.aiRuntimeExecutionState);
+			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
 
 			this.aiConversation.push({
 				role: "assistant",
@@ -3330,7 +3220,7 @@ export class DailyBoardView extends ItemView {
 		} finally {
 			this.aiBusy = false;
 			this.aiStreamingPreview = "";
-			this.aiRuntimeExecutionState = null;
+			this.aiRuntimeTrajectorySnapshot = null;
 			this.aiSendAbortController = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
@@ -3359,7 +3249,8 @@ export class DailyBoardView extends ItemView {
 		this.aiBusy = true;
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
-		this.aiRuntimeExecutionState = null;
+		this.aiRuntimeTrajectoryStore.reset();
+		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimePreviewExpanded = false;
 		this.aiForceScrollToBottomOnce = true;
 		this.renderBoard();
@@ -3390,7 +3281,7 @@ export class DailyBoardView extends ItemView {
 			if (this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(reply);
 			}
-			this.aiLastCompletedRuntimeExecutionState = this.cloneRuntimeExecutionState(this.aiRuntimeExecutionState);
+			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
 			this.aiConversation.push({ role: "assistant", content: reply });
 			try {
 				await this.persistConversation();
@@ -3414,7 +3305,7 @@ export class DailyBoardView extends ItemView {
 		} finally {
 			this.aiBusy = false;
 			this.aiStreamingPreview = "";
-			this.aiRuntimeExecutionState = null;
+			this.aiRuntimeTrajectorySnapshot = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
 			this.renderBoard();
@@ -3497,7 +3388,7 @@ export class DailyBoardView extends ItemView {
 		if (!text) {
 			return;
 		}
-		this.aiRuntimeExecutionState = null;
+		this.aiRuntimeTrajectorySnapshot = null;
 		const chunkSize = Math.max(8, Math.min(48, Math.ceil(text.length / 80)));
 		const delay = 18;
 		this.aiStreamingPreview = "";
@@ -3525,11 +3416,16 @@ export class DailyBoardView extends ItemView {
 			recordAgentTask: (task) => this.recordAgentTask(task),
 			render: () => this.syncAiLiveChatShell(),
 		});
-		if (!this.aiRuntimeExecutionState) {
+		if (!this.aiRuntimeTrajectorySnapshot) {
 			this.aiRuntimePreviewExpanded = false;
 		}
-		this.aiRuntimeExecutionState = this.buildRuntimeExecutionState(event, this.aiRuntimeExecutionState);
-		const forceRender = event.phase === "tool_call" || event.phase === "tool_result" || event.phase === "error" || event.phase === "done";
+		this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
+		const terminalProgress = event.phase === "error" || event.phase === "done";
+		if (terminalProgress) {
+			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.completeFromProgress();
+			this.aiRuntimeTrajectorySnapshot = null;
+		}
+		const forceRender = event.phase === "tool_call" || event.phase === "tool_result" || terminalProgress;
 		const now = Date.now();
 		if (forceRender || now - this.aiRuntimeLastRenderAt >= 120) {
 			this.aiRuntimeLastRenderAt = now;
@@ -4258,323 +4154,6 @@ export class DailyBoardView extends ItemView {
 			normalized.includes("正在继续调用工具") ||
 			normalized.includes("is continuing with tool calls")
 		);
-	}
-
-	private buildRuntimeExecutionState(
-		event: RuntimeProgressEvent,
-		previous: RuntimeExecutionState | null,
-	): RuntimeExecutionState {
-		const next: RuntimeExecutionState = previous
-			? {
-				heading: previous.heading,
-				summary: previous.summary,
-				stages: previous.stages.map((stage) => ({ ...stage })),
-				entries: previous.entries.map((entry) => ({ ...entry })),
-				activeContextEntryKey: previous.activeContextEntryKey,
-			}
-			: {
-				heading: this.t("ai.runtime.execution.preparing", "正在准备上下文"),
-				summary: this.t("ai.runtime.execution.preparingSummary", "先整理当前会话、项目与知识范围。"),
-				stages: [
-					{ key: "context", label: this.t("ai.runtime.execution.stage.context", "上下文"), status: "running" },
-					{ key: "analysis", label: this.t("ai.runtime.execution.stage.analysis", "分析"), status: "pending" },
-					{ key: "tools", label: this.t("ai.runtime.execution.stage.tools", "执行"), status: "pending" },
-					{ key: "finalize", label: this.t("ai.runtime.execution.stage.finalize", "回复"), status: "pending" },
-				],
-				entries: [],
-				activeContextEntryKey: null,
-			};
-
-		switch (event.phase) {
-			case "start":
-				next.heading = this.t("ai.runtime.execution.preparing", "正在准备上下文");
-				next.summary = this.t("ai.runtime.execution.preparingSummary", "先整理当前会话、项目与知识范围。");
-				this.setRuntimeStageStatus(next, "context", "running");
-				this.setRuntimeStageStatus(next, "analysis", "pending");
-				this.setRuntimeStageStatus(next, "tools", "pending");
-				this.setRuntimeStageStatus(next, "finalize", "pending");
-				break;
-			case "context": {
-				this.setRuntimeStageStatus(next, "context", "running");
-				const entryKey = `context:${event.contextKey ?? "general"}`;
-				if (next.activeContextEntryKey && next.activeContextEntryKey !== entryKey) {
-					this.updateRuntimeEntry(next, next.activeContextEntryKey, { status: "ok" });
-				}
-				next.activeContextEntryKey = entryKey;
-				this.upsertRuntimeEntry(next, {
-					key: entryKey,
-					kind: "context",
-					label: this.buildContextEntryLabel(event.contextKey),
-					detail: event.message,
-					status: "running",
-				});
-				next.heading = this.buildContextHeading(event.contextKey);
-				next.summary = event.message;
-				break;
-			}
-			case "model_request":
-				this.completeActiveContextEntry(next);
-				this.setRuntimeStageStatus(next, "context", next.entries.some((entry) => entry.kind === "context") ? "ok" : "pending");
-				this.setRuntimeStageStatus(next, "analysis", "running");
-				next.heading = this.t("ai.runtime.execution.planning", "正在分析下一步");
-				next.summary = this.hasSuccessfulToolEntry(next)
-					? this.t("ai.runtime.execution.planningWithEvidence", "已拿到部分证据，正在决定下一步。")
-					: this.t("ai.runtime.execution.planningSummary", "正在判断要检索哪些资料。");
-				this.upsertRuntimeEntry(next, {
-					key: `model:${event.step ?? 0}`,
-					kind: "model",
-					label: this.t("ai.runtime.execution.modelLabel", "分析第 {step} 步", {
-						step: event.step ?? 0,
-					}),
-					detail: event.message,
-					status: "running",
-					step: event.step,
-				});
-				break;
-			case "model_response":
-				this.updateRuntimeEntry(next, `model:${event.step ?? 0}`, {
-					status: "ok",
-					detail: event.message,
-				});
-				next.heading = this.t("ai.runtime.execution.modelReady", "已完成本轮判断");
-				next.summary = this.t("ai.runtime.execution.modelReadySummary", "下一步动作已经确定。");
-				break;
-			case "tool_approval":
-				this.setRuntimeStageStatus(next, "tools", "running");
-				next.heading = this.t("ai.runtime.execution.permission", "正在确认操作边界");
-				next.summary = event.message || this.t("ai.runtime.execution.permissionSummary", "正在核对本次工具调用是否可执行。");
-				this.upsertRuntimeEntry(next, {
-					key: `approval:${event.step ?? 0}:${event.tool ?? "tool"}`,
-					kind: "system",
-					label: this.t("ai.runtime.execution.approvalLabel", "权限确认"),
-					detail: next.summary,
-					status: "running",
-					step: event.step,
-				});
-				break;
-			case "tool_call": {
-				this.setRuntimeStageStatus(next, "analysis", "ok");
-				this.setRuntimeStageStatus(next, "tools", "running");
-				next.heading = this.isKnowledgeTool(event.tool)
-					? this.t("ai.runtime.execution.retrieve", "正在检索资料")
-					: this.t("ai.runtime.execution.runTool", "正在执行工具");
-				next.summary = this.isKnowledgeTool(event.tool)
-					? this.t("ai.runtime.execution.retrieveSummary", "正在定位相关文件和证据。")
-					: event.message;
-				this.upsertRuntimeEntry(next, {
-					key: this.buildRuntimeEntryKey(event),
-					kind: "tool",
-					label: this.buildRuntimeEntryLabel(event),
-					detail: event.message || this.buildRuntimeEntryLabel(event),
-					status: "running",
-					step: event.step,
-				});
-				break;
-			}
-			case "tool_result": {
-				const status: RuntimeExecutionStatus = event.status === "ok" ? "ok" : "failed";
-				this.upsertRuntimeEntry(next, {
-					key: this.buildRuntimeEntryKey(event),
-					kind: "tool",
-					label: this.buildRuntimeEntryLabel(event),
-					detail: event.summary || event.message || this.buildRuntimeEntryLabel(event),
-					status,
-					step: event.step,
-				});
-				next.heading = status === "ok"
-					? this.t("ai.runtime.execution.evidenceReady", "已获取新证据")
-					: this.t("ai.runtime.execution.adjusting", "正在调整检索路径");
-				next.summary = status === "ok"
-					? this.t("ai.runtime.execution.evidenceSummary", "已定位到相关资料，继续整理证据。")
-					: event.summary || event.message || this.t("ai.runtime.execution.adjustingSummary", "刚刚跳过一次无效尝试，正在换路径继续检索。");
-				break;
-			}
-			case "fallback":
-				this.upsertRuntimeEntry(next, {
-					key: `system:fallback:${next.entries.length}`,
-					kind: "system",
-					label: this.t("ai.runtime.execution.fallbackLabel", "兼容模式"),
-					detail: event.message || this.t("ai.runtime.execution.fallbackSummary", "原生工具调用不可用，切换到兼容执行链路。"),
-					status: "failed",
-				});
-				next.heading = this.t("ai.runtime.execution.fallback", "正在切换兼容模式");
-				next.summary = event.message || this.t("ai.runtime.execution.fallbackSummary", "原生工具调用不可用，切换到兼容执行链路。");
-				break;
-			case "done":
-				this.completeActiveContextEntry(next);
-				if (this.stageHasEntries(next, "context")) this.setRuntimeStageStatus(next, "context", "ok");
-				if (this.stageHasEntries(next, "analysis")) this.setRuntimeStageStatus(next, "analysis", "ok");
-				if (this.stageHasEntries(next, "tools")) this.setRuntimeStageStatus(next, "tools", "ok");
-				this.setRuntimeStageStatus(next, "finalize", "ok");
-				next.heading = this.t("ai.runtime.execution.finalize", "正在整理最终回复");
-				next.summary = this.t("ai.runtime.execution.finalizeSummary", "证据已齐，正在生成最终答复。");
-				this.upsertRuntimeEntry(next, {
-					key: "system:done",
-					kind: "system",
-					label: this.t("ai.runtime.execution.finalizeLabel", "生成回复"),
-					detail: next.summary,
-					status: "ok",
-				});
-				break;
-			case "error":
-				this.completeActiveContextEntry(next, "failed");
-				this.setRuntimeStageStatus(next, "finalize", "failed");
-				next.heading = this.t("ai.runtime.execution.failed", "执行失败");
-				next.summary = event.message || this.t("ai.runtime.execution.failedSummary", "运行时发生异常，请查看详情。");
-				this.upsertRuntimeEntry(next, {
-					key: `system:error:${next.entries.length}`,
-					kind: "system",
-					label: this.t("ai.runtime.execution.errorLabel", "运行异常"),
-					detail: next.summary,
-					status: "failed",
-				});
-				break;
-			default:
-				break;
-		}
-
-		next.entries = next.entries.slice(-12);
-		return next;
-	}
-
-	private setRuntimeStageStatus(
-		state: RuntimeExecutionState,
-		stageKey: RuntimeExecutionStageKey,
-		status: RuntimeExecutionStatus,
-	): void {
-		const stage = state.stages.find((item) => item.key === stageKey);
-		if (stage) {
-			stage.status = status;
-		}
-	}
-
-	private upsertRuntimeEntry(state: RuntimeExecutionState, entry: RuntimeExecutionEntry): void {
-		const existing = state.entries.find((item) => item.key === entry.key);
-		if (existing) {
-			existing.label = entry.label;
-			existing.detail = entry.detail;
-			existing.status = entry.status;
-			existing.kind = entry.kind;
-			existing.step = entry.step;
-			return;
-		}
-		state.entries.push(entry);
-	}
-
-	private updateRuntimeEntry(
-		state: RuntimeExecutionState,
-		entryKey: string,
-		patch: Partial<Pick<RuntimeExecutionEntry, "label" | "detail" | "status" | "step">>,
-	): void {
-		const existing = state.entries.find((item) => item.key === entryKey);
-		if (!existing) {
-			return;
-		}
-		if (patch.label !== undefined) existing.label = patch.label;
-		if (patch.detail !== undefined) existing.detail = patch.detail;
-		if (patch.status !== undefined) existing.status = patch.status;
-		if (patch.step !== undefined) existing.step = patch.step;
-	}
-
-	private completeActiveContextEntry(
-		state: RuntimeExecutionState,
-		status: RuntimeExecutionStatus = "ok",
-	): void {
-		if (!state.activeContextEntryKey) {
-			return;
-		}
-		this.updateRuntimeEntry(state, state.activeContextEntryKey, { status });
-		state.activeContextEntryKey = null;
-	}
-
-	private stageHasEntries(state: RuntimeExecutionState, stageKey: RuntimeExecutionStageKey): boolean {
-		switch (stageKey) {
-			case "context":
-				return state.entries.some((entry) => entry.kind === "context");
-			case "analysis":
-				return state.entries.some((entry) => entry.kind === "model");
-			case "tools":
-				return state.entries.some((entry) => entry.kind === "tool");
-			case "finalize":
-				return state.entries.some((entry) => entry.key === "system:done");
-			default:
-				return false;
-		}
-	}
-
-	private hasSuccessfulToolEntry(state: RuntimeExecutionState): boolean {
-		return state.entries.some((entry) => entry.kind === "tool" && entry.status === "ok");
-	}
-
-	private buildRuntimeEntryKey(event: RuntimeProgressEvent): string {
-		return `${event.step ?? 0}:${event.tool ?? "runtime"}:${event.targetPath ?? ""}`;
-	}
-
-	private buildRuntimeEntryLabel(event: RuntimeProgressEvent): string {
-		const tool = event.tool ?? "tool";
-		const targetPath = (event.targetPath ?? "").trim();
-		const leaf = targetPath ? targetPath.split("/").filter(Boolean).pop() ?? targetPath : "";
-		switch (tool) {
-			case "search_text":
-			case "grep":
-				return this.t("ai.runtime.execution.searchLabel", "搜索 {path}", {
-					path: leaf || targetPath || this.t("ai.runtime.execution.projectScope", "当前项目"),
-				});
-			case "glob":
-				return this.t("ai.runtime.execution.globLabel", "匹配 {path}", {
-					path: leaf || targetPath || this.t("ai.runtime.execution.projectScope", "当前项目"),
-				});
-			case "read":
-				return this.t("ai.runtime.execution.readLabel", "读取 {path}", {
-					path: leaf || targetPath || this.t("ai.runtime.execution.targetFile", "目标文件"),
-				});
-			case "ls":
-				return this.t("ai.runtime.execution.listLabel", "查看 {path}", {
-					path: leaf || targetPath || this.t("ai.runtime.execution.projectScope", "当前项目"),
-				});
-			case "exec":
-				return this.t("ai.runtime.execution.commandLabel", "执行命令");
-			default:
-				return this.t("ai.runtime.execution.toolLabel", "执行 {tool}", { tool });
-		}
-	}
-
-	private buildContextHeading(contextKey: RuntimeProgressEvent["contextKey"]): string {
-		switch (contextKey) {
-			case "instructions":
-				return this.t("ai.runtime.execution.context.instructions", "正在加载规则与画像");
-			case "skills":
-				return this.t("ai.runtime.execution.context.skills", "正在匹配技能与约束");
-			case "wiki":
-				return this.t("ai.runtime.execution.context.wiki", "正在检索项目知识");
-			case "memory":
-				return this.t("ai.runtime.execution.context.memory", "正在加载记忆");
-			case "compact":
-				return this.t("ai.runtime.execution.context.compact", "正在压缩上下文");
-			default:
-				return this.t("ai.runtime.execution.preparing", "正在准备上下文");
-		}
-	}
-
-	private buildContextEntryLabel(contextKey: RuntimeProgressEvent["contextKey"]): string {
-		switch (contextKey) {
-			case "instructions":
-				return this.t("ai.runtime.execution.entry.instructions", "项目规则");
-			case "skills":
-				return this.t("ai.runtime.execution.entry.skills", "技能匹配");
-			case "wiki":
-				return this.t("ai.runtime.execution.entry.wiki", "Wiki 检索");
-			case "memory":
-				return this.t("ai.runtime.execution.entry.memory", "记忆加载");
-			case "compact":
-				return this.t("ai.runtime.execution.entry.compact", "上下文压缩");
-			default:
-				return this.t("ai.runtime.execution.entry.context", "上下文");
-		}
-	}
-
-	private isKnowledgeTool(tool: string | undefined): boolean {
-		return ["ls", "read", "grep", "search_text", "glob"].includes(tool ?? "");
 	}
 
 	private async switchSoul(soulId: string): Promise<void> {

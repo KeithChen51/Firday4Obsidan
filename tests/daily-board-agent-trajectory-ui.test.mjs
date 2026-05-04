@@ -1,5 +1,6 @@
 /* eslint-env node */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -10,10 +11,31 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
+const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 
 async function loadRenderer() {
 	return jiti.import(rendererPath);
 }
+
+test("DailyBoard live process UI is wired to trajectory snapshots instead of runtime execution state", () => {
+	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
+
+	assert.match(source, /LiveTrajectoryStore/);
+	assert.match(source, /AgentTrajectorySnapshot/);
+	assert.match(source, /renderAgentTrajectoryCard/);
+	assert.match(source, /private aiRuntimeTrajectoryStore = new LiveTrajectoryStore\(\)/);
+	assert.match(source, /private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot \| null = null/);
+	assert.match(source, /private aiLastCompletedTrajectorySnapshot: AgentTrajectorySnapshot \| null = null/);
+	assert.doesNotMatch(source, /private aiRuntimeExecutionState:/);
+	assert.doesNotMatch(source, /private buildRuntimeExecutionState\(/);
+
+	const progressMatch = source.match(/private handleRuntimeProgress\(event: RuntimeProgressEvent\): void \{([\s\S]*?)\n\t\}/);
+	assert.ok(progressMatch, "handleRuntimeProgress should exist");
+	const progressBlock = progressMatch[1] ?? "";
+	assert.match(progressBlock, /aiRuntimeTrajectoryStore\.appendProgress\(event\)/);
+	assert.doesNotMatch(progressBlock, /switch \(event\.phase\)/);
+	assert.doesNotMatch(progressBlock, /buildRuntimeExecutionState/);
+});
 
 test("renderAgentTrajectoryCard collapsed view shows headline and last three trajectory items", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
