@@ -50,15 +50,19 @@ test("DailyBoard completed process disclosure is rebuilt from replay summary whe
 	assert.match(source, /this\.aiLastCompletedTrajectorySnapshot = await this\.buildCompletedTrajectorySnapshot\(runtimeResult\)/);
 });
 
-test("renderAgentTrajectoryCard collapsed view shows headline and last three trajectory items", async () => {
+test("renderAgentTrajectoryCard uses lightweight thinking for simple live answers", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
 	renderAgentTrajectoryCard({
 		containerEl: root,
 		snapshot: makeSnapshot({
-			headline: "Agent finished",
-			items: Array.from({ length: 5 }, (_, index) => makeItem(index + 1)),
+			status: "running",
+			headline: "Agent is reasoning",
+			summary: "Thinking through the answer.",
+			items: [
+				makeItem({ id: "model", kind: "model", title: "Model step 1", detail: "Thinking.", status: "running" }),
+			],
 		}),
 		variant: "live",
 		expanded: false,
@@ -67,24 +71,73 @@ test("renderAgentTrajectoryCard collapsed view shows headline and last three tra
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /Agent finished/);
-	assert.doesNotMatch(root.textContent, /Item 1(?![0-9])/);
-	assert.doesNotMatch(root.textContent, /Item 2(?![0-9])/);
-	assert.match(root.textContent, /Item 3/);
-	assert.match(root.textContent, /Item 4/);
-	assert.match(root.textContent, /Item 5/);
-	assert.equal(root.countByClass("friday-runtime-card-collapsed"), 1);
-	assert.equal(root.countByClass("friday-runtime-pill"), 3);
+	assert.equal(root.countByClass("friday-agent-process-thinking"), 1);
+	assert.equal(root.countByClass("friday-agent-process"), 0);
+	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
+	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
+	assert.match(root.textContent, /FRIDAY is thinking/);
 });
 
-test("renderAgentTrajectoryCard expanded view shows stage rail and latest ten timeline items", async () => {
+test("renderAgentTrajectoryCard collapsed process panel shows status current summary action and details toggle", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+	const calls = [];
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "Agent is using a tool",
+			summary: "Reading project notes.",
+			items: [
+				makeItem({ id: "tool", kind: "tool", title: "Read Notes/today.md", detail: "Reading project notes.", status: "running", tool: "read", targetPath: "Notes/today.md", step: 2 }),
+			],
+			actions: [
+				{ id: "cancel", label: "Cancel", enabled: true, targetId: "task-1" },
+			],
+		}),
+		variant: "live",
+		expanded: false,
+		onToggle: () => calls.push("toggle"),
+		onAction: (action) => calls.push(action.id),
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process"), 1);
+	assert.equal(root.countByClass("friday-runtime-card"), 0);
+	assert.match(root.textContent, /Working/);
+	assert.match(root.textContent, /Read Notes\/today\.md/);
+	assert.match(root.textContent, /Reading project notes/);
+	assert.equal(root.countByClass("friday-agent-process-action"), 1);
+	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
+	root.findByClass("friday-agent-process-toggle")?.onclick?.();
+	root.findByClass("friday-agent-process-action")?.onclick?.();
+	assert.deepEqual(calls, ["toggle", "cancel"]);
+});
+
+test("renderAgentTrajectoryCard expanded process panel shows stages current timeline evidence mutations recovery and actions", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
 	renderAgentTrajectoryCard({
 		containerEl: root,
 		snapshot: makeSnapshot({
-			items: Array.from({ length: 12 }, (_, index) => makeItem(index + 1)),
+			status: "failed",
+			headline: "Agent failed",
+			summary: "Write failed.",
+			failure: { class: "mutation", message: "Permission denied.", retryable: true, recoverable: true },
+			items: [
+				makeItem({ id: "context", kind: "context", title: "Loaded project rules", status: "ok" }),
+				makeItem({ id: "tool", kind: "tool", title: "Read Notes/A.md", detail: "Read note.", status: "ok", tool: "read", targetPath: "Notes/A.md", step: 1 }),
+				makeItem({ id: "mutation", kind: "mutation", title: "write Notes/B.md", detail: "Permission denied.", status: "failed", targetPath: "Notes/B.md", step: 2 }),
+			],
+			mutations: [
+				{ id: "m1", event: "apply_failed", operation: "write", targetPath: "Notes/B.md", status: "failed", summary: "Write failed.", reason: "Permission denied." },
+			],
+			actions: [
+				{ id: "retry", label: "Retry", enabled: true, targetId: "task-1" },
+			],
 		}),
 		variant: "completed",
 		expanded: true,
@@ -93,35 +146,37 @@ test("renderAgentTrajectoryCard expanded view shows stage rail and latest ten ti
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-runtime-stage-rail"), 1);
-	assert.equal(root.countByClass("friday-runtime-stage"), 5);
-	assert.equal(root.countByClass("friday-runtime-entry"), 10);
-	assert.doesNotMatch(root.textContent, /Item 1(?![0-9])/);
-	assert.doesNotMatch(root.textContent, /Item 2(?![0-9])/);
-	assert.match(root.textContent, /Item 12/);
-	assert.equal(root.countByClass("friday-ai-runtime-preview"), 1);
+	assert.equal(root.countByClass("friday-agent-process-stages"), 1);
+	assert.equal(root.countByClass("friday-agent-process-current"), 1);
+	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("friday-agent-process-evidence"), 1);
+	assert.equal(root.countByClass("friday-agent-process-mutations"), 1);
+	assert.equal(root.countByClass("friday-agent-process-recovery"), 1);
+	assert.equal(root.countByClass("friday-agent-process-step"), 3);
+	assert.match(root.textContent, /Notes\/A\.md/);
+	assert.match(root.textContent, /Permission denied/);
 });
 
-test("renderAgentTrajectoryCard exposes waiting approval state visually", async () => {
+test("renderAgentTrajectoryCard renders Batch M.1 transport retry as reconnecting without checkpoint claims", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
 	renderAgentTrajectoryCard({
 		containerEl: root,
 		snapshot: makeSnapshot({
-			status: "waiting_for_approval",
-			headline: "Waiting for approval",
-			summary: "Approve write.",
+			status: "running",
+			headline: "Reconnecting to model",
+			summary: "Model request retry scheduled after HTTP 504; attempt 1/4; backoff 700ms",
 			items: [
-				{
-					id: "approval-1",
-					kind: "approval",
-					title: "Approval required",
-					detail: "Approve write.",
-					status: "waiting",
-					tool: "write",
-					targetPath: "Notes/today.md",
-				},
+				makeItem({
+					id: "transport",
+					kind: "transport",
+					title: "Model transport",
+					detail: "Model request retry scheduled after HTTP 504; attempt 1/4; backoff 700ms",
+					status: "running",
+					rawEventType: "retry_scheduled",
+					step: 3,
+				}),
 			],
 		}),
 		variant: "live",
@@ -131,47 +186,40 @@ test("renderAgentTrajectoryCard exposes waiting approval state visually", async 
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /Waiting for approval/);
-	assert.match(root.textContent, /Approval required/);
-	assert.ok(root.hasClassInTree("is-waiting"));
+	assert.ok(root.hasClassInTree("is-reconnecting"));
+	assert.match(root.textContent, /Reconnecting/);
+	assert.match(root.textContent, /attempt 1\/4/);
+	assert.match(root.textContent, /700ms/);
+	assert.doesNotMatch(root.textContent, /checkpoint|resume/i);
 });
 
-test("renderAgentTrajectoryCard exposes failed snapshot failure summary", async () => {
+test("renderAgentTrajectoryCard renders completed replay as collapsed process disclosure", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
 	renderAgentTrajectoryCard({
 		containerEl: root,
 		snapshot: makeSnapshot({
-			status: "failed",
-			headline: "Agent failed",
-			summary: "Runtime failed.",
-			failure: {
-				class: "tool",
-				message: "grep failed.",
-				retryable: true,
-				recoverable: true,
-			},
+			status: "completed",
+			headline: "Agent finished",
+			summary: "Created a sourced answer.",
+			privacy: { redacted: true, source: "replay" },
 			items: [
-				{
-					id: "failure-1",
-					kind: "failure",
-					title: "Run failed",
-					detail: "grep failed.",
-					status: "failed",
-				},
+				makeItem({ id: "read", kind: "tool", title: "read Notes/A.md", detail: "Read note.", status: "ok", tool: "read", targetPath: "Notes/A.md", step: 1 }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Created a sourced answer.", status: "ok" }),
 			],
 		}),
 		variant: "completed",
-		expanded: true,
+		expanded: false,
 		onToggle: () => {},
 		translate,
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /Agent failed/);
-	assert.match(root.textContent, /grep failed/);
-	assert.ok(root.hasClassInTree("is-failed"));
+	assert.equal(root.countByClass("friday-agent-process"), 1);
+	assert.match(root.textContent, /Completed/);
+	assert.match(root.textContent, /Agent finished/);
+	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
 });
 
 test("renderAgentTrajectoryCard renders trajectory actions without deciding availability", async () => {
@@ -182,6 +230,11 @@ test("renderAgentTrajectoryCard renders trajectory actions without deciding avai
 	renderAgentTrajectoryCard({
 		containerEl: root,
 		snapshot: makeSnapshot({
+			status: "failed",
+			failure: { class: "tool", message: "grep failed.", retryable: true, recoverable: true },
+			items: [
+				makeItem({ id: "failure", kind: "failure", title: "Run failed", detail: "grep failed.", status: "failed" }),
+			],
 			actions: [
 				{ id: "retry", label: "Retry", enabled: true, targetId: "task-1" },
 				{ id: "apply", label: "Apply", enabled: false, reason: "No pending mutation.", targetId: "plan-1" },
@@ -195,12 +248,12 @@ test("renderAgentTrajectoryCard renders trajectory actions without deciding avai
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /Retry/);
-	assert.match(root.textContent, /Apply/);
-	assert.equal(root.countByClass("friday-runtime-action"), 2);
+	assert.equal(root.countByClass("friday-agent-process-action"), 2);
 	assert.equal(root.findByClass("is-retry")?.disabled, false);
 	assert.equal(root.findByClass("is-apply")?.disabled, true);
+	assert.equal(root.findByClass("is-apply")?.attributes.title, "No pending mutation.");
 	root.findByClass("is-retry")?.onclick?.();
+	root.findByClass("is-apply")?.onclick?.();
 	assert.deepEqual(calls, ["retry"]);
 });
 
@@ -230,10 +283,10 @@ function makeSnapshot(overrides = {}) {
 		stages: ["context", "reasoning", "tools", "review", "finalize"].map((key) => ({
 			key,
 			label: key,
-			status: key === "review" ? "pending" : "ok",
+			status: "pending",
 			itemIds: [],
 		})),
-		items: [makeItem(1)],
+		items: [],
 		actions: [],
 		mutations: [],
 		privacy: { redacted: true, source: "live" },
@@ -241,14 +294,14 @@ function makeSnapshot(overrides = {}) {
 	};
 }
 
-function makeItem(index) {
+function makeItem(overrides = {}) {
 	return {
-		id: `item-${index}`,
-		kind: index % 2 === 0 ? "tool" : "model",
-		title: `Item ${index}`,
-		detail: `Detail ${index}`,
-		status: "ok",
-		step: index,
+		id: overrides.id ?? "item",
+		kind: overrides.kind ?? "tool",
+		title: overrides.title ?? "Item",
+		detail: overrides.detail ?? "",
+		status: overrides.status ?? "ok",
+		...overrides,
 	};
 }
 
@@ -269,6 +322,7 @@ class FakeElement {
 		this.text = "";
 		this.onclick = undefined;
 		this.disabled = false;
+		this.type = "";
 		if (typeof options.cls === "string") {
 			this.addClasses(options.cls);
 		}
