@@ -1,4 +1,8 @@
-import type { AgentTrajectoryItem, AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
+import type {
+	AgentTrajectoryAction,
+	AgentTrajectoryItem,
+	AgentTrajectorySnapshot,
+} from "../core/trajectory/AgentTrajectory";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 
@@ -8,12 +12,13 @@ export interface RenderAgentTrajectoryCardOptions {
 	variant: "live" | "completed";
 	expanded: boolean;
 	onToggle: () => void;
+	onAction?: (action: AgentTrajectoryAction) => void;
 	translate: (key: string, fallback: string, params?: TranslateParams) => string;
 	renderAssistantAvatar: (containerEl: HTMLElement) => void;
 }
 
 export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOptions): void {
-	const { containerEl, snapshot, variant, expanded, onToggle, translate, renderAssistantAvatar } = options;
+	const { containerEl, snapshot, variant, expanded, onToggle, onAction, translate, renderAssistantAvatar } = options;
 	if (!snapshot) {
 		return;
 	}
@@ -86,6 +91,28 @@ export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOpti
 			cls: `friday-runtime-stage is-${stage.status}`,
 			text: stage.label,
 		});
+	}
+
+	if (snapshot.actions.length > 0) {
+		const actionsEl = cardEl.createDiv({ cls: "friday-runtime-actions" });
+		for (const action of snapshot.actions) {
+			const buttonEl = actionsEl.createEl("button", {
+				cls: `friday-runtime-action is-${action.id}`,
+				text: action.label,
+				attr: {
+					"data-action-id": action.id,
+					...(action.targetId ? { "data-target-id": action.targetId } : {}),
+					...(action.reason ? { title: action.reason } : {}),
+				},
+			});
+			buttonEl.type = "button";
+			buttonEl.disabled = !action.enabled;
+			buttonEl.onclick = () => {
+				if (action.enabled) {
+					onAction?.(action);
+				}
+			};
+		}
 	}
 
 	if (snapshot.items.length === 0) {

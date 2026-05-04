@@ -208,3 +208,49 @@ test("projectReplaySummary prefers task waiting states over open terminal status
 	assert.equal(snapshot.failure, undefined);
 	assert.ok(snapshot.items.some((item) => item.kind === "task" && item.status === "waiting"));
 });
+
+test("projector derives trajectory actions from running failed approval mutation and replay states", async () => {
+	const { projectRuntimeProgress, projectReplaySummary } = await loadProjector();
+
+	const running = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-running" },
+	]);
+	assert.deepEqual(running.actions.map((action) => [action.id, action.enabled]), [["cancel", true]]);
+
+	const failed = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-failed-action" },
+		{ phase: "error", depth: 0, message: "Runtime failed." },
+	]);
+	assert.ok(failed.actions.some((action) => action.id === "retry" && action.enabled));
+
+	const approval = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-approval-action" },
+		{ phase: "tool_approval", depth: 0, step: 1, tool: "write", targetPath: "Notes/today.md", message: "Approve write." },
+	]);
+	assert.deepEqual(approval.actions.map((action) => action.id), ["approve", "reject"]);
+	assert.ok(approval.actions.every((action) => action.enabled && action.targetId));
+
+	const mutation = projectReplaySummary(makeReplaySummary({
+		status: "open",
+		terminalStatus: "open",
+		mutationTimeline: [
+			{
+				id: "plan-pending",
+				event: "planned",
+				operation: "edit",
+				targetPath: "Notes/today.md",
+				status: "pending_review",
+				summary: "Review note update.",
+				reason: "",
+			},
+		],
+	}));
+	assert.deepEqual(mutation.actions.map((action) => [action.id, action.targetId]), [
+		["cancel", "task-replay"],
+		["apply", "plan-pending"],
+		["reject", "plan-pending"],
+	]);
+
+	const completed = projectReplaySummary(makeReplaySummary());
+	assert.deepEqual(completed.actions.map((action) => action.id), ["view_replay"]);
+});

@@ -1,6 +1,7 @@
 import type { TurnReplaySummary } from "../runtime/TurnReplayReader";
 import type { RuntimeProgressEvent } from "../../services/AgentRuntimeService";
 import type {
+	AgentTrajectoryAction,
 	AgentTrajectoryFailure,
 	AgentTrajectoryIdentity,
 	AgentTrajectoryItem,
@@ -65,6 +66,7 @@ export function projectRuntimeProgress(events: RuntimeProgressEvent[]): AgentTra
 	}
 
 	deriveStageStatuses(snapshot);
+	snapshot.actions = deriveActions(snapshot);
 	return snapshot;
 }
 
@@ -175,6 +177,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 	}
 
 	deriveStageStatuses(snapshot);
+	snapshot.actions = deriveActions(snapshot);
 	return snapshot;
 }
 
@@ -462,6 +465,83 @@ function deriveStageStatuses(snapshot: AgentTrajectorySnapshot): void {
 	if (snapshot.status === "cancelled") {
 		setStageStatus(snapshot, "finalize", "cancelled");
 	}
+}
+
+function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction[] {
+	const actions: AgentTrajectoryAction[] = [];
+	if (snapshot.status === "running") {
+		actions.push({
+			id: "cancel",
+			label: "Cancel",
+			enabled: true,
+			targetId: snapshot.identity.taskId,
+		});
+	}
+	if (snapshot.status === "failed" && snapshot.failure?.retryable) {
+		actions.push({
+			id: "retry",
+			label: "Retry",
+			enabled: true,
+			targetId: snapshot.identity.taskId,
+		});
+	}
+	if (snapshot.status === "waiting_for_user") {
+		actions.push({
+			id: "continue",
+			label: "Continue",
+			enabled: true,
+			targetId: snapshot.identity.taskId,
+		});
+	}
+	if (snapshot.status === "waiting_for_approval") {
+		const approvalTarget = snapshot.items.find((item) => item.kind === "approval" && item.status === "waiting")?.id ??
+			snapshot.identity.taskId;
+		actions.push(
+			{
+				id: "approve",
+				label: "Approve",
+				enabled: true,
+				targetId: approvalTarget,
+			},
+			{
+				id: "reject",
+				label: "Reject",
+				enabled: true,
+				targetId: approvalTarget,
+			},
+		);
+	}
+	for (const mutation of snapshot.mutations) {
+		if (mutation.event !== "planned") {
+			continue;
+		}
+		if (snapshot.mutations.some((item) => item.id === mutation.id && item.event !== "planned")) {
+			continue;
+		}
+		actions.push(
+			{
+				id: "apply",
+				label: "Apply",
+				enabled: true,
+				targetId: mutation.id,
+			},
+			{
+				id: "reject",
+				label: "Reject",
+				enabled: true,
+				targetId: mutation.id,
+			},
+		);
+	}
+	if ((snapshot.status === "completed" || snapshot.status === "safe_stopped") && snapshot.privacy.source === "replay") {
+		actions.push({
+			id: "view_replay",
+			label: "View replay",
+			enabled: true,
+			targetId: snapshot.identity.turnId,
+		});
+	}
+	return actions;
 }
 
 function runtimeToolItemId(event: RuntimeProgressEvent): string {
