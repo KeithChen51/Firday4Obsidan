@@ -560,6 +560,9 @@ function resolveReplayStatus(summary: ReplaySummaryWithIdentity): AgentTrajector
 	if (waitingTask?.event === "waiting_for_user") {
 		return "waiting_for_user";
 	}
+	if (summary.mutationTimeline.some((mutation) => mutation.event === "conflicted" || mutation.event === "apply_failed")) {
+		return "failed";
+	}
 	if (summary.status === "failed" || summary.status === "cancelled" || summary.status === "safe_stopped") {
 		return summary.status;
 	}

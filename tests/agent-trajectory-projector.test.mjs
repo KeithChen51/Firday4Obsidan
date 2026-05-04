@@ -178,6 +178,77 @@ test("projectReplaySummary projects tool mutation and task timelines into a comp
 	assert.deepEqual(snapshot.mutations.map((mutation) => mutation.event), ["planned", "applied"]);
 });
 
+test("projectReplaySummary surfaces mutation conflict and apply failure directly", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		mutations: { planned: 2, applied: 0, rejected: 0, conflicted: 1, applyFailed: 1 },
+		mutationTimeline: [
+			{
+				id: "plan-apply-failed",
+				event: "planned",
+				operation: "edit",
+				targetPath: "Notes/apply.md",
+				status: "pending_review",
+				summary: "Prepare apply failure case.",
+				reason: "",
+			},
+			{
+				id: "plan-apply-failed",
+				event: "apply_failed",
+				operation: "edit",
+				targetPath: "Notes/apply.md",
+				status: "apply_failed",
+				summary: "Could not apply patch.",
+				reason: "File changed before apply.",
+			},
+			{
+				id: "plan-conflict",
+				event: "planned",
+				operation: "write",
+				targetPath: "Notes/conflict.md",
+				status: "pending_review",
+				summary: "Prepare conflict case.",
+				reason: "",
+			},
+			{
+				id: "plan-conflict",
+				event: "conflicted",
+				operation: "write",
+				targetPath: "Notes/conflict.md",
+				status: "conflicted",
+				summary: "Detected conflicting write.",
+				reason: "External edit won.",
+			},
+		],
+	}));
+
+	assert.equal(snapshot.status, "failed");
+	assert.equal(snapshot.failure?.class, "mutation");
+	assert.equal(snapshot.failure?.retryable, true);
+	assert.deepEqual(snapshot.actions.map((action) => [action.id, action.targetId]), [["retry", "task-replay"]]);
+	assert.deepEqual(snapshot.mutations.map((mutation) => [mutation.id, mutation.event, mutation.status]), [
+		["plan-apply-failed", "planned", "pending_review"],
+		["plan-apply-failed", "apply_failed", "apply_failed"],
+		["plan-conflict", "planned", "pending_review"],
+		["plan-conflict", "conflicted", "conflicted"],
+	]);
+	assert.ok(snapshot.items.some((item) =>
+		item.kind === "mutation" &&
+		item.actionRef === "plan-apply-failed" &&
+		item.status === "failed" &&
+		item.rawEventType === "mutation_apply_failed" &&
+		item.detail === "Could not apply patch."
+	));
+	assert.ok(snapshot.items.some((item) =>
+		item.kind === "mutation" &&
+		item.actionRef === "plan-conflict" &&
+		item.status === "failed" &&
+		item.rawEventType === "mutation_conflicted" &&
+		item.detail === "Detected conflicting write."
+	));
+});
+
 test("projectReplaySummary maps failed cancelled and safe stopped terminal states", async () => {
 	const { projectReplaySummary } = await loadProjector();
 
