@@ -835,3 +835,22 @@ Stop the migration and ask for direction if any of these happen:
 - retry/continue cannot preserve existing task semantics.
 - mutation review can be bypassed by a default tool path.
 - `AgentRuntimeService` keeps growing during H/I instead of shrinking.
+
+## 21. Batch J Gate Addendum
+
+Batch J now has a dedicated retirement checklist in both locales:
+
+- `docs/plans/agent-kernel-v2-retirement-checklist.md`
+- `docs/plans/agent-kernel-v2-retirement-checklist.zh.md`
+
+The required static and default-path gates are:
+
+- `tests/agent-kernel-legacy-retirement.test.mjs` confirms Kernel v2 has no production dependency on `AgentRuntimeService`, UI wiring goes through `AgentRuntimeFacade`, `ExecutionOrchestrator` does not touch Kernel internals, and every remaining legacy shell has a `LEGACY_RUNTIME_RETIREMENT_ALLOWED` marker.
+- `tests/agent-kernel-v2-default-path.test.mjs` confirms the plugin and harness default path is `AgentRuntimeFacade -> AgentKernel -> AgentLoopController`, and that the same execution context carries `taskId`, `traceId`, and `budget` through replay/default-path evidence.
+
+Allowed legacy runtime references after Batch J are limited to:
+
+- `src/services/AgentRuntimeService.ts`: deprecated Obsidian-facing adapter shell for vault IO, settings, tool handlers, and UI compatibility facades.
+- `src/services/LegacyAgentRuntimeAdapter.ts`: migration shim for explicit legacy fallback or compatibility tests only.
+
+These files must not become the default whole-turn execution entry again. Any new default caller of `AgentRuntimeService.runTurn`, `runTurnNative`, `runTurnPrompt`, or `LegacyAgentRuntimeAdapter` fails the retirement gate.

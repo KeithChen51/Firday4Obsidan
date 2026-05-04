@@ -251,6 +251,12 @@ const DEFAULT_MAX_READ_CHARS = 10000;
 const DEFAULT_MAX_GREP_MATCHES = 40;
 const PROJECT_SCOPED_DISCOVERY_TOOLS = new Set(["ls", "grep", "search_text", "glob"]);
 
+/**
+ * @deprecated Use AgentRuntimeFacade backed by AgentKernel for supported turns.
+ * LEGACY_RUNTIME_RETIREMENT_ALLOWED: retained as the Obsidian-facing adapter shell for vault IO,
+ * settings, tool handlers, and UI compatibility facades. It must not be wired as the default
+ * whole-turn execution engine.
+ */
 export class AgentRuntimeService {
 	private readonly turnOrchestrator: TurnOrchestrator;
 	private readonly toolGovernor: ToolGovernor;

@@ -835,3 +835,22 @@ J 之后，FRIDAY 不会自动等于 Codex 或 Manus 的完整产品。但它应
 - retry/continue 无法保留现有 task semantics。
 - mutation review 能被默认 tool path 绕过。
 - H/I 期间 `AgentRuntimeService` 继续变大，而不是缩小。
+
+## 21. Batch J 门禁补充
+
+Batch J 现在有中英文两份专门的 retirement checklist：
+
+- `docs/plans/agent-kernel-v2-retirement-checklist.md`
+- `docs/plans/agent-kernel-v2-retirement-checklist.zh.md`
+
+必须保留的静态门禁和默认路径门禁是：
+
+- `tests/agent-kernel-legacy-retirement.test.mjs` 确认 Kernel v2 production 路径不依赖 `AgentRuntimeService`，UI wiring 通过 `AgentRuntimeFacade`，`ExecutionOrchestrator` 不直接接触 Kernel internals，并且所有保留的 legacy shell 都带有 `LEGACY_RUNTIME_RETIREMENT_ALLOWED` 标记。
+- `tests/agent-kernel-v2-default-path.test.mjs` 确认 plugin 和 harness 默认路径是 `AgentRuntimeFacade -> AgentKernel -> AgentLoopController`，并确认同一个 execution context 携带 `taskId`、`traceId`、`budget` 贯穿 replay/default-path 证据。
+
+Batch J 后允许保留的 legacy runtime 引用只限于：
+
+- `src/services/AgentRuntimeService.ts`：deprecated 的 Obsidian-facing adapter shell，只保留 vault IO、settings、tool handlers 和 UI compatibility facades。
+- `src/services/LegacyAgentRuntimeAdapter.ts`：只用于显式 legacy fallback 或兼容测试的 migration shim。
+
+这些文件不能重新成为默认整轮执行入口。任何新增的 `AgentRuntimeService.runTurn`、`runTurnNative`、`runTurnPrompt` 或 `LegacyAgentRuntimeAdapter` 默认 caller 都必须让 retirement gate 失败。

@@ -12,6 +12,10 @@ export interface LegacyAgentRuntimeRunner {
 	runTurn(input: LegacyRuntimeTurnInput): Promise<LegacyRuntimeTurnResult>;
 }
 
+/**
+ * LEGACY_RUNTIME_RETIREMENT_ALLOWED: migration shim for explicit legacy fallback or compatibility
+ * tests only. The default product path must use AgentLoopController through AgentKernel.
+ */
 export class LegacyAgentRuntimeAdapter implements RuntimeTurnExecutorPort {
 	constructor(
 		private readonly runtime: LegacyAgentRuntimeRunner,

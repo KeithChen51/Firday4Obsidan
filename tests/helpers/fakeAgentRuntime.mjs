@@ -179,6 +179,7 @@ export async function runAgentRuntimeScenario(scenario) {
 			extraSystemContext: scenario.extraSystemContext,
 			mentionContext: scenario.mentionContext,
 			allowedTools: scenario.allowedTools,
+			budget: scenario.budget,
 			agentMode: scenario.agentMode ?? "ask",
 			onProgress: handleProgress,
 		});
@@ -328,6 +329,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		rawFinalReply: runtimeResult.rawFinalReply ?? "",
 		turnId: runtimeResult.turnId,
 		traceId: runtimeResult.traceId,
+		budget: runtimeResult.budget,
 		stepTraces: runtimeResult.stepTraces ?? [],
 		approvalRequests: approvalService.requests,
 		agentMode: scenario.agentMode ?? "ask",
