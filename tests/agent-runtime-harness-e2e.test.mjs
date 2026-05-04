@@ -549,6 +549,47 @@ test("organize mode: propose link/tag/frontmatter changes as pending mutation pl
 	);
 });
 
+test("model mutation envelope persists plans through Kernel mutation ownership with task trace", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "kernel-owned model mutation planning",
+		files: {
+			"Project/workspace/a.md": "original",
+		},
+		modelSteps: [
+			{
+				assistant: "Prepared a reviewed update.",
+				pendingMutations: [
+					{
+						id: "model-write-plan",
+						operation: "write",
+						targetPath: "Project/workspace/a.md",
+						summary: "Replace the file content.",
+						status: "pending",
+						before: "original",
+						after: "changed",
+						changeType: "update",
+					},
+				],
+			},
+		],
+	});
+
+	assert.ok(result.pendingMutations.some((plan) => plan.id === "model-write-plan"));
+	assert.equal(result.storedMutations.length, 1);
+	assert.equal(result.storedMutations[0].id, "model-write-plan");
+	assert.equal(result.storedMutations[0].operation, "write");
+	assert.equal(result.storedMutations[0].targetPath, "Project/workspace/a.md");
+	assert.equal(result.storedMutations[0].taskId, result.task.id);
+	assert.equal(result.storedMutations[0].traceId, result.traceId);
+	assert.equal(result.files["Project/workspace/a.md"], "original");
+	assert.equal(result.task.status, "waiting_for_approval");
+	const planned = findTurnEvent(result, "mutation_planned");
+	assert.equal(planned.payload.id, "model-write-plan");
+	assert.equal(planned.payload.taskId, result.task.id);
+	assert.equal(planned.payload.traceId, result.traceId);
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+});
+
 test("mutation review accept and reject events are persisted to replay logs", async () => {
 	const accepted = await runAgentRuntimeScenario({
 		name: "mutation accept replay",

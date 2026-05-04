@@ -5,7 +5,6 @@ import { ToolExecutionAdapter } from "./ToolExecutionAdapter";
 import type { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
 import type { AgentTurnInput, AgentTurnResult, AgentTurnStatus } from "../core/agent-kernel/contracts";
-import type { RuntimeEnvelope } from "../core/agent-kernel/RuntimeProtocol";
 import type { AgentMode } from "../core/tools/ToolRegistry";
 import type { RuntimeProgressEvent } from "../core/agent-kernel/contracts";
 import type { PromptMentionContext } from "../core/context/PromptContextEngine";
@@ -55,7 +54,6 @@ interface ObsidianKernelRuntimeHost {
 	}>;
 	formatToolResultForModel(payload: { ok: boolean; tool: string; data?: unknown; error?: string }): string;
 	extractLoadedSkillSystemContext(payload: { ok: boolean; tool: string; data?: unknown; error?: string }): string;
-	recordMutationPlansFromEnvelope(envelope: RuntimeEnvelope): AgentTurnResult["pendingMutations"];
 	buildRuntimeHistory(conversation: ChatMessage[]): ChatMessage[];
 	buildSystemPrompt(input: RuntimeTurnInput, depth: number): Promise<string>;
 	reportProgress(input: RuntimeTurnInput, event: RuntimeProgressEvent): void;
@@ -105,7 +103,8 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 				loadedSkillContext: runtime.extractLoadedSkillSystemContext(result.payload),
 			};
 		},
-		recordMutationPlans: (envelope) => runtime.recordMutationPlansFromEnvelope(envelope) ?? [],
+		recordMutationPlans: (envelope, source, context) =>
+			context ? stateAdapter.recordMutationPlansFromEnvelope(envelope, source, context) : [],
 	});
 	return new AgentLoopController({
 		contextEngine: {

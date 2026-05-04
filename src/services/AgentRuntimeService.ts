@@ -9,6 +9,7 @@ import {
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
+import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
 import type { AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
 import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
@@ -1516,11 +1517,17 @@ export class AgentRuntimeService {
 		}
 		const nextRecord = this.withEditPlanStatus(record, result.status);
 		this.workbenchStateStore.replaceEditPlan(nextRecord);
-		await this.persistMutationReviewEvent(
-			nextRecord,
-			result.status === "conflicted" ? "mutation_conflicted" : "mutation_applied",
-			result.reason,
-		);
+		if (result.status === "applied") {
+			const context = this.createMutationReviewContext(nextRecord);
+			if (context) {
+				await this.agentStateAdapter.mutationCoordinator.markApplied(context, nextRecord.id, result.reason);
+				await this.persistKernelMutationReviewEvents(context);
+			} else {
+				await this.persistMutationReviewEvent(nextRecord, "mutation_applied", result.reason);
+			}
+		} else {
+			await this.persistMutationReviewEvent(nextRecord, "mutation_conflicted", result.reason);
+		}
 		await this.updateTaskAfterMutationReview(nextRecord, result.status, result.reason);
 		return result.status;
 	}
@@ -1539,7 +1546,13 @@ export class AgentRuntimeService {
 		await this.mutationPlanStore.replace(result.plan);
 		const nextRecord = this.withEditPlanStatus(record, "rejected");
 		this.workbenchStateStore.replaceEditPlan(nextRecord);
-		await this.persistMutationReviewEvent(nextRecord, "mutation_rejected");
+		const context = this.createMutationReviewContext(nextRecord);
+		if (context) {
+			await this.agentStateAdapter.mutationCoordinator.rejectPlan(context, nextRecord.id);
+			await this.persistKernelMutationReviewEvents(context);
+		} else {
+			await this.persistMutationReviewEvent(nextRecord, "mutation_rejected");
+		}
 		await this.updateTaskAfterMutationReview(nextRecord, "rejected");
 	}
 
@@ -2928,6 +2941,37 @@ export class AgentRuntimeService {
 				status,
 			})),
 		};
+	}
+
+	private createMutationReviewContext(record: EditPlanRecord): AgentExecutionContext | null {
+		if (!record.originConversationId || !record.originTurnId) {
+			return null;
+		}
+		return new AgentExecutionContext({
+			turnId: record.originTurnId,
+			taskId: record.originTaskId,
+			traceId: record.originTraceId,
+			conversationId: record.originConversationId,
+			agentId: record.agentId,
+			mode: this.activeAgentMode,
+		});
+	}
+
+	private async persistKernelMutationReviewEvents(context: AgentExecutionContext): Promise<void> {
+		await this.agentStateAdapter.replayRecorder.recordTurn({
+			context,
+			result: {
+				turnId: context.turnId,
+				taskId: context.taskId,
+				traceId: context.traceId,
+				conversationId: context.conversationId,
+				status: "completed",
+				assistantText: "",
+				events: context.snapshotEvents(),
+				traces: [],
+				rawFinalReply: "",
+			},
+		});
 	}
 
 	private async persistMutationReviewEvent(

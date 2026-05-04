@@ -11,7 +11,7 @@ export interface ToolExecutionAdapterDelegate {
 		envelope: RuntimeEnvelope,
 		source: string,
 		context?: AgentExecutionContext,
-	): RuntimeMutationPlan[];
+	): RuntimeMutationPlan[] | Promise<RuntimeMutationPlan[]>;
 }
 
 export class ToolExecutionAdapter implements ToolExecutionPort {
@@ -29,7 +29,7 @@ export class ToolExecutionAdapter implements ToolExecutionPort {
 		envelope: RuntimeEnvelope,
 		source: string,
 		context: AgentExecutionContext,
-	): RuntimeMutationPlan[] {
+	): RuntimeMutationPlan[] | Promise<RuntimeMutationPlan[]> {
 		return this.delegate.recordMutationPlans?.(envelope, source, context) ?? [];
 	}
 }

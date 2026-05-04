@@ -56,6 +56,13 @@ export interface RuntimeMutationPlan {
 	summary?: string;
 	status?: string;
 	source?: string;
+	taskId?: string;
+	traceId?: string;
+	toolCallId?: string;
+	before?: string;
+	after?: string;
+	changeType?: string;
+	riskLevel?: string;
 }
 
 export interface RuntimeToolTrace {

@@ -150,6 +150,9 @@ test("default Obsidian kernel path uses Kernel state components instead of legac
 	assert.match(portsSource, /stateAdapter\.beginTurn/);
 	assert.match(portsSource, /stateAdapter\.completeTurn/);
 	assert.match(portsSource, /stateAdapter\.failTurn/);
+	assert.match(portsSource, /stateAdapter\.recordMutationPlansFromEnvelope/);
+	assert.doesNotMatch(portsSource, /runtime\.recordMutationPlansFromEnvelope/);
+	assert.doesNotMatch(portsSource, /recordMutationPlansFromEnvelope\(envelope:/);
 	assert.doesNotMatch(portsSource, /startAgentTaskForTurn\(/);
 	assert.doesNotMatch(portsSource, /finalizeTurnResult\(/);
 	assert.doesNotMatch(portsSource, /persistTurnEvents\(/);

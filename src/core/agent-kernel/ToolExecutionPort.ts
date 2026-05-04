@@ -35,5 +35,5 @@ export interface ToolExecutionPort {
 		envelope: RuntimeEnvelope,
 		source: string,
 		context: AgentExecutionContext,
-	): RuntimeMutationPlan[];
+	): RuntimeMutationPlan[] | Promise<RuntimeMutationPlan[]>;
 }

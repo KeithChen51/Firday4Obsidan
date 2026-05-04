@@ -4,10 +4,12 @@ import { AgentResumeController } from "../core/agent-kernel/AgentResumeControlle
 import { AgentTaskManager } from "../core/agent-kernel/AgentTaskManager";
 import type { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import type { AgentTurnInput, AgentTurnResult, AgentTurnStatus, RuntimeMutationPlan } from "../core/agent-kernel/contracts";
+import { extractMutationPlans, type RuntimeEnvelope } from "../core/agent-kernel/RuntimeProtocol";
 import type { TurnEventInput, TurnEventLog } from "../core/runtime/TurnEventLog";
 import type { StepTraceEvent } from "../core/turn-state/TurnStateMachine";
 import type { AgentTask } from "../core/tasks/AgentTask";
 import type { AgentTaskStore } from "../core/tasks/AgentTaskStore";
+import type { MutationChangeType, MutationOperation, MutationPlan, MutationRiskLevel } from "../core/mutations/MutationPlan";
 import type { MutationPlanStore } from "../core/mutations/MutationPlanStore";
 import type { EditPlanRecord, WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import type { RuntimeProfile } from "../platform/runtime/RuntimeProfile";
@@ -50,6 +52,49 @@ export class ObsidianAgentStateAdapter {
 
 	beginTurn(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentTask> {
 		return this.taskManager.beginTurn(input, context);
+	}
+
+	async recordMutationPlansFromEnvelope(
+		envelope: RuntimeEnvelope,
+		source: string,
+		context: AgentExecutionContext,
+	): Promise<RuntimeMutationPlan[]> {
+		const rawPlans = extractMutationPlans(envelope);
+		const planned: RuntimeMutationPlan[] = [];
+		for (const [index, rawPlan] of rawPlans.entries()) {
+			const normalized = this.normalizeRuntimeMutationPlan(rawPlan, index, source, context);
+			if (this.canPersistRuntimeMutation(rawPlan, normalized)) {
+				const plan = await this.mutationCoordinator.createPlan(context, {
+					id: normalized.id,
+					operation: normalized.operation,
+					targetPath: normalized.targetPath,
+					before: rawPlan.before ?? "",
+					after: rawPlan.after ?? "",
+					summary: normalized.summary ?? `${normalized.operation} ${normalized.targetPath}`.trim(),
+					changeType: normalized.changeType as MutationChangeType | undefined,
+					riskLevel: normalized.riskLevel as MutationRiskLevel | undefined,
+					toolCallId: normalized.toolCallId,
+				});
+				this.options.workbenchStateStore.recordEditPlan(this.toEditPlanRecord(plan));
+				planned.push(this.toRuntimeMutationPlanFromStored(plan, source));
+				continue;
+			}
+			context.emit({
+				type: "mutation_planned",
+				payload: {
+					id: normalized.id,
+					operation: normalized.operation,
+					targetPath: normalized.targetPath,
+					summary: normalized.summary,
+					status: normalized.status,
+					source: normalized.source,
+					taskId: context.taskId,
+					traceId: context.traceId,
+				},
+			});
+			planned.push(normalized);
+		}
+		return planned;
 	}
 
 	async completeTurn(
@@ -133,7 +178,7 @@ export class ObsidianAgentStateAdapter {
 				plan.originTurnId === context.turnId &&
 				plan.items.some((item) => item.status === "pending")
 			)
-			.map((plan) => this.toRuntimeMutationPlan(plan));
+			.map((plan) => this.toRuntimeMutationPlanFromEditRecord(plan));
 		const byId = new Map<string, RuntimeMutationPlan>();
 		for (const plan of [...fromResult, ...fromWorkbench]) {
 			const key = plan.id ?? `${plan.operation}:${plan.targetPath}`;
@@ -142,7 +187,7 @@ export class ObsidianAgentStateAdapter {
 		return [...byId.values()];
 	}
 
-	private toRuntimeMutationPlan(plan: EditPlanRecord): RuntimeMutationPlan {
+	private toRuntimeMutationPlanFromEditRecord(plan: EditPlanRecord): RuntimeMutationPlan {
 		const firstItem = plan.items[0];
 		return {
 			id: plan.id,
@@ -151,7 +196,109 @@ export class ObsidianAgentStateAdapter {
 			summary: firstItem?.summary ?? `${plan.tool} ${firstItem?.path ?? ""}`.trim(),
 			status: "pending",
 			source: "tool",
+			taskId: plan.originTaskId,
+			traceId: plan.originTraceId,
+			toolCallId: plan.toolCallId,
 		};
+	}
+
+	private toRuntimeMutationPlanFromStored(plan: MutationPlan, source: string): RuntimeMutationPlan {
+		return {
+			id: plan.id,
+			operation: plan.operation,
+			targetPath: plan.targetPath,
+			summary: plan.summary,
+			status: plan.status,
+			source,
+			taskId: plan.taskId,
+			traceId: plan.traceId,
+			toolCallId: plan.toolCallId,
+		};
+	}
+
+	private toEditPlanRecord(plan: MutationPlan): EditPlanRecord {
+		return {
+			id: plan.id,
+			agentId: plan.agentId,
+			originConversationId: plan.conversationId,
+			originTurnId: plan.turnId,
+			originTaskId: plan.taskId,
+			originTraceId: plan.traceId,
+			toolCallId: plan.toolCallId,
+			tool: plan.operation,
+			recordedAt: plan.createdAt,
+			items: plan.items.map((item) => ({
+				path: item.path,
+				before: item.before,
+				after: item.after,
+				beforeHash: item.beforeHash,
+				afterHash: item.afterHash,
+				status: item.status,
+				changeType: item.changeType,
+				riskLevel: plan.riskLevel,
+				summary: plan.summary,
+			})),
+		};
+	}
+
+	private normalizeRuntimeMutationPlan(
+		plan: RuntimeMutationPlan,
+		index: number,
+		source: string,
+		context: AgentExecutionContext,
+	): RuntimeMutationPlan {
+		const operation = typeof plan.operation === "string" ? plan.operation.trim() : "";
+		const targetPath = typeof plan.targetPath === "string" ? this.normalizeTargetPath(plan.targetPath) : "";
+		const id = typeof plan.id === "string" && plan.id.trim()
+			? plan.id.trim()
+			: `mutation-plan-${context.turnId}-${index + 1}`;
+		const status = typeof plan.status === "string" && plan.status.trim() ? plan.status.trim() : "pending";
+		const summary = typeof plan.summary === "string" && plan.summary.trim()
+			? this.truncate(plan.summary.trim(), 240)
+			: `${operation || "mutation"} ${targetPath}`.trim();
+		return {
+			...plan,
+			id,
+			operation,
+			targetPath,
+			summary,
+			status,
+			source,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			toolCallId: typeof plan.toolCallId === "string" && plan.toolCallId.trim() ? plan.toolCallId.trim() : undefined,
+			changeType: this.normalizeChangeType(plan.changeType),
+			riskLevel: this.normalizeRiskLevel(plan.riskLevel),
+		};
+	}
+
+	private canPersistRuntimeMutation(rawPlan: RuntimeMutationPlan, normalized: RuntimeMutationPlan): normalized is RuntimeMutationPlan & {
+		operation: MutationOperation;
+		targetPath: string;
+	} {
+		if (!this.isMutationOperation(normalized.operation) || !normalized.targetPath) {
+			return false;
+		}
+		if (normalized.operation === "delete") {
+			return typeof rawPlan.before === "string";
+		}
+		return typeof rawPlan.before === "string" && typeof rawPlan.after === "string";
+	}
+
+	private isMutationOperation(value: string | undefined): value is MutationOperation {
+		return value === "write" || value === "edit" || value === "delete";
+	}
+
+	private normalizeChangeType(value: string | undefined): MutationChangeType | undefined {
+		return value === "create" || value === "update" || value === "delete" ? value : undefined;
+	}
+
+	private normalizeRiskLevel(value: string | undefined): MutationRiskLevel | undefined {
+		return value === "standard" || value === "high" ? value : undefined;
+	}
+
+	private normalizeTargetPath(value: string): string {
+		return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
 	}
 
 	private withPendingMutationNotice(result: AgentTurnResult, context: AgentExecutionContext): AgentTurnResult {

@@ -121,7 +121,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					contextSummary: contextPackage.contextSummary,
 				});
 			}
-			const terminal = this.resolveTerminalEnvelope(input, context, parsed, finalReply, traces, contextPackage);
+			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, finalReply, traces, contextPackage);
 			if (terminal) {
 				return terminal;
 			}
@@ -275,7 +275,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		}
 		const parsed = parseKernelRuntimeEnvelope(assistantStepText);
 		if (parsed) {
-			const terminal = this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage);
+			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage);
 			if (terminal) {
 				return terminal;
 			}
@@ -311,16 +311,16 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		});
 	}
 
-	private resolveTerminalEnvelope(
+	private async resolveTerminalEnvelope(
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		envelope: RuntimeEnvelope,
 		rawFinalReply: string,
 		traces: RuntimeToolTrace[],
 		contextPackage: ContextPackage,
-	): AgentTurnResult | null {
+	): Promise<AgentTurnResult | null> {
 		if (isResponseEnvelope(envelope) || (!envelope.tool && hasMutationPlans(envelope))) {
-			const pendingMutations = this.recordMutationPlans(envelope, context);
+			const pendingMutations = await this.recordMutationPlans(envelope, context);
 			return this.makeResult(input, context, {
 				assistantText: (envelope.assistant ?? rawFinalReply).trim() || "(Model returned no usable content)",
 				traces,
@@ -452,8 +452,8 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		});
 	}
 
-	private recordMutationPlans(envelope: RuntimeEnvelope, context: AgentExecutionContext): RuntimeMutationPlan[] {
-		return this.options.toolExecution.recordMutationPlans?.(envelope, "model_envelope", context) ?? [];
+	private async recordMutationPlans(envelope: RuntimeEnvelope, context: AgentExecutionContext): Promise<RuntimeMutationPlan[]> {
+		return await this.options.toolExecution.recordMutationPlans?.(envelope, "model_envelope", context) ?? [];
 	}
 
 	private resolveMaxIterations(contextPackage: ContextPackage, context: AgentExecutionContext): number {
