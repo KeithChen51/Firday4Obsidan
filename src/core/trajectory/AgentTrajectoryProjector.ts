@@ -146,6 +146,20 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		});
 	}
 
+	for (const [index, checkpoint] of (replaySummary.checkpointTimeline ?? []).entries()) {
+		upsertItem(snapshot, "reasoning", {
+			id: `replay:checkpoint:${checkpoint.checkpointId || index}:${checkpoint.event}`,
+			kind: "system",
+			title: formatCheckpointTitle(checkpoint.event),
+			detail: formatCheckpointDetail(checkpoint),
+			status: mapCheckpointStatus(checkpoint.event, snapshot.status),
+			step: checkpoint.nextStep ?? checkpoint.step,
+			at: checkpoint.at,
+			actionRef: checkpoint.canAutoResume === false ? undefined : checkpoint.checkpointId || undefined,
+			rawEventType: `checkpoint_${checkpoint.event}`,
+		});
+	}
+
 	if (replaySummary.approvals.requested > 0) {
 		const waiting = replaySummary.approvals.requested > replaySummary.approvals.resolved;
 		upsertItem(snapshot, "review", {
@@ -326,6 +340,32 @@ function applyRuntimeProgress(
 					recoverable: true,
 				};
 			}
+			break;
+		}
+		case "checkpoint": {
+			const checkpoint = event.checkpoint;
+			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
+			snapshot.headline = checkpoint?.type === "resume_started"
+				? "Resuming from checkpoint"
+				: checkpoint?.type === "resume_rejected"
+					? "Checkpoint resume skipped"
+					: checkpoint?.type === "resume_completed"
+						? "Checkpoint resume completed"
+						: "Checkpoint saved";
+			snapshot.summary = safeText(event.message);
+			setStageStatus(snapshot, "reasoning", checkpoint?.type === "resume_rejected" ? "ok" : "running");
+			upsertItem(snapshot, "reasoning", {
+				id: `live:checkpoint:${checkpoint?.checkpointId ?? index}:${checkpoint?.type ?? "event"}`,
+				kind: "system",
+				title: checkpoint ? formatCheckpointTitle(runtimeCheckpointToReplayEvent(checkpoint.type)) : "Checkpoint",
+				detail: safeText(event.message || checkpoint?.reason || ""),
+				status: checkpoint?.type === "resume_completed" || checkpoint?.type === "saved" || checkpoint?.type === "resume_rejected"
+					? "ok"
+					: "running",
+				step,
+				actionRef: checkpoint?.checkpointId,
+				rawEventType: checkpoint ? `checkpoint_${runtimeCheckpointToReplayEvent(checkpoint.type)}` : event.phase,
+			});
 			break;
 		}
 		case "tool_approval":
@@ -600,6 +640,14 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 		});
 	}
 	if (snapshot.status === "failed" && snapshot.failure?.retryable) {
+		if (hasResumableCheckpoint(snapshot)) {
+			actions.push({
+				id: "resume",
+				label: "Resume",
+				enabled: true,
+				targetId: snapshot.identity.taskId,
+			});
+		}
 		actions.push({
 			id: "retry",
 			label: "Retry",
@@ -666,6 +714,36 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 		});
 	}
 	return actions;
+}
+
+function hasResumableCheckpoint(snapshot: AgentTrajectorySnapshot): boolean {
+	const rejectedIds = new Set(snapshot.items
+		.filter((item) => item.rawEventType === "checkpoint_resume_rejected")
+		.map((item) => item.actionRef)
+		.filter((value): value is string => Boolean(value)));
+	return snapshot.items.some((item) => {
+		const actionRef = item.actionRef;
+		return item.rawEventType === "checkpoint_saved" &&
+			typeof actionRef === "string" &&
+			actionRef.length > 0 &&
+			!rejectedIds.has(actionRef);
+	});
+}
+
+function runtimeCheckpointToReplayEvent(
+	event: NonNullable<RuntimeProgressEvent["checkpoint"]>["type"],
+): TurnReplaySummary["checkpointTimeline"][number]["event"] {
+	switch (event) {
+		case "resume_started":
+			return "resume_started";
+		case "resume_rejected":
+			return "resume_rejected";
+		case "resume_completed":
+			return "resume_completed";
+		case "saved":
+		default:
+			return "saved";
+	}
 }
 
 function runtimeToolItemId(event: RuntimeProgressEvent): string {
@@ -809,6 +887,19 @@ function mapReplayTransportStatus(
 	return "running";
 }
 
+function mapCheckpointStatus(
+	event: TurnReplaySummary["checkpointTimeline"][number]["event"],
+	snapshotStatus: AgentTrajectoryStatus,
+): AgentTrajectoryItemStatus {
+	if (event === "resume_rejected") {
+		return snapshotStatus === "failed" ? "failed" : "ok";
+	}
+	if (event === "resume_started" && !isTerminalTrajectoryStatus(snapshotStatus)) {
+		return "running";
+	}
+	return "ok";
+}
+
 function formatRuntimeTransportDetail(event: RuntimeProgressEvent): string {
 	const transport = event.transport;
 	if (!transport) {
@@ -905,6 +996,29 @@ function formatMutationTitle(mutation: AgentTrajectoryMutation): string {
 
 function formatTaskTitle(event: TurnReplaySummary["taskTimeline"][number]["event"]): string {
 	return `Task ${event.replace(/_/g, " ")}`;
+}
+
+function formatCheckpointTitle(event: TurnReplaySummary["checkpointTimeline"][number]["event"]): string {
+	switch (event) {
+		case "resume_started":
+			return "Checkpoint resume";
+		case "resume_completed":
+			return "Checkpoint resume completed";
+		case "resume_rejected":
+			return "Checkpoint resume skipped";
+		case "saved":
+		default:
+			return "Checkpoint saved";
+	}
+}
+
+function formatCheckpointDetail(checkpoint: TurnReplaySummary["checkpointTimeline"][number]): string {
+	const boundary = checkpoint.boundary ? ` (${checkpoint.boundary})` : "";
+	const reason = safeText(checkpoint.reason);
+	if (reason) {
+		return `${reason}${boundary}`;
+	}
+	return `${formatCheckpointTitle(checkpoint.event)}${boundary}`.trim();
 }
 
 function safeText(value: string, maxLength = 220): string {

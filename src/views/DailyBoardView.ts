@@ -2967,6 +2967,10 @@ export class DailyBoardView extends ItemView {
 		await this.createAgentTaskPanelActionHandlers(taskId).retry();
 	}
 
+	private async handleAgentTaskResume(taskId: string): Promise<void> {
+		await this.createAgentTaskPanelActionHandlers(taskId).resume();
+	}
+
 	private async handleAgentTaskCancel(taskId: string): Promise<void> {
 		await this.createAgentTaskPanelActionHandlers(taskId).cancel();
 	}
@@ -3118,6 +3122,8 @@ export class DailyBoardView extends ItemView {
 
 	private formatAgentTaskAction(action: AgentTask["availableActions"][number]): string {
 		switch (action) {
+			case "resume":
+				return this.t("ai.task.action.resume", "Resume");
 			case "retry":
 				return this.t("ai.task.action.retry", "Retry");
 			case "cancel":
@@ -3179,7 +3185,9 @@ export class DailyBoardView extends ItemView {
 				text: this.formatAgentTaskAction(action),
 			});
 			button.type = "button";
-			if (action === "retry") {
+			if (action === "resume") {
+				button.onclick = () => void taskActions.resume();
+			} else if (action === "retry") {
 				button.onclick = () => void taskActions.retry();
 			} else if (action === "cancel") {
 				button.onclick = () => void taskActions.cancel();
@@ -3287,7 +3295,9 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 		const taskActions = this.createAgentTaskPanelActionHandlers(taskId);
-		if (action.id === "retry") {
+		if (action.id === "resume") {
+			void taskActions.resume();
+		} else if (action.id === "retry") {
 			void taskActions.retry();
 		} else if (action.id === "cancel") {
 			void taskActions.cancel();

@@ -4,10 +4,18 @@ import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import { AgentFailureClassifier } from "./AgentFailureClassifier";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "./AgentKernelPorts";
-import type { AgentLoopFallbackPolicy, AgentLoopLifecyclePort, AgentLoopProgressPort } from "./AgentLoopTypes";
+import type { AgentLoopCheckpointPort, AgentLoopFallbackPolicy, AgentLoopLifecyclePort, AgentLoopProgressPort } from "./AgentLoopTypes";
 import type { ContextEnginePort, ContextPackage } from "./ContextEnginePort";
 import type { ModelDriverPort } from "./ModelDriverPort";
 import type { ToolExecutionPort, ToolExecutionResult } from "./ToolExecutionPort";
+import {
+	createAgentLoopCheckpointId,
+	sanitizeAgentLoopCheckpoint,
+	validateCheckpointForResume,
+	type AgentLoopCheckpoint,
+	type AgentCheckpointToolResultRef,
+	type AgentLoopCheckpointBoundary,
+} from "./checkpoints/AgentLoopCheckpoint";
 import {
 	hasMutationPlans,
 	isResponseEnvelope,
@@ -31,8 +39,14 @@ export interface AgentLoopControllerOptions {
 	toolExecution: ToolExecutionPort;
 	progress?: AgentLoopProgressPort;
 	lifecycle?: AgentLoopLifecyclePort;
+	checkpoint?: AgentLoopCheckpointPort;
 	fallbackPolicy?: AgentLoopFallbackPolicy;
 	failureClassifier?: AgentFailureClassifierPort;
+}
+
+interface AgentLoopInitialState {
+	startStep?: number;
+	traces?: RuntimeToolTrace[];
 }
 
 export class AgentLoopController implements RuntimeTurnExecutorPort {
@@ -59,14 +73,50 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	}
 
 	private async runConfiguredLoop(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentTurnResult> {
+		const resumeCheckpoint = await this.resolveResumeCheckpoint(input, context);
+		if (resumeCheckpoint) {
+			const result = await this.runFromCheckpoint(input, context, resumeCheckpoint);
+			this.emitCheckpointResumeCompleted(input, context, resumeCheckpoint);
+			return result;
+		}
 		const contextPackage = await this.options.contextEngine.buildContext(input, context, { channel: "native" });
 		if (contextPackage.toolCallingMode === "prompt") {
+			await this.saveCheckpoint(input, context, {
+				boundary: "context_ready",
+				channel: "prompt",
+				step: 0,
+				nextStep: 1,
+				maxIterations: contextPackage.maxIterations,
+				modelMessages: contextPackage.messages,
+				traces: [],
+				safetyReason: "Context package built before prompt model request.",
+			});
 			return this.runPromptLoop(input, context, contextPackage);
 		}
 		if (contextPackage.toolCallingMode === "native") {
+			await this.saveCheckpoint(input, context, {
+				boundary: "context_ready",
+				channel: "native",
+				step: 0,
+				nextStep: 1,
+				maxIterations: contextPackage.maxIterations,
+				modelMessages: contextPackage.messages,
+				traces: [],
+				safetyReason: "Context package built before native model request.",
+			});
 			return this.runNativeLoop(input, context, contextPackage);
 		}
 		try {
+			await this.saveCheckpoint(input, context, {
+				boundary: "context_ready",
+				channel: "native",
+				step: 0,
+				nextStep: 1,
+				maxIterations: contextPackage.maxIterations,
+				modelMessages: contextPackage.messages,
+				traces: [],
+				safetyReason: "Context package built before native model request.",
+			});
 			return await this.runNativeLoop(input, context, contextPackage);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error ?? "");
@@ -80,6 +130,16 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			}
 			this.emitFallback(input, context, message);
 			const promptContext = await this.options.contextEngine.buildContext(input, context, { channel: "prompt" });
+			await this.saveCheckpoint(input, context, {
+				boundary: "context_ready",
+				channel: "prompt",
+				step: 0,
+				nextStep: 1,
+				maxIterations: promptContext.maxIterations,
+				modelMessages: promptContext.messages,
+				traces: [],
+				safetyReason: "Prompt fallback context package built before model request.",
+			});
 			const result = await this.runPromptLoop(input, context, promptContext);
 			return {
 				...result,
@@ -94,12 +154,14 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		contextPackage: ContextPackage,
+		initialState: AgentLoopInitialState = {},
 	): Promise<AgentTurnResult> {
-		const maxIterations = this.resolveMaxIterations(contextPackage, context);
-		const traces: RuntimeToolTrace[] = [];
+		const startStep = initialState.startStep ?? 1;
+		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
+		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		let finalReply = "";
-		for (let step = 1; step <= maxIterations; step += 1) {
+		for (let step = startStep; step <= maxIterations; step += 1) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
 			const response = await this.options.modelDriver.requestText({
 				messages: cloneMessages(modelMessages),
@@ -153,6 +215,23 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				if (executed.loadedSkillContext) {
 					modelMessages.push({ role: "system", content: executed.loadedSkillContext });
 				}
+				await this.saveCheckpoint(input, context, {
+					boundary: "after_tool_result",
+					channel: "prompt",
+					step,
+					nextStep: step + 1,
+					maxIterations,
+					modelMessages,
+					traces,
+					completedToolCalls: [{
+						toolCallId: executed.trace.runId,
+						tool: executed.trace.tool,
+						status: executed.trace.status,
+						step: executed.trace.step,
+						targetPath: executed.trace.targetPath,
+					}],
+					safetyReason: "Prompt tool result appended to model messages.",
+				});
 				continue;
 			}
 			return this.makeResult(input, context, {
@@ -175,9 +254,11 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		contextPackage: ContextPackage,
+		initialState: AgentLoopInitialState = {},
 	): Promise<AgentTurnResult> {
-		const maxIterations = this.resolveMaxIterations(contextPackage, context);
-		const traces: RuntimeToolTrace[] = [];
+		const startStep = initialState.startStep ?? 1;
+		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
+		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		const tools = await this.options.toolExecution.listNativeTools({ input, context, allowedTools: input.allowedTools });
 		if (tools.length === 0) {
@@ -191,7 +272,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 		let finalReply = "";
 		let lastToolPayload: ToolExecutionResult["payload"] | null = null;
-		for (let step = 1; step <= maxIterations; step += 1) {
+		for (let step = startStep; step <= maxIterations; step += 1) {
 			this.emitModelRequest(input, context, step, "native", modelMessages);
 			const response = await this.options.modelDriver.requestWithTools({
 				messages: cloneMessages(modelMessages),
@@ -225,6 +306,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 			const toolResultMessages: AgentChatMessage[] = [];
 			const loadedSkillContexts: string[] = [];
+			const completedToolCalls: AgentCheckpointToolResultRef[] = [];
 			for (const toolCall of response.toolCalls) {
 				const executed = await this.executeTool(input, context, step, {
 					id: toolCall.id,
@@ -233,6 +315,13 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				});
 				traces.push(executed.trace);
 				lastToolPayload = executed.payload;
+				completedToolCalls.push({
+					toolCallId: toolCall.id ?? executed.trace.runId,
+					tool: executed.trace.tool,
+					status: executed.trace.status,
+					step: executed.trace.step,
+					targetPath: executed.trace.targetPath,
+				});
 				toolResultMessages.push({
 					role: "tool",
 					content: executed.modelResultText,
@@ -253,6 +342,17 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			for (const loadedSkillContext of loadedSkillContexts) {
 				modelMessages.push({ role: "system", content: loadedSkillContext });
 			}
+			await this.saveCheckpoint(input, context, {
+				boundary: "after_tool_result",
+				channel: "native",
+				step,
+				nextStep: step + 1,
+				maxIterations,
+				modelMessages,
+				traces,
+				completedToolCalls,
+				safetyReason: "Native tool result appended to model messages.",
+			});
 		}
 		return this.makeResult(input, context, {
 			assistantText: finalReply ? `${finalReply}\n\n${MAX_TOOL_ITERATION_MESSAGE}` : MAX_TOOL_ITERATION_MESSAGE,
@@ -513,6 +613,223 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 	private async recordMutationPlans(envelope: RuntimeEnvelope, context: AgentExecutionContext): Promise<RuntimeMutationPlan[]> {
 		return await this.options.toolExecution.recordMutationPlans?.(envelope, "model_envelope", context) ?? [];
+	}
+
+	private async resolveResumeCheckpoint(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+	): Promise<AgentLoopCheckpoint | null> {
+		const resumeFromCheckpointId = input.resumeFromCheckpointId?.trim() ||
+			(typeof input.metadata?.resumeFromCheckpointId === "string" ? input.metadata.resumeFromCheckpointId.trim() : "");
+		if (!resumeFromCheckpointId || !this.options.checkpoint?.getResumeCheckpoint) {
+			return null;
+		}
+		let checkpoint: AgentLoopCheckpoint | null = null;
+		try {
+			checkpoint = await this.options.checkpoint.getResumeCheckpoint(input, context);
+		} catch {
+			return null;
+		}
+		if (!checkpoint) {
+			return null;
+		}
+		const validation = validateCheckpointForResume({
+			checkpoint,
+			conversationId: context.conversationId,
+			agentId: context.agentId,
+			taskId: input.retryOfTaskId || input.taskId || context.taskId,
+			allowedTools: input.allowedTools,
+		});
+		if (!validation.ok) {
+			await this.markCheckpointConsumed(checkpoint.id, "rejected", validation.reason);
+			context.emit({
+				type: "checkpoint_resume_rejected",
+				payload: this.buildCheckpointEventPayload(checkpoint, validation.reason),
+			});
+			this.report(input, {
+				phase: "checkpoint",
+				depth: input.depth ?? 0,
+				step: checkpoint.nextStep,
+				checkpoint: {
+					type: "resume_rejected",
+					checkpointId: checkpoint.id,
+					boundary: checkpoint.boundary,
+					reason: validation.reason,
+				},
+				message: `Checkpoint resume rejected: ${validation.reason}`,
+			});
+			return null;
+		}
+		await this.markCheckpointConsumed(checkpoint.id, "resumed", "Checkpoint resume started.");
+		context.emit({
+			type: "checkpoint_resume_started",
+			payload: this.buildCheckpointEventPayload(checkpoint, "Checkpoint resume started."),
+		});
+		this.report(input, {
+			phase: "checkpoint",
+			depth: input.depth ?? 0,
+			step: checkpoint.nextStep,
+			checkpoint: {
+				type: "resume_started",
+				checkpointId: checkpoint.id,
+				boundary: checkpoint.boundary,
+				canAutoResume: checkpoint.safety.canAutoResume,
+				reason: "Checkpoint resume started.",
+			},
+			message: `Resuming from checkpoint ${checkpoint.id} at ${checkpoint.boundary}.`,
+		});
+		return sanitizeAgentLoopCheckpoint(checkpoint);
+	}
+
+	private async runFromCheckpoint(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		checkpoint: AgentLoopCheckpoint,
+	): Promise<AgentTurnResult> {
+		const maxIterations = Math.max(
+			checkpoint.nextStep,
+			context.budget.tool?.maxIterations ?? checkpoint.maxIterations ?? checkpoint.nextStep,
+		);
+		const contextPackage: ContextPackage = {
+			toolCallingMode: checkpoint.channel,
+			maxIterations,
+			messages: cloneMessages(checkpoint.modelMessages),
+		};
+		const initialState = {
+			startStep: checkpoint.nextStep,
+			traces: checkpoint.traces,
+		};
+		if (checkpoint.channel === "prompt") {
+			return this.runPromptLoop(input, context, contextPackage, initialState);
+		}
+		return this.runNativeLoop(input, context, contextPackage, initialState);
+	}
+
+	private async markCheckpointConsumed(
+		checkpointId: string,
+		result: "resumed" | "rejected" | "expired",
+		reason: string,
+	): Promise<void> {
+		try {
+			await this.options.checkpoint?.markConsumed?.(checkpointId, result, reason);
+		} catch {
+			// Checkpoint consumption metadata is diagnostic; do not fail the user turn.
+		}
+	}
+
+	private async saveCheckpoint(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		options: {
+			boundary: AgentLoopCheckpointBoundary;
+			channel: "prompt" | "native";
+			step: number;
+			nextStep: number;
+			maxIterations?: number;
+			modelMessages: AgentChatMessage[];
+			traces: RuntimeToolTrace[];
+			pendingMutations?: RuntimeMutationPlan[];
+			completedToolCalls?: AgentCheckpointToolResultRef[];
+			safetyReason: string;
+		},
+	): Promise<void> {
+		if (!this.options.checkpoint) {
+			return;
+		}
+		const canAutoResume = options.boundary === "context_ready" || (
+			options.boundary === "after_tool_result" &&
+			(options.pendingMutations?.length ?? 0) === 0 &&
+			(options.completedToolCalls?.length ?? 0) > 0 &&
+			(options.completedToolCalls ?? []).every((tool) => tool.status === "ok")
+		);
+		const checkpoint = sanitizeAgentLoopCheckpoint({
+			schemaVersion: 1,
+			id: createAgentLoopCheckpointId(context.turnId, options.boundary, options.step),
+			turnId: context.turnId,
+			...(context.taskId ? { taskId: context.taskId } : {}),
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			agentId: context.agentId,
+			boundary: options.boundary,
+			channel: options.channel,
+			step: options.step,
+			nextStep: options.nextStep,
+			...(options.maxIterations ? { maxIterations: options.maxIterations } : {}),
+			createdAt: new Date().toISOString(),
+			...(input.modelOverride ? { modelOverride: input.modelOverride } : {}),
+			mode: input.mode,
+			...(input.allowedTools ? { allowedTools: [...input.allowedTools] } : {}),
+			modelMessages: cloneMessages(options.modelMessages),
+			traces: options.traces.map((trace) => ({ ...trace })),
+			pendingMutations: options.pendingMutations?.map((mutation) => ({ ...mutation })) ?? [],
+			completedToolCalls: options.completedToolCalls?.map((tool) => ({ ...tool })) ?? [],
+			lastEventSequence: context.snapshotEvents().length,
+			safety: {
+				canAutoResume,
+				reason: options.safetyReason,
+			},
+			privacy: {
+				redacted: true,
+				localOnly: true,
+			},
+		});
+		try {
+			await this.options.checkpoint.save(checkpoint);
+			context.emit({
+				type: "checkpoint_saved",
+				payload: this.buildCheckpointEventPayload(checkpoint, options.safetyReason),
+			});
+			this.report(input, {
+				phase: "checkpoint",
+				depth: input.depth ?? 0,
+				step: checkpoint.step,
+				checkpoint: {
+					type: "saved",
+					checkpointId: checkpoint.id,
+					boundary: checkpoint.boundary,
+					canAutoResume: checkpoint.safety.canAutoResume,
+					reason: options.safetyReason,
+				},
+				message: `Checkpoint saved at ${checkpoint.boundary}.`,
+			});
+		} catch {
+			// Checkpoints improve recovery only. A persistence failure must not fail the user turn.
+		}
+	}
+
+	private emitCheckpointResumeCompleted(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		checkpoint: AgentLoopCheckpoint,
+	): void {
+		context.emit({
+			type: "checkpoint_resume_completed",
+			payload: this.buildCheckpointEventPayload(checkpoint, "Checkpoint resume completed."),
+		});
+		this.report(input, {
+			phase: "checkpoint",
+			depth: input.depth ?? 0,
+			step: checkpoint.nextStep,
+			checkpoint: {
+				type: "resume_completed",
+				checkpointId: checkpoint.id,
+				boundary: checkpoint.boundary,
+				canAutoResume: checkpoint.safety.canAutoResume,
+				reason: "Checkpoint resume completed.",
+			},
+			message: `Checkpoint resume completed from ${checkpoint.boundary}.`,
+		});
+	}
+
+	private buildCheckpointEventPayload(checkpoint: AgentLoopCheckpoint, reason: string): Record<string, unknown> {
+		return {
+			checkpointId: checkpoint.id,
+			boundary: checkpoint.boundary,
+			step: checkpoint.step,
+			nextStep: checkpoint.nextStep,
+			canAutoResume: checkpoint.safety.canAutoResume,
+			reason,
+		};
 	}
 
 	private resolveMaxIterations(contextPackage: ContextPackage, context: AgentExecutionContext): number {

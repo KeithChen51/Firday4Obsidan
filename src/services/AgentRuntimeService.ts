@@ -59,6 +59,7 @@ import { MutationApplier } from "../core/mutations/MutationApplier";
 import { MutationPlanStore } from "../core/mutations/MutationPlanStore";
 import type { AgentTask, AgentTaskRunInputSnapshot } from "../core/tasks/AgentTask";
 import { AgentTaskStore } from "../core/tasks/AgentTaskStore";
+import { AgentLoopCheckpointStore } from "../core/agent-kernel/checkpoints/AgentLoopCheckpointStore";
 import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
@@ -184,6 +185,7 @@ export interface RuntimeProgressEvent {
 		| "model_request"
 		| "model_retry"
 		| "model_response"
+		| "checkpoint"
 		| "tool_approval"
 		| "tool_call"
 		| "tool_result"
@@ -199,6 +201,7 @@ export interface RuntimeProgressEvent {
 	summary?: string;
 	taskId?: string;
 	transport?: RuntimeTransportProgress;
+	checkpoint?: RuntimeCheckpointProgress;
 	message: string;
 }
 
@@ -213,6 +216,14 @@ export interface RuntimeTransportProgress {
 	channel: LlmTransportChannel;
 	endpointIndex: number;
 	endpointCount: number;
+}
+
+export interface RuntimeCheckpointProgress {
+	type: "saved" | "resume_started" | "resume_rejected" | "resume_completed";
+	checkpointId: string;
+	boundary: string;
+	canAutoResume?: boolean;
+	reason?: string;
 }
 
 export interface RuntimeWikiCompileSummary {
@@ -245,6 +256,8 @@ export interface RuntimeTurnInput {
 	signal?: AbortSignal;
 	retryOfTaskId?: string;
 	continueFromTaskId?: string;
+	resumeFromCheckpointId?: string;
+	metadata?: Record<string, unknown>;
 }
 
 interface RuntimeTaskResumeOptions {
@@ -295,6 +308,7 @@ export class AgentRuntimeService {
 	private readonly mutationApplier: MutationApplier;
 	private readonly mutationPlanStore: MutationPlanStore;
 	private readonly agentTaskStore: AgentTaskStore;
+	private readonly agentCheckpointStore: AgentLoopCheckpointStore;
 	private readonly agentStateAdapter: ObsidianAgentStateAdapter;
 	private activeTurnId = "";
 	private activeConversationId = "default";
@@ -352,6 +366,9 @@ export class AgentRuntimeService {
 		this.agentTaskStore = new AgentTaskStore({
 			storePath: () => this.runtimeStateStore.getAgentTaskStorePath(),
 		});
+		this.agentCheckpointStore = new AgentLoopCheckpointStore({
+			storePath: () => this.runtimeStateStore.getAgentCheckpointStorePath(),
+		});
 		this.mutationApplier = new MutationApplier(
 			{
 				read: async (targetPath) => this.readVaultFileContentOrNull(targetPath),
@@ -364,6 +381,7 @@ export class AgentRuntimeService {
 		);
 		this.agentStateAdapter = new ObsidianAgentStateAdapter({
 			taskStore: this.agentTaskStore,
+			checkpointStore: this.agentCheckpointStore,
 			eventLog: this.turnEventLog,
 			mutationStore: this.mutationPlanStore,
 			workbenchStateStore: this.workbenchStateStore,
@@ -1555,6 +1573,10 @@ export class AgentRuntimeService {
 
 	async retryAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
 		return (await this.agentStateAdapter.resumeController.retryTask(taskId, options)).result;
+	}
+
+	async resumeAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {
+		return (await this.agentStateAdapter.resumeController.resumeTask(taskId, options)).result;
 	}
 
 	async continueAgentTask(taskId: string, options: RuntimeTaskResumeOptions = {}): Promise<RuntimeTurnResult> {

@@ -37,6 +37,14 @@ export class AgentReplayRecorder {
 				return [this.replayEvent(event, "turn_started", payload)];
 			case "context_compacted":
 				return [this.replayEvent(event, "context_built", { contextKey: "compact", ...payload })];
+			case "checkpoint_saved":
+				return [this.replayEvent(event, "checkpoint_saved", payload)];
+			case "checkpoint_resume_started":
+				return [this.replayEvent(event, "checkpoint_resume_started", payload)];
+			case "checkpoint_resume_rejected":
+				return [this.replayEvent(event, "checkpoint_resume_rejected", payload)];
+			case "checkpoint_resume_completed":
+				return [this.replayEvent(event, "checkpoint_resume_completed", payload)];
 			case "model_request":
 				return [this.replayEvent(event, "model_requested", payload)];
 			case "model_response":

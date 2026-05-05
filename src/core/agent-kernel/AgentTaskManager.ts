@@ -3,6 +3,7 @@ import type { HumanApprovalRequest, HumanApprovalResolution } from "./HumanAppro
 import type { AgentTurnInput, AgentTurnResult } from "./contracts";
 import type {
 	AgentTask,
+	AgentTaskCheckpoint,
 	AgentTaskCreateInput,
 	AgentTaskTransitionPatch,
 } from "../tasks/AgentTask";
@@ -18,6 +19,7 @@ export interface AgentTaskStorePort {
 	cancelTask(taskId: string, patch?: AgentTaskTransitionPatch): Promise<AgentTask>;
 	createRetryTask(taskId: string, input?: Partial<AgentTaskCreateInput>): Promise<AgentTask>;
 	createContinuationTask(taskId: string, input?: Partial<AgentTaskCreateInput>): Promise<AgentTask>;
+	updateCheckpoint?(taskId: string, checkpoint: AgentTaskCheckpoint): Promise<AgentTask>;
 }
 
 export interface AgentTaskManagerOptions {
@@ -218,6 +220,14 @@ export class AgentTaskManager {
 
 	createContinuationTask(taskId: string, input: Partial<AgentTaskCreateInput> = {}): Promise<AgentTask> {
 		return this.options.taskStore.createContinuationTask(taskId, input);
+	}
+
+	async updateCheckpoint(taskId: string, checkpoint: AgentTaskCheckpoint): Promise<AgentTask | undefined> {
+		if (!this.options.taskStore.updateCheckpoint) {
+			return undefined;
+		}
+		const task = await this.options.taskStore.updateCheckpoint(taskId, checkpoint);
+		return task;
 	}
 
 	private emitTask(context: AgentExecutionContext, task: AgentTask): void {

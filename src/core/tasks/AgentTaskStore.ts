@@ -3,6 +3,7 @@ import path from "path";
 
 import {
 	AgentTask,
+	AgentTaskCheckpoint,
 	AgentTaskCreateInput,
 	AgentTaskTransitionPatch,
 	cloneAgentTask,
@@ -94,6 +95,15 @@ export class AgentTaskStore {
 		return this.transition(taskId, "cancelled", patch);
 	}
 
+	async updateCheckpoint(taskId: string, checkpoint: AgentTaskCheckpoint): Promise<AgentTask> {
+		await this.ensureLoaded();
+		const current = await this.requireTask(taskId);
+		const next = transitionAgentTask(current, current.status, { checkpoint }, this.now());
+		this.tasks.set(taskId, cloneAgentTask(next));
+		await this.flush();
+		return cloneAgentTask(next);
+	}
+
 	async createRetryTask(taskId: string, input: Partial<AgentTaskCreateInput> = {}): Promise<AgentTask> {
 		const original = await this.requireTask(taskId);
 		return this.create({
@@ -106,6 +116,7 @@ export class AgentTaskStore {
 			id: input.id,
 			retryOfTaskId: original.id,
 			runInput: input.runInput ?? original.runInput,
+			checkpoint: input.checkpoint ?? original.checkpoint,
 		});
 	}
 
@@ -121,6 +132,7 @@ export class AgentTaskStore {
 			id: input.id,
 			continueFromTaskId: original.id,
 			runInput: input.runInput ?? original.runInput,
+			checkpoint: input.checkpoint ?? original.checkpoint,
 		});
 	}
 

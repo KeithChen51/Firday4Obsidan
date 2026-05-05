@@ -6,6 +6,10 @@ export interface AgentTaskPanelRuntime {
 		taskId: string,
 		options?: AgentTaskPanelResumeOptions,
 	): Promise<Pick<RuntimeTurnResult, "task">>;
+	resumeAgentTask(
+		taskId: string,
+		options?: AgentTaskPanelResumeOptions,
+	): Promise<Pick<RuntimeTurnResult, "task">>;
 	cancelAgentTask(taskId: string): Promise<AgentTask>;
 	continueAgentTask(
 		taskId: string,
@@ -32,6 +36,7 @@ export interface AgentTaskPanelActionCallbacks {
 }
 
 export interface AgentTaskPanelActionHandlers {
+	resume(): Promise<Pick<RuntimeTurnResult, "task">>;
 	retry(): Promise<Pick<RuntimeTurnResult, "task">>;
 	cancel(): Promise<AgentTask>;
 	continue(): Promise<Pick<RuntimeTurnResult, "task">>;
@@ -52,6 +57,16 @@ export function createAgentTaskPanelActionHandlers(
 	};
 
 	return {
+		async resume() {
+			const result = await runtime.resumeAgentTask(taskId, {
+				onProgress: callbacks.onProgress,
+				signal: callbacks.signal,
+			});
+			callbacks.recordAgentTask(result.task);
+			callbacks.render();
+			return result;
+		},
+
 		async retry() {
 			const result = await runtime.retryAgentTask(taskId, {
 				onProgress: callbacks.onProgress,

@@ -29,6 +29,8 @@ function makeReplaySummary(overrides = {}) {
 		completedAt: "2026-05-05T00:00:08.000Z",
 		durationMs: 8000,
 		modelCalls: { requested: 1, completed: 1, failed: 0 },
+		checkpoints: { saved: 0, resumed: 0, rejected: 0, latestBoundary: "" },
+		checkpointTimeline: [],
 		transport: { retries: 0, exhausted: 0, lastMessage: "" },
 		transportTimeline: [],
 		toolEvents: { requested: 1, completed: 1, failed: 0, denied: 0 },
@@ -401,6 +403,111 @@ test("projectReplaySummary projects exhausted transport replay as retryable mode
 	assert.equal(transportItem?.status, "failed");
 	assert.equal(transportItem?.rawEventType, "request_exhausted");
 	assert.match(transportItem?.detail ?? "", /attempt 4\/4/);
+});
+
+test("projectReplaySummary exposes checkpoint resume before retry for resumable failures", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		status: "failed",
+		terminalStatus: "turn_failed",
+		modelCalls: { requested: 1, completed: 0, failed: 1 },
+		checkpoints: { saved: 1, resumed: 0, rejected: 0, latestBoundary: "after_tool_result" },
+		checkpointTimeline: [
+			{
+				event: "saved",
+				checkpointId: "checkpoint-resume",
+				boundary: "after_tool_result",
+				reason: "Stable tool result checkpoint.",
+				at: "2026-05-05T00:00:05.000Z",
+			},
+		],
+		errors: ["Model service unavailable."],
+	}));
+
+	assert.equal(snapshot.status, "failed");
+	assert.deepEqual(snapshot.actions.map((action) => action.id), ["resume", "retry"]);
+	assert.equal(snapshot.actions[0].targetId, "task-replay");
+	const checkpointItem = snapshot.items.find((item) => item.rawEventType === "checkpoint_saved");
+	assert.equal(checkpointItem?.kind, "system");
+	assert.equal(checkpointItem?.status, "ok");
+	assert.match(checkpointItem?.detail ?? "", /Stable tool result checkpoint/);
+});
+
+test("projectReplaySummary does not expose resume for saved checkpoints marked unsafe", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		status: "failed",
+		terminalStatus: "turn_failed",
+		modelCalls: { requested: 1, completed: 0, failed: 1 },
+		checkpoints: { saved: 1, resumed: 0, rejected: 0, latestBoundary: "after_tool_result" },
+		checkpointTimeline: [
+			{
+				event: "saved",
+				checkpointId: "checkpoint-unsafe",
+				boundary: "after_tool_result",
+				canAutoResume: false,
+				reason: "Checkpoint tool result was not successful.",
+			},
+		],
+		errors: ["Tool failed."],
+	}));
+
+	assert.deepEqual(snapshot.actions.map((action) => action.id), ["retry"]);
+	assert.equal(snapshot.items.find((item) => item.rawEventType === "checkpoint_saved")?.actionRef, undefined);
+});
+
+test("projectReplaySummary separates checkpoint resume from transport retry", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		checkpoints: { saved: 1, resumed: 1, rejected: 0, latestBoundary: "after_tool_result" },
+		checkpointTimeline: [
+			{
+				event: "saved",
+				checkpointId: "checkpoint-resume",
+				boundary: "after_tool_result",
+				reason: "Stable checkpoint ready.",
+				at: "2026-05-05T00:00:04.000Z",
+			},
+			{
+				event: "resume_started",
+				checkpointId: "checkpoint-resume",
+				boundary: "after_tool_result",
+				reason: "Resuming from checkpoint.",
+				at: "2026-05-05T00:00:05.000Z",
+			},
+			{
+				event: "resume_completed",
+				checkpointId: "checkpoint-resume",
+				boundary: "after_tool_result",
+				reason: "Checkpoint resume completed.",
+				at: "2026-05-05T00:00:08.000Z",
+			},
+		],
+		transport: { retries: 1, exhausted: 0, lastStatus: 504, lastMessage: "Retry scheduled" },
+		transportTimeline: [
+			{
+				type: "retry_scheduled",
+				step: 1,
+				attempt: 1,
+				maxAttempts: 4,
+				delayMs: 700,
+				httpStatus: 504,
+				message: "Retry scheduled",
+			},
+		],
+	}));
+
+	const checkpointItems = snapshot.items.filter((item) => item.rawEventType?.startsWith("checkpoint_"));
+	assert.deepEqual(checkpointItems.map((item) => item.rawEventType), [
+		"checkpoint_saved",
+		"checkpoint_resume_started",
+		"checkpoint_resume_completed",
+	]);
+	assert.ok(snapshot.items.some((item) => item.kind === "transport" && item.rawEventType === "retry_scheduled"));
+	assert.ok(checkpointItems.every((item) => !/model retry/i.test(item.detail)));
 });
 
 test("projectReplaySummary prefers task waiting states over open terminal status", async () => {

@@ -10,7 +10,7 @@ export const AGENT_TASK_STATUSES = [
 
 export type AgentTaskStatus = typeof AGENT_TASK_STATUSES[number];
 
-export type AgentTaskAction = "retry" | "cancel" | "continue" | "apply" | "reject";
+export type AgentTaskAction = "resume" | "retry" | "cancel" | "continue" | "apply" | "reject";
 
 export interface AgentTaskApprovalWait {
 	kind: "tool" | "mutation";
@@ -37,6 +37,14 @@ export interface AgentTaskRunInputSnapshot {
 	agentMode?: string;
 }
 
+export interface AgentTaskCheckpoint {
+	latestId: string;
+	boundary: string;
+	canResume: boolean;
+	reason: string;
+	updatedAt: string;
+}
+
 export interface AgentTask {
 	id: string;
 	conversationId: string;
@@ -55,6 +63,7 @@ export interface AgentTask {
 	retryOfTaskId?: string;
 	continueFromTaskId?: string;
 	runInput?: AgentTaskRunInputSnapshot;
+	checkpoint?: AgentTaskCheckpoint;
 	createdAt: string;
 	updatedAt: string;
 	completedAt?: string;
@@ -73,6 +82,7 @@ export interface AgentTaskCreateInput {
 	retryOfTaskId?: string;
 	continueFromTaskId?: string;
 	runInput?: AgentTaskRunInputSnapshot;
+	checkpoint?: AgentTaskCheckpoint;
 	createdAt?: string;
 }
 
@@ -83,6 +93,7 @@ export interface AgentTaskTransitionPatch {
 	waitingForUser?: AgentTaskUserWait;
 	pendingMutationCount?: number;
 	changedFileCount?: number;
+	checkpoint?: AgentTaskCheckpoint;
 	turnId?: string;
 }
 
@@ -113,6 +124,7 @@ export function createAgentTask(input: AgentTaskCreateInput, now: Date = new Dat
 		...(input.retryOfTaskId ? { retryOfTaskId: input.retryOfTaskId } : {}),
 		...(input.continueFromTaskId ? { continueFromTaskId: input.continueFromTaskId } : {}),
 		...(input.runInput ? { runInput: sanitizeRunInputSnapshot(input.runInput) } : {}),
+		...(input.checkpoint ? { checkpoint: sanitizeCheckpoint(input.checkpoint) } : {}),
 		createdAt,
 		updatedAt: createdAt,
 	};
@@ -142,9 +154,18 @@ export function transitionAgentTask(
 	delete next.waitingForApproval;
 	delete next.waitingForUser;
 	delete next.failureReason;
+	delete next.checkpoint;
 	delete next.completedAt;
 	delete next.cancelledAt;
 	delete next.failedAt;
+	const checkpoint = patch.checkpoint ?? (
+		nextStatus === "failed" || nextStatus === "running" || nextStatus === "waiting_for_approval" || nextStatus === "waiting_for_user"
+			? task.checkpoint
+			: undefined
+	);
+	if (checkpoint && nextStatus !== "completed" && nextStatus !== "cancelled") {
+		next.checkpoint = sanitizeCheckpoint(checkpoint);
+	}
 	if (nextStatus === "waiting_for_approval" && patch.waitingForApproval) {
 		next.waitingForApproval = sanitizeApprovalWait(patch.waitingForApproval);
 	}
@@ -171,7 +192,7 @@ export function transitionAgentTask(
 	return withDerivedActions(next);
 }
 
-export function deriveAgentTaskActions(task: Pick<AgentTask, "status" | "waitingForApproval" | "pendingMutationCount">): AgentTaskAction[] {
+export function deriveAgentTaskActions(task: Pick<AgentTask, "status" | "waitingForApproval" | "pendingMutationCount" | "checkpoint">): AgentTaskAction[] {
 	switch (task.status) {
 		case "created":
 		case "running":
@@ -183,7 +204,7 @@ export function deriveAgentTaskActions(task: Pick<AgentTask, "status" | "waiting
 		case "waiting_for_user":
 			return ["cancel", "continue"];
 		case "failed":
-			return ["retry"];
+			return task.checkpoint?.canResume ? ["resume", "retry"] : ["retry"];
 		case "cancelled":
 		case "completed":
 			return [];
@@ -202,6 +223,7 @@ export function cloneAgentTask(task: AgentTask): AgentTask {
 		...(task.waitingForApproval ? { waitingForApproval: sanitizeApprovalWait(task.waitingForApproval) } : {}),
 		...(task.waitingForUser ? { waitingForUser: sanitizeUserWait(task.waitingForUser) } : {}),
 		...(task.runInput ? { runInput: sanitizeRunInputSnapshot(task.runInput) } : {}),
+		...(task.checkpoint ? { checkpoint: sanitizeCheckpoint(task.checkpoint) } : {}),
 	};
 }
 
@@ -253,6 +275,16 @@ function sanitizeRunInputSnapshot(snapshot: AgentTaskRunInputSnapshot): AgentTas
 		...(snapshot.extraSystemContext ? { extraSystemContext: sanitizeTaskText(snapshot.extraSystemContext, 2000) } : {}),
 		...(snapshot.allowedTools ? { allowedTools: snapshot.allowedTools.map((tool) => sanitizeTaskText(tool, 80)) } : {}),
 		...(snapshot.agentMode ? { agentMode: sanitizeTaskText(snapshot.agentMode, 80) } : {}),
+	};
+}
+
+function sanitizeCheckpoint(checkpoint: AgentTaskCheckpoint): AgentTaskCheckpoint {
+	return {
+		latestId: sanitizeTaskText(checkpoint.latestId, 160),
+		boundary: sanitizeTaskText(checkpoint.boundary, 80),
+		canResume: Boolean(checkpoint.canResume),
+		reason: sanitizeTaskText(checkpoint.reason, 240),
+		updatedAt: sanitizeTaskText(checkpoint.updatedAt, 80),
 	};
 }
 

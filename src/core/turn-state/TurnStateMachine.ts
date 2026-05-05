@@ -4,6 +4,7 @@ export type StepEventName =
 	| "STEP_MODEL_REQUEST"
 	| "STEP_MODEL_RETRY"
 	| "STEP_MODEL_RESPONSE"
+	| "STEP_CHECKPOINT"
 	| "STEP_TOOL_APPROVAL"
 	| "STEP_TOOL_CALL"
 	| "STEP_TOOL_RESULT"
@@ -34,6 +35,13 @@ export interface StepTraceEvent {
 		channel: string;
 		endpointIndex: number;
 		endpointCount: number;
+	};
+	checkpoint?: {
+		type: "saved" | "resume_started" | "resume_rejected" | "resume_completed";
+		checkpointId: string;
+		boundary: string;
+		canAutoResume?: boolean;
+		reason?: string;
 	};
 	message: string;
 }

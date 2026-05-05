@@ -64,7 +64,7 @@ export interface AgentTrajectoryItem {
 }
 
 export interface AgentTrajectoryAction {
-	id: "retry" | "cancel" | "continue" | "approve" | "reject" | "apply" | "view_changes" | "view_replay";
+	id: "resume" | "retry" | "cancel" | "continue" | "approve" | "reject" | "apply" | "view_changes" | "view_replay";
 	label: string;
 	enabled: boolean;
 	reason?: string;

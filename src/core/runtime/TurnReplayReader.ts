@@ -42,6 +42,22 @@ export interface TurnReplaySummary extends TurnEventRef {
 		lastStatus?: number;
 		lastMessage: string;
 	};
+	checkpoints: {
+		saved: number;
+		resumed: number;
+		rejected: number;
+		latestBoundary: string;
+	};
+	checkpointTimeline: Array<{
+		event: "saved" | "resume_started" | "resume_rejected" | "resume_completed";
+		checkpointId: string;
+		boundary: string;
+		reason: string;
+		step?: number;
+		nextStep?: number;
+		canAutoResume?: boolean;
+		at?: string;
+	}>;
 	transportTimeline: Array<{
 		type: "retry_scheduled" | "retry_started" | "request_exhausted";
 		step: number;
@@ -177,7 +193,9 @@ export class TurnReplayReader {
 		const finalAnswer = [...events].reverse().find((event) => event.type === "assistant_final");
 		const toolCalls = this.summarizeToolCalls(events);
 		const transportTimeline = this.summarizeTransportTimeline(events);
+		const checkpointTimeline = this.summarizeCheckpointTimeline(events);
 		const lastTransport = transportTimeline[transportTimeline.length - 1];
+		const latestSavedCheckpoint = [...checkpointTimeline].reverse().find((event) => event.event === "saved");
 		const startedAt = first?.at ?? "";
 		const updatedAt = last?.at ?? startedAt;
 		const completedAt = terminal?.at;
@@ -206,6 +224,13 @@ export class TurnReplayReader {
 				...(lastTransport?.httpStatus !== undefined ? { lastStatus: lastTransport.httpStatus } : {}),
 				lastMessage: lastTransport?.message ?? "",
 			},
+			checkpoints: {
+				saved: checkpointTimeline.filter((event) => event.event === "saved").length,
+				resumed: checkpointTimeline.filter((event) => event.event === "resume_started").length,
+				rejected: checkpointTimeline.filter((event) => event.event === "resume_rejected").length,
+				latestBoundary: latestSavedCheckpoint?.boundary ?? "",
+			},
+			checkpointTimeline,
 			transportTimeline,
 			toolEvents: {
 				requested: events.filter((event) => event.type === "tool_requested").length,
@@ -367,6 +392,50 @@ export class TurnReplayReader {
 		return timeline;
 	}
 
+	private summarizeCheckpointTimeline(events: TurnEventRecord[]): TurnReplaySummary["checkpointTimeline"] {
+		const timeline: TurnReplaySummary["checkpointTimeline"] = [];
+		for (const event of events) {
+			if (![
+				"checkpoint_saved",
+				"checkpoint_resume_started",
+				"checkpoint_resume_rejected",
+				"checkpoint_resume_completed",
+			].includes(event.type)) {
+				continue;
+			}
+			const step = this.getPayloadOptionalNumber(event, "step");
+			const nextStep = this.getPayloadOptionalNumber(event, "nextStep");
+			const canAutoResume = this.getPayloadOptionalBoolean(event, "canAutoResume");
+			timeline.push({
+				event: this.toCheckpointTimelineEvent(event.type),
+				checkpointId: this.getPayloadText(event, "checkpointId"),
+				boundary: this.getPayloadText(event, "boundary"),
+				reason: this.getPayloadText(event, "reason") ||
+					this.getPayloadText(event, "summary") ||
+					this.getPayloadText(event, "message"),
+				...(step !== undefined ? { step } : {}),
+				...(nextStep !== undefined ? { nextStep } : {}),
+				...(canAutoResume !== undefined ? { canAutoResume } : {}),
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
+	private toCheckpointTimelineEvent(type: string): TurnReplaySummary["checkpointTimeline"][number]["event"] {
+		switch (type) {
+			case "checkpoint_resume_started":
+				return "resume_started";
+			case "checkpoint_resume_rejected":
+				return "resume_rejected";
+			case "checkpoint_resume_completed":
+				return "resume_completed";
+			case "checkpoint_saved":
+			default:
+				return "saved";
+		}
+	}
+
 	private summarizeMutationTimeline(events: TurnEventRecord[]): TurnReplaySummary["mutationTimeline"] {
 		return events
 			.filter((event) => [
@@ -449,6 +518,16 @@ export class TurnReplayReader {
 	private getPayloadNumber(event: TurnEventRecord, key: string): number {
 		const value = event.payload[key];
 		return typeof value === "number" ? value : 0;
+	}
+
+	private getPayloadOptionalNumber(event: TurnEventRecord, key: string): number | undefined {
+		const value = event.payload[key];
+		return typeof value === "number" ? value : undefined;
+	}
+
+	private getPayloadOptionalBoolean(event: TurnEventRecord, key: string): boolean | undefined {
+		const value = event.payload[key];
+		return typeof value === "boolean" ? value : undefined;
 	}
 
 	private getPayloadStringArray(event: TurnEventRecord, key: string): string[] {

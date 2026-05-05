@@ -3,6 +3,8 @@ import { AgentReplayRecorder } from "../core/agent-kernel/AgentReplayRecorder";
 import { AgentResumeController } from "../core/agent-kernel/AgentResumeController";
 import { AgentTaskManager } from "../core/agent-kernel/AgentTaskManager";
 import type { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
+import { validateCheckpointForResume, type AgentLoopCheckpoint } from "../core/agent-kernel/checkpoints/AgentLoopCheckpoint";
+import type { AgentLoopCheckpointStore } from "../core/agent-kernel/checkpoints/AgentLoopCheckpointStore";
 import type { AgentTurnInput, AgentTurnResult, AgentTurnStatus, RuntimeMutationPlan } from "../core/agent-kernel/contracts";
 import { extractMutationPlans, type RuntimeEnvelope } from "../core/agent-kernel/RuntimeProtocol";
 import type { TurnEventInput, TurnEventLog } from "../core/runtime/TurnEventLog";
@@ -16,6 +18,7 @@ import type { RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 
 export interface ObsidianAgentStateAdapterOptions {
 	taskStore: AgentTaskStore;
+	checkpointStore: AgentLoopCheckpointStore;
 	eventLog: TurnEventLog;
 	mutationStore: MutationPlanStore;
 	workbenchStateStore: WorkbenchStateStore;
@@ -46,8 +49,50 @@ export class ObsidianAgentStateAdapter {
 		this.mutationCoordinator = new AgentMutationCoordinator({ mutationStore: options.mutationStore });
 		this.resumeController = new AgentResumeController({
 			taskManager: this.taskManager,
+			checkpointStore: options.checkpointStore,
 			runTurn: (input) => options.runTurn(input as AgentTurnInput),
 		});
+	}
+
+	async saveCheckpoint(checkpoint: AgentLoopCheckpoint): Promise<void> {
+		await this.options.checkpointStore.save(checkpoint);
+		if (!checkpoint.taskId) {
+			return;
+		}
+		const validation = validateCheckpointForResume({
+			checkpoint,
+			conversationId: checkpoint.conversationId,
+			agentId: checkpoint.agentId,
+			taskId: checkpoint.taskId,
+			allowedTools: checkpoint.allowedTools,
+		});
+		await this.taskManager.updateCheckpoint(checkpoint.taskId, {
+			latestId: checkpoint.id,
+			boundary: checkpoint.boundary,
+			canResume: validation.ok,
+			reason: validation.ok ? checkpoint.safety.reason : validation.reason,
+			updatedAt: checkpoint.createdAt,
+		});
+	}
+
+	getResumeCheckpoint(input: AgentTurnInput, _context: AgentExecutionContext): Promise<AgentLoopCheckpoint | null> {
+		const checkpointId = input.resumeFromCheckpointId?.trim() ||
+			(typeof input.metadata?.resumeFromCheckpointId === "string" ? input.metadata.resumeFromCheckpointId.trim() : "");
+		if (checkpointId) {
+			return this.options.checkpointStore.get(checkpointId);
+		}
+		if (input.retryOfTaskId) {
+			return this.options.checkpointStore.getLatestForTask(input.retryOfTaskId);
+		}
+		return Promise.resolve(null);
+	}
+
+	markCheckpointConsumed(
+		checkpointId: string,
+		result: "resumed" | "rejected" | "expired",
+		reason: string,
+	): Promise<void> {
+		return this.options.checkpointStore.markConsumed(checkpointId, result, reason);
 	}
 
 	beginTurn(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentTask> {

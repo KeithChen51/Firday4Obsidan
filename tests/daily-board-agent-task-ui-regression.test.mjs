@@ -38,16 +38,18 @@ test("daily board renders agent task lifecycle outside plain chat bubbles", asyn
 	assert.match(source, /waiting_for_user/);
 });
 
-test("daily board exposes retry, cancel, continue, apply, and reject task actions", async () => {
+test("daily board exposes resume, retry, cancel, continue, apply, and reject task actions", async () => {
 	const source = readViewSource();
 	const match = source.match(/private renderAgentTaskPanel\([\s\S]*?\n\t\}\n\n\tprivate renderApprovalMessage/);
 	assert.ok(match, "task panel should render before approval messages in the chat stream");
 	const block = match[0] ?? "";
+	assert.match(block, /taskActions\.resume/);
 	assert.match(block, /taskActions\.retry/);
 	assert.match(block, /taskActions\.cancel/);
 	assert.match(block, /taskActions\.continue/);
 	assert.match(block, /taskActions\.apply/);
 	assert.match(block, /taskActions\.reject/);
+	assert.match(source, /"Resume"/);
 	assert.match(source, /"Retry"/);
 	assert.match(source, /"Cancel"/);
 	assert.match(source, /"Continue"/);
@@ -66,6 +68,11 @@ test("agent task UI actions call runtime services and update visible task state"
 		async retryAgentTask(taskId, options) {
 			calls.push(["retry", taskId, Boolean(options?.onProgress)]);
 			options?.onProgress?.({ phase: "model_request", depth: 0, taskId, message: "retrying" });
+			return { task: makeTask(taskId, "completed") };
+		},
+		async resumeAgentTask(taskId, options) {
+			calls.push(["resume", taskId, Boolean(options?.onProgress)]);
+			options?.onProgress?.({ phase: "checkpoint", depth: 0, taskId, checkpoint: { type: "resume_started", checkpointId: "checkpoint-1", boundary: "after_tool_result" }, message: "resuming" });
 			return { task: makeTask(taskId, "completed") };
 		},
 		async cancelAgentTask(taskId) {
@@ -102,6 +109,7 @@ test("agent task UI actions call runtime services and update visible task state"
 		},
 	});
 
+	await handlers.resume();
 	await handlers.retry();
 	await handlers.cancel();
 	await handlers.continue();
@@ -109,6 +117,7 @@ test("agent task UI actions call runtime services and update visible task state"
 	await handlers.reject("plan-1");
 
 	assert.deepEqual(calls, [
+		["resume", "task-1", true],
 		["retry", "task-1", true],
 		["cancel", "task-1"],
 		["continue", "task-1", "additional detail"],
@@ -118,12 +127,12 @@ test("agent task UI actions call runtime services and update visible task state"
 		["get", "task-1"],
 	]);
 	assert.equal(abortCount, 1);
-	assert.equal(renderCount, 5);
+	assert.equal(renderCount, 6);
 	assert.deepEqual(
 		recorded.map((task) => task?.status),
-		["completed", "cancelled", "completed", "waiting_for_user", "waiting_for_user"],
+		["completed", "completed", "cancelled", "completed", "waiting_for_user", "waiting_for_user"],
 	);
-	assert.deepEqual(progressEvents.map((event) => event.message), ["retrying", "continuing"]);
+	assert.deepEqual(progressEvents.map((event) => event.message), ["resuming", "retrying", "continuing"]);
 });
 
 test("runtime progress with task id hydrates the running task before final result", async () => {

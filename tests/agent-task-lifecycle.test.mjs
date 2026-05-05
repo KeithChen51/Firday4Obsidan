@@ -90,6 +90,27 @@ test("AgentTask exposes the product lifecycle states and guarded transitions", a
 	});
 	assert.equal(completed.status, "completed");
 	assert.deepEqual(deriveAgentTaskActions(completed), []);
+
+	const failedWithCheckpoint = transitionAgentTask(running, "failed", {
+		summary: "Model transport failed.",
+		failureReason: "504 gateway timeout",
+		checkpoint: {
+			latestId: "checkpoint-1",
+			boundary: "after_tool_result",
+			canResume: true,
+			reason: "Stable tool result checkpoint.",
+			updatedAt: "2026-05-05T00:00:00.000Z",
+		},
+	});
+	assert.equal(failedWithCheckpoint.status, "failed");
+	assert.deepEqual(deriveAgentTaskActions(failedWithCheckpoint), ["resume", "retry"]);
+
+	const failedWithoutCheckpoint = transitionAgentTask(running, "failed", {
+		summary: "Model transport failed.",
+		failureReason: "504 gateway timeout",
+	});
+	assert.deepEqual(deriveAgentTaskActions(failedWithoutCheckpoint), ["retry"]);
+
 	assert.throws(
 		() => transitionAgentTask(completed, "running", { summary: "Restart same task." }),
 		/Invalid AgentTask transition/,
@@ -119,6 +140,13 @@ test("AgentTaskStore persists tasks and supports conversation, turn, retry, canc
 	});
 	await store.markFailed(task.id, {
 		failureReason: "Model transport failed.",
+		checkpoint: {
+			latestId: "checkpoint-store",
+			boundary: "after_tool_result",
+			canResume: true,
+			reason: "Stable tool result checkpoint.",
+			updatedAt: "2026-05-05T00:00:00.000Z",
+		},
 	});
 	const retry = await store.createRetryTask(task.id, {
 		id: "task-store-retry",
@@ -133,6 +161,8 @@ test("AgentTaskStore persists tasks and supports conversation, turn, retry, canc
 	const reloaded = new AgentTaskStore({ storePath });
 	assert.equal((await reloaded.get(task.id))?.status, "failed");
 	assert.equal((await reloaded.get(task.id))?.failureReason, "Model transport failed.");
+	assert.equal((await reloaded.get(task.id))?.checkpoint?.latestId, "checkpoint-store");
+	assert.deepEqual((await reloaded.get(task.id))?.availableActions, ["resume", "retry"]);
 	assert.equal((await reloaded.getByTurnId("turn-store-1"))?.id, task.id);
 	assert.deepEqual((await reloaded.getByConversationId("agent")).map((item) => item.id), [
 		task.id,
@@ -244,6 +274,35 @@ test("runtime retry re-executes a failed task from stored input", async () => {
 	assert.match(retry.result.assistantText, /Recovered from retry/);
 	assert.ok(retry.result.traces.some((trace) => trace.tool === "read" && trace.status === "ok"));
 	assert.ok(result.tasks.some((task) => task.id === retry.result.task.id && task.retryOfTaskId === result.task.id));
+});
+
+test("runtime resume continues a retryable failed task from checkpoint without rebuilding tool work", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "checkpoint resume failed task",
+		userPrompt: "Read checkpoint target",
+		files: {
+			"Project/checkpoint.md": "checkpoint source",
+		},
+		modelSteps: [
+			{ tool: { id: "call-checkpoint-read", name: "read", args: { path: "Project/checkpoint.md" } } },
+			{ error: "504 gateway timeout" },
+			{ assistant: "Recovered from checkpoint with checkpoint source." },
+		],
+		afterTurnActions: ["resumeFirstTask"],
+	});
+
+	assert.equal(result.task?.status, "failed");
+	assert.ok(result.task?.availableActions.includes("resume"));
+	assert.equal(result.task?.checkpoint?.canResume, true);
+	const resume = result.taskActionResults[0];
+	assert.equal(resume.type, "resumeFirstTask");
+	assert.equal(resume.result.task.status, "completed");
+	assert.equal(resume.result.task.retryOfTaskId, result.task.id);
+	assert.match(resume.result.assistantText, /Recovered from checkpoint/);
+	assert.equal(resume.result.traces.length, 1);
+	assert.equal(resume.result.traces[0].tool, "read");
+	assert.match(resume.result.modelRequests.at(-1).sanitizedText, /TOOL_RESULT/);
+	assert.match(resume.result.modelRequests.at(-1).sanitizedText, /checkpoint source/);
 });
 
 test("runtime tool approval transitions task through waiting_for_approval and back to running", async () => {

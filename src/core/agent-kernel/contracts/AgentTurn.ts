@@ -37,6 +37,7 @@ export interface RuntimeProgressEvent {
 		| "model_request"
 		| "model_retry"
 		| "model_response"
+		| "checkpoint"
 		| "tool_approval"
 		| "tool_call"
 		| "tool_result"
@@ -52,6 +53,7 @@ export interface RuntimeProgressEvent {
 	summary?: string;
 	taskId?: string;
 	transport?: RuntimeTransportProgress;
+	checkpoint?: RuntimeCheckpointProgress;
 	reasoningProvider?: ReasoningArtifact["provider"];
 	reasoningRawFormat?: ReasoningArtifact["rawFormat"];
 	reasoningContinuationPolicy?: ReasoningArtifact["continuationPolicy"];
@@ -71,6 +73,14 @@ export interface RuntimeTransportProgress {
 	channel: LlmTransportChannel;
 	endpointIndex: number;
 	endpointCount: number;
+}
+
+export interface RuntimeCheckpointProgress {
+	type: "saved" | "resume_started" | "resume_rejected" | "resume_completed";
+	checkpointId: string;
+	boundary: string;
+	canAutoResume?: boolean;
+	reason?: string;
 }
 
 export interface RuntimeMutationPlan {
@@ -177,6 +187,7 @@ export interface AgentTurnInput {
 	onProgress?: (event: RuntimeProgressEvent) => void;
 	retryOfTaskId?: string;
 	continueFromTaskId?: string;
+	resumeFromCheckpointId?: string;
 }
 
 export interface AgentRuntimeFacadeInput extends Omit<AgentTurnInput, "conversationId" | "mode"> {

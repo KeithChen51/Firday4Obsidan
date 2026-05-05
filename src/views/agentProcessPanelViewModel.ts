@@ -781,7 +781,13 @@ function buildStepControlActions(
 	}
 	if (builder.key === "failure") {
 		return actions
-			.filter((action) => action.id === "retry" || action.id === "continue" || action.id === "apply" || action.id === "reject")
+			.filter((action) =>
+				action.id === "resume" ||
+				action.id === "retry" ||
+				action.id === "continue" ||
+				action.id === "apply" ||
+				action.id === "reject"
+			)
 			.map(toStepControlAction);
 	}
 	return [];

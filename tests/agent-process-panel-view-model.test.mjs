@@ -285,6 +285,43 @@ test("buildAgentProcessPanelViewModel exposes retryable failure recovery", async
 	assert.equal(view.visibleSteps.at(-1)?.status, "retryable");
 });
 
+test("buildAgentProcessPanelViewModel exposes checkpoint resume recovery before retry", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "failed",
+		headline: "Agent failed",
+		summary: "Model service unavailable.",
+		failure: {
+			class: "model_transport",
+			message: "Model service unavailable.",
+			retryable: true,
+			recoverable: true,
+		},
+		items: [
+			makeItem({
+				id: "checkpoint",
+				kind: "system",
+				title: "Checkpoint saved",
+				detail: "Stable tool result checkpoint.",
+				status: "ok",
+				rawEventType: "checkpoint_saved",
+				actionRef: "checkpoint-1",
+			}),
+			makeItem({ id: "failure", kind: "failure", title: "Run failed", detail: "Model service unavailable.", status: "failed" }),
+		],
+		actions: [
+			{ id: "resume", label: "Resume", enabled: true, targetId: "task-1" },
+			{ id: "retry", label: "Retry", enabled: true, targetId: "task-1" },
+		],
+	}));
+
+	assert.equal(view.surface, "compact_recovery");
+	assert.deepEqual(view.actions.map((action) => action.id), ["resume", "retry"]);
+	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.action?.id), ["resume", "retry"]);
+	assert.match(JSON.stringify(view), /Stable tool result checkpoint/);
+});
+
 test("buildAgentProcessPanelViewModel renders transport retry without checkpoint resume claims", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 

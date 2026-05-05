@@ -1,4 +1,5 @@
 import type { AgentExecutionContext } from "./AgentExecutionContext";
+import type { AgentLoopCheckpoint } from "./checkpoints/AgentLoopCheckpoint";
 import type { AgentTurnInput, AgentTurnResult, RuntimeProgressEvent } from "./contracts";
 
 export interface AgentLoopProgressPort {
@@ -14,6 +15,12 @@ export interface AgentLoopLifecyclePort {
 	): Promise<AgentTurnResult>;
 	fail?(input: AgentTurnInput, context: AgentExecutionContext, error: unknown): Promise<void>;
 	cleanup?(input: AgentTurnInput, context: AgentExecutionContext): Promise<void>;
+}
+
+export interface AgentLoopCheckpointPort {
+	save(checkpoint: AgentLoopCheckpoint): Promise<void>;
+	getResumeCheckpoint?(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentLoopCheckpoint | null>;
+	markConsumed?(checkpointId: string, result: "resumed" | "rejected" | "expired", reason: string): Promise<void>;
 }
 
 export interface AgentLoopFallbackPolicy {

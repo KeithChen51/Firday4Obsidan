@@ -237,6 +237,21 @@ export async function runAgentRuntimeScenario(scenario) {
 			});
 			continue;
 		}
+		if (action === "resumeFirstTask") {
+			const taskStore = new modules.AgentTaskStore({
+				storePath: runtimeStateStore.getAgentTaskStorePath(),
+			});
+			const firstTask = (await taskStore.list())[0];
+			if (!firstTask) {
+				throw new Error("afterTurnAction resumeFirstTask requested an agent task, but none were recorded.");
+			}
+			const result = await runtime.resumeAgentTask(firstTask.id, { onProgress: handleProgress });
+			taskActionResults.push({
+				type: "resumeFirstTask",
+				result: normalizeRuntimeActionResult(result, modelDriver),
+			});
+			continue;
+		}
 		if (action && typeof action === "object" && action.type === "continueFirstTask") {
 			const taskStore = new modules.AgentTaskStore({
 				storePath: runtimeStateStore.getAgentTaskStorePath(),
@@ -461,6 +476,7 @@ function createRuntimeStateStore(root) {
 			),
 		getMutationPlanStorePath: () => path.join(root, "runtime", "mutation-plans.json"),
 		getAgentTaskStorePath: () => path.join(root, "runtime", "agent-tasks.json"),
+		getAgentCheckpointStorePath: () => path.join(root, "runtime", "agent-checkpoints.json"),
 		getApprovalStorePath: (scopeKey = "global") => path.join(root, "approvals", `${scopeKey}.json`),
 		getSoulSnapshotsRoot: (soulId) => path.join(root, "snapshots", soulId),
 		ensureBaseLayout: async () => {
@@ -779,6 +795,7 @@ function normalizeAgentTask(task) {
 		availableActions: [...(task.availableActions ?? [])],
 		retryOfTaskId: task.retryOfTaskId,
 		continueFromTaskId: task.continueFromTaskId,
+		checkpoint: task.checkpoint ? { ...task.checkpoint } : undefined,
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
 	};

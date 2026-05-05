@@ -152,6 +152,12 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 			isRetryableTransportFailure: (message) => runtime.toolGovernor.isRetryableTransportFailure(message),
 			shouldFallbackToPrompt: (message) => runtime.toolGovernor.shouldFallbackToPrompt(message),
 		},
+		checkpoint: {
+			save: (checkpoint) => stateAdapter.saveCheckpoint(checkpoint),
+			getResumeCheckpoint: (input, context) => stateAdapter.getResumeCheckpoint(input, context),
+			markConsumed: (checkpointId, result, reason) =>
+				stateAdapter.markCheckpointConsumed(checkpointId, result, reason),
+		},
 		lifecycle: {
 			begin: async (input, context) => {
 				const runtimeInput = toRuntimeTurnInput(input);
@@ -295,6 +301,8 @@ function toRuntimeTurnInput(input: AgentTurnInput | undefined): RuntimeTurnInput
 		signal: input?.signal,
 		retryOfTaskId: input?.retryOfTaskId,
 		continueFromTaskId: input?.continueFromTaskId,
+		resumeFromCheckpointId: input?.resumeFromCheckpointId,
+		metadata: input?.metadata,
 	};
 }
 

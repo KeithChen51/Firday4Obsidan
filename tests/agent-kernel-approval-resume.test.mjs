@@ -140,6 +140,83 @@ test("AgentResumeController retries and continues from recorded kernel task inpu
 	assert.equal(continued.result.traceId, "trace-continue");
 });
 
+test("AgentResumeController keeps checkpoint resume distinct from fresh retry", async () => {
+	const { AgentTaskManager, AgentResumeController, AgentExecutionContext, AgentTaskStore } = await loadModules();
+	const store = new AgentTaskStore();
+	const manager = new AgentTaskManager({ taskStore: store });
+	const context = createContext(AgentExecutionContext, "task-checkpoint-retry", "turn-checkpoint-retry", "trace-checkpoint-retry");
+	await manager.beginTurn({
+		agentId: "agent-i",
+		conversationId: "conversation-i",
+		turnId: "turn-checkpoint-retry",
+		userPrompt: "Original prompt",
+		conversation: [],
+		mode: "ask",
+		modelOverride: "model-i",
+		allowedTools: ["read"],
+	}, context);
+	await manager.failTurn(new Error("504 gateway timeout"), context);
+	const checkpoint = {
+		schemaVersion: 1,
+		id: "checkpoint-resume-i",
+		turnId: "turn-checkpoint-retry",
+		taskId: "task-checkpoint-retry",
+		traceId: "trace-checkpoint-retry",
+		conversationId: "conversation-i",
+		agentId: "agent-i",
+		boundary: "after_tool_result",
+		channel: "native",
+		step: 1,
+		nextStep: 2,
+		createdAt: new Date().toISOString(),
+		modelOverride: "model-i",
+		mode: "ask",
+		allowedTools: ["read"],
+		modelMessages: [],
+		traces: [],
+		pendingMutations: [],
+		completedToolCalls: [{ toolCallId: "tool-1", tool: "read", status: "ok", step: 1, targetPath: "Project/a.md" }],
+		safety: { canAutoResume: true, reason: "stable tool result" },
+		privacy: { redacted: true, localOnly: true },
+	};
+	const resume = new AgentResumeController({
+		taskManager: manager,
+		checkpointStore: {
+			async getLatestForTask(taskId) {
+				return taskId === "task-checkpoint-retry" ? checkpoint : null;
+			},
+			async markConsumed() {},
+		},
+		runTurn: async (input) => ({
+			turnId: input.turnId ?? "resume-turn",
+			taskId: input.taskId,
+			traceId: input.traceId,
+			conversationId: input.conversationId ?? input.agentId,
+			status: "completed",
+			assistantText: input.resumeFromCheckpointId ?? "fresh",
+			events: [],
+			traces: [],
+			rawFinalReply: input.resumeFromCheckpointId ?? "fresh",
+		}),
+	});
+
+	const freshRetry = await resume.retryTask("task-checkpoint-retry", { traceId: "trace-retry" });
+	const checkpointResume = await resume.resumeTask("task-checkpoint-retry", { traceId: "trace-resume" });
+
+	assert.equal(freshRetry.resumedFromCheckpoint, undefined);
+	assert.equal(freshRetry.input.retryOfTaskId, "task-checkpoint-retry");
+	assert.equal(freshRetry.input.resumeFromCheckpointId, undefined);
+	assert.equal(freshRetry.input.metadata?.resumeFromCheckpointId, undefined);
+	assert.equal(freshRetry.result.assistantText, "fresh");
+	assert.equal(checkpointResume.resumedFromCheckpoint, true);
+	assert.equal(checkpointResume.checkpointId, "checkpoint-resume-i");
+	assert.equal(checkpointResume.input.retryOfTaskId, "task-checkpoint-retry");
+	assert.equal(checkpointResume.input.resumeFromCheckpointId, "checkpoint-resume-i");
+	assert.equal(checkpointResume.input.metadata.resumeFromCheckpointId, "checkpoint-resume-i");
+	assert.equal(checkpointResume.input.conversationId, "conversation-i");
+	assert.equal(checkpointResume.result.assistantText, "checkpoint-resume-i");
+});
+
 test("default Obsidian kernel path uses Kernel state components instead of legacy runtime state helpers", () => {
 	const portsSource = fs.readFileSync(obsidianRuntimePortsPath, "utf8");
 	const runtimeSource = fs.readFileSync(runtimeServicePath, "utf8");

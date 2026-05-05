@@ -45,6 +45,10 @@ export class RuntimeStateStore {
 		return path.join(this.getRuntimeRoot(), "agent-tasks.json");
 	}
 
+	getAgentCheckpointStorePath(): string {
+		return path.join(this.getRuntimeRoot(), "agent-checkpoints.json");
+	}
+
 	getBackupsRoot(): string {
 		return this.localStateRootService.resolveVault("backups");
 	}
