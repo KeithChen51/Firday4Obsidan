@@ -1,6 +1,9 @@
 ﻿import { requestUrl } from "obsidian";
 import { FridaySettings } from "../types/settings";
 import { ToolCall, ToolDefinition } from "../types/tools";
+import { normalizeReasoningArtifact } from "../core/llm/ReasoningAdapter";
+import type { ReasoningArtifact, ReasoningProvider, ReasoningSourceProtocol } from "../core/llm/ReasoningArtifact";
+import { resolveReasoningRequestParams } from "../core/llm/LlmSettingsResolver";
 import {
 	buildLlmHeaders,
 	extractHttpStatus,
@@ -23,6 +26,8 @@ export interface ChatMessage {
 	toolCallId?: string;
 	name?: string;
 	toolCalls?: ToolCall[];
+	reasoningArtifact?: ReasoningArtifact;
+	/** @deprecated use reasoningArtifact */
 	reasoningContent?: string;
 	uiMeta?: ChatMessageUiMeta;
 }
@@ -54,6 +59,8 @@ export interface ChatMessageUiMeta {
 	detail?: string;
 	segments?: ChatMessageUiSegment[];
 	taskId?: string;
+	turnId?: string;
+	conversationId?: string;
 }
 
 export type ChatMessagePart =
@@ -95,6 +102,7 @@ interface ChatResponseBody {
 			content?: string | ResponseTextPart[];
 			reasoning?: string;
 			reasoning_content?: string;
+			reasoning_details?: unknown;
 			tool_calls?: Array<{
 				id?: string;
 				type?: string;
@@ -107,15 +115,25 @@ interface ChatResponseBody {
 	}>;
 	output_text?: string;
 	output?: Array<{
+		type?: string;
+		summary?: unknown;
+		encrypted_content?: string;
 		content?: ResponseTextPart[];
 	}>;
+}
+
+export interface ChatResult {
+	assistantText: string;
+	reasoningArtifact: ReasoningArtifact;
 }
 
 export interface ChatWithToolsResult {
 	assistantText: string;
 	toolCalls: ToolCall[];
 	finishReason: string;
-	reasoningContent: string;
+	reasoningArtifact?: ReasoningArtifact;
+	/** @deprecated use reasoningArtifact */
+	reasoningContent?: string;
 }
 
 export type VisionCapability = "supported" | "unsupported" | "unknown";
@@ -425,6 +443,7 @@ export class AIService {
 		const maxTokens = options?.maxTokens ?? config.maxTokens;
 		const modelOverride = options?.modelOverride?.trim() ?? "";
 		const effectiveModel = modelOverride || config.model?.trim() || "";
+		const reasoningProvider = this.resolveReasoningProvider(endpoint, effectiveModel);
 
 		if (this.isResponsesEndpoint(endpoint)) {
 			const payload: Record<string, unknown> = {
@@ -457,6 +476,10 @@ export class AIService {
 			if (!isGroupMode && maxTokens != null) {
 				payload.max_output_tokens = maxTokens;
 			}
+			Object.assign(payload, resolveReasoningRequestParams(config, {
+				provider: reasoningProvider,
+				sourceProtocol: "responses",
+			}));
 
 			return payload;
 		}
@@ -471,6 +494,10 @@ export class AIService {
 		if (!isGroupMode && maxTokens != null) {
 			payload.max_tokens = maxTokens;
 		}
+		Object.assign(payload, resolveReasoningRequestParams(config, {
+			provider: reasoningProvider,
+			sourceProtocol: reasoningProvider === "bailian" || reasoningProvider === "dashscope" ? "dashscope" : "chat_completions",
+		}));
 
 		return payload;
 	}
@@ -498,10 +525,7 @@ export class AIService {
 						},
 					})),
 				};
-				const reasoningContent = item.reasoningContent?.trim();
-				if (reasoningContent) {
-					message.reasoning_content = reasoningContent;
-				}
+				this.applyReasoningContinuation(message, item);
 				return message;
 			}
 			const message: Record<string, unknown> = {
@@ -509,13 +533,35 @@ export class AIService {
 				content: item.parts && item.parts.length > 0 ? item.parts : item.content,
 			};
 			if (item.role === "assistant") {
-				const reasoningContent = item.reasoningContent?.trim();
-				if (reasoningContent) {
-					message.reasoning_content = reasoningContent;
-				}
+				this.applyReasoningContinuation(message, item);
 			}
 			return message;
 		});
+	}
+
+	private applyReasoningContinuation(message: Record<string, unknown>, item: ChatMessage): void {
+		const artifact = item.reasoningArtifact;
+		if (!artifact?.hasReasoning) {
+			return;
+		}
+		if (artifact.continuationPolicy === "drop" || artifact.continuationPolicy === "provider_managed") {
+			return;
+		}
+		const payload = artifact.continuationPayload;
+		if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+			for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+				if (key === "visibleSummary" || key === "rawReasoning") {
+					continue;
+				}
+				message[key] = value;
+			}
+			return;
+		}
+		if (artifact.continuationPolicy === "preserve_raw" && artifact.rawReasoning?.trim()) {
+			if (artifact.rawFormat === "reasoning") {
+				message.reasoning = artifact.rawReasoning;
+			}
+		}
 	}
 
 	private extractStreamDeltaText(eventData: unknown): string {
@@ -666,6 +712,66 @@ export class AIService {
 		return reasoningContent;
 	}
 
+	private extractReasoningArtifact(
+		body: ChatResponseBody,
+		endpoint: string,
+		model: string,
+	): ReasoningArtifact {
+		const provider = this.resolveReasoningProvider(endpoint, model);
+		const sourceProtocol = this.resolveReasoningSourceProtocol(endpoint, provider);
+		return normalizeReasoningArtifact({
+			provider,
+			model,
+			sourceProtocol,
+			body,
+			message: body.choices?.[0]?.message,
+			responseOutput: body.output,
+		});
+	}
+
+	private resolveReasoningProvider(endpoint: string | undefined, model: string | undefined): ReasoningProvider {
+		const config = this.getConfig();
+		const haystack = [
+			endpoint,
+			model,
+			config.model,
+			config.opencodeProviderId,
+			config.apiUrl,
+		].filter((item): item is string => Boolean(item)).join(" ").toLowerCase();
+		if (haystack.includes("zenmux")) {
+			return "zenmux";
+		}
+		if (haystack.includes("deepseek")) {
+			return "deepseek";
+		}
+		if (haystack.includes("dashscope")) {
+			return "dashscope";
+		}
+		if (haystack.includes("bailian") || haystack.includes("aliyun") || haystack.includes("qwen")) {
+			return "bailian";
+		}
+		if (haystack.includes("anthropic") || haystack.includes("claude")) {
+			return "anthropic";
+		}
+		if (haystack.includes("openai") || /\bgpt[-\w.]*/i.test(haystack)) {
+			return "openai";
+		}
+		return "unknown";
+	}
+
+	private resolveReasoningSourceProtocol(endpoint: string, provider: ReasoningProvider): ReasoningSourceProtocol {
+		if (this.isResponsesEndpoint(endpoint)) {
+			return "responses";
+		}
+		if (provider === "dashscope" || provider === "bailian") {
+			return "dashscope";
+		}
+		if (provider === "anthropic") {
+			return "anthropic_messages";
+		}
+		return "chat_completions";
+	}
+
 	private extractConnectionProbeText(body: ChatResponseBody): string {
 		const text = this.extractMessageContent(body, true).trim();
 		if (text) {
@@ -804,6 +910,10 @@ export class AIService {
 	}
 
 	async chat(messages: ChatMessage[], options?: ChatOptions): Promise<string> {
+		return (await this.chatDetailed(messages, options)).assistantText;
+	}
+
+	async chatDetailed(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResult> {
 		const config = this.getConfig();
 		const modelOverride = options?.modelOverride?.trim() ?? "";
 		const effectiveModel = modelOverride || config.model.trim();
@@ -845,9 +955,13 @@ export class AIService {
 						body: JSON.stringify(payload),
 					});
 					this.throwIfAborted(options?.signal);
-					const text = this.extractMessageContent(response.json as ChatResponseBody);
+					const body = response.json as ChatResponseBody;
+					const text = this.extractMessageContent(body);
 					this.emitTransportRequestSucceeded(options, "chat", requestId, endpoints, index, attempt);
-					return text;
+					return {
+						assistantText: text,
+						reasoningArtifact: this.extractReasoningArtifact(body, endpoint, effectiveModel),
+					};
 				} catch (error) {
 					lastError = error;
 					const status = extractHttpStatus(error);
@@ -1084,6 +1198,7 @@ export class AIService {
 		const modelOverride = options?.modelOverride?.trim() ?? "";
 		const effectiveModel = modelOverride || config.model?.trim() || "";
 		const toolChoice = options?.toolChoice ?? "auto";
+		const reasoningProvider = this.resolveReasoningProvider("", effectiveModel);
 
 		const payload: Record<string, unknown> = {
 			messages: this.toOpenAIMessages(messages),
@@ -1107,6 +1222,10 @@ export class AIService {
 		if (!isGroupMode && maxTokens != null) {
 			payload.max_tokens = maxTokens;
 		}
+		Object.assign(payload, resolveReasoningRequestParams(config, {
+			provider: reasoningProvider,
+			sourceProtocol: reasoningProvider === "bailian" || reasoningProvider === "dashscope" ? "dashscope" : "chat_completions",
+		}));
 		return payload;
 	}
 
@@ -1166,7 +1285,7 @@ export class AIService {
 						assistantText,
 						toolCalls,
 						finishReason: body.choices?.[0]?.finish_reason ?? "",
-						reasoningContent: this.extractReasoningContent(body),
+						reasoningArtifact: this.extractReasoningArtifact(body, endpoint, effectiveModel),
 					};
 				} catch (error) {
 					lastError = error;

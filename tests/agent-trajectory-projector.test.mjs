@@ -24,12 +24,16 @@ function makeReplaySummary(overrides = {}) {
 		totalEvents: 7,
 		eventTypes: [],
 		status: "completed",
+		startedAt: "2026-05-05T00:00:00.000Z",
+		updatedAt: "2026-05-05T00:00:08.000Z",
+		completedAt: "2026-05-05T00:00:08.000Z",
+		durationMs: 8000,
 		modelCalls: { requested: 1, completed: 1, failed: 0 },
 		transport: { retries: 0, exhausted: 0, lastMessage: "" },
 		transportTimeline: [],
 		toolEvents: { requested: 1, completed: 1, failed: 0, denied: 0 },
 		toolCalls: [
-			{ step: 1, tool: "read", toolCallId: "tool-1", status: "ok", targetPath: "Notes/today.md" },
+			{ step: 1, tool: "read", toolCallId: "tool-1", status: "ok", targetPath: "Notes/today.md", at: "2026-05-05T00:00:02.000Z" },
 		],
 		approvals: { requested: 1, resolved: 1, approved: 1, denied: 0 },
 		mutations: { planned: 1, applied: 1, rejected: 0, conflicted: 0, applyFailed: 0 },
@@ -42,6 +46,7 @@ function makeReplaySummary(overrides = {}) {
 				status: "pending_review",
 				summary: "Update note summary.",
 				reason: "",
+				at: "2026-05-05T00:00:03.000Z",
 			},
 			{
 				id: "plan-1",
@@ -51,12 +56,13 @@ function makeReplaySummary(overrides = {}) {
 				status: "applied",
 				summary: "Applied note update.",
 				reason: "Approved by user.",
+				at: "2026-05-05T00:00:06.000Z",
 			},
 		],
 		taskTimeline: [
-			{ taskId: "task-replay", event: "created", status: "created", summary: "Task created.", reason: "" },
-			{ taskId: "task-replay", event: "running", status: "running", summary: "Runtime started.", reason: "" },
-			{ taskId: "task-replay", event: "completed", status: "completed", summary: "Task completed.", reason: "" },
+			{ taskId: "task-replay", event: "created", status: "created", summary: "Task created.", reason: "", at: "2026-05-05T00:00:00.000Z" },
+			{ taskId: "task-replay", event: "running", status: "running", summary: "Runtime started.", reason: "", at: "2026-05-05T00:00:01.000Z" },
+			{ taskId: "task-replay", event: "completed", status: "completed", summary: "Task completed.", reason: "", at: "2026-05-05T00:00:08.000Z" },
 		],
 		finalAnswerSummary: "Answered from the replay.",
 		errors: [],
@@ -77,11 +83,12 @@ test("projectRuntimeProgress maps live context model tool done events into order
 			taskId: "task-live",
 			traceId: "trace-live",
 			conversationId: "conversation-live",
+			at: "2026-05-05T00:00:00.000Z",
 		},
-		{ phase: "context", depth: 0, contextKey: "instructions", message: "Loaded project rules." },
-		{ phase: "model_request", depth: 0, step: 1, message: "Requesting model decision." },
-		{ phase: "model_response", depth: 0, step: 1, message: "Model decision received." },
-		{ phase: "tool_call", depth: 0, step: 1, tool: "read", targetPath: "Notes/today.md", message: "Reading note." },
+		{ phase: "context", depth: 0, contextKey: "instructions", message: "Loaded project rules.", at: "2026-05-05T00:00:01.000Z" },
+		{ phase: "model_request", depth: 0, step: 1, message: "Requesting model decision.", at: "2026-05-05T00:00:02.000Z" },
+		{ phase: "model_response", depth: 0, step: 1, message: "Model decision received.", at: "2026-05-05T00:00:03.000Z" },
+		{ phase: "tool_call", depth: 0, step: 1, tool: "read", targetPath: "Notes/today.md", message: "Reading note.", at: "2026-05-05T00:00:04.000Z" },
 		{
 			phase: "tool_result",
 			depth: 0,
@@ -91,8 +98,9 @@ test("projectRuntimeProgress maps live context model tool done events into order
 			status: "ok",
 			summary: "Read note summary.",
 			message: "Read complete.",
+			at: "2026-05-05T00:00:05.000Z",
 		},
-		{ phase: "done", depth: 0, message: "Runtime finished." },
+		{ phase: "done", depth: 0, message: "Runtime finished.", at: "2026-05-05T00:00:06.000Z" },
 	]);
 
 	assert.equal(snapshot.status, "completed");
@@ -111,7 +119,40 @@ test("projectRuntimeProgress maps live context model tool done events into order
 	assert.deepEqual(snapshot.items.map((item) => item.status), ["ok", "ok", "ok", "ok"]);
 	assert.equal(snapshot.items.find((item) => item.kind === "tool")?.tool, "read");
 	assert.equal(snapshot.items.find((item) => item.kind === "tool")?.targetPath, "Notes/today.md");
+	assert.deepEqual(snapshot.time, {
+		startedAt: "2026-05-05T00:00:00.000Z",
+		updatedAt: "2026-05-05T00:00:06.000Z",
+		completedAt: "2026-05-05T00:00:06.000Z",
+		durationMs: 6000,
+	});
+	assert.equal(snapshot.items.find((item) => item.kind === "tool")?.at, "2026-05-05T00:00:04.000Z");
 	assert.equal(snapshot.privacy.source, "live");
+});
+
+test("projectRuntimeProgress turns reasoning metadata into a progressive reasoning item", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "model_response",
+			depth: 0,
+			step: 1,
+			message: "Model response received.",
+			reasoningVisibleSummary: "Checked the user goal and current workspace.",
+			reasoningProvider: "deepseek",
+			reasoningRawFormat: "reasoning_content",
+			reasoningContinuationPolicy: "drop",
+			at: "2026-05-05T00:00:01.000Z",
+		},
+	]);
+
+	const reasoningItem = snapshot.items.find((item) => item.kind === "reasoning");
+	assert.ok(reasoningItem, "reasoning metadata should create a trajectory item");
+	assert.equal(reasoningItem?.detail, "Checked the user goal and current workspace.");
+	assert.equal(reasoningItem?.reasoningProvider, "deepseek");
+	assert.equal(reasoningItem?.reasoningRawFormat, "reasoning_content");
+	assert.equal(reasoningItem?.reasoningContinuationPolicy, "drop");
+	assert.equal(JSON.stringify(snapshot).includes("raw chain of thought"), false);
 });
 
 test("projectRuntimeProgress marks failed tool results and exposes a retryable failure summary", async () => {
@@ -210,10 +251,41 @@ test("projectReplaySummary projects tool mutation and task timelines into a comp
 	});
 	assert.equal(snapshot.summary, "Answered from the replay.");
 	assert.equal(snapshot.privacy.source, "replay");
+	assert.deepEqual(snapshot.time, {
+		startedAt: "2026-05-05T00:00:00.000Z",
+		updatedAt: "2026-05-05T00:00:08.000Z",
+		completedAt: "2026-05-05T00:00:08.000Z",
+		durationMs: 8000,
+	});
 	assert.ok(snapshot.items.some((item) => item.kind === "tool" && item.tool === "read" && item.status === "ok"));
 	assert.ok(snapshot.items.some((item) => item.kind === "mutation" && item.actionRef === "plan-1"));
 	assert.ok(snapshot.items.some((item) => item.kind === "task" && item.status === "ok"));
 	assert.deepEqual(snapshot.mutations.map((mutation) => mutation.event), ["planned", "applied"]);
+});
+
+test("projectReplaySummary restores reasoning timeline from safe replay metadata", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		reasoningTimeline: [
+			{
+				step: 1,
+				provider: "openai",
+				rawFormat: "responses_reasoning",
+				continuationPolicy: "provider_managed",
+				visibleSummary: "Used the provider reasoning summary.",
+				warnings: [],
+				at: "2026-05-05T00:00:02.000Z",
+			},
+		],
+	}));
+
+	const reasoningItem = snapshot.items.find((item) => item.kind === "reasoning");
+	assert.ok(reasoningItem, "replay reasoning metadata should restore a timeline item");
+	assert.equal(reasoningItem?.status, "ok");
+	assert.equal(reasoningItem?.detail, "Used the provider reasoning summary.");
+	assert.equal(reasoningItem?.reasoningProvider, "openai");
+	assert.equal(JSON.stringify(snapshot).includes("raw CoT"), false);
 });
 
 test("projectReplaySummary surfaces mutation conflict and apply failure directly", async () => {

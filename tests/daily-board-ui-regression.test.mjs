@@ -542,7 +542,9 @@ test("chat message meta uses the configured display name for user messages and F
 	assert.doesNotMatch(source, /resolveUserBadgeLabel/);
 	assert.match(source, /private resolveUserDisplayName\(\): string/);
 	assert.match(source, /this\.plugin\.settings\.user\.displayName/);
-	assert.match(source, /text: isUser \? this\.resolveUserDisplayName\(\) : this\.plugin\.t\("ai\.role\.assistant"\)/);
+	assert.match(source, /text: this\.resolveUserDisplayName\(\)/);
+	assert.match(source, /renderAgentAnswerFlow/);
+	assert.match(source, /renderAssistantAvatar: \(metaEl\) => this\.renderAssistantAvatar\(metaEl\)/);
 	assert.match(source, /this\.t\("ai\.role\.userFallback", "用户"\)/);
 });
 

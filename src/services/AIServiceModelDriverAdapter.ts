@@ -1,10 +1,14 @@
-import type { ChatMessage, ChatWithToolsResult } from "./AIService";
+import type { ChatMessage, ChatResult, ChatWithToolsResult } from "./AIService";
 import type { ModelDriverPort, ModelDriverRequest, ModelDriverResponse, ModelDriverToolRequest } from "../core/agent-kernel/ModelDriverPort";
 import type { LlmTransportObserver } from "../core/llm/LlmTransportTelemetry";
 import type { ToolDefinition } from "../types/tools";
 
 export interface AIServiceModelDriver {
 	chat(messages: ChatMessage[], options?: { modelOverride?: string; signal?: AbortSignal } & LlmTransportObserver): Promise<string>;
+	chatDetailed?(
+		messages: ChatMessage[],
+		options?: { modelOverride?: string; signal?: AbortSignal } & LlmTransportObserver,
+	): Promise<ChatResult>;
 	chatWithTools(
 		messages: ChatMessage[],
 		tools: ToolDefinition[],
@@ -16,16 +20,22 @@ export class AIServiceModelDriverAdapter implements ModelDriverPort {
 	constructor(private readonly aiService: AIServiceModelDriver) {}
 
 	async requestText(input: ModelDriverRequest): Promise<ModelDriverResponse> {
-		const assistantText = await this.aiService.chat(input.messages as ChatMessage[], {
+		const options = {
 			modelOverride: input.modelOverride,
 			signal: input.signal,
 			onTransportEvent: input.onTransportEvent,
-		});
+		};
+		const detailed = this.aiService.chatDetailed
+			? await this.aiService.chatDetailed(input.messages as ChatMessage[], options)
+			: {
+					assistantText: await this.aiService.chat(input.messages as ChatMessage[], options),
+					reasoningArtifact: undefined,
+			  };
 		return {
-			assistantText,
+			assistantText: detailed.assistantText,
 			toolCalls: [],
 			finishReason: "stop",
-			reasoningContent: "",
+			...(detailed.reasoningArtifact ? { reasoningArtifact: detailed.reasoningArtifact } : {}),
 		};
 	}
 
@@ -39,7 +49,7 @@ export class AIServiceModelDriverAdapter implements ModelDriverPort {
 			assistantText: result.assistantText,
 			toolCalls: result.toolCalls,
 			finishReason: result.finishReason,
-			reasoningContent: result.reasoningContent,
+			...(result.reasoningArtifact ? { reasoningArtifact: result.reasoningArtifact } : {}),
 		};
 	}
 }

@@ -90,3 +90,103 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 	assert.equal(summary.mutations.planned, 1);
 	assert.deepEqual(summary.taskTimeline.map((item) => item.event), ["created", "running", "completed"]);
 });
+
+test("AgentReplayRecorder preserves Kernel event times for completed replay duration", async () => {
+	const { AgentReplayRecorder, AgentExecutionContext, TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-kernel-replay-"));
+	const resolvePath = resolveTurnPath(root);
+	const recorder = new AgentReplayRecorder({
+		eventLog: new TurnEventLog({
+			resolveTurnPath: resolvePath,
+			now: () => new Date("2026-05-05T00:00:30.000Z"),
+		}),
+	});
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const context = new AgentExecutionContext({
+		turnId: "turn-duration",
+		taskId: "task-duration",
+		traceId: "trace-duration",
+		conversationId: "conversation-duration",
+		agentId: "agent-duration",
+		mode: "ask",
+	});
+
+	context.emit({ type: "turn_started", at: "2026-05-05T00:00:00.000Z", payload: { mode: "ask" } });
+	context.emit({ type: "tool_call", at: "2026-05-05T00:00:03.000Z", payload: { step: 1, tool: "read", targetPath: "Notes/A.md" } });
+	context.emit({ type: "tool_result", at: "2026-05-05T00:00:04.000Z", payload: { step: 1, tool: "read", targetPath: "Notes/A.md", status: "ok" } });
+	context.emit({ type: "turn_completed", at: "2026-05-05T00:00:07.000Z", status: "completed" });
+
+	await recorder.recordTurn({
+		context,
+		result: {
+			turnId: context.turnId,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			status: "completed",
+			assistantText: "Done.",
+			events: context.snapshotEvents(),
+			traces: [],
+			rawFinalReply: "Done.",
+		},
+	});
+	const summary = reader.summarize(await reader.readTurn({
+		conversationId: "conversation-duration",
+		turnId: "turn-duration",
+		taskId: "task-duration",
+	}));
+
+	assert.equal(summary.startedAt, "2026-05-05T00:00:00.000Z");
+	assert.equal(summary.completedAt, "2026-05-05T00:00:07.000Z");
+	assert.equal(summary.durationMs, 7000);
+});
+
+test("AgentReplayRecorder computes replay duration when terminal replay event is appended at completion", async () => {
+	const { AgentReplayRecorder, AgentExecutionContext, TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-kernel-replay-"));
+	const resolvePath = resolveTurnPath(root);
+	const recorder = new AgentReplayRecorder({
+		eventLog: new TurnEventLog({
+			resolveTurnPath: resolvePath,
+			now: () => new Date("2026-05-05T00:00:09.000Z"),
+		}),
+	});
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const context = new AgentExecutionContext({
+		turnId: "turn-extra-terminal",
+		taskId: "task-extra-terminal",
+		traceId: "trace-extra-terminal",
+		conversationId: "conversation-extra-terminal",
+		agentId: "agent-extra-terminal",
+		mode: "ask",
+	});
+
+	context.emit({ type: "turn_started", at: "2026-05-05T00:00:00.000Z", payload: { mode: "ask" } });
+	await recorder.recordTurn({
+		context,
+		result: {
+			turnId: context.turnId,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			status: "completed",
+			assistantText: "Done.",
+			events: context.snapshotEvents(),
+			traces: [],
+			rawFinalReply: "Done.",
+		},
+		extraEvents: [
+			{ type: "assistant_final", payload: { summary: "Done.", traceId: context.traceId } },
+			{ type: "turn_completed", payload: { status: "completed", traceId: context.traceId } },
+		],
+	});
+	const summary = reader.summarize(await reader.readTurn({
+		conversationId: "conversation-extra-terminal",
+		turnId: "turn-extra-terminal",
+		taskId: "task-extra-terminal",
+	}));
+
+	assert.equal(summary.startedAt, "2026-05-05T00:00:00.000Z");
+	assert.equal(summary.completedAt, "2026-05-05T00:00:09.000Z");
+	assert.equal(summary.durationMs, 9000);
+});

@@ -14,17 +14,32 @@ test("agent process panel styles define the primary friday-agent-process namespa
 	const styles = read(stylesPath);
 	for (const className of [
 		"friday-agent-process",
+		"friday-agent-process-disclosure",
 		"friday-agent-process-thinking",
+		"friday-agent-process-strip",
 		"friday-agent-process-header",
 		"friday-agent-process-status",
-		"friday-agent-process-current",
 		"friday-agent-process-step",
-		"friday-agent-process-stages",
 		"friday-agent-process-timeline",
-		"friday-agent-process-evidence",
-		"friday-agent-process-mutations",
+		"friday-agent-process-step-actions",
 		"friday-agent-process-actions",
 		"friday-agent-process-recovery",
+	]) {
+		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
+	}
+});
+
+test("agent answer and artifact styles define document-flow result surfaces", () => {
+	const styles = read(stylesPath);
+	for (const className of [
+		"friday-ai-answer-flow",
+		"friday-ai-answer-content",
+		"friday-agent-artifacts",
+		"friday-agent-artifacts-title",
+		"friday-agent-artifact-card",
+		"friday-agent-artifact-meta",
+		"friday-agent-artifact-open",
+		"friday-agent-artifact-diff-summary",
 	]) {
 		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
 	}
@@ -50,13 +65,39 @@ test("agent process panel styles cover focus responsive and reduced motion state
 	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*friday-agent-process/);
 });
 
+test("agent process disclosure only shows pointer cursor when it is clickable", () => {
+	const styles = read(stylesPath);
+	const baseBlock = styles.match(/\.friday-agent-process-disclosure\s*\{[\s\S]*?\}/)?.[0] ?? "";
+
+	assert.ok(baseBlock, "base disclosure style should exist");
+	assert.doesNotMatch(baseBlock, /cursor\s*:\s*pointer/);
+	assert.match(styles, /\.friday-agent-process-disclosure\.is-clickable\s*\{[\s\S]*cursor\s*:\s*pointer/);
+	assert.match(styles, /\.friday-agent-process-disclosure\s*\{[\s\S]*justify-content\s*:\s*flex-start/);
+	assert.match(styles, /\.friday-agent-process-header-main\s*\{[\s\S]*flex\s*:\s*0\s+1\s+auto/);
+});
+
+test("agent process chevron toggle suppresses native button frame", () => {
+	const styles = read(stylesPath);
+	const toggleBlock = styles.match(/\.friday-agent-process-toggle\s*\{[\s\S]*?\}/)?.[0] ?? "";
+
+	assert.ok(toggleBlock, "toggle style block should exist");
+	assert.match(toggleBlock, /appearance\s*:\s*none/);
+	assert.match(toggleBlock, /border\s*:\s*(?:0|none)/);
+	assert.match(toggleBlock, /background\s*:\s*transparent/);
+	assert.match(toggleBlock, /box-shadow\s*:\s*none/);
+});
+
 test("agent process renderer no longer requires old runtime-card classes", () => {
 	const renderer = read(rendererPath);
 
 	assert.match(renderer, /friday-agent-process/);
+	assert.match(renderer, /friday-ai-answer-flow/);
+	assert.match(renderer, /friday-agent-artifacts/);
 	assert.doesNotMatch(renderer, /friday-runtime-card/);
 	assert.doesNotMatch(renderer, /friday-runtime-stage/);
 	assert.doesNotMatch(renderer, /friday-runtime-entry/);
+	assert.doesNotMatch(renderer, /renderStages|friday-agent-process-stages/);
+	assert.doesNotMatch(renderer, /renderCurrent|friday-agent-process-current/);
 });
 
 function read(filePath) {

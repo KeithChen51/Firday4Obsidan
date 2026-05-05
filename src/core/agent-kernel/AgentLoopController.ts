@@ -1,5 +1,6 @@
 import type { ToolCall } from "../../types/tools";
 import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
+import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import { AgentFailureClassifier } from "./AgentFailureClassifier";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "./AgentKernelPorts";
@@ -111,7 +112,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				onTransportEvent: (event) => this.emitModelTransport(input, context, step, event),
 			});
 			finalReply = response.assistantText.trim();
-			this.emitModelResponse(input, context, step, "prompt", response.assistantText);
+			this.emitModelResponse(input, context, step, "prompt", response.assistantText, response.reasoningArtifact);
 
 			const parsed = parseKernelRuntimeEnvelope(finalReply);
 			if (!parsed) {
@@ -143,7 +144,11 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					args: tool.args ?? {},
 				});
 				traces.push(executed.trace);
-				modelMessages.push({ role: "assistant", content: finalReply });
+				modelMessages.push({
+					role: "assistant",
+					content: finalReply,
+					...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
+				});
 				modelMessages.push({ role: "user", content: executed.modelResultText });
 				if (executed.loadedSkillContext) {
 					modelMessages.push({ role: "system", content: executed.loadedSkillContext });
@@ -203,7 +208,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			if (assistantStepText) {
 				finalReply = assistantStepText;
 			}
-			this.emitModelResponse(input, context, step, "native", response.assistantText, response.reasoningContent);
+			this.emitModelResponse(input, context, step, "native", response.assistantText, response.reasoningArtifact);
 
 			if (response.toolCalls.length === 0) {
 				const terminal = this.resolveNativeNoToolResult(
@@ -242,7 +247,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				role: "assistant",
 				content: response.assistantText?.trim() || "",
 				toolCalls: response.toolCalls,
-				reasoningContent: response.reasoningContent,
+				...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
 			});
 			modelMessages.push(...toolResultMessages);
 			for (const loadedSkillContext of loadedSkillContexts) {
@@ -424,21 +429,23 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		step: number,
 		channel: "native" | "prompt",
 		assistantText: string,
-		reasoningContent?: string,
+		reasoningArtifact?: ReasoningArtifact,
 	): void {
+		const reasoningMetadata = buildSafeReasoningMetadata(reasoningArtifact);
 		context.emit({
 			type: "model_response",
 			payload: {
 				step,
 				channel,
 				hasAssistantText: Boolean(assistantText?.trim()),
-				hasReasoningContent: Boolean(reasoningContent?.trim()),
+				...reasoningMetadata,
 			},
 		});
 		this.report(input, {
 			phase: "model_response",
 			depth: input.depth ?? 0,
 			step,
+			...reasoningMetadata,
 			message: `Step ${step}: model response received`,
 		});
 	}
@@ -572,5 +579,27 @@ function cloneToolCallLike(call: unknown): unknown {
 	return {
 		...value,
 		...(value.args && typeof value.args === "object" ? { args: { ...value.args } } : {}),
+	};
+}
+
+function buildSafeReasoningMetadata(reasoningArtifact: ReasoningArtifact | undefined): {
+	hasReasoning: boolean;
+	reasoningProvider?: ReasoningArtifact["provider"];
+	reasoningRawFormat?: ReasoningArtifact["rawFormat"];
+	reasoningContinuationPolicy?: ReasoningArtifact["continuationPolicy"];
+	reasoningVisibleSummary?: string;
+	reasoningWarnings?: string[];
+} {
+	if (!reasoningArtifact?.hasReasoning) {
+		return { hasReasoning: false };
+	}
+	const warnings = reasoningArtifact.metadata.warnings?.filter((item) => item.trim().length > 0) ?? [];
+	return {
+		hasReasoning: true,
+		reasoningProvider: reasoningArtifact.provider,
+		reasoningRawFormat: reasoningArtifact.rawFormat,
+		reasoningContinuationPolicy: reasoningArtifact.continuationPolicy,
+		reasoningVisibleSummary: reasoningArtifact.visibleSummary,
+		...(warnings.length > 0 ? { reasoningWarnings: warnings } : {}),
 	};
 }

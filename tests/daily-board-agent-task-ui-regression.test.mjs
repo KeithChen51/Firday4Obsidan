@@ -36,7 +36,6 @@ test("daily board renders agent task lifecycle outside plain chat bubbles", asyn
 	assert.match(source, /friday-agent-task-actions/);
 	assert.match(source, /waiting_for_approval/);
 	assert.match(source, /waiting_for_user/);
-	assert.match(source, /failed/);
 });
 
 test("daily board exposes retry, cancel, continue, apply, and reject task actions", async () => {
@@ -193,6 +192,59 @@ test("daily board hydrates persisted task panels when loading or switching conve
 	assert.match(source, /listAgentTasksByConversationId/);
 	assert.match(source, /uiMeta\?\.taskId/);
 	assert.match(source, /await this\.hydrateAgentTasksForCurrentSession\(\)/);
+});
+
+test("daily board hydrates task panels only from the active conversation session", async () => {
+	const source = readViewSource();
+	const match = source.match(/private async hydrateAgentTasksForCurrentSession\([\s\S]*?\n\t\}/);
+	assert.ok(match, "hydration method should exist");
+	const block = match[0] ?? "";
+
+	assert.match(block, /this\.aiSessionId/);
+	assert.match(block, /listAgentTasksByConversationId\(this\.aiSessionId\)/);
+	assert.match(block, /this\.isTaskOwnedByCurrentSession\(task\)/);
+	assert.doesNotMatch(block, /listAgentTasksByConversationId\(activeSoul\.id\)/);
+});
+
+test("daily board does not restore terminal failed or legacy unowned task panels", async () => {
+	const source = readViewSource();
+	const shouldRenderMatch = source.match(/private shouldRenderAgentTaskPanel\([\s\S]*?\n\t\}/);
+	assert.ok(shouldRenderMatch, "task panel visibility predicate should exist");
+	const shouldRenderBlock = shouldRenderMatch[0] ?? "";
+
+	assert.match(shouldRenderBlock, /this\.isTaskOwnedByCurrentSession\(task\)/);
+	assert.match(shouldRenderBlock, /waitingForApproval/);
+	assert.match(shouldRenderBlock, /waitingForUser/);
+	assert.doesNotMatch(shouldRenderBlock, /pendingMutationCount/);
+	assert.doesNotMatch(shouldRenderBlock, /changedFileCount/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "failed"/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "cancelled"/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "completed"/);
+	assert.match(source, /private getVisibleAgentTasksForCurrentSession\(\)/);
+});
+
+test("daily board task panels do not use changed file counts as pending review fallback", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderAgentTaskPanel\([\s\S]*?\n\t\}\n\n\tprivate renderApprovalMessage/);
+	assert.ok(renderMatch, "task panel render method should exist");
+	const renderBlock = renderMatch[0] ?? "";
+
+	assert.match(renderBlock, /task\.pendingMutationCount > 0/);
+	assert.doesNotMatch(renderBlock, /task\.changedFileCount/);
+});
+
+test("daily board ignores cross-session task updates and guards retry actions by task ownership", async () => {
+	const source = readViewSource();
+	const recordMatch = source.match(/private recordAgentTask\(task\?: AgentTask\): void \{[\s\S]*?\n\t\}/);
+	assert.ok(recordMatch, "recordAgentTask should exist");
+	const recordBlock = recordMatch[0] ?? "";
+	assert.match(recordBlock, /this\.isTaskOwnedByCurrentSession\(task\)/);
+
+	const actionMatch = source.match(/private handleTrajectoryAction\([\s\S]*?\n\t\}/);
+	assert.ok(actionMatch, "trajectory action handler should exist");
+	const actionBlock = actionMatch[0] ?? "";
+	assert.match(actionBlock, /this\.isSnapshotOwnedByCurrentSession\(snapshot\)/);
+	assert.match(actionBlock, /this\.hasCurrentSessionTask\(taskId\)/);
 });
 
 test("agent task panel has stable native-feeling layout classes", async () => {

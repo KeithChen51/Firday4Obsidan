@@ -79,7 +79,7 @@ import {
 	createAgentTaskPanelActionHandlers,
 	recordTaskFromRuntimeProgress,
 } from "./agentTaskPanelActions";
-import { renderAgentTrajectoryCard } from "./agentTrajectoryRenderer";
+import { renderAgentAnswerFlow, renderAgentTrajectoryCard } from "./agentTrajectoryRenderer";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
@@ -90,6 +90,8 @@ type AgentTaskStatus = CoreAgentTaskStatus;
 
 interface AgentTaskViewState {
 	id: string;
+	conversationId?: string;
+	turnId?: string;
 	status: AgentTaskStatus;
 	title: string;
 	summary: string;
@@ -135,9 +137,10 @@ export class DailyBoardView extends ItemView {
 	private aiStreamingPreview = "";
 	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
-	private aiLastCompletedTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
+	private aiProcessSnapshotsByKey = new Map<string, AgentTrajectorySnapshot>();
+	private aiProcessExpandedKeys = new Set<string>();
 	private aiAgentTasks: AgentTaskViewState[] = [];
-	private aiRuntimePreviewExpanded = false;
+	private aiRuntimeElapsedTimer: number | null = null;
 	private aiMessageListScrollTop = 0;
 	private aiMessageListStickToBottom = true;
 	private aiForceScrollToBottomOnce = false;
@@ -209,6 +212,7 @@ export class DailyBoardView extends ItemView {
 			window.clearTimeout(this.refreshTimer);
 			this.refreshTimer = null;
 		}
+		this.clearRuntimeElapsedTimer();
 		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
@@ -2291,9 +2295,9 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
-		this.aiLastCompletedTrajectorySnapshot = null;
+		this.clearRuntimeElapsedTimer();
 		this.aiAgentTasks = [];
-		this.aiRuntimePreviewExpanded = false;
+		this.aiProcessSnapshotsByKey.clear();
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiSessionSearchQuery = "";
 		this.aiSessionNavCollapsed = true;
@@ -2323,6 +2327,7 @@ export class DailyBoardView extends ItemView {
 		this.aiSessionId = target.sessionId;
 		this.aiConversation = [...target.messages];
 		await this.hydrateAgentTasksForCurrentSession();
+		await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiQueuedPrompts = [];
@@ -2330,8 +2335,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
-		this.aiLastCompletedTrajectorySnapshot = null;
-		this.aiRuntimePreviewExpanded = false;
+		this.clearRuntimeElapsedTimer();
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
 		this.aiSessionSelection.clear();
@@ -2431,7 +2435,6 @@ export class DailyBoardView extends ItemView {
 		if (this.aiSessionId === sessionId) {
 			this.aiSessionId = "";
 			await this.ensureAiSessionLoaded();
-			this.aiLastCompletedTrajectorySnapshot = null;
 		}
 		this.renderBoard();
 	}
@@ -2457,7 +2460,6 @@ export class DailyBoardView extends ItemView {
 		if (activeDeleted) {
 			this.aiSessionId = "";
 			await this.ensureAiSessionLoaded();
-			this.aiLastCompletedTrajectorySnapshot = null;
 		}
 		this.renderBoard();
 	}
@@ -2583,25 +2585,45 @@ export class DailyBoardView extends ItemView {
 		return parsed.toLocaleDateString();
 	}
 
-	private renderAiMessage(containerEl: HTMLElement, message: ChatMessage, isStreaming = false): void {
+	private renderAiMessage(
+		containerEl: HTMLElement,
+		message: ChatMessage,
+		isStreaming = false,
+		resultSnapshot: AgentTrajectorySnapshot | null = null,
+	): void {
 		const isUser = message.role === "user";
+		if (!isUser) {
+			renderAgentAnswerFlow({
+				containerEl,
+				snapshot: resultSnapshot,
+				isStreaming,
+				expanded: this.isProcessExpanded(resultSnapshot),
+				onToggle: () => this.toggleProcessExpanded(resultSnapshot),
+				onAction: (action) => {
+					if (resultSnapshot) {
+						this.handleTrajectoryAction(resultSnapshot, action);
+					}
+				},
+				renderContent: (contentEl) => this.renderAiMessageContent(contentEl, message),
+				renderAssistantAvatar: (metaEl) => this.renderAssistantAvatar(metaEl),
+				renderIcon: (iconEl, icon) => setIcon(iconEl, icon),
+				onOpenArtifact: (pathValue) => {
+					void this.openAgentArtifactInWorkspace(pathValue);
+				},
+			});
+			return;
+		}
 		const rowEl = containerEl.createDiv({
-			cls: `friday-ai-message-row ${isUser ? "is-user" : "is-assistant"}`,
+			cls: "friday-ai-message-row is-user",
 		});
 		const bubbleEl = rowEl.createDiv({
-			cls: `friday-ai-message ${isUser ? "is-user" : "is-assistant"}`,
+			cls: "friday-ai-message is-user",
 		});
 		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		if (!isUser) {
-			this.renderAssistantAvatar(metaEl);
-		}
-		const roleEl = metaEl.createSpan({
-			cls: isUser ? "friday-ai-message-role" : "friday-ai-message-role friday-wordmark",
-			text: isUser ? this.resolveUserDisplayName() : this.plugin.t("ai.role.assistant"),
+		metaEl.createSpan({
+			cls: "friday-ai-message-role",
+			text: this.resolveUserDisplayName(),
 		});
-		if (!isUser) {
-			roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
-		}
 		const contentEl = bubbleEl.createDiv({
 			cls: `friday-ai-message-content${isStreaming ? " is-streaming" : ""}`,
 		});
@@ -2622,6 +2644,126 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 		void MarkdownRenderer.renderMarkdown(message.content, containerEl, "", this);
+	}
+
+	private isCurrentConversationId(conversationId?: string | null): boolean {
+		const currentConversationId = this.aiSessionId.trim();
+		const candidateConversationId = conversationId?.trim();
+		return Boolean(currentConversationId && candidateConversationId && candidateConversationId === currentConversationId);
+	}
+
+	private isTaskOwnedByCurrentSession(task: { conversationId?: string | null }): boolean {
+		return this.isCurrentConversationId(task.conversationId);
+	}
+
+	private hasCurrentSessionTask(taskId: string): boolean {
+		const normalizedTaskId = taskId.trim();
+		if (!normalizedTaskId) {
+			return false;
+		}
+		return this.aiAgentTasks.some((task) => task.id === normalizedTaskId && this.isTaskOwnedByCurrentSession(task)) ||
+			this.aiConversation.some((message) => message.role === "assistant" && message.uiMeta?.taskId === normalizedTaskId);
+	}
+
+	private isSnapshotOwnedByCurrentSession(snapshot: AgentTrajectorySnapshot | null): snapshot is AgentTrajectorySnapshot {
+		if (!snapshot) {
+			return false;
+		}
+		const conversationId = snapshot.identity.conversationId?.trim();
+		if (conversationId) {
+			return this.isCurrentConversationId(conversationId);
+		}
+		const taskId = snapshot.identity.taskId?.trim();
+		return Boolean(taskId && this.hasCurrentSessionTask(taskId));
+	}
+
+	private getCompletedTrajectorySnapshotForMessage(
+		message: ChatMessage,
+		index: number,
+		lastAssistantIndex: number,
+	): AgentTrajectorySnapshot | null {
+		void index;
+		void lastAssistantIndex;
+		if (this.aiBusy || message.role !== "assistant") {
+			return null;
+		}
+		const key = this.getMessageTrajectorySnapshotKey(message);
+		if (!key) {
+			return null;
+		}
+		const snapshot = this.aiProcessSnapshotsByKey.get(key) ?? null;
+		return this.isSnapshotOwnedByCurrentSession(snapshot) ? snapshot : null;
+	}
+
+	private getMessageTrajectorySnapshotKey(message: ChatMessage): string {
+		const uiMeta = message.uiMeta;
+		const taskId = uiMeta?.taskId?.trim() || "";
+		const task = taskId ? this.aiAgentTasks.find((item) => item.id === taskId) : undefined;
+		const turnId = uiMeta?.turnId?.trim() || task?.turnId?.trim() || "";
+		const conversationId = uiMeta?.conversationId?.trim() || task?.conversationId?.trim() || this.aiSessionId.trim();
+		return this.buildTrajectorySnapshotKey(conversationId, turnId, taskId);
+	}
+
+	private getTrajectorySnapshotKey(snapshot: AgentTrajectorySnapshot | null): string {
+		if (!snapshot) {
+			return "";
+		}
+		return this.buildTrajectorySnapshotKey(
+			snapshot.identity.conversationId || this.aiSessionId,
+			snapshot.identity.turnId,
+			snapshot.identity.taskId,
+		);
+	}
+
+	private buildTrajectorySnapshotKey(
+		conversationId: string | undefined,
+		turnId: string | undefined,
+		taskId: string | undefined,
+	): string {
+		const normalizedConversationId = conversationId?.trim() || "";
+		const normalizedTurnId = turnId?.trim() || "";
+		const normalizedTaskId = taskId?.trim() || "";
+		if (!normalizedConversationId || (!normalizedTurnId && !normalizedTaskId)) {
+			return "";
+		}
+		return `${normalizedConversationId}::${normalizedTurnId}::${normalizedTaskId}`;
+	}
+
+	private rememberCompletedTrajectorySnapshot(snapshot: AgentTrajectorySnapshot | null): void {
+		if (!this.isSnapshotOwnedByCurrentSession(snapshot)) {
+			return;
+		}
+		const key = this.getTrajectorySnapshotKey(snapshot);
+		if (key) {
+			this.aiProcessSnapshotsByKey.set(key, snapshot);
+		}
+	}
+
+	private isProcessExpanded(snapshot: AgentTrajectorySnapshot | null): boolean {
+		const key = this.getTrajectorySnapshotKey(snapshot);
+		return Boolean(key && this.aiProcessExpandedKeys.has(key));
+	}
+
+	private toggleProcessExpanded(snapshot: AgentTrajectorySnapshot | null): void {
+		const key = this.getTrajectorySnapshotKey(snapshot);
+		if (!key) {
+			return;
+		}
+		if (this.aiProcessExpandedKeys.has(key)) {
+			this.aiProcessExpandedKeys.delete(key);
+		} else {
+			this.aiProcessExpandedKeys.add(key);
+		}
+		this.renderBoard();
+	}
+
+	private findLastAssistantMessageIndex(): number {
+		for (let index = this.aiConversation.length - 1; index >= 0; index -= 1) {
+			if (this.aiConversation[index]?.role === "assistant") {
+				return index;
+			}
+		}
+		return -1;
 	}
 
 	private renderStructuredUserMessageBody(containerEl: HTMLElement, segments: ChatMessageUiSegment[]): void {
@@ -2649,19 +2791,22 @@ export class DailyBoardView extends ItemView {
 	private renderAiMessageList(containerEl: HTMLElement): void {
 		containerEl.empty();
 		const pendingApprovals = this.approvalQueue.list();
+		const visibleAgentTasks = this.getVisibleAgentTasksForCurrentSession();
 		if (
 			this.aiConversation.length === 0 &&
 			!this.aiStreamingPreview &&
 			!this.aiRuntimeTrajectorySnapshot &&
 			pendingApprovals.length === 0 &&
-			this.aiAgentTasks.length === 0
+			visibleAgentTasks.length === 0
 		) {
 			const emptyEl = containerEl.createDiv({ cls: "friday-ai-empty" });
 			emptyEl.createEl("h4", { text: this.plugin.t("ai.empty.title") });
 			emptyEl.createEl("p", { text: this.plugin.t("ai.empty.desc") });
 		}
-		for (const message of this.aiConversation) {
-			this.renderAiMessage(containerEl, message);
+		const lastAssistantIndex = this.findLastAssistantMessageIndex();
+		for (const [index, message] of this.aiConversation.entries()) {
+			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message, index, lastAssistantIndex);
+			this.renderAiMessage(containerEl, message, false, completedSnapshotForMessage);
 		}
 		if (this.aiRuntimeTrajectorySnapshot) {
 			this.renderRuntimeExecutionPreview(containerEl);
@@ -2675,15 +2820,34 @@ export class DailyBoardView extends ItemView {
 				true,
 			);
 		}
-		for (const task of this.aiAgentTasks) {
+		for (const task of visibleAgentTasks) {
 			this.renderAgentTaskPanel(containerEl, task);
 		}
 		for (const item of pendingApprovals) {
 			this.renderApprovalMessage(containerEl, item);
 		}
-		if (!this.aiBusy && this.aiLastCompletedTrajectorySnapshot) {
-			this.renderCompletedRuntimeDisclosure(containerEl);
+	}
+
+	private shouldRenderAgentTaskPanel(task: AgentTaskViewState): boolean {
+		return this.isTaskOwnedByCurrentSession(task) && Boolean(
+			task.waitingForApproval ||
+			task.waitingForUser ||
+			task.status === "waiting_for_approval" ||
+			task.status === "waiting_for_user",
+		);
+	}
+
+	private getVisibleAgentTasksForCurrentSession(): AgentTaskViewState[] {
+		return this.aiAgentTasks.filter((task) => this.shouldRenderAgentTaskPanel(task));
+	}
+
+	private async openAgentArtifactInWorkspace(pathValue: string): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(pathValue);
+		if (!(file instanceof TFile)) {
+			new Notice(this.t("ai.artifact.missing", "File not found: {path}", { path: pathValue }), 4000);
+			return;
 		}
+		await this.app.workspace.getLeaf(false).openFile(file);
 	}
 
 	private syncAiLiveChatShell(): void {
@@ -2823,8 +2987,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async hydrateAgentTasksForCurrentSession(): Promise<void> {
-		const activeSoul = this.plugin.getActiveSoul();
-		if (!activeSoul) {
+		if (!this.aiSessionId.trim()) {
 			this.aiAgentTasks = [];
 			return;
 		}
@@ -2834,8 +2997,11 @@ export class DailyBoardView extends ItemView {
 				.filter((taskId): taskId is string => Boolean(taskId)),
 		);
 		const byId = new Map<string, AgentTask>();
-		const conversationTasks = await this.plugin.agentRuntimeService.listAgentTasksByConversationId(activeSoul.id);
+		const conversationTasks = await this.plugin.agentRuntimeService.listAgentTasksByConversationId(this.aiSessionId);
 		for (const task of conversationTasks) {
+			if (!this.isTaskOwnedByCurrentSession(task)) {
+				continue;
+			}
 			if (taskIds.has(task.id) || this.isVisibleAgentTaskStatus(task.status)) {
 				byId.set(task.id, task);
 			}
@@ -2845,7 +3011,7 @@ export class DailyBoardView extends ItemView {
 				continue;
 			}
 			const task = await this.plugin.agentRuntimeService.getAgentTask(taskId);
-			if (task) {
+			if (task && this.isTaskOwnedByCurrentSession(task)) {
 				byId.set(task.id, task);
 			}
 		}
@@ -2855,12 +3021,51 @@ export class DailyBoardView extends ItemView {
 			.map((task) => this.toAgentTaskViewState(task));
 	}
 
+	private async hydrateCompletedTrajectorySnapshotsForCurrentSession(): Promise<void> {
+		this.aiProcessSnapshotsByKey.clear();
+		const currentConversationId = this.aiSessionId.trim();
+		if (!currentConversationId) {
+			return;
+		}
+		const refs = new Map<string, { conversationId: string; turnId: string; taskId?: string }>();
+		for (const message of this.aiConversation) {
+			if (message.role !== "assistant") {
+				continue;
+			}
+			const taskId = message.uiMeta?.taskId?.trim() || "";
+			const task = taskId ? this.aiAgentTasks.find((item) => item.id === taskId) : undefined;
+			const turnId = message.uiMeta?.turnId?.trim() || task?.turnId?.trim() || "";
+			if (!turnId) {
+				continue;
+			}
+			const conversationId = message.uiMeta?.conversationId?.trim() || task?.conversationId?.trim() || currentConversationId;
+			if (!this.isCurrentConversationId(conversationId)) {
+				continue;
+			}
+			const key = this.buildTrajectorySnapshotKey(conversationId, turnId, taskId);
+			if (key) {
+				refs.set(key, { conversationId, turnId, ...(taskId ? { taskId } : {}) });
+			}
+		}
+		for (const ref of refs.values()) {
+			try {
+				const summary = await this.plugin.agentRuntimeService.readTurnReplaySummary(ref);
+				if (summary.totalEvents === 0) {
+					continue;
+				}
+				this.rememberCompletedTrajectorySnapshot(projectReplaySummary(summary));
+			} catch (error) {
+				console.warn("[Friday] Failed to hydrate trajectory replay summary:", error);
+			}
+		}
+	}
+
 	private isVisibleAgentTaskStatus(status: AgentTaskStatus): boolean {
-		return status === "running" || status === "waiting_for_approval" || status === "waiting_for_user" || status === "failed";
+		return status === "waiting_for_approval" || status === "waiting_for_user";
 	}
 
 	private recordAgentTask(task?: AgentTask): void {
-		if (!task) {
+		if (!task || !this.isTaskOwnedByCurrentSession(task)) {
 			return;
 		}
 		const viewState = this.toAgentTaskViewState(task);
@@ -2876,6 +3081,8 @@ export class DailyBoardView extends ItemView {
 	private toAgentTaskViewState(task: AgentTask): AgentTaskViewState {
 		return {
 			id: task.id,
+			conversationId: task.conversationId,
+			...(task.turnId ? { turnId: task.turnId } : {}),
 			status: task.status,
 			title: task.title,
 			summary: task.summary,
@@ -2957,11 +3164,11 @@ export class DailyBoardView extends ItemView {
 				text: task.waitingForUser.prompt,
 			});
 		}
-		if (task.pendingMutationCount > 0 || task.changedFileCount > 0) {
+		if (task.pendingMutationCount > 0) {
 			panelEl.createDiv({
 				cls: "friday-agent-task-mutations",
 				text: this.t("ai.task.mutations", "{count} file change(s) pending review.", {
-					count: task.pendingMutationCount || task.changedFileCount,
+					count: task.pendingMutationCount,
 				}),
 			});
 		}
@@ -3038,13 +3245,6 @@ export class DailyBoardView extends ItemView {
 		this.renderTrajectoryCard(containerEl, this.aiRuntimeTrajectorySnapshot, "live");
 	}
 
-	private renderCompletedRuntimeDisclosure(containerEl: HTMLElement): void {
-		if (!this.aiLastCompletedTrajectorySnapshot) {
-			return;
-		}
-		this.renderTrajectoryCard(containerEl, this.aiLastCompletedTrajectorySnapshot, "completed");
-	}
-
 	private renderTrajectoryCard(
 		containerEl: HTMLElement,
 		snapshot: AgentTrajectorySnapshot,
@@ -3054,14 +3254,12 @@ export class DailyBoardView extends ItemView {
 			containerEl,
 			snapshot,
 			variant,
-			expanded: this.aiRuntimePreviewExpanded,
-			onToggle: () => {
-				this.aiRuntimePreviewExpanded = !this.aiRuntimePreviewExpanded;
-				this.renderBoard();
-			},
+			expanded: this.isProcessExpanded(snapshot),
+			onToggle: () => this.toggleProcessExpanded(snapshot),
 			onAction: (action) => this.handleTrajectoryAction(snapshot, action),
 			translate: (key, fallback, params) => this.t(key, fallback, params),
 			renderAssistantAvatar: (metaEl) => this.renderAssistantAvatar(metaEl),
+			renderIcon: (iconEl, icon) => setIcon(iconEl, icon),
 		});
 	}
 
@@ -3069,16 +3267,23 @@ export class DailyBoardView extends ItemView {
 		snapshot: AgentTrajectorySnapshot,
 		action: AgentTrajectoryAction,
 	): void {
-		if (!action.enabled) {
+		if (!action.enabled || !this.isSnapshotOwnedByCurrentSession(snapshot)) {
 			return;
 		}
 		if (action.id === "view_replay") {
-			this.aiRuntimePreviewExpanded = true;
+			const key = this.getTrajectorySnapshotKey(snapshot);
+			if (key) {
+				this.aiProcessExpandedKeys.add(key);
+			}
+			this.renderBoard();
+			return;
+		}
+		if (action.id === "view_changes") {
 			this.renderBoard();
 			return;
 		}
 		const taskId = snapshot.identity.taskId;
-		if (!taskId) {
+		if (!taskId || !this.hasCurrentSessionTask(taskId)) {
 			return;
 		}
 		const taskActions = this.createAgentTaskPanelActionHandlers(taskId);
@@ -3102,14 +3307,20 @@ export class DailyBoardView extends ItemView {
 			traceId?: string;
 			agentId?: string;
 		};
+		const currentConversationId = this.aiSessionId.trim();
+		if (!currentConversationId) {
+			return null;
+		}
+		const resultConversationId = resultIdentity.conversationId?.trim();
+		if (resultConversationId && resultConversationId !== this.aiSessionId) {
+			return null;
+		}
 		const turnId = resultIdentity.turnId?.trim();
 		if (!turnId) {
-			return this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+			const completedSnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+			return this.isSnapshotOwnedByCurrentSession(completedSnapshot) ? completedSnapshot : null;
 		}
-		const conversationId = resultIdentity.conversationId?.trim() ||
-			this.plugin.getActiveSoul()?.id ||
-			this.aiSessionId ||
-			"default";
+		const conversationId = resultConversationId || this.aiSessionId;
 		try {
 			const summary = await this.plugin.agentRuntimeService.readTurnReplaySummary({
 				conversationId,
@@ -3117,12 +3328,35 @@ export class DailyBoardView extends ItemView {
 				taskId: resultIdentity.taskId ?? result.task?.id,
 			});
 			if (summary.totalEvents > 0) {
-				return projectReplaySummary(summary);
+				const replaySnapshot = projectReplaySummary(summary);
+				return this.isSnapshotOwnedByCurrentSession(replaySnapshot) ? replaySnapshot : null;
 			}
 		} catch (error) {
 			console.warn("[Friday] Failed to rebuild trajectory replay summary:", error);
 		}
-		return this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+		const completedSnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
+		return this.isSnapshotOwnedByCurrentSession(completedSnapshot) ? completedSnapshot : null;
+	}
+
+	private buildAssistantMessageUiMeta(
+		result: RuntimeTurnResult,
+		task?: AgentTask,
+	): ChatMessageUiMeta | undefined {
+		const resultIdentity = result as RuntimeTurnResult & {
+			conversationId?: string;
+			taskId?: string;
+		};
+		const conversationId = resultIdentity.conversationId?.trim() || task?.conversationId?.trim() || this.aiSessionId.trim();
+		const turnId = resultIdentity.turnId?.trim() || task?.turnId?.trim() || "";
+		const taskId = resultIdentity.taskId?.trim() || task?.id?.trim() || result.task?.id?.trim() || "";
+		if (!conversationId && !turnId && !taskId) {
+			return undefined;
+		}
+		return {
+			...(conversationId ? { conversationId } : {}),
+			...(turnId ? { turnId } : {}),
+			...(taskId ? { taskId } : {}),
+		};
 	}
 
 	private async submitAiPrompt(snapshotOverride?: MentionComposerSnapshot): Promise<void> {
@@ -3208,7 +3442,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
-		this.aiRuntimePreviewExpanded = false;
+		this.clearRuntimeElapsedTimer();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
 		this.aiSendAbortController?.abort();
@@ -3236,6 +3470,7 @@ export class DailyBoardView extends ItemView {
 				if (!assistantText) {
 					runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeSoul.id,
+						conversationId: this.aiSessionId,
 						conversation: history,
 						modelOverride,
 						currentFilePath,
@@ -3261,14 +3496,18 @@ export class DailyBoardView extends ItemView {
 			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(normalizedAssistantText);
 			}
-			this.aiLastCompletedTrajectorySnapshot = runtimeResult
+			const completedSnapshot = runtimeResult
 				? await this.buildCompletedTrajectorySnapshot(runtimeResult)
 				: null;
+			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
+			const assistantUiMeta = runtimeResult
+				? this.buildAssistantMessageUiMeta(runtimeResult, runtimeTask)
+				: undefined;
 
 			this.aiConversation.push({
 				role: "assistant",
 				content: normalizedAssistantText,
-				...(runtimeTask ? { uiMeta: { taskId: runtimeTask.id } } : {}),
+				...(assistantUiMeta ? { uiMeta: assistantUiMeta } : {}),
 			});
 			await this.persistConversation();
 		} catch (error) {
@@ -3286,6 +3525,7 @@ export class DailyBoardView extends ItemView {
 			this.aiBusy = false;
 			this.aiStreamingPreview = "";
 			this.aiRuntimeTrajectorySnapshot = null;
+			this.clearRuntimeElapsedTimer();
 			this.aiSendAbortController = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
@@ -3316,7 +3556,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingPreview = "";
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
-		this.aiRuntimePreviewExpanded = false;
+		this.clearRuntimeElapsedTimer();
 		this.aiForceScrollToBottomOnce = true;
 		this.renderBoard();
 
@@ -3336,6 +3576,7 @@ export class DailyBoardView extends ItemView {
 			});
 			const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 				agentId: activeSoul.id,
+				conversationId: this.aiSessionId,
 				conversation: [],
 				currentFilePath: this.app.workspace.getActiveFile()?.path,
 				onProgress: (event) => {
@@ -3346,8 +3587,14 @@ export class DailyBoardView extends ItemView {
 			if (this.plugin.settings.llm.enableStreaming) {
 				await this.streamAssistantText(reply);
 			}
-			this.aiLastCompletedTrajectorySnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
-			this.aiConversation.push({ role: "assistant", content: reply });
+			const completedSnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
+			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
+			const assistantUiMeta = this.buildAssistantMessageUiMeta(runtimeResult, runtimeResult.task);
+			this.aiConversation.push({
+				role: "assistant",
+				content: reply,
+				...(assistantUiMeta ? { uiMeta: assistantUiMeta } : {}),
+			});
 			try {
 				await this.persistConversation();
 			} catch (error) {
@@ -3476,19 +3723,43 @@ export class DailyBoardView extends ItemView {
 		return new Promise((resolve) => window.setTimeout(resolve, ms));
 	}
 
+	private scheduleRuntimeElapsedTimer(): void {
+		if (this.aiRuntimeElapsedTimer != null || !this.aiRuntimeTrajectorySnapshot) {
+			return;
+		}
+		this.aiRuntimeElapsedTimer = window.setTimeout(() => {
+			this.aiRuntimeElapsedTimer = null;
+			if (!this.aiRuntimeTrajectorySnapshot) {
+				return;
+			}
+			this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.refreshElapsed() ?? this.aiRuntimeTrajectorySnapshot;
+			this.syncAiLiveChatShell();
+			this.scheduleRuntimeElapsedTimer();
+		}, 1000);
+	}
+
+	private clearRuntimeElapsedTimer(): void {
+		if (this.aiRuntimeElapsedTimer == null) {
+			return;
+		}
+		window.clearTimeout(this.aiRuntimeElapsedTimer);
+		this.aiRuntimeElapsedTimer = null;
+	}
+
 	private handleRuntimeProgress(event: RuntimeProgressEvent): void {
 		void recordTaskFromRuntimeProgress(event, this.plugin.agentRuntimeService, this.aiRuntimeProgressTaskIds, {
 			recordAgentTask: (task) => this.recordAgentTask(task),
 			render: () => this.syncAiLiveChatShell(),
 		});
-		if (!this.aiRuntimeTrajectorySnapshot) {
-			this.aiRuntimePreviewExpanded = false;
-		}
 		this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
 		const terminalProgress = event.phase === "error" || event.phase === "done";
 		if (terminalProgress) {
-			this.aiLastCompletedTrajectorySnapshot = this.aiRuntimeTrajectoryStore.completeFromProgress();
+			const completedSnapshot = this.aiRuntimeTrajectoryStore.completeFromProgress();
+			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
 			this.aiRuntimeTrajectorySnapshot = null;
+			this.clearRuntimeElapsedTimer();
+		} else {
+			this.scheduleRuntimeElapsedTimer();
 		}
 		const forceRender = event.phase === "tool_call" || event.phase === "tool_result" || terminalProgress;
 		const now = Date.now();
@@ -4259,6 +4530,7 @@ export class DailyBoardView extends ItemView {
 			this.aiSessionId = "";
 			this.aiQueuedPrompts = [];
 			this.aiAgentTasks = [];
+			this.aiProcessSnapshotsByKey.clear();
 			return;
 		}
 
@@ -4273,6 +4545,7 @@ export class DailyBoardView extends ItemView {
 			if (matched) {
 				this.aiConversation = [...matched.messages];
 				await this.hydrateAgentTasksForCurrentSession();
+				await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
 				return;
 			}
 		}
@@ -4282,12 +4555,14 @@ export class DailyBoardView extends ItemView {
 			this.aiSessionId = latest.sessionId;
 			this.aiConversation = [...latest.messages];
 			await this.hydrateAgentTasksForCurrentSession();
+			await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
 			return;
 		}
 
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiConversation = [];
 		this.aiAgentTasks = [];
+		this.aiProcessSnapshotsByKey.clear();
 	}
 
 	private async persistConversation(): Promise<void> {

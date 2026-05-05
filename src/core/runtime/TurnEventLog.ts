@@ -44,6 +44,7 @@ export interface TurnEventRef {
 
 export interface TurnEventInput {
 	type: TurnEventType;
+	at?: string;
 	payload?: Record<string, unknown>;
 }
 
@@ -92,11 +93,18 @@ export class TurnEventLog {
 			...(ref.taskId ? { taskId: ref.taskId } : {}),
 			sequence: startingSequence + index + 1,
 			type: event.type,
-			at: this.now().toISOString(),
+			at: this.resolveEventTime(event.at),
 			payload: this.sanitizePayload(event.payload ?? {}) as Record<string, unknown>,
 		}));
 		await appendFile(filePath, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, "utf8");
 		return records;
+	}
+
+	private resolveEventTime(value: string | undefined): string {
+		if (value && Number.isFinite(Date.parse(value))) {
+			return value;
+		}
+		return this.now().toISOString();
 	}
 
 	private async countExistingEvents(filePath: string): Promise<number> {
@@ -144,6 +152,10 @@ export class TurnEventLog {
 			"secret",
 			"cookie",
 			"setcookie",
+			"rawreasoning",
+			"reasoningcontent",
+			"chainofthought",
+			"cot",
 		].includes(normalized);
 	}
 

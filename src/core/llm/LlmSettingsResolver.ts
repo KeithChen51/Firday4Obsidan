@@ -1,4 +1,5 @@
-import type { FridaySettings, LlmModeConfig } from "../../types/settings";
+import type { FridaySettings, LlmModeConfig, LlmReasoningSettings } from "../../types/settings";
+import type { ReasoningProvider, ReasoningSourceProtocol } from "./ReasoningArtifact";
 
 type LlmSettings = FridaySettings["llm"];
 type LlmMode = LlmSettings["mode"];
@@ -14,6 +15,19 @@ function createDefaultModeConfig(): LlmModeConfig {
 		temperature: null,
 		maxTokens: null,
 		enableStreaming: true,
+		reasoning: createDefaultReasoningSettings(),
+	};
+}
+
+function createDefaultReasoningSettings(): LlmReasoningSettings {
+	return {
+		enabled: false,
+		effort: "",
+		maxTokens: null,
+		summary: "auto",
+		enableThinking: false,
+		thinkingBudget: null,
+		showRawInDebug: false,
 	};
 }
 
@@ -37,6 +51,29 @@ function normalizeNullableNumber(value: unknown): number | null {
 	return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
+function normalizeNullablePositiveInt(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+}
+
+function normalizeReasoningSettings(input?: Partial<LlmReasoningSettings> | null): LlmReasoningSettings {
+	const defaults = createDefaultReasoningSettings();
+	const effort = input?.effort;
+	const summary = input?.summary;
+	return {
+		enabled: typeof input?.enabled === "boolean" ? input.enabled : defaults.enabled,
+		effort: effort === "minimal" || effort === "low" || effort === "medium" || effort === "high" || effort === "xhigh"
+			? effort
+			: defaults.effort,
+		maxTokens: normalizeNullablePositiveInt(input?.maxTokens),
+		summary: summary === "auto" || summary === "concise" || summary === "detailed" || summary === "none"
+			? summary
+			: defaults.summary,
+		enableThinking: typeof input?.enableThinking === "boolean" ? input.enableThinking : defaults.enableThinking,
+		thinkingBudget: normalizeNullablePositiveInt(input?.thinkingBudget),
+		showRawInDebug: typeof input?.showRawInDebug === "boolean" ? input.showRawInDebug : defaults.showRawInDebug,
+	};
+}
+
 function normalizeModeConfig(input?: PartialModeConfig | null): LlmModeConfig {
 	const defaults = createDefaultModeConfig();
 	return {
@@ -49,6 +86,7 @@ function normalizeModeConfig(input?: PartialModeConfig | null): LlmModeConfig {
 		temperature: normalizeNullableNumber(input?.temperature),
 		maxTokens: normalizeNullableNumber(input?.maxTokens),
 		enableStreaming: typeof input?.enableStreaming === "boolean" ? input.enableStreaming : defaults.enableStreaming,
+		reasoning: normalizeReasoningSettings(input?.reasoning),
 	};
 }
 
@@ -64,7 +102,8 @@ function hasMeaningfulModeConfig(input?: PartialModeConfig | null): boolean {
 		(input.extraHeaders && Object.keys(input.extraHeaders).length > 0) ||
 		typeof input.temperature === "number" ||
 		typeof input.maxTokens === "number" ||
-		typeof input.enableStreaming === "boolean",
+		typeof input.enableStreaming === "boolean" ||
+		Boolean(input.reasoning),
 	);
 }
 
@@ -82,6 +121,7 @@ function toCurrentRootConfig(input?: Partial<LlmSettings> | null): PartialModeCo
 		temperature: input?.temperature,
 		maxTokens: input?.maxTokens,
 		enableStreaming: input?.enableStreaming,
+		reasoning: input?.reasoning,
 	};
 }
 
@@ -147,4 +187,50 @@ export function switchLlmMode(settings: LlmSettings, mode: LlmMode): LlmSettings
 		mode,
 		...nextConfig,
 	};
+}
+
+export function resolveReasoningRequestParams(
+	settings: Pick<LlmModeConfig, "reasoning">,
+	options: { provider: ReasoningProvider; sourceProtocol?: ReasoningSourceProtocol },
+): Record<string, unknown> {
+	const reasoning = normalizeReasoningSettings(settings.reasoning);
+	if (!reasoning.enabled) {
+		return {};
+	}
+	const effort = reasoning.effort || undefined;
+	const summary = reasoning.summary && reasoning.summary !== "none" ? reasoning.summary : undefined;
+	if (options.provider === "zenmux") {
+		if (options.sourceProtocol === "responses") {
+			return { reasoning: compactRecord({ effort, summary }) };
+		}
+		return effort ? { reasoning_effort: effort } : { reasoning: { enabled: true } };
+	}
+	if (options.provider === "openai" && options.sourceProtocol === "responses") {
+		return { reasoning: compactRecord({ effort, summary }) };
+	}
+	if (options.provider === "bailian" || options.provider === "dashscope") {
+		return compactRecord({
+			enable_thinking: reasoning.enableThinking || reasoning.enabled,
+			thinking_budget: reasoning.thinkingBudget ?? undefined,
+		});
+	}
+	if (options.provider === "anthropic") {
+		return {
+			thinking: compactRecord({
+				type: "enabled",
+				budget_tokens: reasoning.maxTokens ?? reasoning.thinkingBudget ?? undefined,
+			}),
+		};
+	}
+	return {};
+}
+
+function compactRecord(input: Record<string, unknown>): Record<string, unknown> {
+	const output: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(input)) {
+		if (value !== undefined && value !== null && value !== "") {
+			output[key] = value;
+		}
+	}
+	return output;
 }

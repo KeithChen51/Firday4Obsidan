@@ -104,6 +104,7 @@ test("TurnReplayReader summarizes persisted model retry transport events", async
 			delayMs: 700,
 			httpStatus: 504,
 			message: events[2].payload.summary,
+			at: events[2].at,
 		},
 		{
 			type: "retry_started",
@@ -112,6 +113,7 @@ test("TurnReplayReader summarizes persisted model retry transport events", async
 			maxAttempts: 4,
 			httpStatus: 504,
 			message: "Retry started",
+			at: events[3].at,
 		},
 		{
 			type: "request_exhausted",
@@ -120,8 +122,12 @@ test("TurnReplayReader summarizes persisted model retry transport events", async
 			maxAttempts: 4,
 			httpStatus: 504,
 			message: "Retries exhausted",
+			at: events[4].at,
 		},
 	]);
+	assert.equal(summary.startedAt, events[0].at);
+	assert.equal(summary.completedAt, events[6].at);
+	assert.ok(summary.durationMs >= 0);
 	assert.doesNotMatch(JSON.stringify(events), /sk-supersecret/);
 	assert.match(String(events[2].payload.summary), /truncated/);
 });

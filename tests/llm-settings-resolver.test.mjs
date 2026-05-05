@@ -76,3 +76,53 @@ test("llm settings resolver keeps mode-specific headers isolated", async () => {
 	assert.equal(switched.openaiConfig.apiUrl, "https://api.openai.com/v1");
 	assert.deepEqual(switched.groupConfig.extraHeaders, { "X-Custom-Header": "tenant-001" });
 });
+
+test("llm settings resolver normalizes reasoning config and maps provider request params", async () => {
+	const mod = await loadResolver();
+
+	const normalized = mod.normalizeLlmSettings({
+		mode: "openai",
+		apiUrl: "https://gateway.example.com/v1",
+		apiKey: "key",
+		model: "claude-opus-4-reasoning",
+		reasoning: {
+			enabled: true,
+			effort: "medium",
+			maxTokens: 2048,
+			summary: "auto",
+			enableThinking: true,
+			thinkingBudget: 4096,
+			showRawInDebug: true,
+		},
+	});
+
+	assert.deepEqual(normalized.reasoning, {
+		enabled: true,
+		effort: "medium",
+		maxTokens: 2048,
+		summary: "auto",
+		enableThinking: true,
+		thinkingBudget: 4096,
+		showRawInDebug: true,
+	});
+	assert.deepEqual(
+		mod.resolveReasoningRequestParams(normalized, { provider: "zenmux", sourceProtocol: "chat_completions" }),
+		{ reasoning_effort: "medium" },
+	);
+	assert.deepEqual(
+		mod.resolveReasoningRequestParams(normalized, { provider: "openai", sourceProtocol: "responses" }),
+		{ reasoning: { effort: "medium", summary: "auto" } },
+	);
+	assert.deepEqual(
+		mod.resolveReasoningRequestParams(normalized, { provider: "bailian", sourceProtocol: "dashscope" }),
+		{ enable_thinking: true, thinking_budget: 4096 },
+	);
+	assert.deepEqual(
+		mod.resolveReasoningRequestParams(normalized, { provider: "anthropic", sourceProtocol: "anthropic_messages" }),
+		{ thinking: { type: "enabled", budget_tokens: 2048 } },
+	);
+	assert.deepEqual(
+		mod.resolveReasoningRequestParams(normalized, { provider: "unknown", sourceProtocol: "chat_completions" }),
+		{},
+	);
+});

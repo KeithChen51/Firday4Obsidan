@@ -48,6 +48,58 @@ test("LiveTrajectoryStore appends progress and returns the current projected sna
 	assert.ok(store.getSnapshot()?.items.some((item) => item.kind === "tool" && item.tool === "read"));
 });
 
+test("LiveTrajectoryStore stamps untimed events so live elapsed duration can update", async () => {
+	const { LiveTrajectoryStore } = await loadStore();
+	const times = [
+		new Date("2026-05-05T00:00:00.000Z"),
+		new Date("2026-05-05T00:00:02.000Z"),
+		new Date("2026-05-05T00:00:05.000Z"),
+	];
+	const store = new LiveTrajectoryStore({ now: () => times.shift() ?? new Date("2026-05-05T00:00:05.000Z") });
+
+	store.appendProgress(startEvent("turn-timed"));
+	const running = store.appendProgress({
+		phase: "tool_call",
+		depth: 0,
+		step: 1,
+		tool: "read",
+		targetPath: "Notes/today.md",
+		message: "Reading.",
+		turnId: "turn-timed",
+	});
+	const completed = store.completeFromProgress({
+		phase: "done",
+		depth: 0,
+		message: "Done.",
+		turnId: "turn-timed",
+	});
+
+	assert.equal(running.time.startedAt, "2026-05-05T00:00:00.000Z");
+	assert.equal(running.time.updatedAt, "2026-05-05T00:00:02.000Z");
+	assert.equal(running.items.find((item) => item.kind === "tool")?.at, "2026-05-05T00:00:02.000Z");
+	assert.equal(completed?.time.completedAt, "2026-05-05T00:00:05.000Z");
+	assert.equal(completed?.time.durationMs, 5000);
+});
+
+test("LiveTrajectoryStore refreshes elapsed duration between progress events", async () => {
+	const { LiveTrajectoryStore } = await loadStore();
+	const times = [
+		new Date("2026-05-05T00:00:00.000Z"),
+		new Date("2026-05-05T00:00:01.000Z"),
+		new Date("2026-05-05T00:00:04.000Z"),
+	];
+	const store = new LiveTrajectoryStore({ now: () => times.shift() ?? new Date("2026-05-05T00:00:04.000Z") });
+
+	store.appendProgress(startEvent("turn-refresh"));
+	store.appendProgress({ phase: "model_request", depth: 0, step: 1, message: "Thinking.", turnId: "turn-refresh" });
+	const refreshed = store.refreshElapsed();
+
+	assert.equal(refreshed?.time.startedAt, "2026-05-05T00:00:00.000Z");
+	assert.equal(refreshed?.time.updatedAt, "2026-05-05T00:00:04.000Z");
+	assert.equal(refreshed?.time.durationMs, 4000);
+	assert.equal(store.getSnapshot()?.time.durationMs, 4000);
+});
+
 test("LiveTrajectoryStore resets live history when a new turn starts", async () => {
 	const { LiveTrajectoryStore } = await loadStore();
 	const store = new LiveTrajectoryStore();

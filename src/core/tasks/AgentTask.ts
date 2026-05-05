@@ -129,13 +129,14 @@ export function transitionAgentTask(
 		throw new Error(`Invalid AgentTask transition: ${task.status} -> ${nextStatus}`);
 	}
 	const updatedAt = now.toISOString();
+	const clearsMutationCounts = nextStatus === "completed" || nextStatus === "cancelled";
 	const next: AgentTask = {
 		...task,
 		status: nextStatus,
 		...(patch.turnId ? { turnId: patch.turnId } : {}),
 		summary: sanitizeTaskText(patch.summary?.trim() || task.summary, 240),
-		pendingMutationCount: patch.pendingMutationCount ?? task.pendingMutationCount,
-		changedFileCount: patch.changedFileCount ?? task.changedFileCount,
+		pendingMutationCount: patch.pendingMutationCount ?? (clearsMutationCounts ? 0 : task.pendingMutationCount),
+		changedFileCount: patch.changedFileCount ?? (clearsMutationCounts ? 0 : task.changedFileCount),
 		updatedAt,
 	};
 	delete next.waitingForApproval;

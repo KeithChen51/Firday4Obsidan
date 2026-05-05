@@ -978,6 +978,7 @@ export class AgentRuntimeService {
 				? "Pending file changes were rejected."
 				: "Pending file changes were applied.",
 			pendingMutationCount: 0,
+			changedFileCount: 0,
 		});
 		await this.recordTaskLifecycleEvent(task);
 	}
@@ -2058,7 +2059,7 @@ export class AgentRuntimeService {
 				role: "assistant",
 				content: response.assistantText?.trim() || "",
 				toolCalls,
-				reasoningContent: response.reasoningContent,
+				...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
 			});
 			modelMessages.push(...toolResultMessages);
 			for (const loadedSkillContext of loadedSkillContexts) {

@@ -71,9 +71,19 @@ test("AgentTask exposes the product lifecycle states and guarded transitions", a
 			summary: "Create a draft note.",
 		},
 		pendingMutationCount: 1,
+		changedFileCount: 1,
 	});
 	assert.equal(waiting.status, "waiting_for_approval");
 	assert.deepEqual(deriveAgentTaskActions(waiting), ["cancel", "apply", "reject"]);
+
+	const completedAfterReview = transitionAgentTask(waiting, "completed", {
+		summary: "Pending file changes were applied.",
+		pendingMutationCount: 0,
+	});
+	assert.equal(completedAfterReview.status, "completed");
+	assert.equal(completedAfterReview.pendingMutationCount, 0);
+	assert.equal(completedAfterReview.changedFileCount, 0);
+	assert.deepEqual(deriveAgentTaskActions(completedAfterReview), []);
 
 	const completed = transitionAgentTask(running, "completed", {
 		summary: "Final answer delivered.",

@@ -13,6 +13,16 @@ export interface SlashCommandTemplate {
 	enabled: boolean;
 }
 
+export interface LlmReasoningSettings {
+	enabled: boolean;
+	effort: "" | "minimal" | "low" | "medium" | "high" | "xhigh";
+	maxTokens: number | null;
+	summary: "" | "auto" | "concise" | "detailed" | "none";
+	enableThinking: boolean;
+	thinkingBudget: number | null;
+	showRawInDebug: boolean;
+}
+
 export interface LlmModeConfig {
 	apiUrl: string;
 	apiKey: string;
@@ -22,6 +32,7 @@ export interface LlmModeConfig {
 	temperature: number | null;
 	maxTokens: number | null;
 	enableStreaming: boolean;
+	reasoning: LlmReasoningSettings;
 }
 
 export type WorkbenchStartupPlacement =
@@ -55,6 +66,7 @@ export interface FridaySettings {
 		temperature: number | null;
 		maxTokens: number | null;
 		enableStreaming: boolean;
+		reasoning: LlmReasoningSettings;
 		openaiConfig: LlmModeConfig;
 		groupConfig: LlmModeConfig;
 	};
@@ -119,6 +131,15 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		temperature: null,
 		maxTokens: null,
 		enableStreaming: true,
+		reasoning: {
+			enabled: false,
+			effort: "",
+			maxTokens: null,
+			summary: "auto",
+			enableThinking: false,
+			thinkingBudget: null,
+			showRawInDebug: false,
+		},
 		openaiConfig: {
 			apiUrl: "",
 			apiKey: "",
@@ -128,6 +149,15 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 			temperature: null,
 			maxTokens: null,
 			enableStreaming: true,
+			reasoning: {
+				enabled: false,
+				effort: "",
+				maxTokens: null,
+				summary: "auto",
+				enableThinking: false,
+				thinkingBudget: null,
+				showRawInDebug: false,
+			},
 		},
 		groupConfig: {
 			apiUrl: "",
@@ -138,6 +168,15 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 			temperature: null,
 			maxTokens: null,
 			enableStreaming: true,
+			reasoning: {
+				enabled: false,
+				effort: "",
+				maxTokens: null,
+				summary: "auto",
+				enableThinking: false,
+				thinkingBudget: null,
+				showRawInDebug: false,
+			},
 		},
 	},
 	sync: {

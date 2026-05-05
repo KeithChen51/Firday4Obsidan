@@ -57,6 +57,27 @@ test("TurnEventLog appends ordered JSONL records under the conversation turn pat
 	assert.deepEqual(records[1].payload, { step: 1 });
 });
 
+test("TurnEventLog preserves explicit event timestamps when appending a batch", async () => {
+	const { TurnEventLog } = await loadModule();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-event-log-"));
+	const log = new TurnEventLog({
+		resolveTurnPath: resolveTurnPath(root),
+		now: () => new Date("2026-05-05T00:00:30.000Z"),
+	});
+	const ref = { conversationId: "agent", turnId: "turn-duration" };
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", at: "2026-05-05T00:00:00.000Z", payload: { summary: "Started" } },
+		{ type: "turn_completed", at: "2026-05-05T00:00:07.000Z", payload: { status: "completed" } },
+	]);
+
+	const records = await readJsonl(resolveTurnPath(root)(ref));
+	assert.deepEqual(records.map((event) => event.at), [
+		"2026-05-05T00:00:00.000Z",
+		"2026-05-05T00:00:07.000Z",
+	]);
+});
+
 test("TurnEventLog redacts oversized payload values before writing", async () => {
 	const { TurnEventLog } = await loadModule();
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-event-log-"));

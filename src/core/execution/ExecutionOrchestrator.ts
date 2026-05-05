@@ -10,6 +10,7 @@ import type { PromptMentionContext } from "../context/PromptContextEngine";
 
 export interface ExecutionOrchestratorRunOptions {
 	agentId: string;
+	conversationId?: string;
 	conversation: ChatMessage[];
 	modelOverride?: string;
 	currentFilePath?: string;
@@ -38,6 +39,7 @@ export class ExecutionOrchestrator {
 
 		return this.agentRuntimeFacade.runTurn({
 			agentId: options.agentId,
+			conversationId: options.conversationId,
 			conversation: options.conversation,
 			userPrompt: decision.runtimePrompt,
 			modelOverride: options.modelOverride,

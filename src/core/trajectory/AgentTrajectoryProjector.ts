@@ -14,7 +14,14 @@ import type {
 } from "./AgentTrajectory";
 
 type RuntimeProgressIdentity = Partial<AgentTrajectoryIdentity>;
-type RuntimeProgressWithIdentity = RuntimeProgressEvent & RuntimeProgressIdentity;
+type RuntimeProgressWithIdentity = RuntimeProgressEvent & RuntimeProgressIdentity & {
+	at?: string;
+	reasoningProvider?: string;
+	reasoningRawFormat?: string;
+	reasoningContinuationPolicy?: string;
+	reasoningVisibleSummary?: string;
+	reasoningWarnings?: string[];
+};
 type ReplaySummaryWithIdentity = TurnReplaySummary & Partial<Pick<AgentTrajectoryIdentity, "traceId" | "agentId">>;
 
 const STAGE_LABELS: Record<AgentTrajectoryStage["key"], string> = {
@@ -41,6 +48,7 @@ export function createEmptyTrajectorySnapshot(
 		status: "idle",
 		headline: "Agent is idle",
 		summary: "",
+		time: {},
 		stages: createStages(),
 		items: [],
 		actions: [],
@@ -62,9 +70,11 @@ export function projectRuntimeProgress(events: RuntimeProgressEvent[]): AgentTra
 
 	for (const [index, event] of runtimeEvents.entries()) {
 		mergeIdentity(snapshot.identity, event);
+		updateSnapshotTimeFromEvent(snapshot, event.at);
 		applyRuntimeProgress(snapshot, event, index);
 	}
 
+	finalizeSnapshotTime(snapshot);
 	deriveStageStatuses(snapshot);
 	snapshot.actions = deriveActions(snapshot);
 	return snapshot;
@@ -83,6 +93,28 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 	snapshot.status = resolveReplayStatus(replaySummary);
 	snapshot.headline = replayHeadline(snapshot.status);
 	snapshot.summary = safeText(replaySummary.finalAnswerSummary || replaySummary.errors[0] || "");
+	snapshot.time = {
+		...(replaySummary.startedAt ? { startedAt: replaySummary.startedAt } : {}),
+		...(replaySummary.updatedAt ? { updatedAt: replaySummary.updatedAt } : {}),
+		...(replaySummary.completedAt ? { completedAt: replaySummary.completedAt } : {}),
+		...(typeof replaySummary.durationMs === "number" ? { durationMs: replaySummary.durationMs } : {}),
+	};
+
+	for (const [index, reasoning] of (replaySummary.reasoningTimeline ?? []).entries()) {
+		upsertItem(snapshot, "reasoning", {
+			id: `replay:reasoning:${reasoning.step}:${index}`,
+			kind: "reasoning",
+			title: "FRIDAY 的思路",
+			detail: safeText(reasoning.visibleSummary),
+			status: "ok",
+			step: reasoning.step,
+			at: reasoning.at,
+			rawEventType: "model_response",
+			reasoningProvider: reasoning.provider,
+			reasoningRawFormat: reasoning.rawFormat,
+			reasoningContinuationPolicy: reasoning.continuationPolicy,
+		});
+	}
 
 	for (const toolCall of replaySummary.toolCalls) {
 		const status = mapReplayToolStatus(toolCall.status);
@@ -93,6 +125,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			detail: toolCall.status === "requested" ? "Tool requested." : `Tool ${toolCall.status}.`,
 			status,
 			step: toolCall.step,
+			at: toolCall.at,
 			tool: toolCall.tool,
 			targetPath: toolCall.targetPath || undefined,
 			evidenceRef: toolCall.toolCallId || undefined,
@@ -108,6 +141,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			detail: formatReplayTransportDetail(transport),
 			status: mapReplayTransportStatus(transport.type, snapshot.status),
 			step: transport.step,
+			at: transport.at,
 			rawEventType: transport.type,
 		});
 	}
@@ -122,6 +156,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 				? `${replaySummary.approvals.requested - replaySummary.approvals.resolved} approval request(s) waiting.`
 				: `${replaySummary.approvals.resolved} approval request(s) resolved.`,
 			status: waiting ? "waiting" : replaySummary.approvals.denied > 0 ? "denied" : "ok",
+			at: replaySummary.completedAt ?? replaySummary.updatedAt,
 			rawEventType: "tool_approval",
 		});
 	}
@@ -143,6 +178,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			title: formatMutationTitle(projectedMutation),
 			detail: projectedMutation.summary || projectedMutation.reason || mutation.event,
 			status: mapMutationStatus(mutation.event),
+			at: mutation.at,
 			targetPath: mutation.targetPath || undefined,
 			actionRef: mutation.id || undefined,
 			rawEventType: `mutation_${mutation.event}`,
@@ -159,6 +195,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			title: formatTaskTitle(task.event),
 			detail: safeText(task.summary || task.reason || task.status || task.event),
 			status: mapTaskStatus(task.event),
+			at: task.at,
 			actionRef: task.taskId || undefined,
 			rawEventType: `task_${task.event}`,
 		});
@@ -171,6 +208,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			title: "Final response",
 			detail: safeText(replaySummary.finalAnswerSummary),
 			status: snapshot.status === "completed" || snapshot.status === "safe_stopped" ? "ok" : "pending",
+			at: replaySummary.completedAt ?? replaySummary.updatedAt,
 			rawEventType: "assistant_final",
 		});
 	}
@@ -184,6 +222,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			title: "Run failed",
 			detail: failure.message,
 			status: failure.class === "cancelled" ? "cancelled" : "failed",
+			at: replaySummary.completedAt ?? replaySummary.updatedAt,
 			rawEventType: replaySummary.terminalStatus,
 		});
 	}
@@ -239,8 +278,19 @@ function applyRuntimeProgress(
 		case "model_response":
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
 			snapshot.headline = "Model decision received";
-			snapshot.summary = safeText(event.message);
-			upsertItem(snapshot, "reasoning", {
+			snapshot.summary = safeText(event.reasoningVisibleSummary || event.message);
+			upsertItem(snapshot, "reasoning", event.reasoningVisibleSummary ? {
+				id: `live:reasoning:${step}`,
+				kind: "reasoning",
+				title: "FRIDAY 的思路",
+				detail: safeText(event.reasoningVisibleSummary),
+				status: "ok",
+				step,
+				rawEventType: event.phase,
+				...(event.reasoningProvider ? { reasoningProvider: event.reasoningProvider } : {}),
+				...(event.reasoningRawFormat ? { reasoningRawFormat: event.reasoningRawFormat } : {}),
+				...(event.reasoningContinuationPolicy ? { reasoningContinuationPolicy: event.reasoningContinuationPolicy } : {}),
+			} : {
 				id: `live:model:${step}`,
 				kind: "model",
 				title: `Model step ${step}`,
@@ -299,7 +349,7 @@ function applyRuntimeProgress(
 			if (snapshot.status === "idle" || snapshot.status === "waiting_for_approval") {
 				snapshot.status = "running";
 			}
-			setStageStatus(snapshot, "reasoning", hasKind(snapshot, "model") ? "ok" : "pending");
+			setStageStatus(snapshot, "reasoning", hasKind(snapshot, "model") || hasKind(snapshot, "reasoning") ? "ok" : "pending");
 			setStageStatus(snapshot, "tools", "running");
 			snapshot.headline = "Agent is using a tool";
 			snapshot.summary = safeText(event.message);
@@ -358,6 +408,7 @@ function applyRuntimeProgress(
 		case "done":
 			completeRunningItems(snapshot, "context");
 			completeRunningItems(snapshot, "model");
+			completeRunningItems(snapshot, "reasoning");
 			completeRunningItems(snapshot, "tool");
 			snapshot.status = "completed";
 			snapshot.headline = "Agent finished";
@@ -447,15 +498,46 @@ function upsertItem(
 	item: AgentTrajectoryItem,
 ): void {
 	const existing = snapshot.items.find((entry) => entry.id === item.id);
+	const nextItem = {
+		...item,
+		at: item.at ?? existing?.at ?? snapshot.time.updatedAt,
+	};
 	if (existing) {
-		Object.assign(existing, item);
+		Object.assign(existing, nextItem);
 	} else {
-		snapshot.items.push(item);
+		snapshot.items.push(nextItem);
 	}
 	const stage = snapshot.stages.find((entry) => entry.key === stageKey);
 	if (stage && !stage.itemIds.includes(item.id)) {
 		stage.itemIds.push(item.id);
 	}
+}
+
+function updateSnapshotTimeFromEvent(snapshot: AgentTrajectorySnapshot, at: string | undefined): void {
+	const parsed = at ? Date.parse(at) : NaN;
+	if (!Number.isFinite(parsed)) {
+		return;
+	}
+	if (!snapshot.time.startedAt) {
+		snapshot.time.startedAt = at;
+	}
+	snapshot.time.updatedAt = at;
+}
+
+function finalizeSnapshotTime(snapshot: AgentTrajectorySnapshot): void {
+	if (isTerminalTrajectoryStatus(snapshot.status) && snapshot.time.updatedAt) {
+		snapshot.time.completedAt = snapshot.time.updatedAt;
+	}
+	const startedMs = snapshot.time.startedAt ? Date.parse(snapshot.time.startedAt) : NaN;
+	const endedAt = snapshot.time.completedAt ?? snapshot.time.updatedAt;
+	const endedMs = endedAt ? Date.parse(endedAt) : NaN;
+	if (Number.isFinite(startedMs) && Number.isFinite(endedMs)) {
+		snapshot.time.durationMs = Math.max(0, endedMs - startedMs);
+	}
+}
+
+function isTerminalTrajectoryStatus(status: AgentTrajectoryStatus): boolean {
+	return status === "completed" || status === "failed" || status === "cancelled" || status === "safe_stopped";
 }
 
 function completeRunningItems(snapshot: AgentTrajectorySnapshot, kind: AgentTrajectoryItemKind): void {
@@ -684,6 +766,7 @@ function stageForKind(kind: AgentTrajectoryItemKind): AgentTrajectoryStage["key"
 		case "task":
 			return "context";
 		case "model":
+		case "reasoning":
 		case "transport":
 		case "system":
 			return "reasoning";

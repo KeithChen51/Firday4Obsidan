@@ -47,14 +47,31 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 					return {
 						assistantText: "",
 						toolCalls: [{ id: "call-1", name: "read", args: { path: "Project/a.md" } }],
-						reasoningContent: "need evidence",
+						reasoningArtifact: {
+							hasReasoning: true,
+							provider: "deepseek",
+							model: "deepseek-reasoner",
+							rawFormat: "reasoning_content",
+							visibleSummary: "Decided to read Project/a.md before answering.",
+							rawReasoning: "raw chain of thought should not enter kernel events",
+							continuationPolicy: "drop",
+							metadata: { sourceProtocol: "chat_completions" },
+						},
 						finishReason: "tool_calls",
 					};
 				}
 				return {
 					assistantText: "The file says alpha.",
 					toolCalls: [],
-					reasoningContent: "done",
+					reasoningArtifact: {
+						hasReasoning: true,
+						provider: "openai",
+						model: "gpt-5.1",
+						rawFormat: "responses_reasoning",
+						visibleSummary: "Summarized the tool result.",
+						continuationPolicy: "provider_managed",
+						metadata: { sourceProtocol: "responses" },
+					},
 					finishReason: "stop",
 				};
 			},
@@ -126,6 +143,16 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 		assert.equal(event.traceId, "trace-h");
 		assert.equal(event.taskId, "task-h");
 	}
+	const modelResponsePayloads = result.events
+		.filter((event) => event.type === "model_response")
+		.map((event) => event.payload);
+	assert.deepEqual(modelResponsePayloads.map((payload) => payload.reasoningVisibleSummary), [
+		"Decided to read Project/a.md before answering.",
+		"Summarized the tool result.",
+	]);
+	assert.deepEqual(modelResponsePayloads.map((payload) => payload.reasoningProvider), ["deepseek", "openai"]);
+	assert.equal(JSON.stringify(modelResponsePayloads).includes("raw chain of thought"), false);
+	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
 });
 
 test("AgentLoopController keeps retryable native transport failures out of prompt fallback", async () => {

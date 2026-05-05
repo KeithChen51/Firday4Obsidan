@@ -34,7 +34,7 @@ import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrati
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
-import { SlashCommandTemplate, isWorkbenchStartupPlacement } from "../types/settings";
+import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
 import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
@@ -1133,6 +1133,90 @@ export class FridaySettingTab extends PluginSettingTab {
 						enableStreaming: value,
 					});
 					await this.host.saveSettings();
+				}),
+			);
+
+		const reasoning = this.host.settings.llm.reasoning;
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.enabled.name", "推理能力"))
+			.setDesc(this.t("settings.llm.reasoning.enabled.desc", "为支持 thinking/reasoning 的 provider 发送对应参数；未知网关不会发送专用字段。"))
+			.addToggle((toggle) =>
+				toggle.setValue(reasoning.enabled).onChange(async (value) => {
+					await this.patchActiveLlmReasoningConfig({ enabled: value });
+				}),
+			);
+
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.effort.name", "推理强度"))
+			.setDesc(this.t("settings.llm.reasoning.effort.desc", "映射到 ZenMux/OpenAI Responses 等 provider 的 effort 字段。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("", this.t("settings.llm.reasoning.effort.default", "默认"));
+				dropdown.addOption("minimal", "minimal");
+				dropdown.addOption("low", "low");
+				dropdown.addOption("medium", "medium");
+				dropdown.addOption("high", "high");
+				dropdown.addOption("xhigh", "xhigh");
+				dropdown.setValue(reasoning.effort).onChange(async (value) => {
+					await this.patchActiveLlmReasoningConfig({
+						effort: (["", "minimal", "low", "medium", "high", "xhigh"].includes(value) ? value : "") as LlmReasoningSettings["effort"],
+					});
+				});
+			});
+
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.summary.name", "推理摘要"))
+			.setDesc(this.t("settings.llm.reasoning.summary.desc", "仅使用 provider summary 或 FRIDAY 的安全摘要进入过程 UI。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("auto", "auto");
+				dropdown.addOption("concise", "concise");
+				dropdown.addOption("detailed", "detailed");
+				dropdown.addOption("none", "none");
+				dropdown.setValue(reasoning.summary).onChange(async (value) => {
+					await this.patchActiveLlmReasoningConfig({
+						summary: (["auto", "concise", "detailed", "none"].includes(value) ? value : "auto") as LlmReasoningSettings["summary"],
+					});
+				});
+			});
+
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.maxTokens.name", "推理 Token 上限"))
+			.setDesc(this.t("settings.llm.reasoning.maxTokens.desc", "用于 Anthropic thinking budget；留空则不发送。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("2048")
+					.setValue(reasoning.maxTokens == null ? "" : String(reasoning.maxTokens))
+					.onChange(async (value) => {
+						await this.patchActiveLlmReasoningConfig({
+							maxTokens: this.parseOptionalPositiveInt(value),
+						});
+					}),
+			);
+
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.thinking.name", "DashScope thinking"))
+			.setDesc(this.t("settings.llm.reasoning.thinking.desc", "映射为百炼/DashScope 的 enable_thinking 与 thinking_budget。"))
+			.addToggle((toggle) =>
+				toggle.setValue(reasoning.enableThinking).onChange(async (value) => {
+					await this.patchActiveLlmReasoningConfig({ enableThinking: value });
+				}),
+			)
+			.addText((text) =>
+				text
+					.setPlaceholder("4096")
+					.setValue(reasoning.thinkingBudget == null ? "" : String(reasoning.thinkingBudget))
+					.onChange(async (value) => {
+						await this.patchActiveLlmReasoningConfig({
+							thinkingBudget: this.parseOptionalPositiveInt(value),
+						});
+					}),
+			);
+
+		new Setting(capabilityGroup)
+			.setName(this.t("settings.llm.reasoning.debug.name", "调试时保留 raw reasoning"))
+			.setDesc(this.t("settings.llm.reasoning.debug.desc", "仅用于隔离调试路径；普通 replay 和过程 UI 不显示 raw CoT。"))
+			.addToggle((toggle) =>
+				toggle.setValue(reasoning.showRawInDebug).onChange(async (value) => {
+					await this.patchActiveLlmReasoningConfig({ showRawInDebug: value });
 				}),
 			);
 
@@ -2237,6 +2321,16 @@ export class FridaySettingTab extends PluginSettingTab {
 				: [],
 			enabled: source.enabled !== false,
 		};
+	}
+
+	private async patchActiveLlmReasoningConfig(patch: Partial<LlmReasoningSettings>): Promise<void> {
+		this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
+			reasoning: {
+				...this.host.settings.llm.reasoning,
+				...patch,
+			},
+		});
+		await this.host.saveSettings();
 	}
 
 	private parseOptionalFloat(value: string): number | null {

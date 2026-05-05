@@ -1,6 +1,7 @@
 import { readFile } from "fs/promises";
 
 import type { TurnEventRecord, TurnEventRef } from "./TurnEventLog";
+import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 
 export interface TurnReplayReaderOptions {
 	resolveTurnPath: (ref: TurnEventRef) => string;
@@ -17,11 +18,24 @@ export interface TurnReplaySummary extends TurnEventRef {
 	totalEvents: number;
 	eventTypes: string[];
 	status: "completed" | "failed" | "cancelled" | "safe_stopped" | "open";
+	startedAt: string;
+	updatedAt: string;
+	completedAt?: string;
+	durationMs: number;
 	modelCalls: {
 		requested: number;
 		completed: number;
 		failed: number;
 	};
+	reasoningTimeline: Array<{
+		step: number;
+		provider: ReasoningArtifact["provider"] | "unknown";
+		rawFormat: ReasoningArtifact["rawFormat"] | "unknown";
+		continuationPolicy: ReasoningArtifact["continuationPolicy"] | "drop";
+		visibleSummary: string;
+		warnings: string[];
+		at?: string;
+	}>;
 	transport: {
 		retries: number;
 		exhausted: number;
@@ -36,6 +50,7 @@ export interface TurnReplaySummary extends TurnEventRef {
 		delayMs?: number;
 		httpStatus?: number;
 		message: string;
+		at?: string;
 	}>;
 	toolEvents: {
 		requested: number;
@@ -49,6 +64,7 @@ export interface TurnReplaySummary extends TurnEventRef {
 		toolCallId: string;
 		status: "requested" | "ok" | "failed" | "denied";
 		targetPath: string;
+		at?: string;
 	}>;
 	approvals: {
 		requested: number;
@@ -71,6 +87,7 @@ export interface TurnReplaySummary extends TurnEventRef {
 		status: string;
 		summary: string;
 		reason: string;
+		at?: string;
 	}>;
 	taskTimeline: Array<{
 		taskId: string;
@@ -78,6 +95,7 @@ export interface TurnReplaySummary extends TurnEventRef {
 		status: string;
 		summary: string;
 		reason: string;
+		at?: string;
 	}>;
 	finalAnswerSummary: string;
 	errors: string[];
@@ -154,11 +172,15 @@ export class TurnReplayReader {
 	summarize(events: TurnEventRecord[]): TurnReplaySummary {
 		const first = events[0];
 		const terminal = [...events].reverse().find((event) => TERMINAL_EVENTS.has(event.type));
+		const last = events[events.length - 1];
 		const status = this.resolveStatus(terminal);
 		const finalAnswer = [...events].reverse().find((event) => event.type === "assistant_final");
 		const toolCalls = this.summarizeToolCalls(events);
 		const transportTimeline = this.summarizeTransportTimeline(events);
 		const lastTransport = transportTimeline[transportTimeline.length - 1];
+		const startedAt = first?.at ?? "";
+		const updatedAt = last?.at ?? startedAt;
+		const completedAt = terminal?.at;
 		return {
 			conversationId: first?.conversationId ?? "",
 			turnId: first?.turnId ?? "",
@@ -168,11 +190,16 @@ export class TurnReplayReader {
 			totalEvents: events.length,
 			eventTypes: events.map((event) => event.type),
 			status,
+			startedAt,
+			updatedAt,
+			...(completedAt ? { completedAt } : {}),
+			durationMs: calculateDurationMs(startedAt, completedAt ?? updatedAt),
 			modelCalls: {
 				requested: events.filter((event) => event.type === "model_requested").length,
 				completed: events.filter((event) => event.type === "model_completed").length,
 				failed: events.filter((event) => event.type === "model_failed").length,
 			},
+			reasoningTimeline: this.summarizeReasoningTimeline(events),
 			transport: {
 				retries: transportTimeline.filter((event) => event.type === "retry_scheduled").length,
 				exhausted: transportTimeline.filter((event) => event.type === "request_exhausted").length,
@@ -228,6 +255,30 @@ export class TurnReplayReader {
 		};
 	}
 
+	private summarizeReasoningTimeline(events: TurnEventRecord[]): TurnReplaySummary["reasoningTimeline"] {
+		const timeline: TurnReplaySummary["reasoningTimeline"] = [];
+		for (const event of events) {
+			if (event.type !== "model_completed") {
+				continue;
+			}
+			const visibleSummary = this.getPayloadText(event, "reasoningVisibleSummary");
+			const hasReasoning = event.payload.hasReasoning === true || visibleSummary.length > 0;
+			if (!hasReasoning) {
+				continue;
+			}
+			timeline.push({
+				step: this.getPayloadNumber(event, "step"),
+				provider: this.getPayloadText(event, "reasoningProvider") as ReasoningArtifact["provider"] || "unknown",
+				rawFormat: this.getPayloadText(event, "reasoningRawFormat") as ReasoningArtifact["rawFormat"] || "unknown",
+				continuationPolicy: this.getPayloadText(event, "reasoningContinuationPolicy") as ReasoningArtifact["continuationPolicy"] || "drop",
+				visibleSummary,
+				warnings: this.getPayloadStringArray(event, "reasoningWarnings"),
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
 	async readSummary(ref: TurnEventRef): Promise<TurnReplaySummary> {
 		return this.summarize(await this.readTurn(ref));
 	}
@@ -259,6 +310,7 @@ export class TurnReplayReader {
 				toolCallId: this.getPayloadText(event, "toolCallId"),
 				status: "requested" as const,
 				targetPath: this.getPayloadText(event, "targetPath"),
+				at: event.at,
 			}));
 		for (const event of events) {
 			if (!["tool_completed", "tool_failed", "tool_denied"].includes(event.type)) {
@@ -278,6 +330,7 @@ export class TurnReplayReader {
 				: event.type === "tool_denied"
 					? "denied"
 					: "failed";
+			call.at = call.at || event.at;
 			if (!call.targetPath) {
 				call.targetPath = this.getPayloadText(event, "targetPath");
 			}
@@ -308,6 +361,7 @@ export class TurnReplayReader {
 				message: this.getPayloadText(event, "summary") ||
 					this.getPayloadText(event, "message") ||
 					this.getRecordText(transport, "message"),
+				at: event.at,
 			});
 		}
 		return timeline;
@@ -330,6 +384,7 @@ export class TurnReplayReader {
 				status: this.getPayloadText(event, "status"),
 				summary: this.getPayloadText(event, "summary"),
 				reason: this.getPayloadText(event, "reason") || this.getPayloadText(event, "error"),
+				at: event.at,
 			}));
 	}
 
@@ -368,6 +423,7 @@ export class TurnReplayReader {
 				status: this.getPayloadText(event, "status"),
 				summary: this.getPayloadText(event, "summary"),
 				reason: this.getPayloadText(event, "reason") || this.getPayloadText(event, "error"),
+				at: event.at,
 			}));
 	}
 
@@ -395,6 +451,11 @@ export class TurnReplayReader {
 		return typeof value === "number" ? value : 0;
 	}
 
+	private getPayloadStringArray(event: TurnEventRecord, key: string): string[] {
+		const value = event.payload[key];
+		return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+	}
+
 	private getPayloadRecord(event: TurnEventRecord, key: string): Record<string, unknown> {
 		const value = event.payload[key];
 		return value && typeof value === "object" && !Array.isArray(value)
@@ -420,4 +481,13 @@ export class TurnReplayReader {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return Boolean(error && typeof error === "object" && "code" in error);
+}
+
+function calculateDurationMs(startedAt: string, endedAt: string): number {
+	const startMs = Date.parse(startedAt);
+	const endMs = Date.parse(endedAt);
+	if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+		return 0;
+	}
+	return Math.max(0, endMs - startMs);
 }

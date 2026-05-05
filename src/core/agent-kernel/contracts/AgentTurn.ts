@@ -1,5 +1,6 @@
 import type { StepTraceEvent } from "../../turn-state/TurnStateMachine";
 import type { LlmTransportChannel, LlmTransportEventType } from "../../llm/LlmTransportTelemetry";
+import type { ReasoningArtifact } from "../../llm/ReasoningArtifact";
 import type { AgentMode } from "../../tools/ToolRegistry";
 import type { AgentTask } from "../../tasks/AgentTask";
 import type { RuntimeProfile } from "../../../platform/runtime/RuntimeProfile";
@@ -23,6 +24,8 @@ export interface AgentChatMessage {
 	toolCallId?: string;
 	name?: string;
 	toolCalls?: unknown[];
+	reasoningArtifact?: ReasoningArtifact;
+	/** @deprecated use reasoningArtifact */
 	reasoningContent?: string;
 	uiMeta?: unknown;
 }
@@ -49,6 +52,11 @@ export interface RuntimeProgressEvent {
 	summary?: string;
 	taskId?: string;
 	transport?: RuntimeTransportProgress;
+	reasoningProvider?: ReasoningArtifact["provider"];
+	reasoningRawFormat?: ReasoningArtifact["rawFormat"];
+	reasoningContinuationPolicy?: ReasoningArtifact["continuationPolicy"];
+	reasoningVisibleSummary?: string;
+	reasoningWarnings?: string[];
 	message: string;
 }
 

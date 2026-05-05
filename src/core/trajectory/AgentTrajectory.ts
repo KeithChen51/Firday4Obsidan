@@ -10,6 +10,7 @@ export type AgentTrajectoryStatus =
 
 export type AgentTrajectoryItemKind =
 	| "context"
+	| "reasoning"
 	| "model"
 	| "transport"
 	| "tool"
@@ -57,10 +58,13 @@ export interface AgentTrajectoryItem {
 	evidenceRef?: string;
 	actionRef?: string;
 	rawEventType?: string;
+	reasoningProvider?: string;
+	reasoningRawFormat?: string;
+	reasoningContinuationPolicy?: string;
 }
 
 export interface AgentTrajectoryAction {
-	id: "retry" | "cancel" | "continue" | "approve" | "reject" | "apply" | "view_replay";
+	id: "retry" | "cancel" | "continue" | "approve" | "reject" | "apply" | "view_changes" | "view_replay";
 	label: string;
 	enabled: boolean;
 	reason?: string;
@@ -84,11 +88,19 @@ export interface AgentTrajectoryFailure {
 	recoverable: boolean;
 }
 
+export interface AgentTrajectoryTime {
+	startedAt?: string;
+	updatedAt?: string;
+	completedAt?: string;
+	durationMs?: number;
+}
+
 export interface AgentTrajectorySnapshot {
 	identity: AgentTrajectoryIdentity;
 	status: AgentTrajectoryStatus;
 	headline: string;
 	summary: string;
+	time: AgentTrajectoryTime;
 	stages: AgentTrajectoryStage[];
 	items: AgentTrajectoryItem[];
 	actions: AgentTrajectoryAction[];

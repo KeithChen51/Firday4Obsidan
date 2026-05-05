@@ -1,5 +1,6 @@
 import type { ToolCall, ToolDefinition } from "../../types/tools";
 import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
+import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentChatMessage, AgentExecutionBudget } from "./contracts";
 
 export interface ModelDriverRequest {
@@ -21,6 +22,8 @@ export interface ModelDriverResponse {
 	assistantText: string;
 	toolCalls: ToolCall[];
 	finishReason?: string;
+	reasoningArtifact?: ReasoningArtifact;
+	/** @deprecated use reasoningArtifact */
 	reasoningContent?: string;
 }
 

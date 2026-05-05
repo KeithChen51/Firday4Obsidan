@@ -71,8 +71,12 @@ test("TurnReplayReader reads a turn, validates order, and returns a summary", as
 	assert.equal(summary.mutations.planned, 0);
 	assert.equal(summary.finalAnswerSummary, "Answered from the note.");
 	assert.equal(summary.terminalStatus, "turn_completed");
+	assert.equal(summary.startedAt, events[0].at);
+	assert.equal(summary.updatedAt, events[7].at);
+	assert.equal(summary.completedAt, events[7].at);
+	assert.ok(summary.durationMs >= 0);
 	assert.deepEqual(summary.toolCalls, [
-		{ step: 1, tool: "read", toolCallId: "tool-1", status: "ok", targetPath: "" },
+		{ step: 1, tool: "read", toolCallId: "tool-1", status: "ok", targetPath: "", at: events[3].at },
 	]);
 	assert.deepEqual(summary.eventTypes, [
 		"turn_started",
@@ -84,6 +88,53 @@ test("TurnReplayReader reads a turn, validates order, and returns a summary", as
 		"assistant_final",
 		"turn_completed",
 	]);
+});
+
+test("TurnReplayReader summarizes safe reasoning metadata and does not persist raw CoT", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-reasoning-"));
+	const resolvePath = resolveTurnPath(root);
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const ref = { conversationId: "agent", turnId: "turn-reasoning" };
+	const rawCot = "raw chain of thought that ordinary replay must not store";
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { summary: "Runtime started" } },
+		{ type: "model_requested", payload: { step: 1 } },
+		{
+			type: "model_completed",
+			payload: {
+				step: 1,
+				hasReasoning: true,
+				reasoningProvider: "deepseek",
+				reasoningRawFormat: "reasoning_content",
+				reasoningContinuationPolicy: "drop",
+				reasoningVisibleSummary: "Checked the current workspace before answering.",
+				reasoningWarnings: ["raw reasoning dropped from replay"],
+				rawReasoning: rawCot,
+				reasoningContent: rawCot,
+			},
+		},
+		{ type: "turn_completed", payload: { status: "completed" } },
+	]);
+
+	const events = await reader.readTurn(ref);
+	assert.equal(JSON.stringify(events).includes(rawCot), false);
+	const summary = reader.summarize(events);
+
+	assert.deepEqual(summary.reasoningTimeline, [
+		{
+			step: 1,
+			provider: "deepseek",
+			rawFormat: "reasoning_content",
+			continuationPolicy: "drop",
+			visibleSummary: "Checked the current workspace before answering.",
+			warnings: ["raw reasoning dropped from replay"],
+			at: events[2].at,
+		},
+	]);
+	assert.equal(JSON.stringify(summary).includes(rawCot), false);
 });
 
 test("TurnReplayReader reports sequence gaps and late events after a terminal event", async () => {
@@ -242,11 +293,12 @@ test("TurnReplayReader summarizes failed cancelled safe-stopped approval and mut
 	assert.equal(rich.mutations.conflicted, 1);
 	assert.equal(rich.mutations.applyFailed, 1);
 	assert.deepEqual(rich.mutationTimeline, [
-		{ id: "plan-1", event: "planned", operation: "", targetPath: "a.md", status: "", summary: "", reason: "" },
-		{ id: "plan-1", event: "applied", operation: "", targetPath: "a.md", status: "", summary: "", reason: "" },
-		{ id: "plan-2", event: "conflicted", operation: "", targetPath: "b.md", status: "", summary: "", reason: "Before snapshot changed." },
-		{ id: "plan-3", event: "apply_failed", operation: "write", targetPath: "c.md", status: "", summary: "", reason: "Disk write failed." },
+		{ id: "plan-1", event: "planned", operation: "", targetPath: "a.md", status: "", summary: "", reason: "", at: "2026-04-30T00:00:03.000Z" },
+		{ id: "plan-1", event: "applied", operation: "", targetPath: "a.md", status: "", summary: "", reason: "", at: "2026-04-30T00:00:04.000Z" },
+		{ id: "plan-2", event: "conflicted", operation: "", targetPath: "b.md", status: "", summary: "", reason: "Before snapshot changed.", at: "2026-04-30T00:00:04.500Z" },
+		{ id: "plan-3", event: "apply_failed", operation: "write", targetPath: "c.md", status: "", summary: "", reason: "Disk write failed.", at: "2026-04-30T00:00:04.700Z" },
 	]);
+	assert.equal(rich.durationMs, 5000);
 
 	const cancelled = reader.summarize([
 		{
@@ -306,7 +358,12 @@ test("TurnReplayReader summarizes task lifecycle timeline", async () => {
 
 	const summary = await reader.readSummary(ref);
 	assert.equal(summary.status, "cancelled");
-	assert.deepEqual(summary.taskTimeline, [
+	const taskTimelineWithoutAt = summary.taskTimeline.map((entry) => {
+		const { at, ...item } = entry;
+		assert.ok(at, "task timeline should preserve event timestamps");
+		return item;
+	});
+	assert.deepEqual(taskTimelineWithoutAt, [
 		{ taskId: "task-1", event: "created", status: "created", summary: "Task created.", reason: "" },
 		{ taskId: "task-1", event: "running", status: "running", summary: "Runtime started.", reason: "" },
 		{ taskId: "task-1", event: "waiting_for_approval", status: "waiting_for_approval", summary: "Review changes.", reason: "" },

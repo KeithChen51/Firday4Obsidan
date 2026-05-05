@@ -34,40 +34,40 @@ export class AgentReplayRecorder {
 		const payload = this.withKernelIdentity(event);
 		switch (event.type) {
 			case "turn_started":
-				return [{ type: "turn_started", payload }];
+				return [this.replayEvent(event, "turn_started", payload)];
 			case "context_compacted":
-				return [{ type: "context_built", payload: { contextKey: "compact", ...payload } }];
+				return [this.replayEvent(event, "context_built", { contextKey: "compact", ...payload })];
 			case "model_request":
-				return [{ type: "model_requested", payload }];
+				return [this.replayEvent(event, "model_requested", payload)];
 			case "model_response":
-				return [{ type: "model_completed", payload }];
+				return [this.replayEvent(event, "model_completed", payload)];
 			case "tool_call":
 				return [
-					{ type: "tool_requested", payload },
-					{ type: "tool_policy_checked", payload: { ...payload, decision: "kernel_port" } },
+					this.replayEvent(event, "tool_requested", payload),
+					this.replayEvent(event, "tool_policy_checked", { ...payload, decision: "kernel_port" }),
 				];
 			case "tool_result":
-				return [{ type: this.toToolResultType(event), payload }];
+				return [this.replayEvent(event, this.toToolResultType(event), payload)];
 			case "approval_requested":
-				return [{ type: "tool_approval_requested", payload }];
+				return [this.replayEvent(event, "tool_approval_requested", payload)];
 			case "approval_resolved":
-				return [{ type: "tool_approval_resolved", payload }];
+				return [this.replayEvent(event, "tool_approval_resolved", payload)];
 			case "mutation_planned":
-				return [{ type: "mutation_planned", payload }];
+				return [this.replayEvent(event, "mutation_planned", payload)];
 			case "mutation_applied":
-				return [{ type: "mutation_applied", payload }];
+				return [this.replayEvent(event, "mutation_applied", payload)];
 			case "mutation_rejected":
-				return [{ type: "mutation_rejected", payload }];
+				return [this.replayEvent(event, "mutation_rejected", payload)];
 			case "task_updated":
 				return this.mapTaskEvent(event, payload);
 			case "fallback":
-				return [{ type: "fallback", payload }];
+				return [this.replayEvent(event, "fallback", payload)];
 			case "turn_failed":
-				return [{ type: "turn_failed", payload }];
+				return [this.replayEvent(event, "turn_failed", payload)];
 			case "turn_cancelled":
-				return [{ type: "turn_cancelled", payload }];
+				return [this.replayEvent(event, "turn_cancelled", payload)];
 			case "turn_completed":
-				return [{ type: "turn_completed", payload }];
+				return [this.replayEvent(event, "turn_completed", payload)];
 			default:
 				return [];
 		}
@@ -76,7 +76,7 @@ export class AgentReplayRecorder {
 	private mapTaskEvent(event: AgentTurnEvent, payload: Record<string, unknown>): TurnEventInput[] {
 		const status = typeof event.payload?.status === "string" ? event.payload.status : "";
 		const type = this.toTaskEventType(status);
-		return type ? [{ type, payload }] : [];
+		return type ? [this.replayEvent(event, type, payload)] : [];
 	}
 
 	private toTaskEventType(status: string): TurnEventInput["type"] | null {
@@ -119,6 +119,18 @@ export class AgentReplayRecorder {
 			...(event.agentId ? { agentId: event.agentId } : {}),
 			...(event.status ? { status: event.status } : {}),
 			...(event.failure ? { failureClass: event.failure.category, summary: event.failure.userMessage } : {}),
+		};
+	}
+
+	private replayEvent(
+		event: AgentTurnEvent,
+		type: TurnEventInput["type"],
+		payload: Record<string, unknown>,
+	): TurnEventInput {
+		return {
+			type,
+			...(event.at ? { at: event.at } : {}),
+			payload,
 		};
 	}
 }

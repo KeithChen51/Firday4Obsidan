@@ -2,15 +2,21 @@ import type { RuntimeProgressEvent } from "../../services/AgentRuntimeService";
 import type { AgentTrajectoryIdentity, AgentTrajectorySnapshot } from "./AgentTrajectory";
 import { projectRuntimeProgress } from "./AgentTrajectoryProjector";
 
-type RuntimeProgressWithIdentity = RuntimeProgressEvent & Partial<AgentTrajectoryIdentity>;
+type RuntimeProgressWithIdentity = RuntimeProgressEvent & Partial<AgentTrajectoryIdentity> & { at?: string };
+
+export interface LiveTrajectoryStoreOptions {
+	now?: () => Date;
+}
 
 export class LiveTrajectoryStore {
 	private progressEvents: RuntimeProgressWithIdentity[] = [];
 	private currentSnapshot: AgentTrajectorySnapshot | null = null;
 	private completedSnapshot: AgentTrajectorySnapshot | null = null;
 
+	constructor(private readonly options: LiveTrajectoryStoreOptions = {}) {}
+
 	appendProgress(event: RuntimeProgressEvent): AgentTrajectorySnapshot {
-		const progressEvent = clonePlain(event as RuntimeProgressWithIdentity);
+		const progressEvent = this.prepareProgressEvent(event);
 		if (this.shouldResetForNewTurn(progressEvent)) {
 			this.progressEvents = [];
 			this.currentSnapshot = null;
@@ -23,7 +29,7 @@ export class LiveTrajectoryStore {
 
 	completeFromProgress(event?: RuntimeProgressEvent): AgentTrajectorySnapshot | null {
 		if (event) {
-			const progressEvent = clonePlain(event as RuntimeProgressWithIdentity);
+			const progressEvent = this.prepareProgressEvent(event);
 			if (this.shouldResetForNewTurn(progressEvent)) {
 				this.progressEvents = [];
 			}
@@ -45,6 +51,22 @@ export class LiveTrajectoryStore {
 
 	getSnapshot(): AgentTrajectorySnapshot | null {
 		return this.currentSnapshot ? cloneSnapshot(this.currentSnapshot) : null;
+	}
+
+	refreshElapsed(): AgentTrajectorySnapshot | null {
+		if (!this.currentSnapshot) {
+			return null;
+		}
+		const refreshed = cloneSnapshot(this.currentSnapshot);
+		const nowIso = this.currentTimeIso();
+		const startedMs = refreshed.time.startedAt ? Date.parse(refreshed.time.startedAt) : NaN;
+		const nowMs = Date.parse(nowIso);
+		if (Number.isFinite(startedMs) && Number.isFinite(nowMs)) {
+			refreshed.time.updatedAt = nowIso;
+			refreshed.time.durationMs = Math.max(0, nowMs - startedMs);
+			this.currentSnapshot = refreshed;
+		}
+		return cloneSnapshot(this.currentSnapshot);
 	}
 
 	getCompletedSnapshot(): AgentTrajectorySnapshot | null {
@@ -70,6 +92,17 @@ export class LiveTrajectoryStore {
 			}
 		}
 		return "";
+	}
+
+	private prepareProgressEvent(event: RuntimeProgressEvent): RuntimeProgressWithIdentity {
+		const progressEvent = clonePlain(event as RuntimeProgressWithIdentity);
+		progressEvent.at = progressEvent.at || this.currentTimeIso();
+		return progressEvent;
+	}
+
+	private currentTimeIso(): string {
+		const date = this.options.now?.() ?? new Date();
+		return date.toISOString();
 	}
 }
 

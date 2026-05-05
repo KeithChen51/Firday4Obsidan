@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
+const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const iconPath = path.join(projectRoot, "src/constants/icon.ts");
@@ -21,6 +22,7 @@ function read(filePath) {
 
 test("FRIDAY wordmark and Obsidian icons use the current brand system", () => {
 	const view = read(viewPath);
+	const renderer = read(rendererPath);
 	const settings = read(settingsPath);
 	const main = read(mainPath);
 	const icon = read(iconPath);
@@ -59,8 +61,10 @@ test("FRIDAY wordmark and Obsidian icons use the current brand system", () => {
 	assert.match(view, /cls:\s*"friday-shell-project-brand friday-wordmark"/);
 	assert.doesNotMatch(view, /friday-shell-project-subtitle/);
 	assert.doesNotMatch(view, /shell\.subtitle/);
-	assert.match(view, /cls:\s*isUser \? "friday-ai-message-role" : "friday-ai-message-role friday-wordmark"/);
 	assert.match(view, /cls:\s*"friday-ai-message-role friday-wordmark"/);
+	assert.match(view, /renderAgentAnswerFlow/);
+	assert.match(renderer, /friday-ai-answer-flow/);
+	assert.match(renderer, /cls:\s*"friday-ai-message-role friday-wordmark"/);
 	assert.match(view, /projectBrandEl\.style\.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;/);
 	assert.match(view, /roleEl\.style\.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;/);
 
