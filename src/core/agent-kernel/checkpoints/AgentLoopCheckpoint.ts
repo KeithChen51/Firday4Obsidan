@@ -95,18 +95,23 @@ export function createAgentLoopCheckpointId(turnId: string, boundary: AgentLoopC
 }
 
 export function sanitizeAgentLoopCheckpoint(checkpoint: AgentLoopCheckpoint): AgentLoopCheckpoint {
+	const messageResults = checkpoint.modelMessages.map(sanitizeCheckpointMessage);
+	const hasUnsafeContinuation = messageResults.some((result) => result.unsafeContinuation);
+	const safetyReason = hasUnsafeContinuation
+		? "Checkpoint requires provider continuation payload that cannot be safely persisted."
+		: checkpoint.safety.reason;
 	return {
 		...checkpoint,
 		modelOverride: checkpoint.modelOverride ? sanitizeText(checkpoint.modelOverride, 160) : undefined,
 		mode: sanitizeText(checkpoint.mode, 80),
 		allowedTools: checkpoint.allowedTools?.map((tool) => sanitizeText(tool, 80)),
-		modelMessages: checkpoint.modelMessages.map(sanitizeCheckpointMessage),
+		modelMessages: messageResults.map((result) => result.message),
 		traces: checkpoint.traces.map((trace) => sanitizeRecord(trace) as unknown as RuntimeToolTrace),
 		pendingMutations: checkpoint.pendingMutations.map((mutation) => sanitizeRecord(mutation) as unknown as RuntimeMutationPlan),
 		completedToolCalls: checkpoint.completedToolCalls.map((tool) => sanitizeRecord(tool) as unknown as AgentCheckpointToolResultRef),
 		safety: {
-			canAutoResume: Boolean(checkpoint.safety.canAutoResume),
-			reason: sanitizeText(checkpoint.safety.reason, 240),
+			canAutoResume: Boolean(checkpoint.safety.canAutoResume) && !hasUnsafeContinuation,
+			reason: sanitizeText(safetyReason, 240),
 		},
 		privacy: {
 			redacted: true,
@@ -188,36 +193,56 @@ function allowedToolSetContains(current: string[] | undefined, required: string[
 	return required.every((tool) => currentSet.has(tool));
 }
 
-function sanitizeCheckpointMessage(message: AgentCheckpointMessage): AgentCheckpointMessage {
+interface SanitizedCheckpointMessage {
+	message: AgentCheckpointMessage;
+	unsafeContinuation: boolean;
+}
+
+interface SanitizedReasoningArtifact {
+	artifact?: ReasoningArtifact;
+	unsafeContinuation: boolean;
+}
+
+interface SanitizedContinuationPayload {
+	payload?: unknown;
+	unsafe: boolean;
+}
+
+function sanitizeCheckpointMessage(message: AgentCheckpointMessage): SanitizedCheckpointMessage {
 	const sanitized = sanitizeRecord(message) as unknown as AgentCheckpointMessage;
+	let unsafeContinuation = false;
 	if (message.reasoningArtifact) {
-		const artifact = sanitizeReasoningArtifactForCheckpoint(message.reasoningArtifact);
-		if (artifact) {
-			sanitized.reasoningArtifact = artifact;
+		const result = sanitizeReasoningArtifactForCheckpoint(message.reasoningArtifact);
+		unsafeContinuation = result.unsafeContinuation;
+		if (result.artifact) {
+			sanitized.reasoningArtifact = result.artifact;
 		} else {
 			delete sanitized.reasoningArtifact;
 		}
 	}
 	delete (sanitized as unknown as Record<string, unknown>).endpoint;
 	delete (sanitized as unknown as Record<string, unknown>).requestHeaders;
-	return sanitized;
+	return { message: sanitized, unsafeContinuation };
 }
 
-function sanitizeReasoningArtifactForCheckpoint(artifact: ReasoningArtifact): ReasoningArtifact | undefined {
+function sanitizeReasoningArtifactForCheckpoint(artifact: ReasoningArtifact): SanitizedReasoningArtifact {
 	if (!artifact.hasReasoning) {
 		return {
-			hasReasoning: false,
-			provider: artifact.provider,
-			model: sanitizeText(artifact.model, 160),
-			rawFormat: artifact.rawFormat,
-			visibleSummary: "",
-			continuationPolicy: "drop",
-			metadata: sanitizeRecord(artifact.metadata) as ReasoningArtifact["metadata"],
+			unsafeContinuation: false,
+			artifact: {
+				hasReasoning: false,
+				provider: artifact.provider,
+				model: sanitizeText(artifact.model, 160),
+				rawFormat: artifact.rawFormat,
+				visibleSummary: "",
+				continuationPolicy: "drop",
+				metadata: sanitizeRecord(artifact.metadata) as ReasoningArtifact["metadata"],
+			},
 		};
 	}
-	const continuationPayload = sanitizeContinuationPayload(artifact);
+	const continuation = sanitizeContinuationPayload(artifact);
 	const dropsProviderReasoning =
-		continuationPayload === undefined &&
+		continuation.payload === undefined &&
 		(
 			artifact.provider === "deepseek" ||
 			artifact.provider === "bailian" ||
@@ -225,42 +250,64 @@ function sanitizeReasoningArtifactForCheckpoint(artifact: ReasoningArtifact): Re
 			artifact.rawFormat === "reasoning_content"
 		);
 	return {
-		hasReasoning: true,
-		provider: artifact.provider,
-		model: sanitizeText(artifact.model, 160),
-		rawFormat: dropsProviderReasoning ? "unknown" : artifact.rawFormat,
-		visibleSummary: sanitizeText(artifact.visibleSummary, 240),
-		continuationPolicy: continuationPayload === undefined ? "drop" : artifact.continuationPolicy,
-		...(continuationPayload !== undefined ? { continuationPayload } : {}),
-		metadata: {
-			...(sanitizeRecord(artifact.metadata) as ReasoningArtifact["metadata"]),
-			redacted: true,
+		unsafeContinuation: continuation.unsafe,
+		artifact: {
+			hasReasoning: true,
+			provider: artifact.provider,
+			model: sanitizeText(artifact.model, 160),
+			rawFormat: dropsProviderReasoning ? "unknown" : artifact.rawFormat,
+			visibleSummary: sanitizeText(artifact.visibleSummary, 240),
+			continuationPolicy: continuation.payload === undefined ? "drop" : artifact.continuationPolicy,
+			...(continuation.payload !== undefined ? { continuationPayload: continuation.payload } : {}),
+			metadata: {
+				...(sanitizeRecord(artifact.metadata) as ReasoningArtifact["metadata"]),
+				redacted: true,
+			},
 		},
 	};
 }
 
-function sanitizeContinuationPayload(artifact: ReasoningArtifact): unknown {
+function sanitizeContinuationPayload(artifact: ReasoningArtifact): SanitizedContinuationPayload {
 	if (
 		artifact.continuationPolicy === "drop" ||
-		artifact.continuationPolicy === "provider_managed" ||
+		artifact.continuationPolicy === "provider_managed"
+	) {
+		return { unsafe: false };
+	}
+	if (
 		artifact.provider === "deepseek" ||
 		artifact.provider === "bailian" ||
-		artifact.provider === "dashscope" ||
-		artifact.rawFormat === "reasoning_content"
+		artifact.provider === "dashscope"
 	) {
-		return undefined;
+		return { unsafe: true };
 	}
 	const payload = artifact.continuationPayload;
 	if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-		return undefined;
+		return { unsafe: true };
+	}
+	if (artifact.rawFormat === "reasoning_content") {
+		return { unsafe: true };
+	}
+	if (artifact.provider === "anthropic" || artifact.rawFormat === "anthropic_thinking") {
+		if (containsRawContinuationReasoning(payload)) {
+			return { unsafe: true };
+		}
+		const sanitized = sanitizeRecord(payload, {
+			preserveAnthropicSignatures: true,
+			preserveAnthropicText: true,
+		});
+		return Object.keys(sanitized).length > 0 ? { payload: sanitized, unsafe: false } : { unsafe: true };
 	}
 	const sanitized = sanitizeRecord(payload, { preserveReasoningDetails: true, preserveAnthropicSignatures: true });
-	return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+	if (Object.keys(sanitized).length === 0) {
+		return { unsafe: true };
+	}
+	return { payload: sanitized, unsafe: false };
 }
 
 function sanitizeRecord(
 	value: object,
-	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean } = {},
+	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean; preserveAnthropicText?: boolean } = {},
 ): Record<string, unknown> {
 	const output: Record<string, unknown> = {};
 	for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
@@ -278,7 +325,7 @@ function sanitizeRecord(
 function sanitizeUnknown(
 	value: unknown,
 	key: string,
-	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean },
+	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean; preserveAnthropicText?: boolean },
 ): unknown {
 	if (isDroppedKey(key, options)) {
 		return undefined;
@@ -299,10 +346,13 @@ function sanitizeUnknown(
 
 function isDroppedKey(
 	key: string,
-	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean },
+	options: { preserveReasoningDetails?: boolean; preserveAnthropicSignatures?: boolean; preserveAnthropicText?: boolean },
 ): boolean {
 	const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
 	if (options.preserveReasoningDetails && normalized === "reasoningdetails") {
+		return false;
+	}
+	if (options.preserveAnthropicText && normalized === "text") {
 		return false;
 	}
 	if (options.preserveAnthropicSignatures && (
@@ -342,11 +392,58 @@ function sanitizeText(value: string, maxLength: number): string {
 	const redacted = value
 		.replace(/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]")
 		.replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "[redacted]")
-		.replace(/https?:\/\/[^\s)]+\/api\/[^\s)]+/gi, "[redacted-api-url]")
+		.replace(/https?:\/\/[^\s)"'<>]+/gi, (url) => isLikelyEndpointUrl(url) ? "[redacted-endpoint-url]" : url)
 		.replace(/\b(cookie|set-cookie)\s*[:=]\s*[^;\s]+/gi, "$1=[redacted]")
 		.replace(/\b[A-Za-z0-9_]*(?:secret|token|password|apikey|api_key)[A-Za-z0-9_-]*\s*[:=]\s*\S+/gi, "[redacted]");
 	if (redacted.length <= maxLength) {
 		return redacted;
 	}
 	return `${redacted.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function containsRawContinuationReasoning(value: unknown, key = ""): boolean {
+	const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+	if ([
+		"rawreasoning",
+		"reasoningcontent",
+		"chainofthought",
+		"cot",
+		"reasoning",
+		"thinking",
+	].includes(normalized)) {
+		return true;
+	}
+	if (Array.isArray(value)) {
+		return value.some((item) => containsRawContinuationReasoning(item));
+	}
+	if (!value || typeof value !== "object") {
+		return false;
+	}
+	return Object.entries(value as Record<string, unknown>).some(([childKey, child]) =>
+		containsRawContinuationReasoning(child, childKey)
+	);
+}
+
+function isLikelyEndpointUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value);
+		const host = parsed.hostname.toLowerCase();
+		const pathname = parsed.pathname.toLowerCase();
+		return host.includes("api.") ||
+			host.includes("gateway") ||
+			host.includes("dashscope") ||
+			host.includes("deepseek") ||
+			host.includes("openai") ||
+			host.includes("anthropic") ||
+			host.includes("zenmux") ||
+			host.includes("bailian") ||
+			pathname.includes("/api/") ||
+			pathname.includes("/v1") ||
+			pathname.includes("/chat/completions") ||
+			pathname.includes("/responses") ||
+			pathname.includes("/messages") ||
+			pathname.includes("/compatible-mode");
+	} catch {
+		return false;
+	}
 }

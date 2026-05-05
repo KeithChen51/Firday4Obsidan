@@ -155,3 +155,133 @@ test("AgentLoopCheckpointStore sanitizes secrets and raw reasoning before persis
 	assert.deepEqual(secondArtifact.continuationPayload, { reasoning_details: [{ signature: "sig-1" }] });
 	assert.equal("rawReasoning" in secondArtifact, false);
 });
+
+test("AgentLoopCheckpointStore redacts endpoint urls that do not contain api path segments", async () => {
+	const { AgentLoopCheckpointStore } = await jiti.import(storePath);
+	const filePath = makeTempStorePath();
+	const checkpointStore = new AgentLoopCheckpointStore({ storePath: filePath });
+
+	await checkpointStore.save(makeCheckpoint({
+		id: "endpoint-checkpoint",
+		modelMessages: [
+			{
+				role: "system",
+				content: "provider endpoint https://gateway.example.com/v1/chat/completions",
+				metadata: {
+					url: "https://api.deepseek.com/chat/completions",
+					baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+				},
+			},
+		],
+		traces: [
+			{
+				runId: "read-1",
+				step: 1,
+				tool: "read",
+				scope: "vault",
+				targetPath: "https://gateway.example.com/v1/chat/completions",
+				approved: true,
+				approvalReason: "No approval required",
+				persistedRule: false,
+				viaRule: false,
+				status: "ok",
+				ok: true,
+				summary: "Read via https://api.deepseek.com/chat/completions",
+			},
+		],
+	}));
+
+	const raw = fs.readFileSync(filePath, "utf8");
+	assert.equal(raw.includes("https://gateway.example.com/v1/chat/completions"), false);
+	assert.equal(raw.includes("https://api.deepseek.com/chat/completions"), false);
+	assert.equal(raw.includes("https://dashscope.aliyuncs.com/compatible-mode/v1"), false);
+	assert.match(raw, /\[redacted-endpoint-url\]/);
+});
+
+test("AgentLoopCheckpointStore preserves safe provider continuation and disables unsafe raw continuation", async () => {
+	const { AgentLoopCheckpointStore } = await jiti.import(storePath);
+	const filePath = makeTempStorePath();
+	const checkpointStore = new AgentLoopCheckpointStore({ storePath: filePath });
+
+	await checkpointStore.save(makeCheckpoint({
+		id: "provider-continuation-checkpoint",
+		modelMessages: [
+			{
+				role: "assistant",
+				content: "",
+				reasoningArtifact: {
+					hasReasoning: true,
+					provider: "zenmux",
+					model: "deepseek-v4-pro",
+					rawFormat: "reasoning_content",
+					visibleSummary: "safe zenmux summary",
+					rawReasoning: "raw zenmux deepseek reasoning",
+					continuationPolicy: "preserve_raw",
+					continuationPayload: { reasoning_content: "raw zenmux deepseek reasoning" },
+					metadata: { sourceProtocol: "chat_completions" },
+				},
+			},
+			{
+				role: "assistant",
+				content: "",
+				reasoningArtifact: {
+					hasReasoning: true,
+					provider: "anthropic",
+					model: "claude-4-sonnet",
+					rawFormat: "anthropic_thinking",
+					visibleSummary: "safe anthropic summary",
+					rawReasoning: "raw anthropic private thinking",
+					continuationPolicy: "preserve_raw",
+					continuationPayload: {
+						content: [
+							{ type: "thinking", thinking: "raw anthropic private thinking", signature: "sig-raw" },
+							{ type: "text", text: "assistant answer" },
+						],
+					},
+					metadata: { sourceProtocol: "anthropic_messages" },
+				},
+			},
+			{
+				role: "assistant",
+				content: "",
+				reasoningArtifact: {
+					hasReasoning: true,
+					provider: "anthropic",
+					model: "claude-4-sonnet",
+					rawFormat: "anthropic_thinking",
+					visibleSummary: "safe anthropic redacted summary",
+					continuationPolicy: "preserve_signature_only",
+					continuationPayload: {
+						content: [
+							{ type: "thinking", redacted_thinking: "redacted-provider-state", signature: "sig-redacted" },
+							{ type: "text", text: "assistant answer" },
+							{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "Project/a.md" } },
+						],
+					},
+					metadata: { sourceProtocol: "anthropic_messages" },
+				},
+			},
+		],
+	}));
+
+	const raw = fs.readFileSync(filePath, "utf8");
+	assert.equal(raw.includes("raw zenmux deepseek reasoning"), false);
+	assert.equal(raw.includes("raw anthropic private thinking"), false);
+	assert.equal(raw.includes("reasoning_content"), false);
+
+	const restored = await checkpointStore.get("provider-continuation-checkpoint");
+	assert.equal(restored.safety.canAutoResume, false);
+	assert.match(restored.safety.reason, /provider continuation payload/i);
+	const [zenmuxArtifact, unsafeAnthropicArtifact, safeAnthropicArtifact] = restored.modelMessages.map((message) => message.reasoningArtifact);
+	assert.equal(zenmuxArtifact.continuationPolicy, "drop");
+	assert.equal(zenmuxArtifact.continuationPayload, undefined);
+	assert.equal(unsafeAnthropicArtifact.continuationPolicy, "drop");
+	assert.equal(unsafeAnthropicArtifact.continuationPayload, undefined);
+	assert.deepEqual(safeAnthropicArtifact.continuationPayload, {
+		content: [
+			{ type: "thinking", redacted_thinking: "redacted-provider-state", signature: "sig-redacted" },
+			{ type: "text", text: "assistant answer" },
+			{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "Project/a.md" } },
+		],
+	});
+});
