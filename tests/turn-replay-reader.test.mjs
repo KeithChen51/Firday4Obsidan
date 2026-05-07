@@ -389,3 +389,111 @@ test("TurnReplayReader preserves trace and agent identity from replay payloads",
 	assert.equal(summary.traceId, "trace-identity");
 	assert.equal(summary.agentId, "soul-1");
 });
+
+test("TurnEventLog redacts headers and TurnReplayReader summarizes recovery and safe stops", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-hygiene-"));
+	const resolvePath = resolveTurnPath(root);
+	const ref = { conversationId: "agent", turnId: "turn-hygiene", taskId: "task-hygiene" };
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+
+	await log.appendMany(ref, [
+		{
+			type: "turn_started",
+			payload: {
+				traceId: "trace-hygiene",
+				headers: { cookie: "session=secret-cookie", "x-extra": "header-value" },
+				requestHeaders: { authorization: "Bearer secret-token-value" },
+			},
+		},
+		{ type: "tool_requested", payload: { step: 1, tool: "read", toolCallId: "read-1" } },
+		{
+			type: "tool_failed",
+			payload: {
+				step: 1,
+				tool: "read",
+				toolCallId: "read-1",
+				targetPath: "Project/notes/missing.md",
+				failureClass: "path_resolution",
+				recovery: {
+					recoverable: true,
+					retryable: true,
+					code: "path_recovery_available",
+					message: "Use the project-relative candidate path.",
+					candidatePaths: ["Project/notes/missing.md"],
+					suggestedArgs: { path: "Project/notes/missing.md" },
+				},
+			},
+		},
+		{
+			type: "tool_failed",
+			payload: {
+				step: 2,
+				tool: "read",
+				toolCallId: "read-duplicate",
+				failureClass: "duplicate_failed_tool_call",
+				recovery: {
+					recoverable: true,
+					retryable: false,
+					code: "duplicate_failed_tool_call",
+					message: "Change the tool arguments before retrying.",
+				},
+			},
+		},
+		{
+			type: "max_tool_iterations",
+			payload: {
+				channel: "native",
+				maxIterations: 2,
+				status: "safe_stopped",
+				summary: "Stopped after repeated failed calls.",
+			},
+		},
+		{ type: "turn_completed", payload: { status: "safe_stopped", summary: "Stopped safely." } },
+	]);
+
+	const events = await reader.readTurn(ref);
+	const serializedEvents = JSON.stringify(events);
+	assert.equal(serializedEvents.includes("secret-cookie"), false);
+	assert.equal(serializedEvents.includes("header-value"), false);
+	assert.equal(serializedEvents.includes("secret-token-value"), false);
+
+	const summary = reader.summarize(events);
+	assert.equal(summary.status, "safe_stopped");
+	assert.deepEqual(summary.recoveryTimeline, [{
+		event: "tool_failed",
+		step: 1,
+		tool: "read",
+		toolCallId: "read-1",
+		targetPath: "Project/notes/missing.md",
+		failureClass: "path_resolution",
+		recoverable: true,
+		retryable: true,
+		code: "path_recovery_available",
+		message: "Use the project-relative candidate path.",
+		candidatePaths: ["Project/notes/missing.md"],
+		suggestedArgs: { path: "Project/notes/missing.md" },
+		at: events[2].at,
+	}]);
+	assert.deepEqual(summary.loopPreventionTimeline, [
+		{
+			event: "duplicate_failed_tool_call",
+			step: 2,
+			tool: "read",
+			toolCallId: "read-duplicate",
+			status: "",
+			summary: "Change the tool arguments before retrying.",
+			at: events[3].at,
+		},
+		{
+			event: "max_tool_iterations",
+			step: 0,
+			tool: "",
+			toolCallId: "",
+			status: "safe_stopped",
+			summary: "Stopped after repeated failed calls.",
+			at: events[4].at,
+		},
+	]);
+});

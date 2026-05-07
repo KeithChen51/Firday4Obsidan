@@ -82,6 +82,30 @@ export interface TurnReplaySummary extends TurnEventRef {
 		targetPath: string;
 		at?: string;
 	}>;
+	recoveryTimeline: Array<{
+		event: "tool_failed" | "tool_denied";
+		step: number;
+		tool: string;
+		toolCallId: string;
+		targetPath: string;
+		failureClass: string;
+		recoverable: boolean;
+		retryable: boolean;
+		code: string;
+		message: string;
+		candidatePaths: string[];
+		suggestedArgs: Record<string, unknown>;
+		at?: string;
+	}>;
+	loopPreventionTimeline: Array<{
+		event: "duplicate_failed_tool_call" | "max_tool_iterations";
+		step: number;
+		tool: string;
+		toolCallId: string;
+		status: string;
+		summary: string;
+		at?: string;
+	}>;
 	approvals: {
 		requested: number;
 		resolved: number;
@@ -239,6 +263,8 @@ export class TurnReplayReader {
 				denied: events.filter((event) => event.type === "tool_denied").length,
 			},
 			toolCalls,
+			recoveryTimeline: this.summarizeRecoveryTimeline(events),
+			loopPreventionTimeline: this.summarizeLoopPreventionTimeline(events),
 			approvals: {
 				requested: events.filter((event) => event.type === "tool_approval_requested").length,
 				resolved: events.filter((event) => event.type === "tool_approval_resolved").length,
@@ -361,6 +387,77 @@ export class TurnReplayReader {
 			}
 		}
 		return calls;
+	}
+
+	private summarizeRecoveryTimeline(events: TurnEventRecord[]): TurnReplaySummary["recoveryTimeline"] {
+		const timeline: TurnReplaySummary["recoveryTimeline"] = [];
+		for (const event of events) {
+			if (event.type !== "tool_failed" && event.type !== "tool_denied") {
+				continue;
+			}
+			const recovery = this.getPayloadRecord(event, "recovery");
+			const candidatePaths = this.getStringArrayFromPayloadOrRecord(event, recovery, "candidatePaths");
+			const suggestedArgs = this.getRecordFromPayloadOrRecord(event, recovery, "suggestedArgs");
+			if (candidatePaths.length === 0 && Object.keys(suggestedArgs).length === 0) {
+				continue;
+			}
+			timeline.push({
+				event: event.type,
+				step: this.getPayloadNumber(event, "step"),
+				tool: this.getPayloadText(event, "tool"),
+				toolCallId: this.getPayloadText(event, "toolCallId"),
+				targetPath: this.getPayloadText(event, "targetPath"),
+				failureClass: this.getPayloadText(event, "failureClass"),
+				recoverable: this.getBooleanFromPayloadOrRecord(event, recovery, "recoverable"),
+				retryable: this.getBooleanFromPayloadOrRecord(event, recovery, "retryable"),
+				code: this.getTextFromPayloadOrRecord(event, recovery, "code"),
+				message: this.getTextFromPayloadOrRecord(event, recovery, "message") ||
+					this.getPayloadText(event, "summary"),
+				candidatePaths,
+				suggestedArgs,
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
+	private summarizeLoopPreventionTimeline(events: TurnEventRecord[]): TurnReplaySummary["loopPreventionTimeline"] {
+		const timeline: TurnReplaySummary["loopPreventionTimeline"] = [];
+		for (const event of events) {
+			if (event.type === "max_tool_iterations") {
+				timeline.push({
+					event: "max_tool_iterations",
+					step: this.getPayloadNumber(event, "step"),
+					tool: this.getPayloadText(event, "tool"),
+					toolCallId: this.getPayloadText(event, "toolCallId"),
+					status: this.getPayloadText(event, "status"),
+					summary: this.getPayloadText(event, "summary") || this.getPayloadText(event, "message"),
+					at: event.at,
+				});
+				continue;
+			}
+			if (event.type !== "tool_failed") {
+				continue;
+			}
+			const recovery = this.getPayloadRecord(event, "recovery");
+			const failureClass = this.getPayloadText(event, "failureClass");
+			const recoveryCode = this.getRecordText(recovery, "code");
+			if (failureClass !== "duplicate_failed_tool_call" && recoveryCode !== "duplicate_failed_tool_call") {
+				continue;
+			}
+			timeline.push({
+				event: "duplicate_failed_tool_call",
+				step: this.getPayloadNumber(event, "step"),
+				tool: this.getPayloadText(event, "tool"),
+				toolCallId: this.getPayloadText(event, "toolCallId"),
+				status: this.getPayloadText(event, "status"),
+				summary: this.getRecordText(recovery, "message") ||
+					this.getPayloadText(event, "summary") ||
+					this.getPayloadText(event, "message"),
+				at: event.at,
+			});
+		}
+		return timeline;
 	}
 
 	private summarizeTransportTimeline(events: TurnEventRecord[]): TurnReplaySummary["transportTimeline"] {
@@ -540,6 +637,49 @@ export class TurnReplayReader {
 		return value && typeof value === "object" && !Array.isArray(value)
 			? value as Record<string, unknown>
 			: {};
+	}
+
+	private getRecordFromPayloadOrRecord(
+		event: TurnEventRecord,
+		record: Record<string, unknown>,
+		key: string,
+	): Record<string, unknown> {
+		const payloadValue = event.payload[key];
+		if (payloadValue && typeof payloadValue === "object" && !Array.isArray(payloadValue)) {
+			return payloadValue as Record<string, unknown>;
+		}
+		const recordValue = record[key];
+		return recordValue && typeof recordValue === "object" && !Array.isArray(recordValue)
+			? recordValue as Record<string, unknown>
+			: {};
+	}
+
+	private getStringArrayFromPayloadOrRecord(
+		event: TurnEventRecord,
+		record: Record<string, unknown>,
+		key: string,
+	): string[] {
+		const payloadValue = event.payload[key];
+		if (Array.isArray(payloadValue)) {
+			return payloadValue.filter((item): item is string => typeof item === "string" && item.length > 0);
+		}
+		const recordValue = record[key];
+		return Array.isArray(recordValue)
+			? recordValue.filter((item): item is string => typeof item === "string" && item.length > 0)
+			: [];
+	}
+
+	private getTextFromPayloadOrRecord(event: TurnEventRecord, record: Record<string, unknown>, key: string): string {
+		return this.getPayloadText(event, key) || this.getRecordText(record, key);
+	}
+
+	private getBooleanFromPayloadOrRecord(event: TurnEventRecord, record: Record<string, unknown>, key: string): boolean {
+		const payloadValue = event.payload[key];
+		if (typeof payloadValue === "boolean") {
+			return payloadValue;
+		}
+		const recordValue = record[key];
+		return typeof recordValue === "boolean" ? recordValue : false;
 	}
 
 	private getRecordText(record: Record<string, unknown>, key: string): string {

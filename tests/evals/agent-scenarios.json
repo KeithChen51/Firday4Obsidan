@@ -52,6 +52,154 @@
       }
     },
     {
+      "id": "project-relative-read-resolves-workspace-path",
+      "name": "project-relative workspace read resolves to active project",
+      "projectRoot": "ProjectA",
+      "files": { "ProjectA/workspace/01_general/profile.html": "<main>Alpha profile evidence.</main>" },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "workspace/01_general/profile.html" } } },
+        { "assistant": "ProjectA/workspace/01_general/profile.html contains Alpha profile evidence." }
+      ],
+      "expect": {
+        "assistantIncludes": ["ProjectA/workspace/01_general/profile.html", "Alpha profile evidence"],
+        "traceTools": ["read"],
+        "traceStatuses": ["ok"],
+        "traceTargetPaths": ["ProjectA/workspace/01_general/profile.html"],
+        "turnEventsInclude": ["tool_completed", "turn_completed"],
+        "finalFiles": { "ProjectA/workspace/01_general/profile.html": "<main>Alpha profile evidence.</main>" }
+      }
+    },
+    {
+      "id": "bare-filename-resolves-unique-active-project-file",
+      "name": "bare filename resolves only inside active project",
+      "projectRoot": "ProjectA",
+      "files": {
+        "ProjectA/workspace/notes/unique.md": "Active project unique evidence.",
+        "OtherProject/workspace/unique.md": "Other project should not be read."
+      },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "unique.md" } } },
+        { "assistant": "The active project file says Active project unique evidence." }
+      ],
+      "expect": {
+        "assistantIncludes": ["Active project unique evidence"],
+        "assistantExcludes": ["Other project should not be read"],
+        "traceTools": ["read"],
+        "traceStatuses": ["ok"],
+        "traceTargetPaths": ["ProjectA/workspace/notes/unique.md"],
+        "turnEventsInclude": ["tool_completed", "turn_completed"]
+      }
+    },
+    {
+      "id": "ambiguous-bare-filename-returns-candidates",
+      "name": "ambiguous bare filename returns recovery candidates",
+      "projectRoot": "ProjectA",
+      "files": {
+        "ProjectA/workspace/one/shared.md": "one",
+        "ProjectA/workspace/two/shared.md": "two"
+      },
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "shared.md" } } },
+        { "assistant": "The bare filename is ambiguous; use one of the candidate paths." }
+      ],
+      "expect": {
+        "assistantIncludes": ["ambiguous", "candidate"],
+        "traceTools": ["read"],
+        "traceStatuses": ["failed"],
+        "traceTargetPaths": ["shared.md"],
+        "recoveryTimelineIncludes": [
+          {
+            "event": "tool_failed",
+            "tool": "read",
+            "code": "ambiguous_bare_filename",
+            "recoverable": true,
+            "retryable": false,
+            "candidatePaths": [
+              "ProjectA/workspace/one/shared.md",
+              "ProjectA/workspace/two/shared.md"
+            ],
+            "suggestedArgs": { "path": "ProjectA/workspace/one/shared.md" }
+          }
+        ],
+        "turnEventsInclude": ["tool_failed", "turn_completed"]
+      }
+    },
+    {
+      "id": "raw-write-denied-with-workspace-suggestion",
+      "name": "raw write denied with workspace recovery suggestion",
+      "projectRoot": "ProjectA",
+      "files": { "ProjectA/raw/source.md": "curated input" },
+      "modelSteps": [
+        { "tool": { "name": "write", "args": { "path": "raw/source.md", "content": "changed output", "mode": "update" } } },
+        { "assistant": "Raw writes are blocked; use the workspace suggestion instead." }
+      ],
+      "expect": {
+        "assistantIncludes": ["Raw writes", "workspace suggestion"],
+        "traceTools": ["write"],
+        "traceStatuses": ["failed"],
+        "traceTargetPaths": ["ProjectA/raw/source.md"],
+        "recoveryTimelineIncludes": [
+          {
+            "event": "tool_failed",
+            "tool": "write",
+            "code": "project_raw_write_denied",
+            "recoverable": true,
+            "retryable": false,
+            "candidatePaths": ["ProjectA/workspace/source.md"],
+            "suggestedArgs": { "path": "ProjectA/workspace/source.md" }
+          }
+        ],
+        "finalFiles": { "ProjectA/raw/source.md": "curated input" },
+        "turnEventsInclude": ["tool_failed", "turn_completed"]
+      }
+    },
+    {
+      "id": "repeated-invalid-path-does-not-loop",
+      "name": "repeated invalid path is blocked by loop prevention",
+      "projectRoot": "ProjectA",
+      "files": {},
+      "modelSteps": [
+        { "tool": { "name": "read", "args": { "path": "workspace/missing.md" } } },
+        { "tool": { "name": "read", "args": { "path": "workspace/missing.md" } } },
+        { "assistant": "I stopped repeating the failed read and will change arguments next." }
+      ],
+      "expect": {
+        "assistantIncludes": ["stopped repeating"],
+        "assistantExcludes": ["Maximum tool-iteration limit reached"],
+        "traceTools": ["read", "read"],
+        "traceStatuses": ["failed", "failed"],
+        "traceTargetPaths": [
+          "ProjectA/workspace/missing.md",
+          "ProjectA/workspace/missing.md"
+        ],
+        "modelCalls": { "native": 3, "prompt": 0 },
+        "recoveryTimelineIncludes": [
+          {
+            "event": "tool_failed",
+            "tool": "read",
+            "code": "vault_file_not_found",
+            "candidatePaths": ["ProjectA/workspace/missing.md"],
+            "suggestedArgs": { "path": "ProjectA/workspace/missing.md" }
+          },
+          {
+            "event": "tool_failed",
+            "tool": "read",
+            "code": "duplicate_failed_tool_call",
+            "candidatePaths": ["ProjectA/workspace/missing.md"],
+            "suggestedArgs": { "path": "ProjectA/workspace/missing.md" }
+          }
+        ],
+        "loopPreventionTimelineIncludes": [
+          {
+            "event": "duplicate_failed_tool_call",
+            "tool": "read",
+            "status": "failed"
+          }
+        ],
+        "turnEventsInclude": ["tool_failed", "turn_completed"]
+      }
+    },
+    {
       "id": "write-request-creates-mutation-plan",
       "name": "write request creates mutation plan",
       "files": { "Project/workspace/a.md": "original" },
@@ -296,8 +444,16 @@
       ],
       "expect": {
         "safeStopped": true,
+        "assistantExcludes": ["Maximum tool-iteration limit reached"],
         "traceTools": ["read"],
         "traceStatuses": ["ok"],
+        "loopPreventionTimelineIncludes": [
+          {
+            "event": "max_tool_iterations",
+            "status": "safe_stopped",
+            "summary": "Tool iteration limit reached; stopped further tool calls for this turn."
+          }
+        ],
         "turnEventsInclude": ["max_tool_iterations", "turn_completed"]
       }
     }

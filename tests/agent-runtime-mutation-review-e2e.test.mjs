@@ -54,6 +54,26 @@ test("default review mode records a pending write mutation without changing the 
 	assert.match(result.assistantText, /not applied/i);
 });
 
+test("native write mutation records the model tool call id for review correlation", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		modelSteps: [
+			{
+				tool: {
+					id: "native-call-123",
+					name: "write",
+					args: { path: "Project/workspace/a.md", content: "changed", mode: "update" },
+				},
+			},
+			{ assistant: "Prepared the update for review." },
+		],
+	}));
+
+	assert.equal(result.storedMutations.length, 1);
+	assert.equal(result.storedMutations[0].toolCallId, "native-call-123");
+	const planned = result.turnEvents.find((event) => event.type === "mutation_planned");
+	assert.equal(planned?.payload.toolCallId, "native-call-123");
+});
+
 test("accepting a reviewed mutation applies the file write and records replay event", async () => {
 	const result = await runAgentRuntimeScenario(writeScenario({
 		afterTurnActions: ["acceptFirstEditPlan"],

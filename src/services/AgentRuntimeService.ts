@@ -14,7 +14,6 @@ import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKerne
 import type { AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
 import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
 import { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
-import { AgentActionType } from "../types/action";
 import { FridaySettings } from "../types/settings";
 import { AgentActionService } from "./AgentActionService";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
@@ -34,7 +33,6 @@ import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { ToolBoundaryFilter } from "../core/context/ToolBoundaryFilter";
 import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
 import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
-import type { MemoryWriteInput } from "../core/memory/MemoryTypes";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityPolicy } from "../core/policy/CapabilityPolicy";
@@ -43,6 +41,9 @@ import {
 	buildNativeToolDefinitionsFromRegistry,
 	type AgentMode,
 } from "../core/tools/ToolRegistry";
+import type { ToolResultFailureClass, ToolResultPayload, ToolResultRecovery } from "../core/tools/ToolResultContract";
+import { DEFAULT_MAX_MODEL_RESULT_CHARS, formatForModel, summarizeForTrace } from "../core/tools/ToolResultFormatter";
+import { ToolPathResolver, type ToolPathIntent } from "../core/tools/ToolPathResolver";
 import { TurnEventLog, type TurnEventInput } from "../core/runtime/TurnEventLog";
 import { TurnReplayReader, type TurnReplaySummary } from "../core/runtime/TurnReplayReader";
 import {
@@ -60,7 +61,6 @@ import { MutationPlanStore } from "../core/mutations/MutationPlanStore";
 import type { AgentTask, AgentTaskRunInputSnapshot } from "../core/tasks/AgentTask";
 import { AgentTaskStore } from "../core/tasks/AgentTaskStore";
 import { AgentLoopCheckpointStore } from "../core/agent-kernel/checkpoints/AgentLoopCheckpointStore";
-import { CapabilityResolver } from "../core/tool-governor/CapabilityResolver";
 import { ToolFailureClass, ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import { StepTraceEvent, TurnStateMachine } from "../core/turn-state/TurnStateMachine";
 import { ExecutionGate } from "../core/execution/ExecutionGate";
@@ -72,7 +72,6 @@ import { WikiLookupCapability } from "../platform/capability/WikiLookupCapabilit
 import { WIKI_FEATURE_ENABLED, WIKI_SKILL_COMMANDS } from "../constants/wikiFeature";
 import { detectRuntimeProfile, RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 import { StepTraceStore } from "../platform/tools/StepTraceStore";
-import { findToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { ToolRunAuditStore } from "../platform/tools/ToolRunAuditStore";
 import type { LlmTransportChannel, LlmTransportEvent, LlmTransportEventType } from "../core/llm/LlmTransportTelemetry";
 import { SoulStore } from "./SoulStore";
@@ -80,10 +79,13 @@ import { RuntimeStateStore } from "./RuntimeStateStore";
 import {
 	isAgentWritableProjectPath,
 	isProjectRawPath,
-	resolveAgentWritableVaultPath,
 } from "../utils/projectWorkspacePolicy";
+import { ObsidianToolAdapter } from "./tools/ObsidianToolAdapter";
+import { ObsidianToolContext } from "./tools/ObsidianToolContext";
+import { ObsidianToolHandlers } from "./tools/ObsidianToolHandlers";
 
 interface RuntimeToolCall {
+	id?: string;
 	name: string;
 	args?: Record<string, unknown>;
 }
@@ -105,26 +107,9 @@ interface RuntimeEnvelope {
 	pendingMutations?: RuntimeMutationPlan[];
 }
 
-interface RuntimeToolResultPayload {
-	ok: boolean;
-	tool: string;
-	data?: unknown;
-	error?: string;
-}
+type RuntimeToolResultPayload = ToolResultPayload;
 
-type RuntimeFailureClass = ToolFailureClass | "cancelled";
-
-interface ExecVaultDeleteRedirect {
-	routedToDelete: true;
-	path: string;
-	deletedType: "file" | "folder";
-}
-
-interface ExecVaultDeleteRedirect {
-	routedToDelete: true;
-	path: string;
-	deletedType: "file" | "folder";
-}
+type RuntimeFailureClass = ToolResultFailureClass;
 
 export interface RuntimeToolTrace {
 	runId: string;
@@ -137,13 +122,14 @@ export interface RuntimeToolTrace {
 	persistedRule: boolean;
 	viaRule: boolean;
 	status: "ok" | "failed" | "denied";
-	failureClass?: ToolFailureClass;
+	failureClass?: RuntimeFailureClass;
 	ok: boolean;
 	summary: string;
 	error?: string;
 }
 
 export interface RuntimeTurnResult {
+	status?: KernelAgentTurnResult["status"];
 	assistantText: string;
 	traces: RuntimeToolTrace[];
 	rawFinalReply: string;
@@ -274,12 +260,7 @@ interface BuiltinSkillRunInput {
 }
 
 const RUNTIME_CODE_FENCE = "friday-runtime";
-const MAX_MODEL_RESULT_CHARS = 5000;
-const MAX_TOOL_RESULT_ITEM = 80;
-const DEFAULT_MAX_LIST = 120;
-const DEFAULT_MAX_READ_CHARS = 10000;
-const DEFAULT_MAX_GREP_MATCHES = 40;
-const PROJECT_SCOPED_DISCOVERY_TOOLS = new Set(["ls", "grep", "search_text", "glob"]);
+const MAX_MODEL_RESULT_CHARS = DEFAULT_MAX_MODEL_RESULT_CHARS;
 
 /**
  * @deprecated Use AgentRuntimeFacade backed by AgentKernel for supported turns.
@@ -305,6 +286,7 @@ export class AgentRuntimeService {
 	private readonly gitConflictCapability: GitConflictCapability;
 	private readonly capabilityPolicy: CapabilityPolicy;
 	private readonly toolGateway: ToolGateway;
+	private readonly obsidianToolAdapter: ObsidianToolAdapter;
 	private readonly mutationApplier: MutationApplier;
 	private readonly mutationPlanStore: MutationPlanStore;
 	private readonly agentTaskStore: AgentTaskStore;
@@ -360,6 +342,9 @@ export class AgentRuntimeService {
 		this.executionGate = new ExecutionGate(this.getSettings);
 		this.capabilityPolicy = new CapabilityPolicy();
 		this.toolGateway = new ToolGateway(this.capabilityPolicy);
+		this.obsidianToolAdapter = new ObsidianToolAdapter(
+			new ObsidianToolHandlers(new ObsidianToolContext(this)),
+		);
 		this.mutationPlanStore = new MutationPlanStore({
 			storePath: () => this.runtimeStateStore.getMutationPlanStorePath(),
 		});
@@ -842,7 +827,7 @@ export class AgentRuntimeService {
 			await this.recordTaskLifecycleEvent(task);
 			return task;
 		}
-		if (this.isMaxToolIterationStop(result.assistantText)) {
+		if (this.isMaxToolIterationStop(result)) {
 			const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
 				summary: "Runtime stopped at the maximum tool iteration limit.",
 				failureReason: result.assistantText,
@@ -1226,11 +1211,14 @@ export class AgentRuntimeService {
 				payload: { summary: this.truncateText(result.parseError, 240) },
 			});
 		}
-		const safeStopped = this.isMaxToolIterationStop(result?.assistantText ?? "");
+		const safeStopped = this.isMaxToolIterationStop(result);
 		if (safeStopped) {
 			events.push({
 				type: "max_tool_iterations",
-				payload: { summary: "Maximum tool iteration limit reached." },
+				payload: {
+					status: "safe_stopped",
+					summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+				},
 			});
 		}
 		if (options.failureMessage) {
@@ -1491,8 +1479,8 @@ export class AgentRuntimeService {
 		};
 	}
 
-	private isMaxToolIterationStop(assistantText: string): boolean {
-		return assistantText.includes("Maximum tool-iteration limit reached");
+	private isMaxToolIterationStop(result: RuntimeTurnResult | undefined): boolean {
+		return result?.status === "safe_stopped" || (result?.assistantText ?? "").includes("Maximum tool-iteration limit reached");
 	}
 
 	private resolveConversationId(agentId: string | undefined): string {
@@ -1890,8 +1878,9 @@ export class AgentRuntimeService {
 			};
 		}
 
-		const overflowTip = "Maximum tool-iteration limit reached. Stopped further tool calls.";
+		const overflowTip = "Tool iteration limit reached; stopped further tool calls for this turn.";
 		return {
+			status: "safe_stopped",
 			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
 			traces,
 			rawFinalReply: finalReply,
@@ -2049,6 +2038,7 @@ export class AgentRuntimeService {
 					message: `Step ${step}: calling tool ${toolCall.name}`,
 				});
 				const toolResult = await this.executeTool(step, input, {
+					id: toolCall.id,
 					name: toolCall.name,
 					args: toolCall.args,
 				}, allowedToolSet);
@@ -2089,8 +2079,9 @@ export class AgentRuntimeService {
 			}
 		}
 
-		const overflowTip = "Maximum tool-iteration limit reached. Stopped further tool calls.";
+		const overflowTip = "Tool iteration limit reached; stopped further tool calls for this turn.";
 		return {
+			status: "safe_stopped",
 			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
 			traces,
 			rawFinalReply: finalReply,
@@ -2314,8 +2305,11 @@ export class AgentRuntimeService {
 		const depth = input.depth ?? 0;
 		const agentId = input.agentId;
 		const name = tool.name.trim().toLowerCase();
-		const args = this.normalizeToolArgs(name, tool.args ?? {});
+		const rawArgs = tool.args ?? {};
+		const originalPath = this.getStringArg(rawArgs, "path");
+		const args = this.normalizeToolArgs(name, rawArgs);
 		const runId = this.toolGovernor.createRunId(name, step);
+		const mutationToolCallId = tool.id || runId;
 		const targetPath = this.resolveToolTargetPath(name, args);
 		const scope = this.resolveScope(targetPath);
 		const shouldReportApproval = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
@@ -2367,16 +2361,17 @@ export class AgentRuntimeService {
 				: (request) => this.approvalService.requestApproval(request),
 			execute: () => {
 				this.assertActiveTaskNotCancelled();
-				return this.runToolByName(name, args, agentId, runId);
+				return this.runToolByName(name, args, agentId, mutationToolCallId);
 			},
 		});
 		this.assertActiveTaskNotCancelled();
 		const gatewayApproval = gatewayResult.approval;
-		const gatewayApprovalReason = gatewayApproval?.reason ?? gatewayResult.decision.reason;
+		const gatewayAudit = gatewayResult.audit;
+		const gatewayApprovalReason = gatewayAudit.approval?.reason ?? gatewayAudit.policy.reason;
 		if (shouldRequestToolApproval) {
 			await this.markActiveTaskToolApprovalResolved(
 				name,
-				Boolean(gatewayApproval?.allowed ?? gatewayResult.status !== "denied"),
+				Boolean(gatewayAudit.approval?.allowed ?? (gatewayAudit.policy.allow && gatewayResult.status !== "denied")),
 				gatewayApprovalReason,
 			);
 		}
@@ -2431,14 +2426,17 @@ export class AgentRuntimeService {
 
 		if (gatewayResult.status === "failed") {
 			const message = gatewayResult.error || "Unknown error";
-			const failureClass = this.toolGovernor.classifyFailure(message);
+			const failureRecovery = this.buildToolFailureRecovery(message, args, targetPath, originalPath);
+			const failureClass = gatewayAudit.execution.failureClass
+				?? failureRecovery.failureClass
+				?? this.toolGovernor.classifyFailure(message);
 			const trace: RuntimeToolTrace = {
 				runId,
 				step,
 				tool: name,
 				scope,
 				targetPath,
-				approved: Boolean(gatewayApproval?.allowed ?? gatewayResult.decision.allow),
+				approved: Boolean(gatewayAudit.approval?.allowed ?? gatewayAudit.policy.allow),
 				approvalReason: gatewayApprovalReason,
 				persistedRule: gatewayApproval?.persisted ?? false,
 				viaRule: gatewayApproval?.viaRule ?? false,
@@ -2451,11 +2449,19 @@ export class AgentRuntimeService {
 			await this.persistToolRun(trace, startedAt, new Date().toISOString());
 			return {
 				trace,
-				payload: { ok: false, tool: name, error: message },
+				payload: {
+					ok: false,
+					tool: name,
+					error: message,
+					status: "failed",
+					failureClass,
+					recovery: failureRecovery.recovery,
+					trace: this.buildToolResultTraceMetadata(args, targetPath, originalPath),
+				},
 			};
 		}
 
-		const denyCode = gatewayResult.decision.allow ? undefined : gatewayResult.decision.code;
+		const denyCode = gatewayAudit.policy.allow ? undefined : gatewayAudit.policy.code;
 		const denyReason = gatewayResult.error || gatewayApprovalReason;
 		const deniedTrace: RuntimeToolTrace = {
 			runId,
@@ -2476,8 +2482,125 @@ export class AgentRuntimeService {
 		await this.persistToolRun(deniedTrace, startedAt, new Date().toISOString());
 		return {
 			trace: deniedTrace,
-			payload: { ok: false, tool: name, error: denyReason },
+			payload: {
+				ok: false,
+				tool: name,
+				error: denyReason,
+				status: "denied",
+				failureClass: deniedTrace.failureClass,
+				recovery: {
+					recoverable: true,
+					retryable: false,
+					code: denyCode ?? deniedTrace.failureClass,
+					message: denyReason,
+				},
+				trace: this.buildToolResultTraceMetadata(args, targetPath, originalPath),
+			},
 		};
+	}
+
+	private buildToolResultTraceMetadata(args: Record<string, unknown>, targetPath: string, originalPath?: string) {
+		const inputPath = originalPath || (typeof args.path === "string" ? args.path : undefined);
+		const projectRoot = this.projectBoundaryService.getActiveProjectRoot() || this.resolvePolicyWorkspaceRoot() || undefined;
+		return {
+			inputPath,
+			targetPath,
+			resolvedPath: targetPath || undefined,
+			displayPath: targetPath || undefined,
+			projectRoot,
+		};
+	}
+
+	private buildToolFailureRecovery(
+		message: string,
+		args: Record<string, unknown>,
+		targetPath: string,
+		originalPath?: string,
+	): { failureClass?: RuntimeFailureClass; recovery: ToolResultRecovery } {
+		const retryable = this.toolGovernor.isRetryableTransportFailure(message);
+		const inputPath = originalPath || this.getStringArg(args, "path");
+		const ambiguous = this.parseCandidateList(message, /File name is (?:not unique|ambiguous):\s*([^.]+(?:\.[^.\s]+)?).*Candidates:\s*(.+)$/i);
+		if (ambiguous.length > 0) {
+			return {
+				failureClass: "invalid_input",
+				recovery: {
+					recoverable: true,
+					retryable: false,
+					code: "ambiguous_bare_filename",
+					message,
+					candidatePaths: ambiguous,
+					suggestedArgs: { path: ambiguous[0] },
+				},
+			};
+		}
+
+		if (/blocked under raw\//i.test(message)) {
+			const suggestedPath = this.buildRawWorkspaceSuggestion(targetPath || inputPath);
+			return {
+				failureClass: "invalid_input",
+				recovery: {
+					recoverable: true,
+					retryable: false,
+					code: "project_raw_write_denied",
+					message,
+					candidatePaths: suggestedPath ? [suggestedPath] : undefined,
+					suggestedArgs: suggestedPath ? { path: suggestedPath } : undefined,
+				},
+			};
+		}
+
+		if (/Vault file does not exist:/i.test(message)) {
+			const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+			const candidatePaths = targetPath && activeProjectRoot && inputPath !== targetPath ? [targetPath] : undefined;
+			return {
+				failureClass: "invalid_input",
+				recovery: {
+					recoverable: Boolean(candidatePaths?.length),
+					retryable: false,
+					code: "vault_file_not_found",
+					message,
+					candidatePaths,
+					suggestedArgs: candidatePaths?.[0] ? { path: candidatePaths[0] } : undefined,
+				},
+			};
+		}
+
+		const failureClass = this.toolGovernor.classifyFailure(message);
+		return {
+			failureClass,
+			recovery: {
+				recoverable: true,
+				retryable,
+				code: failureClass,
+				message,
+			},
+		};
+	}
+
+	private parseCandidateList(message: string, pattern: RegExp): string[] {
+		const match = message.match(pattern);
+		if (!match) {
+			return [];
+		}
+		return String(match[2] ?? "")
+			.split(",")
+			.map((item) => normalizePath(item.trim()))
+			.filter(Boolean);
+	}
+
+	private buildRawWorkspaceSuggestion(targetPath: string): string {
+		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+		const normalizedPath = normalizePath(targetPath || "");
+		const root = activeProjectRoot && activeProjectRoot !== "/" ? normalizePath(activeProjectRoot) : "";
+		const rawPrefix = root ? `${root}/raw` : "raw";
+		const workspacePrefix = root ? `${root}/workspace` : "workspace";
+		if (normalizedPath === rawPrefix) {
+			return workspacePrefix;
+		}
+		if (normalizedPath.startsWith(`${rawPrefix}/`)) {
+			return normalizePath(`${workspacePrefix}/${normalizedPath.slice(rawPrefix.length + 1)}`);
+		}
+		return workspacePrefix;
 	}
 
 	private async runToolByName(
@@ -2486,405 +2609,7 @@ export class AgentRuntimeService {
 		agentId: string,
 		toolCallId?: string,
 	): Promise<unknown> {
-		if (name === "use_skill") {
-			return this.toolUseSkill(args);
-		}
-		const manifest = findToolManifest(name);
-		if (!manifest) {
-			throw new Error(`Unsupported tool: ${name}`);
-		}
-
-		const resolver = new CapabilityResolver({
-			ls: async (payload) => this.toolList(payload),
-			read: async (payload) => this.toolRead(payload),
-			grep: async (payload) => this.toolGrep(payload),
-			search_text: async (payload) => this.toolSearchText(payload),
-			glob: async (payload) => this.toolGlob(payload),
-			...(WIKI_FEATURE_ENABLED ? { compile_wiki: async (payload) => this.toolCompileWiki(payload) } : {}),
-			memory: async (payload) => this.toolMemory(payload),
-			write: async (payload) => this.toolWrite(payload, agentId, toolCallId),
-			edit: async (payload) => this.toolEdit(payload, agentId, toolCallId),
-			delete: async (payload) => this.toolDelete(payload, agentId, toolCallId),
-			exec: async (payload) => this.toolExec(payload),
-		});
-
-		const handler = resolver.resolve(manifest.name);
-		if (!handler) {
-			throw new Error(`No capability handler bound for tool: ${manifest.name}`);
-		}
-		return handler(args, agentId);
-	}
-
-	private async toolUseSkill(args: Record<string, unknown>): Promise<unknown> {
-		const command = this.getRequiredStringArg(args, "command");
-		const reason = this.getStringArg(args, "reason");
-		const skillContext = await this.skillCommandService.buildSkillSystemContext(command, {
-			invocationMode: "auto",
-			selectionReason: reason || "Model selected the skill during runtime routing.",
-		});
-		return {
-			command: skillContext.skill.command,
-			name: skillContext.skill.name,
-			description: skillContext.skill.description,
-			loaded: true,
-			summary: `Loaded skill ${skillContext.skill.command}`,
-			systemContext: skillContext.systemContext,
-		};
-	}
-
-	private async toolMemory(args: Record<string, unknown>): Promise<unknown> {
-		const action = this.getRequiredStringArg(args, "action") as MemoryWriteInput["action"];
-		const scope = this.getRequiredStringArg(args, "scope") as MemoryWriteInput["scope"];
-		const content = this.getStringArg(args, "content");
-		const oldText = this.getStringArg(args, "old_text");
-		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		const result = await this.memoryStore.write({
-			action,
-			scope,
-			content,
-			oldText,
-			projectRoot: scope === "project" ? activeProjectRoot || undefined : undefined,
-		});
-		return result;
-	}
-
-	private async toolList(args: Record<string, unknown>): Promise<unknown> {
-		const rawPath = this.getStringArg(args, "path");
-		const maxEntries = this.getPositiveIntArg(args, "maxEntries", DEFAULT_MAX_LIST);
-		const recursive = this.getBooleanArg(args, "recursive", false);
-		const scope = this.resolveScope(rawPath);
-		if (scope === "external") {
-			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
-			}
-			const rows = await this.listExternal(rawPath, recursive, maxEntries);
-			return {
-				scope: "external",
-				path: rawPath,
-				items: rows,
-			};
-		}
-
-		const targetPath = this.resolveDefaultVaultSearchPath(rawPath);
-		if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-			throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
-		}
-
-		const rows = this.listVault(targetPath, recursive, maxEntries);
-		return {
-			scope: "vault",
-			path: targetPath,
-			items: rows,
-		};
-	}
-
-	private async toolRead(args: Record<string, unknown>): Promise<unknown> {
-		const rawPath = this.getRequiredStringArg(args, "path");
-		const maxChars = this.getPositiveIntArg(args, "maxChars", DEFAULT_MAX_READ_CHARS);
-		const scope = this.resolveScope(rawPath);
-
-		if (scope === "external") {
-			if (!this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`No permission to read external path: ${rawPath}`);
-			}
-			const stat = await fsPromises.stat(rawPath);
-			if (!stat.isFile()) {
-				throw new Error(`External path is not a file: ${rawPath}`);
-			}
-			const text = await fsPromises.readFile(rawPath, "utf8");
-			return {
-				scope: "external",
-				path: rawPath,
-				content: this.truncateText(text, maxChars),
-				truncated: text.length > maxChars,
-			};
-		}
-
-		const targetPath = this.resolveVaultFilePath(rawPath);
-		if (!this.workspaceAccessService.canReadVaultPath(targetPath)) {
-			throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
-		}
-		const file = this.vault.getAbstractFileByPath(targetPath);
-		if (!(file instanceof TFile)) {
-			throw new Error(`Vault file does not exist: ${targetPath}`);
-		}
-		const text = await this.vault.cachedRead(file);
-		return {
-			scope: "vault",
-			path: targetPath,
-			content: this.truncateText(text, maxChars),
-			truncated: text.length > maxChars,
-		};
-	}
-
-	private async toolGrep(args: Record<string, unknown>): Promise<unknown> {
-		const pattern = this.getRequiredStringArg(args, "pattern");
-		const flags = this.getStringArg(args, "flags") || "i";
-		const maxMatches = this.getPositiveIntArg(args, "maxMatches", DEFAULT_MAX_GREP_MATCHES);
-		const rawPath = this.getStringArg(args, "path");
-		const scope = this.resolveScope(rawPath);
-		const regExp = this.buildSafeRegex(pattern, flags);
-
-		const matches: Array<{ path: string; line: number; text: string }> = [];
-		if (scope === "external") {
-			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
-			}
-			const fileList = await this.collectExternalFiles(rawPath, 120);
-			for (const filePath of fileList) {
-				const text = await fsPromises.readFile(filePath, "utf8");
-				this.appendGrepMatches(matches, filePath, text, regExp, maxMatches);
-				if (matches.length >= maxMatches) break;
-			}
-		} else {
-			const targetPath = this.resolveDefaultVaultSearchPath(rawPath);
-			if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-				throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
-			}
-			const files = this.vault
-				.getFiles()
-				.filter((file) => !targetPath || this.isPathWithin(file.path, targetPath));
-			for (const file of files) {
-				if (!this.workspaceAccessService.canReadVaultPath(file.path)) {
-					continue;
-				}
-				const text = await this.vault.cachedRead(file);
-				this.appendGrepMatches(matches, file.path, text, regExp, maxMatches);
-				if (matches.length >= maxMatches) break;
-			}
-		}
-
-		return {
-			scope,
-			path: rawPath || "",
-			pattern,
-			matches,
-			truncated: matches.length >= maxMatches,
-		};
-	}
-
-	private async toolSearchText(args: Record<string, unknown>): Promise<unknown> {
-		const query = this.getRequiredStringArg(args, "query");
-		return this.toolGrep({
-			path: this.getStringArg(args, "path"),
-			pattern: this.escapeRegExp(query),
-			flags: "i",
-			maxMatches: this.getPositiveIntArg(args, "maxMatches", DEFAULT_MAX_GREP_MATCHES),
-		});
-	}
-
-	private async toolGlob(args: Record<string, unknown>): Promise<unknown> {
-		const pattern = this.getRequiredStringArg(args, "pattern");
-		const maxMatches = this.getPositiveIntArg(args, "maxMatches", MAX_TOOL_RESULT_ITEM);
-		const rawPath = this.getStringArg(args, "path");
-		const scope = this.resolveScope(rawPath);
-		const matcher = this.globToRegex(pattern);
-
-		const matched: string[] = [];
-		if (scope === "external") {
-			if (!rawPath || !this.workspaceAccessService.canReadExternalPath(rawPath)) {
-				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
-			}
-			const files = await this.collectExternalFiles(rawPath, 300);
-			for (const filePath of files) {
-				const relative = rawPath ? normalizePath(path.relative(rawPath, filePath)) : filePath;
-				const baseName = path.basename(filePath);
-				if (matcher.test(relative) || (!pattern.includes("/") && matcher.test(baseName))) {
-					matched.push(filePath);
-				}
-				if (matched.length >= maxMatches) break;
-			}
-		} else {
-			const targetPath = this.resolveDefaultVaultSearchPath(rawPath);
-			if (targetPath && !this.workspaceAccessService.canReadVaultPath(targetPath)) {
-				throw new Error(this.buildVaultScopeDeniedError(targetPath, "read"));
-			}
-			for (const file of this.vault.getFiles()) {
-				if (targetPath && !this.isPathWithin(file.path, targetPath)) {
-					continue;
-				}
-				if (!this.workspaceAccessService.canReadVaultPath(file.path)) {
-					continue;
-				}
-				const relative = targetPath ? normalizePath(path.posix.relative(targetPath, file.path)) : file.path;
-				const baseName = path.posix.basename(file.path);
-				if (matcher.test(relative) || (!pattern.includes("/") && matcher.test(baseName))) {
-					matched.push(file.path);
-				}
-				if (matched.length >= maxMatches) break;
-			}
-		}
-
-		return {
-			scope,
-			path: rawPath || "",
-			pattern,
-			files: matched,
-			truncated: matched.length >= maxMatches,
-		};
-	}
-
-	private async toolCompileWiki(args: Record<string, unknown>): Promise<unknown> {
-		const mode = this.getStringArg(args, "mode").toLowerCase();
-		if (mode === "all") {
-			return this.wikiCompileCapability.execute(undefined, true);
-		}
-
-		const requestedPaths: string[] = [];
-		const singlePath = this.getStringArg(args, "path");
-		if (singlePath) {
-			requestedPaths.push(singlePath);
-		}
-
-		const multiPaths = args["paths"];
-		if (Array.isArray(multiPaths)) {
-			for (const item of multiPaths) {
-				if (typeof item !== "string") {
-					continue;
-				}
-				const normalized = item.trim();
-				if (normalized) {
-					requestedPaths.push(normalized);
-				}
-			}
-		}
-
-		const normalized = [...new Set(requestedPaths.map((item) => normalizePath(item)))].filter(Boolean);
-		return this.wikiCompileCapability.execute(normalized.length > 0 ? normalized : undefined, false);
-	}
-
-	private async toolWrite(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
-		const pathValue = this.getRequiredStringArg(args, "path");
-		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("write only supports Vault-relative paths.");
-		}
-		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		const normalizedPath = activeProjectRoot
-			? resolveAgentWritableVaultPath(activeProjectRoot, pathValue)
-			: normalizePath(pathValue);
-		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
-		const effectivePath = resolvedExistingPath ?? normalizedPath;
-		this.assertAgentWritableVaultPath(effectivePath);
-		const modeRaw = this.getStringArg(args, "mode").toLowerCase();
-		const content = this.getRequiredStringArg(args, "content");
-		const existing = this.vault.getAbstractFileByPath(effectivePath);
-
-		let actionType: AgentActionType = "update";
-		if (modeRaw === "create") {
-			actionType = "create";
-		} else if (modeRaw === "update") {
-			actionType = "update";
-		} else {
-			actionType = existing instanceof TFile ? "update" : "create";
-		}
-
-		const beforeContent = existing instanceof TFile ? await this.vault.cachedRead(existing) : "";
-		const afterContent = content;
-		const diffSegments = this.inlineEditService.computeLineDiff(beforeContent, afterContent);
-		const editPlanId = await this.recordEditPlan({
-			agentId,
-			toolCallId,
-			tool: "write",
-			path: effectivePath,
-			before: beforeContent,
-			after: afterContent,
-			changeType: actionType === "create" ? "create" : "update",
-		});
-		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
-		return {
-			editPlanId,
-			path: effectivePath,
-			type: actionType,
-			status: applied ? "applied" : "pending_review",
-			planned: !applied,
-			applied,
-			diff: this.makeSimpleDiffSummary(beforeContent, afterContent),
-			diffPreview: this.inlineEditService.formatDiffForModel(diffSegments),
-		};
-	}
-
-	private async toolDelete(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
-		const pathValue = this.getRequiredStringArg(args, "path");
-		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("delete only supports Vault-relative paths.");
-		}
-		const normalizedPath = normalizePath(pathValue);
-		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
-		const effectivePath = resolvedExistingPath ?? normalizedPath;
-		this.assertAgentWritableVaultPath(effectivePath);
-		const beforeTarget = this.vault.getAbstractFileByPath(effectivePath);
-		if (!(beforeTarget instanceof TFile) && !(beforeTarget instanceof TFolder)) {
-			throw new Error(`Vault path does not exist: ${effectivePath}`);
-		}
-		const deletedType = beforeTarget instanceof TFolder ? "folder" : "file";
-		const beforeContent = beforeTarget instanceof TFile ? await this.vault.cachedRead(beforeTarget) : "";
-		if (deletedType === "folder") {
-			throw new Error("Folder delete cannot be represented as a reviewable mutation plan yet.");
-		}
-		const editPlanId = await this.recordEditPlan({
-			agentId,
-			toolCallId,
-			tool: "delete",
-			path: effectivePath,
-			before: beforeContent,
-			after: "",
-			changeType: "delete",
-		});
-		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
-		return {
-			editPlanId,
-			path: effectivePath,
-			type: "delete",
-			deletedType,
-			status: applied ? "applied" : "pending_review",
-			planned: !applied,
-			applied,
-		};
-	}
-
-	private async toolEdit(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
-		const pathValue = this.getRequiredStringArg(args, "path");
-		if (this.resolveScope(pathValue) === "external") {
-			throw new Error("edit only supports Vault-relative paths.");
-		}
-		const normalizedPath = normalizePath(pathValue);
-		const resolvedExistingPath = this.resolveExistingVaultFilePath(normalizedPath);
-		const effectivePath = resolvedExistingPath ?? normalizedPath;
-		this.assertAgentWritableVaultPath(effectivePath);
-		const file = this.vault.getAbstractFileByPath(effectivePath);
-		if (!(file instanceof TFile)) {
-			throw new Error(`Vault file does not exist: ${effectivePath}`);
-		}
-		const beforeContent = await this.vault.cachedRead(file);
-		const edits = this.parseEditOperations(args);
-		const editResult = this.inlineEditService.applyEdits(beforeContent, edits);
-
-		if (editResult.appliedCount === 0) {
-			throw new Error(`No matching text found: ${editResult.failedReasons.join("; ")}`);
-		}
-
-		const diffSegments = this.inlineEditService.computeLineDiff(beforeContent, editResult.result);
-		const editPlanId = await this.recordEditPlan({
-			agentId,
-			toolCallId,
-			tool: "edit",
-			path: effectivePath,
-			before: beforeContent,
-			after: editResult.result,
-			changeType: "update",
-		});
-		const applied = await this.maybeAutoApplyEditPlan(editPlanId);
-		return {
-			editPlanId,
-			path: effectivePath,
-			status: applied ? "applied" : "pending_review",
-			planned: !applied,
-			applied,
-			proposedEdits: editResult.appliedCount,
-			appliedEdits: editResult.appliedCount,
-			failedReasons: editResult.failedReasons,
-			diffPreview: this.inlineEditService.formatDiffForModel(diffSegments),
-		};
+		return this.obsidianToolAdapter.runToolByName(name, args, agentId, toolCallId);
 	}
 
 	private async recordEditPlan(input: {
@@ -3259,67 +2984,6 @@ export class AgentRuntimeService {
 			}));
 	}
 
-	private async toolExec(args: Record<string, unknown>): Promise<unknown> {
-		const settings = this.getSettings();
-		if (!this.activeRuntimeProfile.capabilities.supportsExecTool) {
-			throw new Error(`exec tool is not supported on runtime profile: ${this.activeRuntimeProfile.id}`);
-		}
-		if (!settings.agentRuntime.enableExecTool) {
-			throw new Error("exec tool is disabled. Enable it in settings first.");
-		}
-		const command = this.getRequiredStringArg(args, "command");
-		const rawArgs = args["args"];
-		const cmdArgs = Array.isArray(rawArgs)
-			? rawArgs.map((item) => String(item))
-			: [];
-		const redirectedDelete = await this.tryExecuteVaultDeleteBuiltin(command, cmdArgs);
-		if (redirectedDelete) {
-			return redirectedDelete;
-		}
-		const cwd = this.getStringArg(args, "cwd") || undefined;
-
-		const result = await this.commandExecService.exec(command, cmdArgs, { cwd, agentMode: this.activeAgentMode });
-		return {
-			exitCode: result.exitCode,
-			stdout: result.stdout,
-			stderr: result.stderr,
-			truncated: result.truncated,
-			timedOut: result.timedOut,
-		};
-	}
-
-	private async tryExecuteVaultDeleteBuiltin(command: string, args: string[]): Promise<ExecVaultDeleteRedirect | null> {
-		const normalizedCommand = command.trim().toLowerCase();
-		if (!["rmdir", "rd", "rm", "del", "erase"].includes(normalizedCommand)) {
-			return null;
-		}
-		const targetArg = args.find((item) => {
-			const normalized = item.trim();
-			return normalized.length > 0 && !normalized.startsWith("/") && !normalized.startsWith("-");
-		});
-		if (!targetArg) {
-			return null;
-		}
-		const normalizedTarget = normalizePath(targetArg.replace(/\\/g, "/"));
-		if (!normalizedTarget || path.isAbsolute(normalizedTarget)) {
-			return null;
-		}
-		const existing = this.vault.getAbstractFileByPath(normalizedTarget);
-		if (!(existing instanceof TFile) && !(existing instanceof TFolder)) {
-			return null;
-		}
-		const activeSoulId = this.getSettings().activeSoulId;
-		if (!activeSoulId) {
-			return null;
-		}
-		await this.toolDelete({ path: normalizedTarget }, activeSoulId);
-		return {
-			routedToDelete: true,
-			path: normalizedTarget,
-			deletedType: existing instanceof TFolder ? "folder" : "file",
-		};
-	}
-
 	private resolveVaultFilePath(rawPath: string): string {
 		const resolved = this.resolveExistingVaultFilePath(rawPath);
 		if (!resolved) {
@@ -3490,21 +3154,60 @@ export class AgentRuntimeService {
 	}
 
 	private normalizeToolArgs(name: string, args: Record<string, unknown>): Record<string, unknown> {
-		if (!PROJECT_SCOPED_DISCOVERY_TOOLS.has(name)) {
+		const intent = this.resolveToolPathIntent(name);
+		if (!intent) {
 			return args;
 		}
-		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		if (!activeProjectRoot) {
+		const resolution = this.createToolPathResolver().resolve({
+			intent,
+			path: this.getStringArg(args, "path"),
+		});
+		if (resolution.scope === "external") {
 			return args;
 		}
-		const rawPath = this.getStringArg(args, "path");
-		if (!rawPath || rawPath === "/" || rawPath === "\\" || rawPath === ".") {
+		if (resolution.targetPath && resolution.targetPath !== this.getStringArg(args, "path")) {
 			return {
 				...args,
-				path: this.normalizeVaultRootSearchPath(activeProjectRoot),
+				path: resolution.targetPath,
 			};
 		}
 		return args;
+	}
+
+	private resolveToolPathIntent(name: string): ToolPathIntent | null {
+		if (name === "ls") {
+			return "read_directory";
+		}
+		if (name === "grep" || name === "search_text" || name === "glob") {
+			return "search";
+		}
+		if (name === "read") {
+			return "read_file";
+		}
+		if (name === "write") {
+			return "write_file";
+		}
+		if (name === "edit") {
+			return "edit_file";
+		}
+		if (name === "delete") {
+			return "delete_path";
+		}
+		return null;
+	}
+
+	private createToolPathResolver(): ToolPathResolver {
+		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+		const vaultFiles = this.vault.getFiles().map((file) => file.path);
+		const vaultFolders = this.vault
+			.getAllLoadedFiles()
+			.filter((item) => item instanceof TFolder)
+			.map((folder) => folder.path);
+		return new ToolPathResolver({
+			activeProjectRoot,
+			vaultFiles,
+			vaultFolders,
+		});
 	}
 
 	private resolveScope(pathValue: string): ToolApprovalScope {
@@ -3642,97 +3345,11 @@ export class AgentRuntimeService {
 	}
 
 	private formatToolResultForModel(payload: RuntimeToolResultPayload): string {
-		if (payload.tool === "use_skill" && payload.ok) {
-			const data = payload.data as { command?: string; summary?: string } | undefined;
-			const summary = data?.summary?.trim() || `Loaded skill ${data?.command ?? ""}`.trim();
-			return `TOOL_RESULT ${JSON.stringify({ ok: true, tool: "use_skill", data: { command: data?.command, summary } })}`;
-		}
-		if (payload.tool === "memory" && payload.data && typeof payload.data === "object") {
-			const data = payload.data as { ok?: boolean; scope?: string; summary?: string; code?: string; reason?: string };
-			return `TOOL_RESULT ${JSON.stringify({
-				ok: Boolean(data.ok),
-				tool: "memory",
-				data: {
-					scope: data.scope,
-					summary: data.summary,
-					code: data.code,
-					reason: data.reason,
-				},
-			})}`;
-		}
-		const compact = this.safeStringify(payload, MAX_MODEL_RESULT_CHARS);
-		return `TOOL_RESULT ${compact}`;
+		return formatForModel(payload, { maxChars: MAX_MODEL_RESULT_CHARS });
 	}
 
 	private buildSummaryFromData(tool: string, data: unknown): string {
-		if (tool === "use_skill") {
-			const payload = data as { command?: string; summary?: string } | undefined;
-			return payload?.summary?.trim() || `Loaded skill ${payload?.command ?? ""}`.trim();
-		}
-		if (tool === "read") {
-			const payload = data as { path?: string; truncated?: boolean };
-			return `Read ${payload.path ?? ""}${payload.truncated ? " (truncated)" : ""}`.trim();
-		}
-		if (tool === "memory") {
-			const payload = data as { summary?: string } | undefined;
-			return payload?.summary?.trim() || "Memory updated";
-		}
-		if (tool === "ls") {
-			const payload = data as { items?: unknown[] };
-			return `Listed ${payload.items?.length ?? 0} item(s)`;
-		}
-		if (tool === "grep") {
-			const payload = data as { matches?: unknown[] };
-			return `grep matched ${payload.matches?.length ?? 0} result(s)`;
-		}
-		if (tool === "search_text") {
-			const payload = data as { matches?: unknown[] };
-			return `search_text matched ${payload.matches?.length ?? 0} result(s)`;
-		}
-		if (tool === "glob") {
-			const payload = data as { files?: unknown[] };
-			return `glob matched ${payload.files?.length ?? 0} file(s)`;
-		}
-		if (tool === "compile_wiki") {
-			const payload = data as {
-				projectId?: string;
-				requested?: number;
-				processed?: number;
-				succeeded?: number;
-				failed?: number;
-				updatedDocs?: string[];
-				updatedIndex?: string;
-				updatedLog?: string;
-			};
-			const updatedDocs = Array.isArray(payload.updatedDocs) ? payload.updatedDocs.length : 0;
-			const indexState = payload.updatedIndex ? "index updated" : "index unchanged";
-			const logState = payload.updatedLog ? "log updated" : "log unchanged";
-			return `Wiki compile ${payload.projectId ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
-		}
-		if (tool === "write") {
-			const payload = data as { path?: string; status?: string };
-			return `${payload.status === "pending_review" ? "Write planned" : "Write completed"} ${payload.path ?? ""}`.trim();
-		}
-		if (tool === "delete") {
-			const payload = data as { path?: string; deletedType?: string; status?: string };
-			const targetLabel = payload.deletedType === "folder" ? "folder" : "file";
-			return `${payload.status === "pending_review" ? "Delete planned" : "Delete completed"} ${targetLabel} ${payload.path ?? ""}`.trim();
-		}
-		if (tool === "edit") {
-			const payload = data as { path?: string; appliedEdits?: number; status?: string };
-			const verb = payload.status === "pending_review" ? "Edit planned" : "Edited";
-			return `${verb} ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
-		}
-		if (tool === "exec") {
-			const payload = data as { exitCode?: number; timedOut?: boolean; routedToDelete?: boolean; path?: string; deletedType?: string };
-			if (payload.routedToDelete) {
-				const targetLabel = payload.deletedType === "folder" ? "folder" : "file";
-				return `Exec redirected to native delete (${targetLabel} ${payload.path ?? ""})`.trim();
-			}
-			const status = payload.timedOut ? "timed out" : `exit code ${payload.exitCode ?? "?"}`;
-			return `Exec completed (${status})`;
-		}
-		return `${tool} completed`;
+		return summarizeForTrace(tool, data);
 	}
 
 	private extractLoadedSkillSystemContext(payload: RuntimeToolResultPayload): string {
@@ -3838,7 +3455,7 @@ export class AgentRuntimeService {
 				persistedRule: trace.persistedRule,
 				viaRule: trace.viaRule,
 				status: trace.status,
-				failureClass: trace.failureClass,
+				failureClass: this.toAuditFailureClass(trace.failureClass),
 				scope: trace.scope,
 				targetPath: trace.targetPath,
 				summary: trace.summary,
@@ -3849,6 +3466,10 @@ export class AgentRuntimeService {
 		} catch {
 			// Tool execution result should not fail only because audit persistence fails.
 		}
+	}
+
+	private toAuditFailureClass(failureClass: RuntimeFailureClass | undefined): ToolFailureClass | undefined {
+		return failureClass === "cancelled" ? undefined : failureClass;
 	}
 
 	private makeSimpleDiffSummary(beforeContent: string, afterContent: string): {

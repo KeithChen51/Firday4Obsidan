@@ -2,6 +2,7 @@ import type { ToolCall, ToolDefinition } from "../../types/tools";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import type { AgentTurnInput, RuntimeMutationPlan, RuntimeToolTrace } from "./contracts";
 import type { RuntimeEnvelope } from "./RuntimeProtocol";
+import type { ToolResultPayload } from "../tools/ToolResultContract";
 
 export interface ToolExecutionListRequest {
 	input?: AgentTurnInput;
@@ -18,12 +19,7 @@ export interface ToolExecutionRequest {
 
 export interface ToolExecutionResult {
 	trace: RuntimeToolTrace;
-	payload: {
-		ok: boolean;
-		tool: string;
-		data?: unknown;
-		error?: string;
-	};
+	payload: ToolResultPayload;
 	modelResultText: string;
 	loadedSkillContext?: string;
 }

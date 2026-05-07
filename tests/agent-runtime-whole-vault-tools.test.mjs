@@ -19,7 +19,7 @@ test("whole-vault runtime normalizes slash project roots to an empty vault searc
 	assert.match(source, /private normalizeVaultRootSearchPath\(rawPath: string \| undefined\): string/);
 	assert.match(source, /return normalized === "\/" \? "" : normalized;/);
 	assert.match(source, /return this\.normalizeVaultRootSearchPath\(activeProjectRoot\);/);
-	assert.match(source, /path: this\.normalizeVaultRootSearchPath\(activeProjectRoot\)/);
+	assert.match(source, /new ToolPathResolver\(\{\s*activeProjectRoot,/);
 	assert.match(source, /const normalizedTargetPath = this\.normalizeVaultRootSearchPath\(targetPath\);/);
 	assert.match(source, /if \(!basePath \|\| basePath === "\/"\) return true;/);
 });

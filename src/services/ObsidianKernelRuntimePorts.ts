@@ -11,12 +11,13 @@ import type { PromptMentionContext } from "../core/context/PromptContextEngine";
 import type { RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 import { detectRuntimeProfile } from "../platform/runtime/RuntimeProfile";
 import { TurnStateMachine } from "../core/turn-state/TurnStateMachine";
-import type { ToolDefinition } from "../types/tools";
+import type { ToolCall, ToolDefinition } from "../types/tools";
 import type { ToolGovernor } from "../core/tool-governor/ToolGovernor";
 import type { ExecutionGate } from "../core/execution/ExecutionGate";
 import type { ResolvedInvocation } from "../core/execution/ResolvedInvocation";
 import type { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
 import type { TurnEventInput } from "../core/runtime/TurnEventLog";
+import type { ToolResultPayload } from "../core/tools/ToolResultContract";
 
 interface ObsidianKernelRuntimeHost {
 	aiService: AIServiceModelDriver;
@@ -43,17 +44,12 @@ interface ObsidianKernelRuntimeHost {
 	buildAllowedToolSet(allowedTools: string[] | undefined): Set<string> | null;
 	buildNativeToolDefinitions(settings: ReturnType<ObsidianKernelRuntimeHost["getSettings"]>, allowedTools: Set<string> | null, agentMode: AgentMode): ToolDefinition[];
 	resolveAgentMode(input: RuntimeTurnInput): AgentMode;
-	executeTool(step: number, input: RuntimeTurnInput, tool: { name: string; args?: Record<string, unknown> }, allowedTools: Set<string> | null): Promise<{
+	executeTool(step: number, input: RuntimeTurnInput, tool: ToolCall, allowedTools: Set<string> | null): Promise<{
 		trace: AgentTurnResult["traces"][number];
-		payload: {
-			ok: boolean;
-			tool: string;
-			data?: unknown;
-			error?: string;
-		};
+		payload: ToolResultPayload;
 	}>;
-	formatToolResultForModel(payload: { ok: boolean; tool: string; data?: unknown; error?: string }): string;
-	extractLoadedSkillSystemContext(payload: { ok: boolean; tool: string; data?: unknown; error?: string }): string;
+	formatToolResultForModel(payload: ToolResultPayload): string;
+	extractLoadedSkillSystemContext(payload: ToolResultPayload): string;
 	buildRuntimeHistory(conversation: ChatMessage[]): ChatMessage[];
 	buildSystemPrompt(input: RuntimeTurnInput, depth: number): Promise<string>;
 	reportProgress(input: RuntimeTurnInput, event: RuntimeProgressEvent): void;
@@ -87,6 +83,7 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 				});
 			}
 			const result = await runtime.executeTool(step, runtimeInput, {
+				id: tool.id,
 				name: tool.name,
 				args: tool.args,
 			}, allowedToolSet);
@@ -321,6 +318,15 @@ function withKernelStatus(result: RuntimeTurnResult, context: AgentExecutionCont
 }
 
 function resolveKernelTurnStatus(result: RuntimeTurnResult): AgentTurnStatus {
+	if (
+		result.status === "failed" ||
+		result.status === "cancelled" ||
+		result.status === "waiting_for_approval" ||
+		result.status === "waiting_for_user" ||
+		result.status === "safe_stopped"
+	) {
+		return result.status;
+	}
 	switch (result.task?.status) {
 		case "waiting_for_approval":
 		case "waiting_for_user":

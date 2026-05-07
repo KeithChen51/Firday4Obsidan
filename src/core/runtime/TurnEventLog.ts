@@ -123,22 +123,26 @@ export class TurnEventLog {
 		}
 	}
 
-	private sanitizePayload(value: unknown, key = ""): unknown {
+	private sanitizePayload(value: unknown, key = "", redactContainerValues = false): unknown {
+		const redactChildren = redactContainerValues || this.isSensitiveContainerKey(key);
 		if (this.isSensitiveKey(key)) {
+			return "[redacted]";
+		}
+		if (redactChildren && (!value || typeof value !== "object")) {
 			return "[redacted]";
 		}
 		if (typeof value === "string") {
 			return this.redactString(this.redactSecrets(value));
 		}
 		if (Array.isArray(value)) {
-			return value.map((item) => this.sanitizePayload(item, key));
+			return value.map((item) => this.sanitizePayload(item, key, redactChildren));
 		}
 		if (!value || typeof value !== "object") {
 			return value;
 		}
 		const output: Record<string, unknown> = {};
 		for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-			output[key] = this.sanitizePayload(child, key);
+			output[key] = this.sanitizePayload(child, key, redactChildren);
 		}
 		return output;
 	}
@@ -156,10 +160,22 @@ export class TurnEventLog {
 			"secret",
 			"cookie",
 			"setcookie",
+			"endpoint",
+			"apiurl",
+			"baseurl",
 			"rawreasoning",
 			"reasoningcontent",
 			"chainofthought",
 			"cot",
+		].includes(normalized);
+	}
+
+	private isSensitiveContainerKey(key: string): boolean {
+		const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+		return [
+			"headers",
+			"requestheaders",
+			"responseheaders",
 		].includes(normalized);
 	}
 

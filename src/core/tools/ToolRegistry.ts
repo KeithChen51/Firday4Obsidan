@@ -43,6 +43,15 @@ export interface ToolListOptions {
 	allowedTools?: Iterable<string> | null;
 }
 
+const DISCOVERY_PATH_DESCRIPTION =
+	"Optional project-relative path or canonical vault path. Empty or omitted path uses the active project root when one is selected. Allowed external absolute paths may be read when supported.";
+const READ_PATH_DESCRIPTION =
+	"Project-relative path or canonical vault path. Allowed external absolute paths may be read when supported.";
+const WRITE_PATH_DESCRIPTION =
+	"Project-relative path or canonical vault path. Relative file names are normalized into the active project workspace when one is selected.";
+const DELETE_PATH_DESCRIPTION =
+	"Project-relative path or canonical vault path for the file or folder to delete.";
+
 const TOOL_CONTRACTS: ToolContract[] = [
 	{
 		name: "use_skill",
@@ -66,11 +75,11 @@ const TOOL_CONTRACTS: ToolContract[] = [
 	},
 	{
 		name: "ls",
-		description: "List files and folders in a path. Uses Vault-relative path by default.",
+		description: "List files and folders. Accepts empty paths, project-relative paths, canonical vault paths, and allowed external absolute paths when supported.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string", description: "Optional path. Relative for Vault; absolute for allowed external path." },
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
 				recursive: { type: "boolean", default: false },
 				maxEntries: { type: "number", default: 120 },
 			},
@@ -82,15 +91,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "read",
 		riskLevel: "low",
-		promptArgumentLine: '- ls: {"path":"optional path","recursive":false,"maxEntries":120}',
+		promptArgumentLine: '- ls: {"path":"optional project-relative directory path","recursive":false,"maxEntries":120}',
 	},
 	{
 		name: "read",
-		description: "Read file content from Vault or allowed external path.",
+		description: "Read file content from project-relative paths, canonical vault paths, or allowed external absolute paths when supported.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string", description: "File path." },
+				path: { type: "string", description: READ_PATH_DESCRIPTION },
 				maxChars: { type: "number", default: 10000 },
 			},
 			required: ["path"],
@@ -102,15 +111,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "read",
 		riskLevel: "low",
-		promptArgumentLine: '- read: {"path":"file path","maxChars":10000}',
+		promptArgumentLine: '- read: {"path":"project-relative or canonical file path","maxChars":10000}',
 	},
 	{
 		name: "grep",
-		description: "Search text pattern in files.",
+		description: "Search a regex pattern in files under project-relative paths, canonical vault paths, or allowed external absolute paths when supported.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
 				pattern: { type: "string" },
 				flags: { type: "string", default: "i" },
 				maxMatches: { type: "number", default: 40 },
@@ -124,15 +133,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "read",
 		riskLevel: "low",
-		promptArgumentLine: '- grep: {"path":"optional directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
+		promptArgumentLine: '- grep: {"path":"optional project-relative directory or file path","pattern":"regex","flags":"i","maxMatches":40}',
 	},
 	{
 		name: "search_text",
-		description: "Search plain text keywords in files.",
+		description: "Search plain text keywords in files under project-relative paths, canonical vault paths, or allowed external absolute paths when supported.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
 				query: { type: "string" },
 				maxMatches: { type: "number", default: 40 },
 			},
@@ -145,15 +154,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "read",
 		riskLevel: "low",
-		promptArgumentLine: '- search_text: {"path":"optional directory or file path","query":"plain text query","maxMatches":40}',
+		promptArgumentLine: '- search_text: {"path":"optional project-relative directory or file path","query":"plain text query","maxMatches":40}',
 	},
 	{
 		name: "glob",
-		description: "Find files by glob pattern.",
+		description: "Find files by glob pattern under project-relative paths, canonical vault paths, or allowed external absolute paths when supported.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
 				pattern: { type: "string" },
 				maxMatches: { type: "number", default: 80 },
 			},
@@ -166,7 +175,7 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "read",
 		riskLevel: "low",
-		promptArgumentLine: '- glob: {"path":"optional directory path","pattern":"*.md","maxMatches":80}',
+		promptArgumentLine: '- glob: {"path":"optional project-relative directory path","pattern":"*.md","maxMatches":80}',
 	},
 	{
 		name: "compile_wiki",
@@ -215,11 +224,11 @@ const TOOL_CONTRACTS: ToolContract[] = [
 	},
 	{
 		name: "write",
-		description: "Create or update a Vault file with full content.",
+		description: "Create or update a vault file with full content. Accepts project-relative paths and canonical vault paths; bare file names normalize into the active project workspace when one is selected.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: WRITE_PATH_DESCRIPTION },
 				content: { type: "string" },
 				mode: { type: "string", enum: ["create", "update", "upsert"] },
 			},
@@ -232,15 +241,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
-		promptArgumentLine: '- write: {"path":"Vault-relative path","content":"full file content","mode":"create|update|upsert"}',
+		promptArgumentLine: '- write: {"path":"project-relative or canonical file path","content":"full file content","mode":"create|update|upsert"}',
 	},
 	{
 		name: "edit",
-		description: "Apply targeted search/replace edits to a Vault file.",
+		description: "Apply targeted search/replace edits to a vault file. Accepts project-relative paths and canonical vault paths; bare file names normalize into the active project workspace when one is selected.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: WRITE_PATH_DESCRIPTION },
 				edits: {
 					type: "array",
 					items: {
@@ -264,15 +273,15 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
-		promptArgumentLine: '- edit: {"path":"Vault-relative path","edits":[{"search":"old text","replace":"new text"}]}',
+		promptArgumentLine: '- edit: {"path":"project-relative or canonical file path","edits":[{"search":"old text","replace":"new text"}]}',
 	},
 	{
 		name: "delete",
-		description: "Delete a Vault file or folder.",
+		description: "Delete a vault file or folder by project-relative paths or canonical vault path.",
 		parameters: {
 			type: "object",
 			properties: {
-				path: { type: "string" },
+				path: { type: "string", description: DELETE_PATH_DESCRIPTION },
 			},
 			required: ["path"],
 			additionalProperties: false,
@@ -283,7 +292,7 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		primary: false,
 		category: "delete",
 		riskLevel: "high",
-		promptArgumentLine: '- delete: {"path":"Vault-relative path"}',
+		promptArgumentLine: '- delete: {"path":"project-relative or canonical path"}',
 	},
 	{
 		name: "exec",

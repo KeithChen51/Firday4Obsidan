@@ -77,3 +77,15 @@ test("debug mode can expose exec only when explicitly enabled", async () => {
 	assert.ok(toolRegistry.buildPromptToolNameUnion({ agentMode: "debug", enableExecTool: true }).includes("exec"));
 	assert.ok(toolRegistry.buildNativeToolDefinitions({ agentMode: "debug", enableExecTool: true }).some((tool) => tool.name === "exec"));
 });
+
+test("prompt tool argument lines describe project-relative filesystem paths", async () => {
+	const { registry } = await loadModules();
+	const toolRegistry = registry.ToolRegistry.getInstance();
+	const lines = toolRegistry.buildPromptToolArgumentLines({ agentMode: "developer", enableExecTool: true });
+	const lineFor = (name) => lines.find((line) => line.startsWith(`- ${name}:`)) ?? "";
+
+	for (const name of ["ls", "read", "grep", "search_text", "glob", "write", "edit", "delete"]) {
+		assert.match(lineFor(name), /project-relative/i, `${name} prompt line should use project-relative guidance`);
+		assert.doesNotMatch(lineFor(name), /Vault-relative path/i, `${name} prompt line should not require vault-relative paths`);
+	}
+});

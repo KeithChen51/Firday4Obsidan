@@ -190,3 +190,97 @@ test("AgentReplayRecorder computes replay duration when terminal replay event is
 	assert.equal(summary.completedAt, "2026-05-05T00:00:09.000Z");
 	assert.equal(summary.durationMs, 9000);
 });
+
+test("AgentReplayRecorder persists tool recovery and max-iteration replay metadata", async () => {
+	const { AgentReplayRecorder, AgentExecutionContext, TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-kernel-replay-metadata-"));
+	const resolvePath = resolveTurnPath(root);
+	const recorder = new AgentReplayRecorder({
+		eventLog: new TurnEventLog({ resolveTurnPath: resolvePath }),
+	});
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const context = new AgentExecutionContext({
+		turnId: "turn-recovery-replay",
+		taskId: "task-recovery-replay",
+		traceId: "trace-recovery-replay",
+		conversationId: "conversation-recovery-replay",
+		agentId: "agent-recovery-replay",
+		mode: "ask",
+	});
+
+	context.emit({
+		type: "tool_result",
+		payload: {
+			step: 1,
+			tool: "read",
+			toolCallId: "read-missing",
+			targetPath: "Project/workspace/missing.md",
+			status: "failed",
+			failureClass: "invalid_input",
+			recovery: {
+				recoverable: true,
+				retryable: false,
+				code: "vault_file_not_found",
+				message: "Use the suggested active-project path.",
+				candidatePaths: ["Project/workspace/missing.md"],
+				suggestedArgs: { path: "Project/workspace/missing.md" },
+			},
+		},
+	});
+	context.emit({
+		type: "max_tool_iterations",
+		status: "safe_stopped",
+		payload: {
+			channel: "native",
+			maxIterations: 2,
+			status: "safe_stopped",
+			summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+		},
+	});
+	context.emit({ type: "turn_completed", status: "safe_stopped", payload: { status: "safe_stopped" } });
+
+	await recorder.recordTurn({
+		context,
+		result: {
+			turnId: context.turnId,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			status: "safe_stopped",
+			assistantText: "Tool iteration limit reached; stopped further tool calls for this turn.",
+			events: context.snapshotEvents(),
+			traces: [],
+			rawFinalReply: "",
+		},
+	});
+	const summary = reader.summarize(await reader.readTurn({
+		conversationId: context.conversationId,
+		turnId: context.turnId,
+		taskId: context.taskId,
+	}));
+
+	assert.deepEqual(summary.recoveryTimeline, [{
+		event: "tool_failed",
+		step: 1,
+		tool: "read",
+		toolCallId: "read-missing",
+		targetPath: "Project/workspace/missing.md",
+		failureClass: "invalid_input",
+		recoverable: true,
+		retryable: false,
+		code: "vault_file_not_found",
+		message: "Use the suggested active-project path.",
+		candidatePaths: ["Project/workspace/missing.md"],
+		suggestedArgs: { path: "Project/workspace/missing.md" },
+		at: summary.recoveryTimeline[0]?.at,
+	}]);
+	assert.deepEqual(summary.loopPreventionTimeline, [{
+		event: "max_tool_iterations",
+		step: 0,
+		tool: "",
+		toolCallId: "",
+		status: "safe_stopped",
+		summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+		at: summary.loopPreventionTimeline[0]?.at,
+	}]);
+});

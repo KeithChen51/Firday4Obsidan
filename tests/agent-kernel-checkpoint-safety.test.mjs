@@ -215,3 +215,127 @@ test("AgentLoopController rejects unsafe checkpoint resumes and records a distin
 	));
 	assert.equal(progress.some((event) => event.phase === "model_retry" && /checkpoint/i.test(event.message)), false);
 });
+
+test("AgentLoopController checkpoints recoverable failed tool results but marks them unsafe for auto resume", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const saved = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [{ role: "user", content: "Read a project-relative file" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: "call-missing", name: "read", args: { path: "notes/missing.md" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "I could not read that path.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool({ step, tool }) {
+				return {
+					trace: {
+						runId: "read-missing-1",
+						step,
+						tool: tool.name,
+						scope: "vault",
+						targetPath: "Project/notes/missing.md",
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "failed",
+						ok: false,
+						failureClass: "path_resolution",
+						summary: "Path not found; use the project-relative candidate.",
+						error: "Path not found",
+					},
+					payload: {
+						ok: false,
+						tool: "read",
+						status: "failed",
+						failureClass: "path_resolution",
+						error: "Path not found",
+						recovery: {
+							recoverable: true,
+							retryable: true,
+							code: "path_recovery_available",
+							candidatePaths: ["Project/notes/missing.md"],
+							suggestedArgs: { path: "Project/notes/missing.md" },
+						},
+					},
+					modelResultText: "TOOL_RESULT {\"ok\":false,\"recovery\":{\"candidatePaths\":[\"Project/notes/missing.md\"]}}",
+				};
+			},
+		},
+		checkpoint: {
+			async save(checkpoint) {
+				saved.push(checkpoint);
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-failed-tool-checkpoint",
+		taskId: "task-failed-tool-checkpoint",
+		traceId: "trace-failed-tool-checkpoint",
+		conversationId: "conversation-safe",
+		agentId: "agent-safe",
+		conversation: [],
+		userPrompt: "Read a project-relative file",
+		mode: "ask",
+		allowedTools: ["read"],
+	});
+
+	const failedToolResult = result.events.find((event) =>
+		event.type === "tool_result" && event.payload?.toolCallId === "call-missing"
+	);
+	assert.ok(failedToolResult, "expected failed tool result event");
+	assert.deepEqual(failedToolResult.payload?.recovery, {
+		recoverable: true,
+		retryable: true,
+		code: "path_recovery_available",
+		candidatePaths: ["Project/notes/missing.md"],
+		suggestedArgs: { path: "Project/notes/missing.md" },
+	});
+	assert.deepEqual(failedToolResult.payload?.candidatePaths, ["Project/notes/missing.md"]);
+	assert.deepEqual(failedToolResult.payload?.suggestedArgs, { path: "Project/notes/missing.md" });
+
+	const toolCheckpoint = saved.find((checkpoint) => checkpoint.boundary === "after_tool_result");
+	assert.ok(toolCheckpoint, "expected failed tool result checkpoint");
+	assert.equal(toolCheckpoint.safety.canAutoResume, false);
+	assert.match(toolCheckpoint.safety.reason, /tool result/i);
+	assert.deepEqual(toolCheckpoint.completedToolCalls, [{
+		toolCallId: "call-missing",
+		tool: "read",
+		status: "failed",
+		step: 1,
+		targetPath: "Project/notes/missing.md",
+	}]);
+	assert.equal(
+		toolCheckpoint.modelMessages.some((message) =>
+			message.role === "tool" && message.content.includes("Project/notes/missing.md")
+		),
+		true,
+	);
+});

@@ -89,7 +89,7 @@ function collectStudioSnapshot(rootDir) {
 				entries.push({
 					kind: "file",
 					relativePath: toPosix(path.relative(rootDir, absolutePath)),
-					content: fs.readFileSync(absolutePath, "utf8"),
+					content: normalizeLineEndings(fs.readFileSync(absolutePath, "utf8")),
 				});
 			}
 		}
