@@ -23,7 +23,7 @@ const requiredScenarioIds = [
 	"write-request-creates-mutation-plan",
 	"reject-mutation-keeps-file-unchanged",
 	"edit-conflict-becomes-conflicted",
-	"delete-requires-strict-approval",
+	"delete-creates-single-mutation-review",
 	"organize-mode-plans-links-and-tags",
 	"review-mode-detects-structure-issues",
 	"debug-profile-allows-exec",

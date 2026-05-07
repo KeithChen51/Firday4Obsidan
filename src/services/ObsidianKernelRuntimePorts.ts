@@ -121,6 +121,7 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 							hardLimit: contextSummary.hardLimit,
 							trimmedChannels: [...contextSummary.trimmedChannels],
 							overflowChannels: [...(contextSummary.overflowChannels ?? [])],
+							...(contextSummary.activeFileContext ? { activeFileContext: contextSummary.activeFileContext } : {}),
 						},
 					});
 				}
@@ -267,7 +268,8 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 }
 
 function shouldTrackHumanApproval(toolName: string): boolean {
-	return !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(toolName.trim().toLowerCase());
+	const normalized = toolName.trim().toLowerCase();
+	return normalized === "exec" || normalized === "compile_wiki";
 }
 
 function filterKernelCompatibleSideEvents(events: unknown[]): TurnEventInput[] {
@@ -289,7 +291,7 @@ function toRuntimeTurnInput(input: AgentTurnInput | undefined): RuntimeTurnInput
 		userPrompt: input?.userPrompt ?? "",
 		modelOverride: input?.modelOverride,
 		depth: input?.depth,
-		currentFilePath: input?.currentFilePath,
+		activeFileContext: input?.activeFileContext,
 		extraSystemContext: input?.extraSystemContext,
 		mentionContext: input?.mentionContext as PromptMentionContext | undefined,
 		allowedTools: input?.allowedTools,

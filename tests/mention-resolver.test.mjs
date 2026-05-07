@@ -46,6 +46,7 @@ test("mention resolver resolves active note, note, and folder tokens into struct
 	assert.equal(result.errors.length, 0);
 	assert.equal(result.channels.mentioned_notes.length, 2);
 	assert.equal(result.channels.folder_structures.length, 1);
+	assert.match(result.channels.mentioned_notes[0].body, /# Active\ncurrent note body/);
 	assert.deepEqual(
 		result.summary.tokenTypes,
 		["active_note", "folder", "note"],

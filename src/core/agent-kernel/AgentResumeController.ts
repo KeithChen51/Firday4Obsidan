@@ -127,7 +127,7 @@ export class AgentResumeController {
 			userPrompt,
 			modelOverride: snapshot.modelOverride,
 			depth: snapshot.depth,
-			currentFilePath: snapshot.currentFilePath,
+			activeFileContext: snapshot.activeFileContext,
 			extraSystemContext: snapshot.extraSystemContext,
 			allowedTools: snapshot.allowedTools,
 			agentMode: snapshot.agentMode as AgentMode | undefined,

@@ -36,6 +36,17 @@ export interface TurnReplaySummary extends TurnEventRef {
 		warnings: string[];
 		at?: string;
 	}>;
+	narrationTimeline: Array<{
+		kind: "task_acknowledged" | "plan_declared" | "stage_report";
+		summary: string;
+		source: "runtime" | "model" | "fallback";
+		status?: "running" | "completed" | "waiting" | "failed";
+		understanding?: string;
+		plan?: string[];
+		justDone?: string;
+		next?: string;
+		at?: string;
+	}>;
 	transport: {
 		retries: number;
 		exhausted: number;
@@ -242,6 +253,7 @@ export class TurnReplayReader {
 				failed: events.filter((event) => event.type === "model_failed").length,
 			},
 			reasoningTimeline: this.summarizeReasoningTimeline(events),
+			narrationTimeline: this.summarizeNarrationTimeline(events),
 			transport: {
 				retries: transportTimeline.filter((event) => event.type === "retry_scheduled").length,
 				exhausted: transportTimeline.filter((event) => event.type === "request_exhausted").length,
@@ -328,6 +340,62 @@ export class TurnReplayReader {
 			});
 		}
 		return timeline;
+	}
+
+	private summarizeNarrationTimeline(events: TurnEventRecord[]): TurnReplaySummary["narrationTimeline"] {
+		const timeline: TurnReplaySummary["narrationTimeline"] = [];
+		for (const event of events) {
+			if (event.type !== "narration_report") {
+				continue;
+			}
+			const kind = this.toNarrationKind(this.getPayloadText(event, "kind"));
+			if (!kind) {
+				continue;
+			}
+			const summary = this.getPayloadText(event, "summary") || this.getPayloadText(event, "message");
+			if (!summary) {
+				continue;
+			}
+			const source = this.toNarrationSource(this.getPayloadText(event, "source"));
+			const status = this.toNarrationStatus(this.getPayloadText(event, "status"));
+			const understanding = this.getPayloadText(event, "understanding");
+			const plan = this.getPayloadStringArray(event, "plan").filter((item) => item.trim().length > 0);
+			const justDone = this.getPayloadText(event, "justDone");
+			const next = this.getPayloadText(event, "next");
+			timeline.push({
+				kind,
+				summary,
+				source,
+				...(status ? { status } : {}),
+				...(understanding ? { understanding } : {}),
+				...(plan.length > 0 ? { plan } : {}),
+				...(justDone ? { justDone } : {}),
+				...(next ? { next } : {}),
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
+	private toNarrationKind(value: string): TurnReplaySummary["narrationTimeline"][number]["kind"] | null {
+		if (value === "task_acknowledged" || value === "plan_declared" || value === "stage_report") {
+			return value;
+		}
+		return null;
+	}
+
+	private toNarrationSource(value: string): TurnReplaySummary["narrationTimeline"][number]["source"] {
+		if (value === "runtime" || value === "model" || value === "fallback") {
+			return value;
+		}
+		return "fallback";
+	}
+
+	private toNarrationStatus(value: string): TurnReplaySummary["narrationTimeline"][number]["status"] | undefined {
+		if (value === "running" || value === "completed" || value === "waiting" || value === "failed") {
+			return value;
+		}
+		return undefined;
 	}
 
 	async readSummary(ref: TurnEventRef): Promise<TurnReplaySummary> {

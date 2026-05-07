@@ -49,7 +49,17 @@ export type AgentProcessStepStatus =
 	| "cancelled"
 	| "denied";
 
-type AgentProcessStepKey = "context" | "reasoning" | "file_change" | "approval" | "transport" | "failure" | "internal";
+type AgentProcessStepKey =
+	| "receipt"
+	| "plan"
+	| "stage_report"
+	| "context"
+	| "reasoning"
+	| "file_change"
+	| "approval"
+	| "transport"
+	| "failure"
+	| "internal";
 
 export interface AgentProcessStatusView {
 	key: AgentTrajectoryStatus;
@@ -106,6 +116,96 @@ export interface AgentProcessActionView extends AgentTrajectoryAction {
 	tone: "primary" | "secondary" | "danger";
 }
 
+export type AgentProcessTimelineStatus =
+	| "hidden"
+	| "thinking"
+	| "running"
+	| "waiting"
+	| "retrying"
+	| "recovering"
+	| "failed"
+	| "completed";
+
+export type AgentProcessTimelineItemKind =
+	| "receipt"
+	| "plan"
+	| "stage_report"
+	| "context"
+	| "reasoning"
+	| "tool_batch"
+	| "file_change"
+	| "validation"
+	| "retry"
+	| "approval"
+	| "blocked"
+	| "finalizing"
+	| "done";
+
+export type AgentProcessTimelineItemStatus =
+	| "pending"
+	| "running"
+	| "done"
+	| "warning"
+	| "error"
+	| "waiting";
+
+export interface AgentProcessTimelineDetailView {
+	title?: string;
+	lines: string[];
+	initiallyExpanded: boolean;
+}
+
+export interface AgentProcessTimelineActionView {
+	id: AgentTrajectoryAction["id"];
+	label: string;
+	enabled: boolean;
+	tone: "primary" | "secondary" | "danger";
+	targetId?: string;
+	reason?: string;
+}
+
+export interface AgentProcessTimelineItemView {
+	id: string;
+	kind: AgentProcessTimelineItemKind;
+	status: AgentProcessTimelineItemStatus;
+	title: string;
+	summary: string;
+	meta?: string;
+	detail?: AgentProcessTimelineDetailView;
+	artifactRefs?: string[];
+	actionRefs?: string[];
+}
+
+export interface AgentProcessTimelineStatusBarView {
+	phase: string;
+	action: string;
+	elapsed: string;
+	status: AgentProcessTimelineStatus;
+}
+
+export interface AgentProcessTimelineGroupView {
+	id: string;
+	title: string;
+	status: AgentProcessTimelineItemStatus;
+	summary: string;
+	defaultExpanded: boolean;
+	items: AgentProcessTimelineItemView[];
+}
+
+export interface AgentProcessTimelineView {
+	title: string;
+	status: AgentProcessTimelineStatus;
+	defaultExpanded: boolean;
+	canExpand: boolean;
+	collapsedSummary?: string;
+	statusBar: AgentProcessTimelineStatusBarView | null;
+	groups: AgentProcessTimelineGroupView[];
+	items: AgentProcessTimelineItemView[];
+	actions: AgentProcessTimelineActionView[];
+	finalArtifacts: AgentProcessArtifactView[];
+	diffSummary: AgentProcessDiffSummaryView | null;
+}
+
 export interface AgentProcessStepActionView {
 	id: string;
 	label: string;
@@ -154,6 +254,7 @@ export interface AgentProcessPanelViewModel {
 		headline: string;
 		summary: string;
 	};
+	timeline: AgentProcessTimelineView | null;
 	visibleSteps: AgentProcessStepView[];
 	evidence: AgentProcessEvidenceView[];
 	mutations: AgentProcessMutationView[];
@@ -194,6 +295,17 @@ export function buildAgentProcessPanelViewModel(
 	const diffSummary = buildDiffSummary(resultArtifacts);
 	const hasExpandableContent = resolveHasExpandableContent(surface, visibleSteps);
 	const headline = headerHeadline(snapshot, mode, triggerReason, durationSeconds);
+	const timeline = buildTimelineView(snapshot, options, {
+		mode,
+		surface,
+		triggerReason,
+		durationSeconds,
+		visibleSteps,
+		actions,
+		resultArtifacts,
+		diffSummary,
+		recovery,
+	});
 
 	return {
 		mode,
@@ -210,6 +322,7 @@ export function buildAgentProcessPanelViewModel(
 			headline,
 			summary: headerSummary(snapshot, visibleSteps),
 		},
+		timeline,
 		visibleSteps,
 		evidence,
 		mutations,
@@ -243,6 +356,7 @@ function createEmptyViewModel(): AgentProcessPanelViewModel {
 			headline: "FRIDAY is ready",
 			summary: "",
 		},
+		timeline: null,
 		visibleSteps: [],
 		evidence: [],
 		mutations: [],
@@ -333,6 +447,7 @@ function resolveTriggerReason(
 		return "memory_activity";
 	}
 	if (visibleItems.some((item) =>
+		item.kind === "narration" ||
 		item.kind === "context" ||
 		item.kind === "reasoning" ||
 		item.kind === "model" ||
@@ -438,6 +553,606 @@ function headerSummary(snapshot: AgentTrajectorySnapshot, visibleSteps: AgentPro
 	return shortText(snapshot.summary || visibleSteps.at(-1)?.summary || "");
 }
 
+interface TimelineBuildContext {
+	mode: AgentProcessPanelMode;
+	surface: AgentProcessSurface;
+	triggerReason: AgentProcessTriggerReason | null;
+	durationSeconds: number;
+	visibleSteps: AgentProcessStepView[];
+	actions: AgentProcessActionView[];
+	resultArtifacts: AgentProcessArtifactView[];
+	diffSummary: AgentProcessDiffSummaryView | null;
+	recovery: AgentProcessRecoveryView | null;
+}
+
+function buildTimelineView(
+	snapshot: AgentTrajectorySnapshot,
+	_options: BuildAgentProcessPanelViewModelOptions,
+	context: TimelineBuildContext,
+): AgentProcessTimelineView | null {
+	if (context.surface === "hidden") {
+		return null;
+	}
+	const status = timelineStatus(snapshot, context);
+	if (status === "thinking") {
+		return {
+			title: "FRIDAY 思考中",
+			status,
+			defaultExpanded: false,
+			canExpand: false,
+			collapsedSummary: shortText(snapshot.summary || "正在整理回答。"),
+			statusBar: null,
+			groups: [],
+			items: [],
+			actions: [],
+			finalArtifacts: context.resultArtifacts,
+			diffSummary: context.diffSummary,
+		};
+	}
+	const items = buildTimelineItems(snapshot, context);
+	const actions = buildTimelineActions(context.actions, status);
+	const groups = buildTimelineGroups(items, status);
+	return {
+		title: timelineTitle(status, context.durationSeconds),
+		status,
+		defaultExpanded: status === "running" || status === "retrying" || status === "recovering" || status === "waiting",
+		canExpand: items.length > 0,
+		collapsedSummary: collapsedTimelineSummary(snapshot, context, status, items),
+		statusBar: buildTimelineStatusBar(groups, status, context.durationSeconds),
+		groups,
+		items,
+		actions,
+		finalArtifacts: context.resultArtifacts,
+		diffSummary: context.diffSummary,
+	};
+}
+
+function hasRecoverableToolWarning(snapshot: AgentTrajectorySnapshot): boolean {
+	const hasToolFailure = snapshot.items.some((item) =>
+		item.kind === "tool" && (item.status === "failed" || item.status === "denied")
+	);
+	const hasContinuingWork = snapshot.items.some((item) => item.status === "running" || item.status === "waiting");
+	return hasToolFailure && hasContinuingWork;
+}
+
+function timelineStatus(
+	snapshot: AgentTrajectorySnapshot,
+	context: TimelineBuildContext,
+): AgentProcessTimelineStatus {
+	if (snapshot.status === "waiting_for_approval" || snapshot.status === "waiting_for_user" || context.triggerReason === "mutation_review") {
+		return "waiting";
+	}
+	if (context.triggerReason === "transport_retry" && snapshot.status === "running") {
+		return "retrying";
+	}
+	if (snapshot.status === "running" && hasRecoverableToolWarning(snapshot)) {
+		return "recovering";
+	}
+	if (snapshot.status === "failed" || snapshot.status === "cancelled" || snapshot.status === "safe_stopped" || context.recovery) {
+		return "failed";
+	}
+	if (snapshot.status === "completed") {
+		return "completed";
+	}
+	if (snapshot.status === "running") {
+		return context.mode === "simple_thinking" ? "thinking" : "running";
+	}
+	return "hidden";
+}
+
+function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: number): string {
+	const duration = formatDuration(durationSeconds);
+	switch (status) {
+		case "recovering":
+			return `执行遇到问题，正在换一种方式继续 · ${duration}`;
+		case "completed":
+			return `已处理 ${duration}`;
+		case "waiting":
+			return "等待确认";
+		case "retrying":
+			return `正在重试 ${duration}`;
+		case "failed":
+			return "运行遇到问题";
+		case "running":
+			return `正在处理 ${duration}`;
+		case "thinking":
+			return "FRIDAY 思考中";
+		default:
+			return "FRIDAY";
+	}
+}
+
+function collapsedTimelineSummary(
+	snapshot: AgentTrajectorySnapshot,
+	context: TimelineBuildContext,
+	status: AgentProcessTimelineStatus,
+	items: AgentProcessTimelineItemView[],
+): string {
+	if (status === "waiting") {
+		return "FRIDAY 准备修改文件，需要你确认后继续。";
+	}
+	if (status === "retrying") {
+		return "模型连接不稳定，正在恢复。";
+	}
+	if (status === "recovering") {
+		return "执行遇到问题，正在换一种方式继续。";
+	}
+	if (status === "failed") {
+		return sanitizeTimelineSummary(context.recovery?.summary || snapshot.failure?.message || snapshot.summary || "运行遇到问题，可以重试。");
+	}
+	if (status === "completed") {
+		const changedCount = context.resultArtifacts.length;
+		if (changedCount > 0) {
+			return `完成：已更新 ${changedCount} 个文件`;
+		}
+		return "完成：本次工作已结束。";
+	}
+	return sanitizeTimelineSummary(items.find((item) => item.status === "running")?.summary || snapshot.summary || items.at(-1)?.summary || "");
+}
+
+function buildTimelineItems(
+	snapshot: AgentTrajectorySnapshot,
+	context: TimelineBuildContext,
+): AgentProcessTimelineItemView[] {
+	const items: AgentProcessTimelineItemView[] = [];
+	if (shouldAddReceiptItem(context)) {
+		items.push({
+			id: "timeline:receipt",
+			kind: "receipt",
+			status: "done",
+			title: "收到任务",
+			summary: receiptSummary(snapshot),
+		});
+	}
+	for (const step of context.visibleSteps) {
+		items.push(timelineItemFromStep(step, snapshot));
+	}
+	if (snapshot.status === "completed" && context.visibleSteps.length > 0) {
+		items.push({
+			id: "timeline:done",
+			kind: "done",
+			status: "done",
+			title: "完成",
+			summary: doneTimelineSummary(snapshot, context),
+		});
+	}
+	return items;
+}
+
+function buildTimelineGroups(
+	items: AgentProcessTimelineItemView[],
+	timelineStatusValue: AgentProcessTimelineStatus,
+): AgentProcessTimelineGroupView[] {
+	const groups = new Map<string, AgentProcessTimelineGroupView>();
+	for (const item of items) {
+		const id = timelineGroupIdForItem(item);
+		let group = groups.get(id);
+		if (!group) {
+			group = {
+				id,
+				title: timelineGroupTitle(id),
+				status: "pending",
+				summary: "",
+				defaultExpanded: false,
+				items: [],
+			};
+			groups.set(id, group);
+		}
+		group.items.push(item);
+	}
+	const result = [...groups.values()].map((group) => ({
+		...group,
+		status: timelineGroupStatus(group.items),
+		summary: timelineGroupSummary(group.items),
+	}));
+	const activeIndex = result.findIndex((group) =>
+		group.status === "running" ||
+		group.status === "waiting" ||
+		group.status === "warning" ||
+		group.status === "error"
+	);
+	if (timelineStatusValue !== "completed" && activeIndex >= 0) {
+		const activeGroup = result[activeIndex];
+		if (activeGroup) {
+			activeGroup.defaultExpanded = true;
+		}
+	}
+	return result;
+}
+
+function buildTimelineStatusBar(
+	groups: AgentProcessTimelineGroupView[],
+	status: AgentProcessTimelineStatus,
+	durationSeconds: number,
+): AgentProcessTimelineStatusBarView | null {
+	if (groups.length === 0) {
+		return null;
+	}
+	const activeGroup = groups.find((group) => group.defaultExpanded) ?? groups.at(-1);
+	if (!activeGroup) {
+		return null;
+	}
+	const activeItem = activeGroup.items.find((item) =>
+		item.status === "running" ||
+		item.status === "waiting" ||
+		item.status === "warning" ||
+		item.status === "error"
+	) ?? activeGroup.items.at(-1);
+	return {
+		phase: activeGroup.title,
+		action: activeItem?.title || activeGroup.summary || activeGroup.title,
+		elapsed: formatDuration(durationSeconds),
+		status,
+	};
+}
+
+function timelineGroupIdForItem(item: AgentProcessTimelineItemView): string {
+	switch (item.kind) {
+		case "receipt":
+			return "receipt";
+		case "plan":
+		case "reasoning":
+			return "plan";
+		case "approval":
+		case "validation":
+		case "blocked":
+			return "check";
+		case "done":
+		case "finalizing":
+			return "complete";
+		default:
+			return "execute";
+	}
+}
+
+function timelineGroupTitle(id: string): string {
+	switch (id) {
+		case "receipt":
+			return "收到任务";
+		case "plan":
+			return "计划";
+		case "execute":
+			return "执行";
+		case "check":
+			return "检查";
+		case "complete":
+			return "完成";
+		default:
+			return "执行";
+	}
+}
+
+function timelineGroupStatus(items: AgentProcessTimelineItemView[]): AgentProcessTimelineItemStatus {
+	if (items.some((item) => item.status === "running")) {
+		return "running";
+	}
+	if (items.some((item) => item.status === "waiting")) {
+		return "waiting";
+	}
+	if (items.some((item) => item.status === "error")) {
+		return "error";
+	}
+	if (items.some((item) => item.status === "warning")) {
+		return "warning";
+	}
+	if (items.length > 0 && items.every((item) => item.status === "done")) {
+		return "done";
+	}
+	return "pending";
+}
+
+function timelineGroupSummary(items: AgentProcessTimelineItemView[]): string {
+	const activeItem = items.find((item) => item.status === "running" || item.status === "waiting") ?? items.at(-1);
+	return activeItem?.summary || activeItem?.title || "";
+}
+
+function shouldAddReceiptItem(context: TimelineBuildContext): boolean {
+	return context.mode !== "simple_thinking" &&
+		context.visibleSteps.length > 0 &&
+		!context.visibleSteps.some((step) => step.id.includes(":receipt:"));
+}
+
+function receiptSummary(snapshot: AgentTrajectorySnapshot): string {
+	const summary = sanitizeTimelineSummary(snapshot.headline || snapshot.summary || "");
+	if (!summary || /^Agent\b/i.test(summary)) {
+		return "FRIDAY 已收到任务，开始按当前上下文处理。";
+	}
+	return shortText(summary, 120);
+}
+
+function doneTimelineSummary(
+	snapshot: AgentTrajectorySnapshot,
+	context: TimelineBuildContext,
+): string {
+	if (context.resultArtifacts.length > 0) {
+		return `本次已完成 ${context.resultArtifacts.length} 个文件产物。`;
+	}
+	return "本次工作已完成。";
+}
+
+function timelineItemFromStep(
+	step: AgentProcessStepView,
+	snapshot: AgentTrajectorySnapshot,
+): AgentProcessTimelineItemView {
+	const kind = timelineKindForStep(step);
+	const status = timelineStatusForStep(step.status, kind);
+	const title = timelineTitleForStep(step, kind);
+	const summary = timelineSummaryForStep(step, snapshot, kind, status);
+	const meta = timelineMetaForStep(step, kind);
+	const detail = timelineDetailForStep(step, kind, [title, summary, meta]);
+	const actionRefs = step.actions
+		.filter((action) => action.kind === "control" && action.action)
+		.map((action) => action.action?.id)
+		.filter((value): value is AgentTrajectoryAction["id"] => Boolean(value));
+	return {
+		id: `timeline:${step.id}`,
+		kind,
+		status,
+		title,
+		summary,
+		...(meta ? { meta } : {}),
+		...(detail ? { detail } : {}),
+		...(actionRefs.length > 0 ? { actionRefs } : {}),
+	};
+}
+
+function timelineKindForStep(step: AgentProcessStepView): AgentProcessTimelineItemKind {
+	if (step.id.includes(":approval:") || step.status === "waiting_for_approval") {
+		return "approval";
+	}
+	if (step.id.includes(":transport:")) {
+		return "retry";
+	}
+	if (step.id.includes(":receipt:")) {
+		return "receipt";
+	}
+	if (step.id.includes(":plan:")) {
+		return "plan";
+	}
+	if (step.id.includes(":stage_report:")) {
+		return "stage_report";
+	}
+	if (step.id.includes(":failure:")) {
+		return "blocked";
+	}
+	if (step.id.includes(":file_change:")) {
+		return "file_change";
+	}
+	if (step.id.includes(":reasoning:")) {
+		return "reasoning";
+	}
+	if (step.id.includes(":context:")) {
+		return "context";
+	}
+	return "tool_batch";
+}
+
+function timelineStatusForStep(
+	status: AgentProcessStepStatus,
+	kind: AgentProcessTimelineItemKind,
+): AgentProcessTimelineItemStatus {
+	if (kind === "approval" || status === "waiting_for_approval") {
+		return "waiting";
+	}
+	if (kind === "retry" && status !== "failed") {
+		return status === "running" ? "running" : "warning";
+	}
+	switch (status) {
+		case "running":
+			return "running";
+		case "completed":
+			return "done";
+		case "retryable":
+		case "denied":
+		case "cancelled":
+			return "warning";
+		case "failed":
+			return "error";
+		default:
+			return "pending";
+	}
+}
+
+function timelineTitleForStep(
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+): string {
+	switch (kind) {
+		case "context":
+			return "读取项目现状";
+		case "receipt":
+			return "收到任务";
+		case "plan":
+			return "整理方案";
+		case "stage_report":
+			return "阶段性汇报";
+		case "reasoning":
+			return "整理方案";
+		case "file_change":
+			return "创建/修改文件";
+		case "approval":
+			return "等待确认";
+		case "retry":
+			return "处理连接重试";
+		case "blocked":
+			return step.status === "retryable" ? "遇到可恢复问题" : "运行遇到问题";
+		default:
+			return "执行操作";
+	}
+}
+
+function timelineSummaryForStep(
+	step: AgentProcessStepView,
+	snapshot: AgentTrajectorySnapshot,
+	kind: AgentProcessTimelineItemKind,
+	status: AgentProcessTimelineItemStatus,
+): string {
+	if (kind === "approval") {
+		const count = pendingMutationCountForSnapshot(snapshot);
+		return count > 0
+			? `FRIDAY 准备修改 ${count} 个文件，需要你确认后继续。`
+			: "FRIDAY 准备修改文件，需要你确认后继续。";
+	}
+	if (kind === "retry") {
+		return status === "running" ? "模型连接不稳定，正在恢复。" : "模型连接出现波动，已记录恢复过程。";
+	}
+	if (kind === "context") {
+		const fileCount = step.fileRefs.length;
+		if (fileCount > 0) {
+			return fileCount === 1 ? "已查看相关文件和项目上下文。" : `已查看 ${fileCount} 个相关文件和项目上下文。`;
+		}
+		return sanitizeTimelineSummary(step.summary || "已读取项目上下文。");
+	}
+	if (kind === "receipt" || kind === "plan" || kind === "stage_report") {
+		return sanitizeTimelineSummary(step.summary);
+	}
+	if (kind === "reasoning") {
+		return reasoningTimelineSummary(step.summary);
+	}
+	if (kind === "file_change") {
+		const fileCount = step.fileRefs.length;
+		if (status === "done") {
+			return fileCount > 0 ? `已完成 ${fileCount} 个文件改动。` : sanitizeTimelineSummary(step.summary || "已完成文件改动。");
+		}
+		return fileCount > 0 ? `已准备 ${fileCount} 个文件改动。` : sanitizeTimelineSummary(step.summary || "已准备文件改动。");
+	}
+	return sanitizeTimelineSummary(step.summary);
+}
+
+function pendingMutationCountForSnapshot(snapshot: AgentTrajectorySnapshot): number {
+	return snapshot.mutations.filter((mutation) => mutation.event === "planned").length;
+}
+
+function reasoningTimelineSummary(summary: string): string {
+	const sanitized = sanitizeTimelineSummary(summary);
+	if (!sanitized || /received model reasoning/i.test(sanitized)) {
+		return "FRIDAY 已整理当前判断。";
+	}
+	const sentences = sanitized.split(/(?<=[。.!?])\s+/).filter(Boolean).slice(0, 2);
+	return sentences.join(" ") || sanitized;
+}
+
+function timelineMetaForStep(step: AgentProcessStepView, kind: AgentProcessTimelineItemKind): string {
+	if (kind === "context") {
+		const commandCount = step.actions.filter((action) => action.kind === "event").length;
+		return commandCount > 0 ? `已运行 ${commandCount} 条命令` : "";
+	}
+	if (kind === "retry") {
+		return retryAttemptMeta(step.summary);
+	}
+	if (kind === "file_change" && step.fileRefs.length > 0) {
+		return `${step.fileRefs.length} 个文件`;
+	}
+	return "";
+}
+
+function retryAttemptMeta(value: string): string {
+	const match = value.match(/attempt\s+(\d+)\s*\/\s*(\d+)/i) ?? value.match(/第\s*(\d+)\s*\/\s*(\d+)\s*次/);
+	if (!match) {
+		return "";
+	}
+	return `第 ${match[1]}/${match[2]} 次重试`;
+}
+
+function timelineDetailForStep(
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[] = [],
+): AgentProcessTimelineDetailView | undefined {
+	const lines: string[] = [];
+	const visible = new Set(visibleTexts.map(normalizeTimelineDedupeText).filter(Boolean));
+	for (const action of step.actions) {
+		if (action.kind !== "event") {
+			continue;
+		}
+		const rawLines = (action.detail || action.label).split(/\r?\n/);
+		for (const rawLine of rawLines) {
+			const line = sanitizeTimelineDetail(rawLine, kind);
+			const normalized = normalizeTimelineDedupeText(line);
+			if (line && normalized && !visible.has(normalized) && !lines.some((item) => normalizeTimelineDedupeText(item) === normalized)) {
+				lines.push(line);
+			}
+		}
+	}
+	for (const file of step.fileRefs) {
+		const normalized = normalizeTimelineDedupeText(file.path);
+		if (normalized && !visible.has(normalized) && !lines.some((item) => normalizeTimelineDedupeText(item) === normalized)) {
+			lines.push(file.path);
+		}
+	}
+	if (lines.length === 0) {
+		return undefined;
+	}
+	return {
+		title: "技术细节",
+		lines: lines.slice(0, 6),
+		initiallyExpanded: false,
+	};
+}
+
+function sanitizeTimelineDetail(value: string, kind: AgentProcessTimelineItemKind): string {
+	if (kind === "retry") {
+		return retryAttemptMeta(value) || "连接恢复记录。";
+	}
+	if (/Context package built before|context_ready/i.test(value)) {
+		return "";
+	}
+	return sanitizeTimelineSummary(value);
+}
+
+function sanitizeTimelineSummary(value: string): string {
+	const text = shortText(value, 140);
+	if (!text) {
+		return "";
+	}
+	if (/Context package built before|context_ready/i.test(text)) {
+		return "已整理上下文，准备进入下一步。";
+	}
+	if (/received model reasoning/i.test(text)) {
+		return "FRIDAY 已整理当前判断。";
+	}
+	if (/^Listed\s+\d+\s+item/i.test(text)) {
+		return "已查看目录内容。";
+	}
+	if (/^Tool requested\.?$/i.test(text)) {
+		return "正在执行操作。";
+	}
+	if (/task failed/i.test(text)) {
+		return "运行遇到问题。";
+	}
+	if (/HTTP\s+\d+|status\s+\d+|backoff|request id|gateway|transport/i.test(text)) {
+		return "模型连接不稳定，正在恢复。";
+	}
+	return text;
+}
+
+function normalizeTimelineDedupeText(value: string): string {
+	return value
+		.trim()
+		.toLowerCase()
+		.replace(/[。.!?]+$/g, "")
+		.replace(/\s+/g, " ");
+}
+
+function buildTimelineActions(
+	actions: AgentProcessActionView[],
+	status: AgentProcessTimelineStatus,
+): AgentProcessTimelineActionView[] {
+	if (status !== "waiting" && status !== "failed") {
+		return [];
+	}
+	return actions
+		.filter((action) => action.id !== "view_replay")
+		.map((action) => ({
+			id: action.id,
+			label: action.label,
+			enabled: action.enabled,
+			tone: action.tone,
+			...(action.targetId ? { targetId: action.targetId } : {}),
+			...(action.reason ? { reason: action.reason } : {}),
+		}));
+}
+
 function buildVisibleSteps(
 	snapshot: AgentTrajectorySnapshot,
 	visibleItems: AgentTrajectoryItem[],
@@ -485,6 +1200,7 @@ function hasVisibleProcessTrigger(
 	return visibleItems.some((item) =>
 		item.kind === "context" ||
 		item.kind === "reasoning" ||
+		item.kind === "narration" ||
 		item.kind === "tool" ||
 		item.kind === "approval" ||
 		item.kind === "mutation" ||
@@ -516,6 +1232,9 @@ function createStepBuilder(key: AgentProcessStepKey, item: AgentTrajectoryItem):
 }
 
 function shouldSplitStep(previous: StepBuilder, item: AgentTrajectoryItem, key: AgentProcessStepKey): boolean {
+	if (key === "receipt" || key === "plan" || key === "stage_report") {
+		return true;
+	}
 	if (key === "approval" || key === "failure" || key === "transport") {
 		return true;
 	}
@@ -606,6 +1325,18 @@ function failureToItem(snapshot: AgentTrajectorySnapshot): AgentTrajectoryItem {
 }
 
 function semanticStepKey(item: AgentTrajectoryItem): AgentProcessStepKey {
+	if (item.kind === "narration") {
+		if (item.narrationKind === "task_acknowledged") {
+			return "receipt";
+		}
+		if (item.narrationKind === "plan_declared") {
+			return "plan";
+		}
+		if (item.narrationKind === "stage_report") {
+			return "stage_report";
+		}
+		return "stage_report";
+	}
 	if (item.kind === "approval") {
 		return "approval";
 	}
@@ -680,9 +1411,15 @@ function deriveStepStatus(
 		return "waiting_for_approval";
 	}
 	if (builder.items.some((item) => item.status === "failed")) {
+		if (snapshot.status === "running" && builder.items.some((item) => item.status === "running" || item.status === "waiting")) {
+			return "running";
+		}
 		return recovery?.retryable || snapshot.failure?.retryable ? "retryable" : "failed";
 	}
 	if (builder.items.some((item) => item.status === "denied")) {
+		if (snapshot.status === "running" && builder.items.some((item) => item.status === "running" || item.status === "waiting")) {
+			return "running";
+		}
 		return "denied";
 	}
 	if (builder.items.some((item) => item.status === "cancelled")) {
@@ -696,6 +1433,12 @@ function deriveStepStatus(
 
 function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): string {
 	switch (builder.key) {
+		case "receipt":
+			return "收到任务";
+		case "plan":
+			return "整理方案";
+		case "stage_report":
+			return "阶段性汇报";
 		case "context":
 			return "读取上下文";
 		case "reasoning":
@@ -729,6 +1472,9 @@ function summaryForStep(
 		return firstMeaningfulDetail(builder.items);
 	}
 	if (builder.key === "transport") {
+		return firstMeaningfulDetail(builder.items);
+	}
+	if (builder.key === "receipt" || builder.key === "plan" || builder.key === "stage_report") {
 		return firstMeaningfulDetail(builder.items);
 	}
 	if (status === "running") {
@@ -829,10 +1575,13 @@ function ensureChangeApprovalControls(
 }
 
 function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionView {
+	const narrationDetail = item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
+		? item.narrationPlan.join("\n")
+		: cleanText(item.detail);
 	return {
 		id: item.id,
 		label: item.title,
-		detail: cleanText(item.detail),
+		detail: narrationDetail,
 		kind: "event",
 		tone: itemTone(item.status),
 		status: item.status,
@@ -1068,6 +1817,16 @@ function calculateDurationSeconds(
 		return 0;
 	}
 	return Math.max(0, Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 1000));
+}
+
+function formatDuration(seconds: number): string {
+	const safeSeconds = Math.max(0, Math.round(seconds));
+	if (safeSeconds < 60) {
+		return `${safeSeconds}s`;
+	}
+	const minutes = Math.floor(safeSeconds / 60);
+	const remainingSeconds = safeSeconds % 60;
+	return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 }
 
 function resolveNow(nowOption?: Date | (() => Date)): Date {

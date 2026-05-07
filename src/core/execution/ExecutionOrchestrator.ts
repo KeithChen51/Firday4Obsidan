@@ -7,13 +7,14 @@ import type {
 import type { SkillCommandService } from "../../services/SkillCommandService";
 import type { ExecutionDecision } from "./ExecutionDecision";
 import type { PromptMentionContext } from "../context/PromptContextEngine";
+import type { ActiveFileContext } from "../context/ActiveFileContext";
 
 export interface ExecutionOrchestratorRunOptions {
 	agentId: string;
 	conversationId?: string;
 	conversation: ChatMessage[];
 	modelOverride?: string;
-	currentFilePath?: string;
+	activeFileContext?: ActiveFileContext;
 	extraSystemContext?: string;
 	mentionContext?: PromptMentionContext;
 	allowedTools?: string[];
@@ -34,7 +35,7 @@ export class ExecutionOrchestrator {
 		const extraSystemContext = await this.buildSystemContext(
 			decision,
 			options.extraSystemContext,
-			options.currentFilePath,
+			options.activeFileContext,
 		);
 
 		return this.agentRuntimeFacade.runTurn({
@@ -43,7 +44,7 @@ export class ExecutionOrchestrator {
 			conversation: options.conversation,
 			userPrompt: decision.runtimePrompt,
 			modelOverride: options.modelOverride,
-			currentFilePath: options.currentFilePath,
+			activeFileContext: options.activeFileContext,
 			extraSystemContext,
 			mentionContext: options.mentionContext,
 			allowedTools: decision.allowedTools?.length ? decision.allowedTools : options.allowedTools,
@@ -55,7 +56,7 @@ export class ExecutionOrchestrator {
 	async buildSystemContext(
 		decision: ExecutionDecision,
 		baseSystemContext = "",
-		currentFilePath?: string,
+		activeFileContext?: ActiveFileContext,
 	): Promise<string> {
 		let extraSystemContext = baseSystemContext.trim();
 		if (decision.mode === "runtime_with_skill_context" && decision.requestedSkillName) {
@@ -67,7 +68,7 @@ export class ExecutionOrchestrator {
 				? `${skillContext.systemContext}\n\n${extraSystemContext}`
 				: skillContext.systemContext;
 		} else {
-			const skillCatalogContext = await this.skillCommandService.buildSkillCatalogContext({ currentFilePath });
+			const skillCatalogContext = await this.skillCommandService.buildSkillCatalogContext({ activeFileContext });
 			extraSystemContext = extraSystemContext
 				? `${skillCatalogContext}\n\n${extraSystemContext}`
 				: skillCatalogContext;

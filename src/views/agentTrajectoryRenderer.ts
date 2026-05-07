@@ -4,9 +4,9 @@ import {
 	type AgentProcessActionView,
 	type AgentProcessArtifactView,
 	type AgentProcessDiffSummaryView,
-	type AgentProcessPanelViewModel,
-	type AgentProcessStepActionView,
-	type AgentProcessStepView,
+	type AgentProcessTimelineActionView,
+	type AgentProcessTimelineItemView,
+	type AgentProcessTimelineView,
 } from "./agentProcessPanelViewModel";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
@@ -45,21 +45,18 @@ export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOpti
 	}
 
 	const view = buildAgentProcessPanelViewModel(snapshot);
-	if (!view.shouldRenderProcessPanel) {
+	if (!view.shouldRenderProcessPanel || !view.timeline) {
 		return;
 	}
 	const flowEl = renderAssistantFlowShell(containerEl, variant);
-	renderAgentProcessHeader(flowEl, {
-		view,
+	renderTimelineProcess(flowEl, view.timeline, {
 		variant,
 		expanded,
 		onToggle,
+		onAction,
 		renderAssistantAvatar,
 		renderIcon,
 	});
-	if (shouldRenderExpandedProcessPanel(view, expanded)) {
-		renderExpandedProcessPanel(flowEl, view, variant, onAction);
-	}
 }
 
 function renderAssistantFlowShell(
@@ -72,25 +69,30 @@ function renderAssistantFlowShell(
 	return rowEl.createDiv({ cls: `friday-ai-answer-flow friday-agent-process-flow is-${variant}` });
 }
 
-function renderAgentProcessHeader(
+function renderTimelineProcess(
 	containerEl: HTMLElement,
+	timeline: AgentProcessTimelineView,
 	options: {
-		view: AgentProcessPanelViewModel;
 		variant: "live" | "completed";
 		expanded: boolean;
 		onToggle: () => void;
+		onAction?: (action: AgentTrajectoryAction) => void;
 		renderAssistantAvatar: (containerEl: HTMLElement) => void;
 		renderIcon?: RenderAgentProcessIcon;
 	},
 ): void {
-	const { view, variant, expanded, onToggle, renderAssistantAvatar, renderIcon } = options;
-	const canToggle = view.canExpand;
-	const headerEl = containerEl.createDiv({
-		cls: `friday-agent-process friday-agent-process-header friday-agent-process-disclosure is-${view.status.key} is-${view.status.tone} is-${view.mode} is-${variant}${canToggle ? " is-clickable" : ""}`,
+	const { variant, expanded, onToggle, onAction, renderAssistantAvatar, renderIcon } = options;
+	const canToggle = timeline.canExpand;
+	const shellEl = containerEl.createDiv({
+		cls: `friday-agent-process friday-agent-process-shell is-${timeline.status} is-${variant}`,
 		attr: {
-			"data-status": view.status.key,
-			"data-mode": view.mode,
-			"data-surface": view.surface,
+			"data-status": timeline.status,
+			"data-expanded": expanded ? "true" : "false",
+		},
+	});
+	const disclosureEl = shellEl.createDiv({
+		cls: `friday-agent-process-disclosure friday-agent-process-header is-${timeline.status}${canToggle ? " is-clickable" : ""}`,
+		attr: {
 			...(canToggle ? {
 				role: "button",
 				tabindex: "0",
@@ -99,8 +101,8 @@ function renderAgentProcessHeader(
 		},
 	});
 	if (canToggle) {
-		headerEl.onclick = () => onToggle();
-		headerEl.onkeydown = (event: KeyboardEvent) => {
+		disclosureEl.onclick = () => onToggle();
+		disclosureEl.onkeydown = (event: KeyboardEvent) => {
 			if (event.key !== "Enter" && event.key !== " ") {
 				return;
 			}
@@ -108,66 +110,104 @@ function renderAgentProcessHeader(
 			onToggle();
 		};
 	}
-	const avatarEl = headerEl.createDiv({ cls: "friday-agent-process-avatar" });
-	renderAssistantAvatar(avatarEl);
-	const mainEl = headerEl.createDiv({ cls: "friday-agent-process-header-main" });
-	mainEl.createDiv({ cls: "friday-agent-process-headline", text: view.header.headline || "FRIDAY" });
-
-	if (!canToggle) {
-		return;
+	const iconEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-icon friday-agent-process-avatar" });
+	renderAssistantAvatar(iconEl);
+	const titleEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-title" });
+	titleEl.createDiv({ cls: "friday-agent-process-headline", text: timeline.title });
+	if (timeline.collapsedSummary) {
+		titleEl.createDiv({ cls: "friday-agent-process-disclosure-summary", text: timeline.collapsedSummary });
 	}
-
-	const toggleButton = headerEl.createEl("button", {
-		cls: "friday-agent-process-toggle",
-		attr: {
-			"aria-expanded": expanded ? "true" : "false",
-			"aria-label": expanded ? "收起过程详情" : "展开过程详情",
-			title: expanded ? "收起过程详情" : "展开过程详情",
-		},
-	});
-	toggleButton.type = "button";
-	toggleButton.onclick = (event) => {
-		event?.stopPropagation();
-		onToggle();
-	};
-	renderChevronIcon(toggleButton, expanded ? "chevron-up" : "chevron-right", renderIcon);
+	if (!expanded) {
+		renderTimelineActions(disclosureEl, timeline.actions, onAction, "friday-agent-process-disclosure-actions");
+	}
+	if (canToggle) {
+		const toggleButton = disclosureEl.createEl("button", {
+			cls: "friday-agent-process-toggle",
+			attr: {
+				"aria-expanded": expanded ? "true" : "false",
+				"aria-label": expanded ? "收起过程详情" : "展开过程详情",
+				title: expanded ? "收起过程详情" : "展开过程详情",
+			},
+		});
+		toggleButton.type = "button";
+		toggleButton.onclick = (event) => {
+			event?.stopPropagation();
+			onToggle();
+		};
+		renderChevronIcon(toggleButton, expanded ? "chevron-up" : "chevron-right", renderIcon);
+	}
+	if (expanded && canToggle) {
+		renderTimelinePanel(shellEl, timeline, variant, onAction);
+	}
 }
 
-function shouldRenderExpandedProcessPanel(view: AgentProcessPanelViewModel, expanded: boolean): boolean {
-	return expanded && view.canExpand;
-}
-
-function renderExpandedProcessPanel(
+function renderTimelinePanel(
 	containerEl: HTMLElement,
-	view: AgentProcessPanelViewModel,
+	timeline: AgentProcessTimelineView,
 	variant: "live" | "completed",
 	onAction?: (action: AgentTrajectoryAction) => void,
 ): void {
 	const panelEl = containerEl.createDiv({
-		cls: `friday-agent-process-panel friday-agent-process-strip is-${view.status.key} is-${view.status.tone} is-${variant}`,
+		cls: `friday-agent-process-timeline-panel friday-agent-process-panel friday-agent-process-strip is-${timeline.status} is-${variant}`,
 		attr: {
-			"data-status": view.status.key,
-			"data-mode": view.mode,
-			"data-surface": view.surface,
+			"data-status": timeline.status,
 			role: "group",
 		},
 	});
-	if (view.mode === "simple_thinking") {
-		renderSimpleThinkingPanel(panelEl, view);
-		return;
+	renderTimelineStatusBar(panelEl, timeline);
+	const timelineEl = panelEl.createDiv({ cls: "friday-agent-process-timeline" });
+	if (timeline.groups.length > 0) {
+		renderTimelineGroups(timelineEl, timeline, onAction);
+	} else {
+		for (const item of timeline.items) {
+			renderTimelineItem(timelineEl, item, timeline.actions, onAction);
+		}
 	}
-	renderExpandedBody(panelEl, view, onAction);
 }
 
-function renderSimpleThinkingPanel(
+function renderTimelineStatusBar(
 	containerEl: HTMLElement,
-	view: AgentProcessPanelViewModel,
+	timeline: AgentProcessTimelineView,
 ): void {
-	const simpleEl = containerEl.createDiv({ cls: "friday-agent-process-simple" });
-	simpleEl.createDiv({
-		cls: "friday-agent-process-section-summary",
-		text: view.header.summary || "已完成直接回答。",
+	if (!timeline.statusBar) {
+		return;
+	}
+	const statusBarEl = containerEl.createDiv({
+		cls: `friday-agent-process-statusbar is-${timeline.statusBar.status}`,
+		attr: {
+			"data-status": timeline.statusBar.status,
+		},
 	});
+	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-phase", text: timeline.statusBar.phase });
+	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-action", text: timeline.statusBar.action });
+	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-elapsed", text: timeline.statusBar.elapsed });
+}
+
+function renderTimelineGroups(
+	containerEl: HTMLElement,
+	timeline: AgentProcessTimelineView,
+	onAction?: (action: AgentTrajectoryAction) => void,
+): void {
+	const groupsEl = containerEl.createDiv({ cls: "friday-agent-process-phase-groups" });
+	for (const group of timeline.groups) {
+		const groupEl = groupsEl.createEl("details", {
+			cls: `friday-agent-process-phase-group is-${group.status}`,
+			attr: {
+				"data-phase-id": group.id,
+				"data-status": group.status,
+				...(group.defaultExpanded ? { open: "true" } : {}),
+			},
+		});
+		const summaryEl = groupEl.createEl("summary", { cls: "friday-agent-process-phase-summary" });
+		summaryEl.createSpan({ cls: "friday-agent-process-phase-title", text: group.title });
+		if (group.summary) {
+			summaryEl.createSpan({ cls: "friday-agent-process-phase-subtitle", text: group.summary });
+		}
+		const bodyEl = groupEl.createDiv({ cls: "friday-agent-process-phase-body" });
+		for (const item of group.items) {
+			renderTimelineItem(bodyEl, item, timeline.actions, onAction);
+		}
+	}
 }
 
 function renderChevronIcon(
@@ -185,93 +225,73 @@ function renderChevronIcon(
 	renderIcon?.(iconEl, icon);
 }
 
-function renderExpandedBody(
-	panelEl: HTMLElement,
-	view: AgentProcessPanelViewModel,
-	onAction?: (action: AgentTrajectoryAction) => void,
-): void {
-	const bodyEl = panelEl.createDiv({ cls: "friday-agent-process-body" });
-	renderVisibleStepTimeline(bodyEl, view.visibleSteps, onAction);
-	if (view.recovery) {
-		const recoveryEl = bodyEl.createDiv({ cls: "friday-agent-process-recovery" });
-		recoveryEl.createDiv({ cls: "friday-agent-process-section-label", text: view.recovery.title });
-		recoveryEl.createDiv({ cls: "friday-agent-process-section-summary", text: view.recovery.summary });
-	}
-}
-
-function renderVisibleStepTimeline(
+function renderTimelineItem(
 	containerEl: HTMLElement,
-	steps: AgentProcessStepView[],
+	item: AgentProcessTimelineItemView,
+	actions: AgentProcessTimelineActionView[],
 	onAction?: (action: AgentTrajectoryAction) => void,
 ): void {
-	const timelineEl = containerEl.createDiv({ cls: "friday-agent-process-timeline" });
-	for (const step of steps) {
-		renderProcessStep(timelineEl, step, onAction);
-	}
-}
-
-function renderProcessStep(
-	containerEl: HTMLElement,
-	step: AgentProcessStepView,
-	onAction?: (action: AgentTrajectoryAction) => void,
-): void {
-	const stepEl = containerEl.createDiv({
-		cls: `friday-agent-process-step is-${step.status}`,
+	const itemEl = containerEl.createDiv({
+		cls: `friday-agent-process-timeline-item is-${item.kind} is-${item.status}`,
 		attr: {
-			"data-step-id": step.id,
-			"data-step-status": step.status,
+			"data-item-id": item.id,
+			"data-kind": item.kind,
+			"data-status": item.status,
 		},
 	});
-	stepEl.createDiv({ cls: "friday-agent-process-step-marker", attr: { "aria-hidden": "true" } });
-	const bodyEl = stepEl.createDiv({ cls: "friday-agent-process-step-body" });
-	const titleRow = bodyEl.createDiv({ cls: "friday-agent-process-step-title-row" });
-	titleRow.createDiv({ cls: "friday-agent-process-step-title", text: step.title });
-	if (step.summary) {
-		bodyEl.createDiv({ cls: "friday-agent-process-section-summary", text: step.summary });
+	const railEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-rail", attr: { "aria-hidden": "true" } });
+	railEl.createDiv({ cls: "friday-agent-process-timeline-marker" });
+	const contentEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-content" });
+	const titleRowEl = contentEl.createDiv({ cls: "friday-agent-process-timeline-title-row" });
+	titleRowEl.createDiv({ cls: "friday-agent-process-timeline-title", text: item.title });
+	if (item.meta) {
+		titleRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
 	}
-	const eventActions = step.actions.filter((action) => action.kind === "event");
-	if (eventActions.length > 0) {
-		const actionsEl = bodyEl.createDiv({ cls: "friday-agent-process-step-actions" });
-		for (const action of eventActions) {
-			renderStepEvent(actionsEl, action);
-		}
-	}
-	if (step.fileRefs.length > 0) {
-		const filesEl = bodyEl.createDiv({ cls: "friday-agent-process-step-files" });
-		for (const file of step.fileRefs) {
-			filesEl.createSpan({
-				cls: "friday-agent-process-file-ref",
-				text: file.path,
-				attr: { title: file.operation },
-			});
-		}
-	}
-	const controls = step.actions.filter((action) => action.kind === "control" && action.action);
-	if (controls.length > 0) {
-		const controlsEl = bodyEl.createDiv({ cls: "friday-agent-process-step-controls friday-agent-process-actions" });
-		for (const control of controls) {
-			if (control.action) {
-				renderActionButton(controlsEl, control.action, onAction);
-			}
-		}
+	contentEl.createDiv({ cls: "friday-agent-process-timeline-summary", text: item.summary });
+	renderTimelineItemDetail(contentEl, item);
+	if (item.actionRefs && item.actionRefs.length > 0) {
+		const itemActions = actions.filter((action) => item.actionRefs?.includes(action.id));
+		renderTimelineActions(contentEl, itemActions, onAction, "friday-agent-process-timeline-actions");
 	}
 }
 
-function renderStepEvent(containerEl: HTMLElement, item: AgentProcessStepActionView): void {
-	const itemEl = containerEl.createDiv({
-		cls: `friday-agent-process-step-action is-${item.status || "event"}`,
+function renderTimelineItemDetail(containerEl: HTMLElement, item: AgentProcessTimelineItemView): void {
+	if (!item.detail || item.detail.lines.length === 0) {
+		return;
+	}
+	const detailEl = containerEl.createEl("details", {
+		cls: "friday-agent-process-timeline-detail",
+		attr: {
+			...(item.detail.initiallyExpanded ? { open: "true" } : {}),
+		},
 	});
-	itemEl.createDiv({ cls: "friday-agent-process-step-action-bullet", text: "-" });
-	const copyEl = itemEl.createDiv({ cls: "friday-agent-process-step-action-copy" });
-	copyEl.createDiv({ cls: "friday-agent-process-step-action-label", text: item.label });
-	if (item.detail && item.detail !== item.label) {
-		copyEl.createDiv({ cls: "friday-agent-process-meta", text: item.detail });
+	detailEl.createEl("summary", {
+		cls: "friday-agent-process-timeline-detail-title",
+		text: item.detail.title || "技术细节",
+	});
+	for (const line of item.detail.lines) {
+		detailEl.createDiv({ cls: "friday-agent-process-timeline-detail-line", text: line });
+	}
+}
+
+function renderTimelineActions(
+	containerEl: HTMLElement,
+	actions: AgentProcessTimelineActionView[],
+	onAction: ((action: AgentTrajectoryAction) => void) | undefined,
+	className: string,
+): void {
+	if (actions.length === 0) {
+		return;
+	}
+	const actionsEl = containerEl.createDiv({ cls: `${className} friday-agent-process-actions` });
+	for (const action of actions) {
+		renderActionButton(actionsEl, action, onAction);
 	}
 }
 
 function renderActionButton(
 	containerEl: HTMLElement,
-	action: AgentProcessActionView,
+	action: AgentProcessActionView | AgentProcessTimelineActionView,
 	onAction?: (action: AgentTrajectoryAction) => void,
 ): void {
 	const buttonEl = containerEl.createEl("button", {
@@ -309,18 +329,15 @@ export function renderAgentAnswerFlow(options: RenderAgentAnswerFlowOptions): vo
 	const view = snapshot ? buildAgentProcessPanelViewModel(snapshot) : null;
 	const rowEl = containerEl.createDiv({ cls: "friday-ai-message-row is-assistant friday-ai-answer-row" });
 	const flowEl = rowEl.createDiv({ cls: "friday-ai-answer-flow" });
-	if (view?.shouldRenderProcessPanel) {
-		renderAgentProcessHeader(flowEl, {
-			view,
+	if (view?.shouldRenderProcessPanel && view.timeline) {
+		renderTimelineProcess(flowEl, view.timeline, {
 			variant: "completed",
 			expanded,
 			onToggle,
+			onAction,
 			renderAssistantAvatar,
 			renderIcon,
 		});
-		if (shouldRenderExpandedProcessPanel(view, expanded)) {
-			renderExpandedProcessPanel(flowEl, view, "completed", onAction);
-		}
 	} else {
 		renderAssistantIdentityHeader(flowEl, renderAssistantAvatar);
 	}

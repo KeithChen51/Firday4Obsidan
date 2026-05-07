@@ -12,7 +12,7 @@ function writeScenario(overrides = {}) {
 		},
 		settings: {
 			agentRuntime: {
-				toolPermissionMode: "auto",
+				toolPermissionMode: "standard",
 				fileMutationMode: "review",
 			},
 		},
@@ -29,7 +29,7 @@ function writeScenario(overrides = {}) {
 	};
 }
 
-test("default review mode records a pending write mutation without changing the vault", async () => {
+test("standard review mode records a pending write mutation without changing the vault", async () => {
 	const result = await runAgentRuntimeScenario(writeScenario({
 		reloadPendingMutations: true,
 	}));
@@ -151,7 +151,45 @@ test("autoApproved mutation mode applies writes immediately after planning", asy
 	assert.equal(result.turnEventSummary.mutations.applied, 1);
 });
 
-test("default review mode records a pending edit mutation without changing the vault", async () => {
+test("auto execution applies ordinary file writes even when legacy mutation mode was review", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "auto",
+				fileMutationMode: "review",
+			},
+		},
+	}));
+
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "changed" });
+	assert.equal(result.approvalRequests.length, 0);
+	assert.equal(result.pendingMutations.length, 0);
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+	assert.equal(result.turnEventSummary.mutations.applied, 1);
+});
+
+test("standard review write creates one mutation review without a separate tool approval", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		approvals: ["deny"],
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "standard",
+				fileMutationMode: "review",
+			},
+		},
+	}));
+
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
+	assert.equal(result.approvalRequests.length, 0);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.pendingMutations[0].operation, "write");
+	assert.equal(result.turnEventSummary.approvals.requested, 0);
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+	assert.equal(result.turnEventSummary.mutations.applied, 0);
+	assert.ok(!result.turnEvents.some((event) => event.type === "tool_approval_requested"));
+});
+
+test("standard review mode records a pending edit mutation without changing the vault", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "reviewable edit mutation",
 		files: {
@@ -159,7 +197,7 @@ test("default review mode records a pending edit mutation without changing the v
 		},
 		settings: {
 			agentRuntime: {
-				toolPermissionMode: "auto",
+				toolPermissionMode: "standard",
 				fileMutationMode: "review",
 			},
 		},
@@ -186,7 +224,7 @@ test("default review mode records a pending edit mutation without changing the v
 	assert.equal(planned?.payload.targetPath, "Project/workspace/a.md");
 });
 
-test("default review mode records a high-risk pending delete mutation without deleting the file", async () => {
+test("standard review mode records a high-risk pending delete mutation without deleting the file", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "reviewable delete mutation",
 		files: {
@@ -194,7 +232,7 @@ test("default review mode records a high-risk pending delete mutation without de
 		},
 		settings: {
 			agentRuntime: {
-				toolPermissionMode: "auto",
+				toolPermissionMode: "standard",
 				fileMutationMode: "review",
 			},
 		},
@@ -217,16 +255,43 @@ test("default review mode records a high-risk pending delete mutation without de
 	assert.equal(planned?.payload.riskLevel, "high");
 });
 
-test("tool denial does not create a pending mutation plan", async () => {
+test("standard review delete creates one high-risk mutation review without a separate tool approval", async () => {
 	const result = await runAgentRuntimeScenario({
-		name: "denied write mutation",
+		name: "standard review delete mutation",
 		files: {
 			"Project/workspace/a.md": "original",
 		},
-		approvals: ["deny"],
 		settings: {
 			agentRuntime: {
 				toolPermissionMode: "standard",
+				fileMutationMode: "review",
+			},
+		},
+		modelSteps: [
+			{
+				tool: {
+					name: "delete",
+					args: { path: "Project/workspace/a.md" },
+				},
+			},
+			{ assistant: "Could not prepare the deletion because permission was denied." },
+		],
+	});
+
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
+	assert.equal(result.approvalRequests.length, 0);
+	assert.equal(result.turnEventSummary.approvals.requested, 0);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.pendingMutations[0].operation, "delete");
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+	assert.ok(!result.turnEvents.some((event) => event.type === "tool_approval_requested"));
+});
+
+test("strict protection rejects ordinary file writes without creating review work", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "strict",
 				fileMutationMode: "review",
 			},
 		},
@@ -237,14 +302,16 @@ test("tool denial does not create a pending mutation plan", async () => {
 					args: { path: "Project/workspace/a.md", content: "changed", mode: "update" },
 				},
 			},
-			{ assistant: "Could not prepare the update because permission was denied." },
+			{ assistant: "Switch execution mode before editing files." },
 		],
-	});
+	}));
 
 	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
+	assert.equal(result.approvalRequests.length, 0);
 	assert.equal(result.pendingMutations.length, 0);
 	assert.equal(result.storedMutations.length, 0);
 	assert.equal(result.turnEventSummary.mutations.planned, 0);
+	assert.equal(result.traces[0].status, "denied");
 });
 
 test("apply failure records mutation_apply_failed and keeps the plan pending", async () => {

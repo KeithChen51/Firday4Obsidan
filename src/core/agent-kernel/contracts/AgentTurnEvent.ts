@@ -3,6 +3,7 @@ import type { AgentTurnStatus } from "./AgentTurn";
 
 export const AGENT_TURN_EVENT_TYPES = [
 	"turn_started",
+	"narration",
 	"model_request",
 	"model_response",
 	"tool_call",

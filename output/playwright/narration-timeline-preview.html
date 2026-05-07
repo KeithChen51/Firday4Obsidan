@@ -1,0 +1,63 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/styles.css" />
+<style>
+:root {
+  --background-primary: #fbfaf8;
+  --background-secondary: #f4f1ec;
+  --background-modifier-border: #ddd7cd;
+  --background-modifier-hover: #eee9df;
+  --text-normal: #1f2328;
+  --text-muted: #6a6258;
+  --text-faint: #91887c;
+  --interactive-accent: #57a66a;
+  --interactive-accent-hover: #438a54;
+  --interactive-normal: #fffdf8;
+  --interactive-hover: #f0ece4;
+  --text-on-accent: #ffffff;
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --font-interface: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+body { margin: 0; min-height: 100vh; font-family: var(--font-interface); background: var(--background-primary); color: var(--text-normal); }
+.preview-wrap { max-width: 1120px; margin: 24px auto; padding: 24px; }
+.friday-ai-message-row.is-user { display:flex; justify-content:flex-end; margin-bottom: 14px; }
+.user-bubble { background:#f2ecff; border:1px solid #d7c9ff; border-radius:18px 18px 4px 18px; padding:10px 14px; max-width:260px; }
+.avatar { width: 26px; height: 26px; border-radius: 999px; background:#111; color:#fff; display:grid; place-items:center; font-weight:700; font-size:12px; }
+.final-answer { font-size: 18px; line-height: 1.65; }
+</style>
+</head>
+<body>
+<div class="preview-wrap">
+  <div class="friday-ai-message-row is-user"><div class="user-bubble"><div style="font-size:12px;color:#6a58a8">用户</div><div>请把过程叙事落地到时间线</div></div></div>
+  <div class="friday-ai-message-row is-assistant friday-ai-answer-row">
+    <div class="friday-ai-answer-flow">
+      <div class="friday-agent-process friday-agent-process-shell is-completed is-completed" data-status="completed" data-expanded="true">
+        <div class="friday-agent-process-disclosure friday-agent-process-header is-completed is-clickable" role="button" aria-expanded="true">
+          <div class="friday-agent-process-disclosure-icon friday-agent-process-avatar"><div class="avatar">F</div></div>
+          <div class="friday-agent-process-disclosure-title">
+            <div class="friday-agent-process-headline">已处理 12s</div>
+            <div class="friday-agent-process-disclosure-summary">完成：本次工作已结束。</div>
+          </div>
+          <button class="friday-agent-process-toggle" aria-expanded="true" aria-label="收起过程详情"><span class="friday-agent-process-chevron" data-icon="chevron-up">⌃</span></button>
+        </div>
+        <div class="friday-agent-process-timeline-panel friday-agent-process-panel friday-agent-process-strip is-completed is-completed" data-status="completed" role="group">
+          <div class="friday-agent-process-timeline">
+            <div class="friday-agent-process-timeline-item is-receipt is-done" data-kind="receipt" data-status="done"><div class="friday-agent-process-timeline-rail"><div class="friday-agent-process-timeline-marker"></div></div><div class="friday-agent-process-timeline-content"><div class="friday-agent-process-timeline-title-row"><div class="friday-agent-process-timeline-title">收到任务</div></div><div class="friday-agent-process-timeline-summary">需要把过程叙事放进线性时间线。</div></div></div>
+            <div class="friday-agent-process-timeline-item is-plan is-done" data-kind="plan" data-status="done"><div class="friday-agent-process-timeline-rail"><div class="friday-agent-process-timeline-marker"></div></div><div class="friday-agent-process-timeline-content"><div class="friday-agent-process-timeline-title-row"><div class="friday-agent-process-timeline-title">整理方案</div></div><div class="friday-agent-process-timeline-summary">先确认上下文，再按需要使用工具推进。</div><details class="friday-agent-process-timeline-detail"><summary class="friday-agent-process-timeline-detail-title">技术细节</summary><div class="friday-agent-process-timeline-detail-line">读取相关代码</div><div class="friday-agent-process-timeline-detail-line">补测试</div><div class="friday-agent-process-timeline-detail-line">实现事件链路</div></details></div></div>
+            <div class="friday-agent-process-timeline-item is-stage_report is-done" data-kind="stage_report" data-status="done"><div class="friday-agent-process-timeline-rail"><div class="friday-agent-process-timeline-marker"></div></div><div class="friday-agent-process-timeline-content"><div class="friday-agent-process-timeline-title-row"><div class="friday-agent-process-timeline-title">阶段性汇报</div></div><div class="friday-agent-process-timeline-summary">已读取相关文件，接下来实现事件链路。</div></div></div>
+            <div class="friday-agent-process-timeline-item is-context is-done" data-kind="context" data-status="done"><div class="friday-agent-process-timeline-rail"><div class="friday-agent-process-timeline-marker"></div></div><div class="friday-agent-process-timeline-content"><div class="friday-agent-process-timeline-title-row"><div class="friday-agent-process-timeline-title">读取项目现状</div><div class="friday-agent-process-timeline-meta">已运行 1 条命令</div></div><div class="friday-agent-process-timeline-summary">已查看相关文件和项目上下文。</div></div></div>
+            <div class="friday-agent-process-timeline-item is-done is-done" data-kind="done" data-status="done"><div class="friday-agent-process-timeline-rail"><div class="friday-agent-process-timeline-marker"></div></div><div class="friday-agent-process-timeline-content"><div class="friday-agent-process-timeline-title-row"><div class="friday-agent-process-timeline-title">完成</div></div><div class="friday-agent-process-timeline-summary">本次工作已完成。</div></div></div>
+          </div>
+        </div>
+      </div>
+      <div class="friday-ai-answer-content"><div class="final-answer">已完成“用户可见过程叙事”链路：过程区承载收到任务、整理方案、阶段性汇报；最终回答只保留结论。</div></div>
+      <div class="friday-agent-artifacts"><div class="friday-agent-artifacts-title">本次改动</div><div class="friday-agent-artifact-card is-ts is-modified"><div class="friday-agent-artifact-icon">TS</div><div class="friday-agent-artifact-body"><div class="friday-agent-artifact-name">agentProcessPanelViewModel.ts</div><div class="friday-agent-artifact-meta">文件 · TS</div></div><button class="friday-agent-artifact-open">打开</button></div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

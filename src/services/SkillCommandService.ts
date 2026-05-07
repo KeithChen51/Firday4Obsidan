@@ -10,6 +10,10 @@ import {
 import type { LocaleCode } from "../i18n/types";
 import { FridaySettings } from "../types/settings";
 import { WorkspaceAccessService } from "./WorkspaceAccessService";
+import {
+	normalizeActiveFileContext,
+	type ActiveFileContext,
+} from "../core/context/ActiveFileContext";
 
 const SKILL_FILE_NAMES = ["skill.md", "SKILL.md"];
 const MAX_SCAN_SKILLS = 200;
@@ -71,6 +75,7 @@ export interface SuggestedSkill {
 }
 
 interface BuildSkillCatalogContextOptions {
+	activeFileContext?: ActiveFileContext;
 	currentFilePath?: string;
 	limit?: number;
 }
@@ -336,7 +341,8 @@ export class SkillCommandService {
 		options: BuildSkillCatalogContextOptions = {},
 	): Promise<string> {
 		const skills = await this.listSkills(options.limit ?? 24);
-		const currentFilePath = options.currentFilePath?.trim() ?? "";
+		const activeFileContext = normalizeActiveFileContext(options.activeFileContext);
+		const currentFilePath = activeFileContext.mode !== "none" ? activeFileContext.path ?? "" : "";
 		const lines = [
 			"[SkillCatalog]",
 			"Available skills (summary only; full skill content is not loaded yet).",
@@ -344,6 +350,7 @@ export class SkillCommandService {
 			"After use_skill returns, follow the loaded skill instructions before continuing.",
 			"Do not call use_skill unless the user intent clearly matches the skill domain.",
 			...(currentFilePath ? [`current_file: ${currentFilePath}`] : []),
+			...(currentFilePath ? [`current_file_reason: ${activeFileContext.reason}`] : []),
 			"skills:",
 		];
 		for (const skill of skills) {

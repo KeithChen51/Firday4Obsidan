@@ -13,6 +13,8 @@ export {
 	AGENT_TURN_STATUSES,
 	type AgentExecutionBudget,
 	type AgentChatMessage,
+	type AgentNarrationKind,
+	type AgentNarrationPayload,
 	type AgentRuntimeFacadeInput,
 	type AgentTurnInput,
 	type AgentTurnResult,

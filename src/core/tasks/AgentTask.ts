@@ -1,3 +1,8 @@
+import {
+	normalizeActiveFileContext,
+	type ActiveFileContext,
+} from "../context/ActiveFileContext";
+
 export const AGENT_TASK_STATUSES = [
 	"created",
 	"running",
@@ -31,6 +36,7 @@ export interface AgentTaskRunInputSnapshot {
 	userPrompt: string;
 	modelOverride?: string;
 	depth?: number;
+	activeFileContext?: ActiveFileContext;
 	currentFilePath?: string;
 	extraSystemContext?: string;
 	allowedTools?: string[];
@@ -271,10 +277,25 @@ function sanitizeRunInputSnapshot(snapshot: AgentTaskRunInputSnapshot): AgentTas
 		userPrompt: sanitizeTaskText(snapshot.userPrompt, 2000),
 		...(snapshot.modelOverride ? { modelOverride: sanitizeTaskText(snapshot.modelOverride, 120) } : {}),
 		...(snapshot.depth !== undefined ? { depth: snapshot.depth } : {}),
-		...(snapshot.currentFilePath ? { currentFilePath: sanitizeTaskText(snapshot.currentFilePath, 240) } : {}),
+		...sanitizeActiveFileContextForTask(snapshot.activeFileContext),
 		...(snapshot.extraSystemContext ? { extraSystemContext: sanitizeTaskText(snapshot.extraSystemContext, 2000) } : {}),
 		...(snapshot.allowedTools ? { allowedTools: snapshot.allowedTools.map((tool) => sanitizeTaskText(tool, 80)) } : {}),
 		...(snapshot.agentMode ? { agentMode: sanitizeTaskText(snapshot.agentMode, 80) } : {}),
+	};
+}
+
+function sanitizeActiveFileContextForTask(activeFileContext: ActiveFileContext | undefined): Pick<AgentTaskRunInputSnapshot, "activeFileContext"> {
+	const normalized = normalizeActiveFileContext(activeFileContext);
+	if (normalized.mode === "none") {
+		return {};
+	}
+	return {
+		activeFileContext: {
+			mode: normalized.mode,
+			path: sanitizeTaskText(normalized.path ?? "", 240),
+			includeContent: normalized.includeContent,
+			reason: sanitizeTaskText(normalized.reason, 240),
+		},
 	};
 }
 

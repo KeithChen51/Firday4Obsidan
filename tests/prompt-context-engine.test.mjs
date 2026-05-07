@@ -9,9 +9,28 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const modulePath = path.join(projectRoot, "src/core/context/PromptContextEngine.ts");
+const activeFilePolicyPath = path.join(projectRoot, "src/core/context/ActiveFileContext.ts");
+const skillServicePath = path.join(projectRoot, "src/services/SkillCommandService.ts");
 
 async function loadPromptContextEngineModule() {
 	return jiti.import(modulePath);
+}
+
+async function loadActiveFilePolicyModule() {
+	return jiti.import(activeFilePolicyPath);
+}
+
+async function loadSkillServiceModule() {
+	return jiti.import(skillServicePath);
+}
+
+function createSkillService(mod) {
+	return new mod.SkillCommandService(
+		{ canReadExternalPath: () => false },
+		() => ({ agentRuntime: { externalSkillPaths: [], disabledSkills: [] } }),
+		() => projectRoot,
+		() => "zh-CN",
+	);
 }
 
 test("prompt context engine builds runtime prompt envelope with context summary flags", async () => {
@@ -22,8 +41,7 @@ test("prompt context engine builds runtime prompt envelope with context summary 
 		depth: 1,
 		permissionMode: "auto",
 		runtimeProfileId: "win_desktop",
-		focusPaths: "<projectRoot>",
-		currentFilePath: "<projectRoot>/raw/spec.md",
+		focusPaths: "Projects/demo",
 		userPrompt: "Compile the current project wiki",
 		fridayMd: "Global rules",
 		agentProfile: "Agent profile excerpt",
@@ -65,6 +83,102 @@ test("prompt path guidance delegates active project normalization to the tool la
 	assert.doesNotMatch(result.prompt, /manually prefix/i);
 	assert.doesNotMatch(result.prompt, /write\/delete only supports Vault-relative paths/);
 	assert.doesNotMatch(result.prompt, /prefer scoping ls\/grep\/search_text\/glob to that root/);
+});
+
+test("prompt context engine omits active file lines by default even when an editor file exists elsewhere", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		userPrompt: "创建一个新的版本，作为通用版本的简化",
+		agentProfile: "agent",
+	});
+
+	assert.doesNotMatch(result.prompt, /Current active file/i);
+	assert.doesNotMatch(result.prompt, /current_file/i);
+	assert.equal(result.summary.activeFileContext?.mode ?? "none", "none");
+});
+
+test("prompt context engine includes deictic active file path and reason without injecting file body", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const activeBody = "ACTIVE_FILE_BODY_SHOULD_REQUIRE_READ";
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		userPrompt: "请总结当前文档",
+		agentProfile: "agent",
+		activeFileContext: {
+			mode: "deictic_reference",
+			path: "Projects/demo/raw/active.md",
+			includeContent: false,
+			reason: "用户明确指代当前文档",
+		},
+		mentionContext: {
+			resolvedCount: 0,
+			tokenTypes: [],
+			sourceMap: [],
+			entries: [],
+		},
+	});
+
+	assert.match(result.prompt, /Current active file: Projects\/demo\/raw\/active\.md/);
+	assert.match(result.prompt, /Active file context reason: 用户明确指代当前文档/);
+	assert.match(result.prompt, /Active file content: not included; call read/);
+	assert.doesNotMatch(result.prompt, new RegExp(activeBody));
+	assert.equal(result.summary.activeFileContext?.mode, "deictic_reference");
+	assert.equal(result.summary.activeFileContext?.reason, "用户明确指代当前文档");
+});
+
+test("active file policy only binds current file for explicit references", async () => {
+	const mod = await loadActiveFilePolicyModule();
+
+	assert.deepEqual(
+		mod.resolveActiveFileContextPolicy({
+			userPrompt: "创建一个新的版本，作为通用版本的简化",
+			activeFilePath: "Projects/demo/raw/active.md",
+			hasExplicitActiveNoteMention: false,
+		}),
+		{ mode: "none", includeContent: false, reason: "未显式绑定当前文件" },
+	);
+
+	assert.deepEqual(
+		mod.resolveActiveFileContextPolicy({
+			userPrompt: "请总结当前文档",
+			activeFilePath: "Projects/demo/raw/active.md",
+			hasExplicitActiveNoteMention: false,
+		}),
+		{
+			mode: "deictic_reference",
+			path: "Projects/demo/raw/active.md",
+			includeContent: false,
+			reason: "用户明确指代当前文档",
+		},
+	);
+});
+
+test("skill catalog context omits current_file unless active file context is explicit", async () => {
+	const mod = await loadSkillServiceModule();
+	const service = createSkillService(mod);
+
+	const defaultCatalog = await service.buildSkillCatalogContext();
+	assert.doesNotMatch(defaultCatalog, /current_file:/);
+
+	const deicticCatalog = await service.buildSkillCatalogContext({
+		activeFileContext: {
+			mode: "deictic_reference",
+			path: "Projects/demo/raw/active.md",
+			includeContent: false,
+			reason: "用户明确指代当前文档",
+		},
+	});
+	assert.match(deicticCatalog, /current_file: Projects\/demo\/raw\/active\.md/);
+	assert.match(deicticCatalog, /current_file_reason: 用户明确指代当前文档/);
 });
 
 test("prompt context engine reports trimmed channels when envelope exceeds hard limit", async () => {

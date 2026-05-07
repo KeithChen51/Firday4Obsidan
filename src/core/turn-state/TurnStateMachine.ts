@@ -1,5 +1,9 @@
+import type { ActiveFileContext } from "../context/ActiveFileContext";
+import type { AgentNarrationPayload } from "../agent-kernel/contracts/AgentTurn";
+
 export type StepEventName =
 	| "STEP_START"
+	| "STEP_NARRATION"
 	| "STEP_CONTEXT"
 	| "STEP_MODEL_REQUEST"
 	| "STEP_MODEL_RETRY"
@@ -21,6 +25,7 @@ export interface StepTraceEvent {
 	step?: number;
 	tool?: string;
 	contextKey?: "instructions" | "skills" | "wiki" | "memory" | "compact";
+	activeFileContext?: ActiveFileContext;
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
@@ -43,6 +48,7 @@ export interface StepTraceEvent {
 		canAutoResume?: boolean;
 		reason?: string;
 	};
+	narration?: AgentNarrationPayload;
 	message: string;
 }
 

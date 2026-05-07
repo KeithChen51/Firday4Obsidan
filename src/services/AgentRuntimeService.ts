@@ -8,10 +8,11 @@ import {
 	Vault,
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
+import { deriveFileMutationModeFromToolPermissionMode } from "../types/agent";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
 import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
-import type { AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
+import type { AgentNarrationPayload, AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
 import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
 import { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
 import { FridaySettings } from "../types/settings";
@@ -32,6 +33,10 @@ import { PolicyEffect, PolicyRule } from "../core/security/policy-resolver/types
 import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { ToolBoundaryFilter } from "../core/context/ToolBoundaryFilter";
 import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
+import {
+	normalizeActiveFileContext,
+	type ActiveFileContext,
+} from "../core/context/ActiveFileContext";
 import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
 import { parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
@@ -152,6 +157,7 @@ export interface RuntimeContextSummary {
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
 	hasMentionContext: boolean;
+	activeFileContext?: ActiveFileContext;
 	mentionResolvedCount: number;
 	mentionTokenTypes: string[];
 	mentionSourceMap: Array<{
@@ -167,6 +173,7 @@ export interface RuntimeContextSummary {
 export interface RuntimeProgressEvent {
 	phase:
 		| "start"
+		| "narration"
 		| "context"
 		| "model_request"
 		| "model_retry"
@@ -182,12 +189,14 @@ export interface RuntimeProgressEvent {
 	step?: number;
 	tool?: string;
 	contextKey?: "instructions" | "skills" | "wiki" | "memory" | "compact";
+	activeFileContext?: ActiveFileContext;
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
 	taskId?: string;
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
+	narration?: AgentNarrationPayload;
 	message: string;
 }
 
@@ -233,6 +242,7 @@ export interface RuntimeTurnInput {
 	userPrompt: string;
 	modelOverride?: string;
 	depth?: number;
+	activeFileContext?: ActiveFileContext;
 	currentFilePath?: string;
 	extraSystemContext?: string;
 	mentionContext?: PromptMentionContext;
@@ -994,12 +1004,13 @@ export class AgentRuntimeService {
 	}
 
 	private createTaskRunInputSnapshot(input: RuntimeTurnInput): AgentTaskRunInputSnapshot {
+		const activeFileContext = normalizeActiveFileContext(input.activeFileContext);
 		return {
 			agentId: input.agentId,
 			userPrompt: input.userPrompt,
 			...(input.modelOverride ? { modelOverride: input.modelOverride } : {}),
 			...(input.depth !== undefined ? { depth: input.depth } : {}),
-			...(input.currentFilePath ? { currentFilePath: input.currentFilePath } : {}),
+			...(activeFileContext.mode !== "none" ? { activeFileContext } : {}),
 			...(input.extraSystemContext ? { extraSystemContext: input.extraSystemContext } : {}),
 			...(input.allowedTools ? { allowedTools: [...input.allowedTools] } : {}),
 			...(input.agentMode ? { agentMode: input.agentMode } : {}),
@@ -1111,11 +1122,14 @@ export class AgentRuntimeService {
 		depth: number,
 		contextKey: NonNullable<RuntimeProgressEvent["contextKey"]>,
 		message: string,
+		options: { activeFileContext?: ActiveFileContext; targetPath?: string } = {},
 	): void {
 		this.reportProgress(input, {
 			phase: "context",
 			depth,
 			contextKey,
+			...(options.activeFileContext ? { activeFileContext: options.activeFileContext } : {}),
+			...(options.targetPath ? { targetPath: options.targetPath } : {}),
 			message,
 		});
 	}
@@ -1280,6 +1294,8 @@ export class AgentRuntimeService {
 		switch (trace.stepName) {
 			case "STEP_START":
 				return [{ type: "turn_started", payload }];
+			case "STEP_NARRATION":
+				return [{ type: "narration_report", payload }];
 			case "STEP_CONTEXT":
 				return [{ type: "context_built", payload }];
 			case "STEP_MODEL_REQUEST":
@@ -1338,6 +1354,9 @@ export class AgentRuntimeService {
 		if (trace.contextKey) {
 			payload.contextKey = trace.contextKey;
 		}
+		if (trace.activeFileContext) {
+			payload.activeFileContext = trace.activeFileContext;
+		}
 		if (trace.contextKey === "compact" && this.lastContextSummary) {
 			payload.used = this.lastContextSummary.used;
 			payload.softLimit = this.lastContextSummary.softLimit;
@@ -1364,6 +1383,26 @@ export class AgentRuntimeService {
 				endpointIndex: trace.transport.endpointIndex,
 				endpointCount: trace.transport.endpointCount,
 			};
+		}
+		if (trace.narration) {
+			payload.kind = trace.narration.kind;
+			payload.source = trace.narration.source;
+			payload.summary = this.truncateText(trace.narration.summary || trace.summary || trace.message, 240);
+			if (trace.narration.status) {
+				payload.status = trace.narration.status;
+			}
+			if (trace.narration.understanding) {
+				payload.understanding = this.truncateText(trace.narration.understanding, 240);
+			}
+			if (Array.isArray(trace.narration.plan)) {
+				payload.plan = trace.narration.plan.map((item) => this.truncateText(item, 160)).slice(0, 6);
+			}
+			if (trace.narration.justDone) {
+				payload.justDone = this.truncateText(trace.narration.justDone, 200);
+			}
+			if (trace.narration.next) {
+				payload.next = this.truncateText(trace.narration.next, 200);
+			}
 		}
 		if ((trace.status === "failed" || toolTrace?.status === "failed") && (toolTrace?.error || trace.summary || trace.message)) {
 			Object.assign(
@@ -1601,7 +1640,7 @@ export class AgentRuntimeService {
 			userPrompt,
 			modelOverride: snapshot.modelOverride,
 			depth: snapshot.depth,
-			currentFilePath: snapshot.currentFilePath,
+			activeFileContext: snapshot.activeFileContext,
 			extraSystemContext: snapshot.extraSystemContext,
 			allowedTools: snapshot.allowedTools,
 			agentMode: snapshot.agentMode as AgentMode | undefined,
@@ -1712,15 +1751,15 @@ export class AgentRuntimeService {
 		const mode = this.getSettings().agentRuntime.toolPermissionMode;
 		const disabledTools = this.buildDisabledToolSet();
 		const readEffect: PolicyEffect = "allow";
-		let writeEffect: PolicyEffect = "ask";
-		let execEffect: PolicyEffect = "ask";
+		let fileChangeEffect: PolicyEffect = "allow";
+		let nonFileRiskEffect: PolicyEffect = "ask";
 		if (mode === "auto") {
-			writeEffect = "allow";
-			execEffect = "allow";
+			fileChangeEffect = "allow";
+			nonFileRiskEffect = "allow";
 		}
 		if (mode === "strict") {
-			writeEffect = "deny";
-			execEffect = "deny";
+			fileChangeEffect = "deny";
+			nonFileRiskEffect = "deny";
 		}
 		const resolveEffect = (tool: string, fallback: PolicyEffect): PolicyEffect =>
 			disabledTools.has(tool) ? "deny" : fallback;
@@ -1732,13 +1771,13 @@ export class AgentRuntimeService {
 			{ action: "tool:search_text", effect: resolveEffect("search_text", readEffect), source: "global" },
 			{ action: "tool:glob", effect: resolveEffect("glob", readEffect), source: "global" },
 			...(WIKI_FEATURE_ENABLED
-				? [{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", writeEffect), source: "global" } as PolicyRule]
+				? [{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", nonFileRiskEffect), source: "global" } as PolicyRule]
 				: []),
 			{ action: "tool:memory", effect: resolveEffect("memory", "allow"), source: "global" },
-			{ action: "tool:write", effect: resolveEffect("write", writeEffect), source: "global" },
-			{ action: "tool:edit", effect: resolveEffect("edit", writeEffect), source: "global" },
-			{ action: "tool:delete", effect: resolveEffect("delete", writeEffect), source: "global" },
-			{ action: "tool:exec", effect: resolveEffect("exec", execEffect), source: "global" },
+			{ action: "tool:write", effect: resolveEffect("write", fileChangeEffect), source: "global" },
+			{ action: "tool:edit", effect: resolveEffect("edit", fileChangeEffect), source: "global" },
+			{ action: "tool:delete", effect: resolveEffect("delete", fileChangeEffect), source: "global" },
+			{ action: "tool:exec", effect: resolveEffect("exec", nonFileRiskEffect), source: "global" },
 		];
 	}
 
@@ -2105,7 +2144,7 @@ export class AgentRuntimeService {
 	): Promise<string> {
 		const settings = this.getSettings();
 		const agentId = input.agentId;
-		const currentFilePath = input.currentFilePath;
+		const activeFileContext = normalizeActiveFileContext(input.activeFileContext);
 		const extraSystemContext = input.extraSystemContext;
 		const userPrompt = input.userPrompt;
 		const focusPaths = settings.agentRuntime.vaultFocusPaths.length
@@ -2142,7 +2181,7 @@ export class AgentRuntimeService {
 		const trimmedExtra = extraSystemContext?.trim();
 
 		this.reportContextProgress(input, depth, "skills", "匹配相关技能与命令约束");
-		const autoSkillContext = await this.buildAutoSkillContext(userPrompt, currentFilePath, trimmedExtra);
+		const autoSkillContext = await this.buildAutoSkillContext(userPrompt, activeFileContext, trimmedExtra);
 		const runtimeExtraContext = autoSkillContext && autoSkillContext === trimmedExtra ? "" : trimmedExtra;
 
 		let wikiKnowledgeContext = "";
@@ -2154,7 +2193,17 @@ export class AgentRuntimeService {
 		this.reportContextProgress(input, depth, "memory", "加载长期记忆与项目偏好");
 		const memoryContext = await this.loadMemoryContext();
 
-		this.reportContextProgress(input, depth, "compact", "压缩上下文并生成提示包");
+		this.reportContextProgress(
+			input,
+			depth,
+			"compact",
+			activeFileContext.mode === "none"
+				? "压缩上下文并生成提示包"
+				: `压缩上下文并生成提示包（当前文件：${activeFileContext.reason}）`,
+			activeFileContext.mode === "none"
+				? {}
+				: { activeFileContext, targetPath: activeFileContext.path },
+		);
 		const agentMode = this.resolveAgentMode(input);
 		const allowedToolSet = this.buildAllowedToolSet(input.allowedTools);
 		const promptContext = this.promptContextEngine.build({
@@ -2166,7 +2215,7 @@ export class AgentRuntimeService {
 			runtimeCapabilities: this.activeRuntimeProfile.capabilities,
 			focusPaths,
 			externalPaths,
-			currentFilePath,
+			activeFileContext,
 			activeProjectRoot,
 			userPrompt: userPrompt ?? "",
 			fridayMd,
@@ -2197,14 +2246,14 @@ export class AgentRuntimeService {
 
 	private async buildAutoSkillContext(
 		userPrompt: string | undefined,
-		currentFilePath: string | undefined,
+		activeFileContext: ActiveFileContext,
 		extraSystemContext: string | undefined,
 	): Promise<string> {
 		if (extraSystemContext?.includes("[SkillInvocation]")) {
 			return extraSystemContext;
 		}
 		void userPrompt;
-		void currentFilePath;
+		void activeFileContext;
 		return "";
 	}
 
@@ -2312,10 +2361,11 @@ export class AgentRuntimeService {
 		const mutationToolCallId = tool.id || runId;
 		const targetPath = this.resolveToolTargetPath(name, args);
 		const scope = this.resolveScope(targetPath);
-		const shouldReportApproval = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
 		const settings = this.getSettings();
 		const gatewayPolicy = this.resolveToolPolicy(name);
-		const shouldRequestToolApproval = shouldReportApproval && gatewayPolicy.effect === "ask";
+		const approvalEligible = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
+		const shouldRequestToolApproval = approvalEligible && gatewayPolicy.effect === "ask";
+		const shouldReportApproval = shouldRequestToolApproval || (approvalEligible && gatewayPolicy.effect === "deny");
 		if (shouldReportApproval) {
 			const target = targetPath ? `（${targetPath}）` : "";
 			if (shouldRequestToolApproval) {
@@ -2680,7 +2730,7 @@ export class AgentRuntimeService {
 	}
 
 	private getFileMutationMode(): FridaySettings["agentRuntime"]["fileMutationMode"] {
-		return this.getSettings().agentRuntime.fileMutationMode ?? "review";
+		return deriveFileMutationModeFromToolPermissionMode(this.getSettings().agentRuntime.toolPermissionMode);
 	}
 
 	private resolveMutationOperation(tool: string): MutationOperation {

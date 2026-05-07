@@ -56,7 +56,7 @@ export class LegacyAgentRuntimeAdapter implements RuntimeTurnExecutorPort {
 			userPrompt: input.userPrompt,
 			modelOverride: input.modelOverride,
 			depth: input.depth,
-			currentFilePath: input.currentFilePath,
+			activeFileContext: input.activeFileContext,
 			extraSystemContext: input.extraSystemContext,
 			mentionContext: input.mentionContext as LegacyRuntimeTurnInput["mentionContext"],
 			allowedTools: input.allowedTools,

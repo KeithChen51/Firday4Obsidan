@@ -14,6 +14,10 @@ export interface AgentProfile {
 export type ToolPermissionMode = "auto" | "standard" | "strict";
 export type FileMutationMode = "review" | "autoApproved";
 export type RuntimePolicyEffect = "allow" | "ask" | "deny";
+
+export function deriveFileMutationModeFromToolPermissionMode(mode: ToolPermissionMode): FileMutationMode {
+	return mode === "auto" ? "autoApproved" : "review";
+}
 export type RuntimeExecutionGateCode =
 	| "allowed"
 	| "runtime_disabled"

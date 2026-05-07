@@ -5,6 +5,7 @@ import type { AgentMode } from "../../tools/ToolRegistry";
 import type { ToolResultFailureClass } from "../../tools/ToolResultContract";
 import type { AgentTask } from "../../tasks/AgentTask";
 import type { RuntimeProfile } from "../../../platform/runtime/RuntimeProfile";
+import type { ActiveFileContext } from "../../context/ActiveFileContext";
 import type { AgentFailure } from "./AgentFailure";
 import type { AgentTurnEvent } from "./AgentTurnEvent";
 
@@ -32,9 +33,23 @@ export interface AgentChatMessage {
 	uiMeta?: unknown;
 }
 
+export type AgentNarrationKind = "task_acknowledged" | "plan_declared" | "stage_report";
+
+export interface AgentNarrationPayload {
+	kind: AgentNarrationKind;
+	summary: string;
+	source: "runtime" | "model" | "fallback";
+	status?: "running" | "completed" | "waiting" | "failed";
+	understanding?: string;
+	plan?: string[];
+	justDone?: string;
+	next?: string;
+}
+
 export interface RuntimeProgressEvent {
 	phase:
 		| "start"
+		| "narration"
 		| "context"
 		| "model_request"
 		| "model_retry"
@@ -50,12 +65,14 @@ export interface RuntimeProgressEvent {
 	step?: number;
 	tool?: string;
 	contextKey?: "instructions" | "skills" | "wiki" | "memory" | "compact";
+	activeFileContext?: ActiveFileContext;
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
 	taskId?: string;
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
+	narration?: AgentNarrationPayload;
 	reasoningProvider?: ReasoningArtifact["provider"];
 	reasoningRawFormat?: ReasoningArtifact["rawFormat"];
 	reasoningContinuationPolicy?: ReasoningArtifact["continuationPolicy"];
@@ -128,6 +145,7 @@ export interface RuntimeContextSummary {
 	hasMemoryContext: boolean;
 	hasAutoSkillContext: boolean;
 	hasMentionContext: boolean;
+	activeFileContext?: ActiveFileContext;
 	mentionResolvedCount: number;
 	mentionTokenTypes: string[];
 	mentionSourceMap: Array<{
@@ -179,6 +197,7 @@ export interface AgentTurnInput {
 	mode: AgentMode;
 	allowedTools?: string[];
 	modelOverride?: string;
+	activeFileContext?: ActiveFileContext;
 	currentFilePath?: string;
 	extraSystemContext?: string;
 	depth?: number;

@@ -23,6 +23,9 @@ type RuntimeProgressWithIdentity = RuntimeProgressEvent & RuntimeProgressIdentit
 	reasoningWarnings?: string[];
 };
 type ReplaySummaryWithIdentity = TurnReplaySummary & Partial<Pick<AgentTrajectoryIdentity, "traceId" | "agentId">>;
+type ProjectableNarration =
+	| NonNullable<RuntimeProgressWithIdentity["narration"]>
+	| TurnReplaySummary["narrationTimeline"][number];
 
 const STAGE_LABELS: Record<AgentTrajectoryStage["key"], string> = {
 	context: "Context",
@@ -99,6 +102,23 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		...(replaySummary.completedAt ? { completedAt: replaySummary.completedAt } : {}),
 		...(typeof replaySummary.durationMs === "number" ? { durationMs: replaySummary.durationMs } : {}),
 	};
+
+	for (const [index, narration] of (replaySummary.narrationTimeline ?? []).entries()) {
+		upsertItem(snapshot, stageForNarration(narration.kind), {
+			id: `replay:narration:${narration.kind}:${index}`,
+			kind: "narration",
+			title: formatNarrationTitle(narration.kind),
+			detail: formatNarrationDetail(narration),
+			status: mapNarrationStatus(narration.status, true),
+			at: narration.at,
+			rawEventType: "narration_report",
+			narrationKind: narration.kind,
+			narrationSource: narration.source,
+			...(narration.plan?.length ? { narrationPlan: [...narration.plan] } : {}),
+			...(narration.justDone ? { narrationJustDone: narration.justDone } : {}),
+			...(narration.next ? { narrationNext: narration.next } : {}),
+		});
+	}
 
 	for (const [index, reasoning] of (replaySummary.reasoningTimeline ?? []).entries()) {
 		upsertItem(snapshot, "reasoning", {
@@ -259,6 +279,33 @@ function applyRuntimeProgress(
 			snapshot.summary = safeText(event.message);
 			setStageStatus(snapshot, "context", "running");
 			break;
+		case "narration": {
+			const narration = event.narration ?? {
+				kind: "stage_report" as const,
+				summary: event.message,
+				source: "fallback" as const,
+			};
+			const itemStatus = mapNarrationStatus(narration.status, false);
+			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
+			snapshot.headline = formatNarrationTitle(narration.kind);
+			snapshot.summary = safeText(narration.summary || event.message);
+			upsertItem(snapshot, stageForNarration(narration.kind), {
+				id: `live:narration:${narration.kind}:${index}`,
+				kind: "narration",
+				title: formatNarrationTitle(narration.kind),
+				detail: formatNarrationDetail(narration),
+				status: itemStatus,
+				step,
+				at: event.at,
+				rawEventType: "narration_report",
+				narrationKind: narration.kind,
+				narrationSource: narration.source,
+				...(narration.plan?.length ? { narrationPlan: [...narration.plan] } : {}),
+				...(narration.justDone ? { narrationJustDone: narration.justDone } : {}),
+				...(narration.next ? { narrationNext: narration.next } : {}),
+			});
+			break;
+		}
 		case "context":
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
 			snapshot.headline = formatContextHeadline(event.contextKey);
@@ -391,7 +438,7 @@ function applyRuntimeProgress(
 			}
 			setStageStatus(snapshot, "reasoning", hasKind(snapshot, "model") || hasKind(snapshot, "reasoning") ? "ok" : "pending");
 			setStageStatus(snapshot, "tools", "running");
-			snapshot.headline = "Agent is using a tool";
+			snapshot.headline = findLatestFailedToolItem(snapshot) ? "Recovering from tool issue" : "Agent is using a tool";
 			snapshot.summary = safeText(event.message);
 			upsertItem(snapshot, "tools", {
 				id: runtimeToolItemId(event),
@@ -419,13 +466,7 @@ function applyRuntimeProgress(
 				rawEventType: event.phase,
 			});
 			if (itemStatus === "failed" || itemStatus === "denied") {
-				snapshot.failure = {
-					class: itemStatus === "denied" ? "approval" : "tool",
-					message: safeText(event.summary || event.message || "Tool failed."),
-					retryable: itemStatus === "failed",
-					recoverable: itemStatus === "failed",
-				};
-				snapshot.headline = itemStatus === "denied" ? "Tool denied" : "Tool failed";
+				snapshot.headline = itemStatus === "denied" ? "Tool denied" : "Recovering from tool issue";
 			} else {
 				snapshot.headline = "Tool result received";
 			}
@@ -467,9 +508,10 @@ function applyRuntimeProgress(
 			snapshot.headline = "Agent failed";
 			snapshot.summary = safeText(event.message);
 			if (!snapshot.failure) {
+				const failedTool = findLatestFailedToolItem(snapshot);
 				snapshot.failure = {
-					class: "runtime",
-					message: safeText(event.message || "Runtime failed."),
+					class: failedTool ? "tool" : "runtime",
+					message: safeText(failedTool?.detail || event.message || "Runtime failed."),
 					retryable: true,
 					recoverable: true,
 				};
@@ -487,6 +529,19 @@ function applyRuntimeProgress(
 		default:
 			break;
 	}
+}
+
+function findLatestFailedToolItem(snapshot: AgentTrajectorySnapshot): AgentTrajectoryItem | null {
+	for (let index = snapshot.items.length - 1; index >= 0; index -= 1) {
+		const item = snapshot.items[index];
+		if (!item) {
+			continue;
+		}
+		if (item.kind === "tool" && (item.status === "failed" || item.status === "denied")) {
+			return item;
+		}
+	}
+	return null;
 }
 
 function extractRuntimeIdentity(events: RuntimeProgressWithIdentity[]): Partial<AgentTrajectoryIdentity> {
@@ -840,6 +895,7 @@ function buildReplayFailure(
 
 function stageForKind(kind: AgentTrajectoryItemKind): AgentTrajectoryStage["key"] {
 	switch (kind) {
+		case "narration":
 		case "context":
 		case "task":
 			return "context";
@@ -857,6 +913,58 @@ function stageForKind(kind: AgentTrajectoryItemKind): AgentTrajectoryStage["key"
 		case "failure":
 		default:
 			return "finalize";
+	}
+}
+
+function stageForNarration(kind: ProjectableNarration["kind"]): AgentTrajectoryStage["key"] {
+	return kind === "task_acknowledged" ? "context" : "reasoning";
+}
+
+function formatNarrationTitle(kind: ProjectableNarration["kind"]): string {
+	switch (kind) {
+		case "task_acknowledged":
+			return "收到任务";
+		case "plan_declared":
+			return "整理方案";
+		case "stage_report":
+		default:
+			return "阶段性汇报";
+	}
+}
+
+function formatNarrationDetail(narration: ProjectableNarration): string {
+	if (narration.kind === "task_acknowledged") {
+		return safeText(narration.understanding || narration.summary);
+	}
+	if (narration.kind === "plan_declared") {
+		const plan = Array.isArray(narration.plan) && narration.plan.length > 0
+			? narration.plan.join("；")
+			: "";
+		return safeText(plan || narration.summary);
+	}
+	if (narration.justDone || narration.next) {
+		return safeText([narration.justDone, narration.next].filter(Boolean).join("，"));
+	}
+	return safeText(narration.summary);
+}
+
+function mapNarrationStatus(
+	status: ProjectableNarration["status"] | undefined,
+	completedReplay: boolean,
+): AgentTrajectoryItemStatus {
+	if (completedReplay && status === "running") {
+		return "ok";
+	}
+	switch (status) {
+		case "running":
+			return "running";
+		case "waiting":
+			return "waiting";
+		case "failed":
+			return "failed";
+		case "completed":
+		default:
+			return "ok";
 	}
 }
 

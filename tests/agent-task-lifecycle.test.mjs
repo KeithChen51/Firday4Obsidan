@@ -190,6 +190,76 @@ test("runtime task state and persisted turn event refs agree for completed turns
 	assert.ok(result.turnEvents.every((event) => event.taskId === result.task.id));
 });
 
+test("runtime ignores unauthorized currentFilePath in task snapshots and prompts", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "ordinary prompt with stray active file",
+		userPrompt: "创建一个新的版本，作为通用版本的简化",
+		currentFilePath: "Project/raw/active.md",
+		files: {
+			"Project/raw/active.md": "Wrong active file body",
+		},
+		modelSteps: [
+			{ assistant: "I will ask for the target file instead of assuming the active one." },
+		],
+	});
+
+	assert.equal(result.task?.runInput?.currentFilePath, undefined);
+	assert.equal(result.task?.runInput?.activeFileContext, undefined);
+	assert.doesNotMatch(result.modelRequests[0]?.sanitizedText ?? "", /Current active file/i);
+	assert.doesNotMatch(result.modelRequests[0]?.sanitizedText ?? "", /Project\/raw\/active\.md/);
+});
+
+test("runtime checkpoints do not persist unauthorized currentFilePath", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "checkpoint with stray active file",
+		userPrompt: "Read checkpoint target",
+		currentFilePath: "Project/raw/active.md",
+		files: {
+			"Project/raw/active.md": "Wrong active file body",
+			"Project/checkpoint.md": "checkpoint source",
+		},
+		modelSteps: [
+			{ tool: { id: "call-checkpoint-read", name: "read", args: { path: "Project/checkpoint.md" } } },
+			{ error: "504 gateway timeout" },
+		],
+	});
+
+	assert.ok(result.checkpoints.length > 0, "scenario should persist at least one checkpoint");
+	const serialized = JSON.stringify(result.checkpoints);
+	assert.doesNotMatch(serialized, /Project\/raw\/active\.md/);
+	assert.doesNotMatch(serialized, /Wrong active file body/);
+	assert.doesNotMatch(serialized, /Current active file/i);
+});
+
+test("runtime records explicit active file context reason in prompt context and replay", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "deictic active file context",
+		userPrompt: "请总结当前文档",
+		activeFileContext: {
+			mode: "deictic_reference",
+			path: "Project/raw/active.md",
+			includeContent: false,
+			reason: "用户明确指代当前文档",
+		},
+		files: {
+			"Project/raw/active.md": "ACTIVE_FILE_BODY_SHOULD_NOT_BE_INJECTED",
+		},
+		modelSteps: [
+			{ assistant: "I need to read the file before summarizing." },
+		],
+	});
+
+	const prompt = result.modelRequests[0]?.sanitizedText ?? "";
+	assert.match(prompt, /Current active file: Project\/raw\/active\.md/);
+	assert.match(prompt, /Active file context reason: 用户明确指代当前文档/);
+	assert.doesNotMatch(prompt, /ACTIVE_FILE_BODY_SHOULD_NOT_BE_INJECTED/);
+	assert.equal(result.task?.runInput?.activeFileContext?.reason, "用户明确指代当前文档");
+	const contextEvent = result.turnEvents.find((event) =>
+		event.type === "context_built" && event.payload?.activeFileContext
+	);
+	assert.equal(contextEvent?.payload.activeFileContext.reason, "用户明确指代当前文档");
+});
+
 test("runtime records failed and cancelled task terminal states", async () => {
 	const failed = await runAgentRuntimeScenario({
 		name: "task lifecycle failed turn",
@@ -386,7 +456,7 @@ test("runtime continue resumes a waiting task with user input", async () => {
 		},
 		settings: {
 			agentRuntime: {
-				toolPermissionMode: "auto",
+				toolPermissionMode: "standard",
 				fileMutationMode: "review",
 			},
 		},

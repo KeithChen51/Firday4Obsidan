@@ -55,6 +55,15 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 
 	context.emit({ type: "task_updated", payload: { taskId: "task-i", status: "created", summary: "Task created." } });
 	context.emit({ type: "task_updated", payload: { taskId: "task-i", status: "running", summary: "Task running." } });
+	context.emit({
+		type: "narration",
+		payload: {
+			kind: "task_acknowledged",
+			summary: "收到任务，正在确认目标。",
+			understanding: "需要把过程叙事恢复到时间线。",
+			source: "fallback",
+		},
+	});
 	context.emit({ type: "model_request", payload: { step: 1 } });
 	context.emit({ type: "model_response", payload: { step: 1 } });
 	context.emit({ type: "approval_requested", payload: { tool: "write", targetPath: "Note.md" } });
@@ -80,7 +89,7 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 	const replay = await reader.readTurn({ conversationId: "conversation-i", turnId: "turn-i-replay" });
 	const summary = reader.summarize(replay);
 
-	assert.equal(records.length, 9);
+	assert.equal(records.length, 10);
 	assert.equal(replay.every((event) => event.taskId === "task-i"), true);
 	assert.equal(replay.every((event) => event.payload.traceId === "trace-i"), true);
 	assert.equal(summary.status, "completed");
@@ -88,6 +97,8 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 	assert.equal(summary.approvals.requested, 1);
 	assert.equal(summary.approvals.resolved, 1);
 	assert.equal(summary.mutations.planned, 1);
+	assert.deepEqual(summary.narrationTimeline.map((item) => item.kind), ["task_acknowledged"]);
+	assert.equal(summary.narrationTimeline[0]?.understanding, "需要把过程叙事恢复到时间线。");
 	assert.deepEqual(summary.taskTimeline.map((item) => item.event), ["created", "running", "completed"]);
 });
 

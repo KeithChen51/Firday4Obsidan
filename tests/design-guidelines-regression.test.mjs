@@ -87,7 +87,7 @@ test("core design selectors have one source of truth", () => {
 		".friday-top-nav",
 		".friday-page-content",
 		".friday-ai-chat-shell",
-		".friday-runtime-card",
+		".friday-agent-process-shell",
 	]) {
 		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const matches = styles.match(new RegExp(`^${escaped}\\s*\\{`, "gm")) ?? [];

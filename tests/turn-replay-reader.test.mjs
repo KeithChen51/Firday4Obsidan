@@ -137,6 +137,73 @@ test("TurnReplayReader summarizes safe reasoning metadata and does not persist r
 	assert.equal(JSON.stringify(summary).includes(rawCot), false);
 });
 
+test("TurnReplayReader restores user-visible narration timeline without raw reasoning", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-narration-"));
+	const resolvePath = resolveTurnPath(root);
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const ref = { conversationId: "agent", turnId: "turn-narration" };
+	const rawCot = "raw hidden model thinking must not be replayed";
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { summary: "Runtime started" } },
+		{
+			type: "narration_report",
+			payload: {
+				kind: "task_acknowledged",
+				summary: "收到任务，正在确认目标。",
+				understanding: "需要把过程叙事放进线性时间线。",
+				source: "fallback",
+				rawReasoning: rawCot,
+			},
+		},
+		{
+			type: "narration_report",
+			payload: {
+				kind: "plan_declared",
+				summary: "先确认上下文，再执行修改。",
+				plan: ["读取相关代码", "补测试", "实现事件链路"],
+				source: "fallback",
+			},
+		},
+		{
+			type: "narration_report",
+			payload: {
+				kind: "stage_report",
+				summary: "已读取相关文件，接下来实现事件链路。",
+				justDone: "已读取相关文件",
+				next: "接下来实现事件链路",
+				source: "model",
+				status: "running",
+			},
+		},
+		{ type: "assistant_final", payload: { summary: "完成。" } },
+		{ type: "turn_completed", payload: { status: "completed" } },
+	]);
+
+	const events = await reader.readTurn(ref);
+	assert.equal(JSON.stringify(events).includes(rawCot), false);
+	const summary = reader.summarize(events);
+
+	assert.deepEqual(summary.narrationTimeline.map((item) => item.kind), [
+		"task_acknowledged",
+		"plan_declared",
+		"stage_report",
+	]);
+	assert.deepEqual(summary.narrationTimeline[0], {
+		kind: "task_acknowledged",
+		summary: "收到任务，正在确认目标。",
+		understanding: "需要把过程叙事放进线性时间线。",
+		source: "fallback",
+		at: events[1].at,
+	});
+	assert.deepEqual(summary.narrationTimeline[1].plan, ["读取相关代码", "补测试", "实现事件链路"]);
+	assert.equal(summary.narrationTimeline[2].justDone, "已读取相关文件");
+	assert.equal(summary.narrationTimeline[2].next, "接下来实现事件链路");
+	assert.equal(JSON.stringify(summary).includes(rawCot), false);
+});
+
 test("TurnReplayReader reports sequence gaps and late events after a terminal event", async () => {
 	const { TurnReplayReader } = await loadModules();
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-"));

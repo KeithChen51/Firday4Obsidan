@@ -252,7 +252,7 @@ export class AgentTaskManager {
 			userPrompt: input.userPrompt,
 			...(input.modelOverride ? { modelOverride: input.modelOverride } : {}),
 			...(input.depth !== undefined ? { depth: input.depth } : {}),
-			...(input.currentFilePath ? { currentFilePath: input.currentFilePath } : {}),
+			...(input.activeFileContext ? { activeFileContext: input.activeFileContext } : {}),
 			...(input.extraSystemContext ? { extraSystemContext: input.extraSystemContext } : {}),
 			...(input.allowedTools ? { allowedTools: [...input.allowedTools] } : {}),
 			agentMode: input.mode,

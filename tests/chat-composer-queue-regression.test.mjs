@@ -26,6 +26,15 @@ test("chat toolbar persists model and permission choices instead of session foll
 	assert.match(source, /this\.plugin\.settings\.agentRuntime\.toolPermissionMode = value as ToolPermissionMode/);
 });
 
+test("chat toolbar execution mode derives file mutation behavior from the visible mode", async () => {
+	const source = readSource(viewPath);
+	const permissionChangeBlock = source.match(/permissionSelect\.onchange = async \(\) => \{[\s\S]*?\n\t\t\};/)?.[0] ?? "";
+
+	assert.match(permissionChangeBlock, /deriveFileMutationModeFromToolPermissionMode\(value as ToolPermissionMode\)/);
+	assert.match(permissionChangeBlock, /fileMutationMode = /);
+	assert.doesNotMatch(permissionChangeBlock, /toolPermissionMode = value as ToolPermissionMode;\s*await this\.plugin\.saveSettings\(\);/);
+});
+
 test("chat composer stays editable during work and queues the next prompt", async () => {
 	const source = readSource(viewPath);
 	assert.match(source, /private aiQueuedPrompts: MentionComposerSnapshot\[\] = \[\];/);

@@ -97,6 +97,7 @@ test("agent task UI actions call runtime services and update visible task state"
 		},
 	};
 	const progressEvents = [];
+	let mutationReviewRefreshCount = 0;
 	const handlers = createAgentTaskPanelActionHandlers("task-1", runtime, {
 		abortCurrentRun: () => {
 			abortCount += 1;
@@ -104,6 +105,9 @@ test("agent task UI actions call runtime services and update visible task state"
 		getContinuePrompt: () => "additional detail",
 		onProgress: (event) => progressEvents.push(event),
 		recordAgentTask: (task) => recorded.push(task),
+		afterMutationReview: async () => {
+			mutationReviewRefreshCount += 1;
+		},
 		render: () => {
 			renderCount += 1;
 		},
@@ -127,6 +131,7 @@ test("agent task UI actions call runtime services and update visible task state"
 		["get", "task-1"],
 	]);
 	assert.equal(abortCount, 1);
+	assert.equal(mutationReviewRefreshCount, 2);
 	assert.equal(renderCount, 6);
 	assert.deepEqual(
 		recorded.map((task) => task?.status),

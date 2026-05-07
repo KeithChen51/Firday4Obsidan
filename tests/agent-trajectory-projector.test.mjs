@@ -29,6 +29,7 @@ function makeReplaySummary(overrides = {}) {
 		completedAt: "2026-05-05T00:00:08.000Z",
 		durationMs: 8000,
 		modelCalls: { requested: 1, completed: 1, failed: 0 },
+		narrationTimeline: [],
 		checkpoints: { saved: 0, resumed: 0, rejected: 0, latestBoundary: "" },
 		checkpointTimeline: [],
 		transport: { retries: 0, exhausted: 0, lastMessage: "" },
@@ -131,6 +132,61 @@ test("projectRuntimeProgress maps live context model tool done events into order
 	assert.equal(snapshot.privacy.source, "live");
 });
 
+test("projectRuntimeProgress maps narration events into ordered visible process items", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "start",
+			depth: 0,
+			message: "Runtime started.",
+			turnId: "turn-live-narration",
+			conversationId: "conversation-live",
+			at: "2026-05-06T00:00:00.000Z",
+		},
+		{
+			phase: "narration",
+			depth: 0,
+			message: "收到任务，正在确认目标。",
+			narration: {
+				kind: "task_acknowledged",
+				summary: "收到任务，正在确认目标。",
+				understanding: "需要把过程叙事放进线性时间线。",
+				source: "fallback",
+			},
+			at: "2026-05-06T00:00:01.000Z",
+		},
+		{
+			phase: "narration",
+			depth: 0,
+			message: "先确认上下文，再执行修改。",
+			narration: {
+				kind: "plan_declared",
+				summary: "先确认上下文，再执行修改。",
+				plan: ["读取相关代码", "补测试", "实现事件链路"],
+				source: "fallback",
+			},
+			at: "2026-05-06T00:00:02.000Z",
+		},
+		{
+			phase: "tool_call",
+			depth: 0,
+			step: 1,
+			tool: "read",
+			targetPath: "src/views/agentProcessPanelViewModel.ts",
+			message: "Reading process view model.",
+			at: "2026-05-06T00:00:03.000Z",
+		},
+	]);
+
+	assert.equal(snapshot.status, "running");
+	assert.deepEqual(snapshot.items.map((item) => item.kind), ["narration", "narration", "tool"]);
+	assert.deepEqual(snapshot.items.slice(0, 2).map((item) => item.title), ["收到任务", "整理方案"]);
+	assert.equal(snapshot.items[0]?.detail, "需要把过程叙事放进线性时间线。");
+	assert.deepEqual(snapshot.items[1]?.narrationPlan, ["读取相关代码", "补测试", "实现事件链路"]);
+	assert.equal(snapshot.items[1]?.rawEventType, "narration_report");
+});
+
 test("projectRuntimeProgress turns reasoning metadata into a progressive reasoning item", async () => {
 	const { projectRuntimeProgress } = await loadProjector();
 
@@ -184,6 +240,32 @@ test("projectRuntimeProgress marks failed tool results and exposes a retryable f
 	assert.equal(snapshot.failure?.class, "tool");
 	assert.equal(snapshot.failure?.retryable, true);
 	assert.match(snapshot.failure?.message ?? "", /grep failed/i);
+});
+
+test("projectRuntimeProgress keeps a failed tool result non-terminal while the turn continues", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-recovering" },
+		{ phase: "tool_call", depth: 0, step: 1, tool: "read", targetPath: "workspace/missing.md", message: "Reading file." },
+		{
+			phase: "tool_result",
+			depth: 0,
+			step: 1,
+			tool: "read",
+			targetPath: "workspace/missing.md",
+			status: "failed",
+			summary: "read failed: file was not found.",
+			message: "read failed.",
+		},
+		{ phase: "tool_call", depth: 0, step: 2, tool: "ls", targetPath: "Project", message: "Trying another path." },
+	]);
+
+	assert.equal(snapshot.status, "running");
+	assert.equal(snapshot.failure, undefined);
+	assert.equal(snapshot.headline, "Recovering from tool issue");
+	assert.equal(snapshot.items.find((item) => item.tool === "read")?.status, "failed");
+	assert.equal(snapshot.items.find((item) => item.tool === "ls")?.status, "running");
 });
 
 test("projectRuntimeProgress turns approval progress into a waiting approval snapshot", async () => {
@@ -288,6 +370,38 @@ test("projectReplaySummary restores reasoning timeline from safe replay metadata
 	assert.equal(reasoningItem?.detail, "Used the provider reasoning summary.");
 	assert.equal(reasoningItem?.reasoningProvider, "openai");
 	assert.equal(JSON.stringify(snapshot).includes("raw CoT"), false);
+});
+
+test("projectReplaySummary restores narration timeline before tools without fixed phase buckets", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		narrationTimeline: [
+			{
+				kind: "task_acknowledged",
+				summary: "收到任务，正在确认目标。",
+				understanding: "需要把过程叙事放进线性时间线。",
+				source: "fallback",
+				at: "2026-05-06T00:00:01.000Z",
+			},
+			{
+				kind: "stage_report",
+				summary: "已读取相关文件，接下来实现事件链路。",
+				justDone: "已读取相关文件",
+				next: "接下来实现事件链路",
+				source: "model",
+				status: "running",
+				at: "2026-05-06T00:00:02.000Z",
+			},
+		],
+	}));
+
+	const narrationItems = snapshot.items.filter((item) => item.kind === "narration");
+	assert.deepEqual(narrationItems.map((item) => item.title), ["收到任务", "阶段性汇报"]);
+	assert.equal(narrationItems[1]?.narrationJustDone, "已读取相关文件");
+	assert.equal(narrationItems[1]?.narrationNext, "接下来实现事件链路");
+	assert.ok(snapshot.items.findIndex((item) => item.kind === "narration") < snapshot.items.findIndex((item) => item.kind === "tool"));
+	assert.doesNotMatch(JSON.stringify(snapshot.items), /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
 test("projectReplaySummary surfaces mutation conflict and apply failure directly", async () => {

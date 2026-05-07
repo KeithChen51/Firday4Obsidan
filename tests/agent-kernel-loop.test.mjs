@@ -131,10 +131,13 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	const eventTypes = result.events.map((event) => event.type);
 	assert.deepEqual(eventTypes, [
 		"turn_started",
+		"narration",
+		"narration",
 		"model_request",
 		"model_response",
 		"tool_call",
 		"tool_result",
+		"narration",
 		"model_request",
 		"model_response",
 		"turn_completed",
@@ -153,6 +156,96 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	assert.deepEqual(modelResponsePayloads.map((payload) => payload.reasoningProvider), ["deepseek", "openai"]);
 	assert.equal(JSON.stringify(modelResponsePayloads).includes("raw chain of thought"), false);
 	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
+});
+
+test("AgentLoopController puts model-authored progress narration into the process timeline instead of the final answer", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 3,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "我理解你的需求是先读取项目文件，接下来我会调用读取工具。",
+						toolCalls: [{ id: "call-1", name: "read", args: { path: "Project/a.md" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: "The file says alpha.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "已读取 Project/a.md。",
+					},
+					payload: { ok: true, tool: "read", data: { path: "Project/a.md", content: "alpha" } },
+					modelResultText: "TOOL_RESULT alpha",
+				};
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-narration-progress",
+		traceId: "trace-narration-progress",
+		conversationId: "conversation-narration-progress",
+		agentId: "agent-narration-progress",
+		conversation: [],
+		userPrompt: "读取 Project/a.md 并告诉我内容",
+		mode: "ask",
+	});
+
+	assert.equal(result.assistantText, "The file says alpha.");
+	assert.equal(result.assistantText.includes("我理解你的需求"), false);
+	const narrationPayloads = result.events
+		.filter((event) => event.type === "narration")
+		.map((event) => event.payload);
+	assert.deepEqual(narrationPayloads.map((payload) => payload.kind), [
+		"task_acknowledged",
+		"plan_declared",
+		"stage_report",
+		"stage_report",
+	]);
+	assert.match(narrationPayloads[2]?.summary ?? "", /我理解你的需求/);
+	assert.equal(JSON.stringify(narrationPayloads).includes("raw chain of thought"), false);
 });
 
 test("AgentLoopController saves context and tool-result checkpoints without raw reasoning", async () => {

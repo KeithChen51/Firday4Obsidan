@@ -3,6 +3,7 @@ import { StepEventName, TurnStateMachine } from "../turn-state/TurnStateMachine"
 
 const PHASE_TO_STEP_EVENT: Record<RuntimeProgressEvent["phase"], StepEventName> = {
 	start: "STEP_START",
+	narration: "STEP_NARRATION",
 	context: "STEP_CONTEXT",
 	model_request: "STEP_MODEL_REQUEST",
 	model_retry: "STEP_MODEL_RETRY",
@@ -24,11 +25,13 @@ export class TurnOrchestrator {
 			step: event.step,
 			tool: event.tool,
 			contextKey: event.contextKey,
+			activeFileContext: event.activeFileContext,
 			targetPath: event.targetPath,
 			status: event.status,
 			summary: event.summary,
 			transport: event.transport,
 			checkpoint: event.checkpoint,
+			narration: event.narration,
 			message: event.message,
 		});
 	}

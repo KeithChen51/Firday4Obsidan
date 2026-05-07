@@ -10,6 +10,7 @@ export type AgentTrajectoryStatus =
 
 export type AgentTrajectoryItemKind =
 	| "context"
+	| "narration"
 	| "reasoning"
 	| "model"
 	| "transport"
@@ -61,6 +62,11 @@ export interface AgentTrajectoryItem {
 	reasoningProvider?: string;
 	reasoningRawFormat?: string;
 	reasoningContinuationPolicy?: string;
+	narrationKind?: "task_acknowledged" | "plan_declared" | "stage_report";
+	narrationSource?: "runtime" | "model" | "fallback" | string;
+	narrationPlan?: string[];
+	narrationJustDone?: string;
+	narrationNext?: string;
 }
 
 export interface AgentTrajectoryAction {

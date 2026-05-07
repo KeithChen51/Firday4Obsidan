@@ -28,7 +28,7 @@ The data-driven suite in `tests/evals/agent-scenarios.json` must cover these cur
 9. `write-request-creates-mutation-plan` - Write request creates a pending mutation plan.
 10. `reject-mutation-keeps-file-unchanged` - Rejecting a mutation leaves files unchanged.
 11. `edit-conflict-becomes-conflicted` - External edits produce a conflicted mutation.
-12. `delete-requires-strict-approval` - Delete requires approval and review.
+12. `delete-creates-single-mutation-review` - Delete creates one high-risk mutation review.
 13. `organize-mode-plans-links-and-tags` - Organize mode proposes links/tags/frontmatter as reviewable mutations.
 14. `review-mode-detects-structure-issues` - Review mode detects duplicate structure and missing sources.
 15. `debug-profile-allows-exec` - Debug profile exposes allowlisted `exec`.

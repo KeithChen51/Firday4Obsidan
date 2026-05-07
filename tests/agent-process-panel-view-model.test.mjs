@@ -72,6 +72,34 @@ test("buildAgentProcessPanelViewModel uses live elapsed time for running process
 	assert.deepEqual(view.visibleSteps[0]?.fileRefs.map((file) => file.path), ["Notes/Today.md"]);
 });
 
+test("buildAgentProcessPanelViewModel exposes a running timeline view from the same snapshot data", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "Agent is using a tool",
+		summary: "Reading project notes.",
+		time: {
+			startedAt: "2026-05-06T00:00:00.000Z",
+			updatedAt: "2026-05-06T00:00:11.000Z",
+		},
+		items: [
+			makeItem({ id: "context", kind: "context", title: "Loaded project rules", detail: "Loaded AGENTS.md.", status: "ok", at: "2026-05-06T00:00:01.000Z" }),
+			makeItem({ id: "tool", kind: "tool", title: "Read src/views/agentTrajectoryRenderer.ts", detail: "Read renderer state.", status: "running", tool: "read", targetPath: "src/views/agentTrajectoryRenderer.ts", at: "2026-05-06T00:00:10.000Z" }),
+		],
+	}), { now: new Date("2026-05-06T00:00:11.000Z") });
+
+	assert.ok(view.timeline, "task work should expose timeline view");
+	assert.equal(view.timeline.status, "running");
+	assert.equal(view.timeline.title, "正在处理 11s");
+	assert.equal(view.timeline.defaultExpanded, true);
+	assert.equal(view.timeline.canExpand, true);
+	assert.deepEqual(view.timeline.items.map((item) => item.kind), ["receipt", "context"]);
+	assert.deepEqual(view.timeline.items.map((item) => item.title), ["收到任务", "读取项目现状"]);
+	assert.equal(view.timeline.items[1]?.status, "running");
+	assert.doesNotMatch(JSON.stringify(view.timeline.items), /Context|Tools|Review|Finalize|Listed \d+ item/);
+});
+
 test("buildAgentProcessPanelViewModel uses completed snapshot duration instead of falling back to zero", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -96,6 +124,33 @@ test("buildAgentProcessPanelViewModel uses completed snapshot duration instead o
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), ["读取上下文"]);
 });
 
+test("buildAgentProcessPanelViewModel reuses timeline items for completed replay", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		time: {
+			startedAt: "2026-05-06T00:00:00.000Z",
+			completedAt: "2026-05-06T00:02:11.000Z",
+			durationMs: 131000,
+		},
+		items: [
+			makeItem({ id: "context", kind: "context", title: "Loaded current note", detail: "Read visible context.", status: "ok", at: "2026-05-06T00:00:05.000Z" }),
+			makeItem({ id: "read", kind: "tool", title: "Read Notes/Today.md", detail: "Read current note.", status: "ok", tool: "read", targetPath: "Notes/Today.md", at: "2026-05-06T00:00:10.000Z" }),
+			makeItem({ id: "final", kind: "final", title: "Final response", detail: "Answered from the current note.", status: "ok", at: "2026-05-06T00:02:11.000Z" }),
+		],
+	}));
+
+	assert.ok(view.timeline, "completed task replay should expose the same timeline contract");
+	assert.equal(view.timeline.status, "completed");
+	assert.equal(view.timeline.title, "已处理 2m 11s");
+	assert.equal(view.timeline.defaultExpanded, false);
+	assert.deepEqual(view.timeline.items.map((item) => item.kind), ["receipt", "context", "done"]);
+	assert.deepEqual(view.timeline.items.map((item) => item.status), ["done", "done", "done"]);
+	assert.equal(view.timeline.items.at(-1)?.title, "完成");
+});
+
 test("buildAgentProcessPanelViewModel hides simple completed answers without replay", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -117,6 +172,7 @@ test("buildAgentProcessPanelViewModel hides simple completed answers without rep
 	assert.equal(view.resultArtifacts.length, 0);
 	assert.equal(view.diffSummary, null);
 	assert.equal(view.visibleSteps.length, 0);
+	assert.equal(view.timeline, null);
 });
 
 test("buildAgentProcessPanelViewModel hides lifecycle-only completed task replay", async () => {
@@ -350,6 +406,65 @@ test("buildAgentProcessPanelViewModel renders transport retry without checkpoint
 	assert.match(view.header.summary, /attempt 1\/4/);
 	assert.match(view.header.summary, /700ms/);
 	assert.doesNotMatch(JSON.stringify(view), /checkpoint|resume/i);
+	assert.ok(view.timeline);
+	assert.equal(view.timeline.status, "retrying");
+	assert.equal(view.timeline.collapsedSummary, "模型连接不稳定，正在恢复。");
+	assert.equal(view.timeline.items.at(-1)?.kind, "retry");
+	assert.equal(view.timeline.items.at(-1)?.title, "处理连接重试");
+	assert.doesNotMatch(view.timeline.items.at(-1)?.summary ?? "", /HTTP|504|700ms|request/i);
+});
+
+test("buildAgentProcessPanelViewModel shows recoverable tool errors as a running warning", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "Recovering from tool issue",
+		summary: "Trying another path.",
+		time: {
+			startedAt: "2026-05-06T00:00:00.000Z",
+			updatedAt: "2026-05-06T00:00:41.000Z",
+		},
+		items: [
+			makeItem({ id: "read-failed", kind: "tool", title: "Read workspace/missing.md", detail: "read failed: file was not found.", status: "failed", tool: "read", targetPath: "workspace/missing.md", step: 1 }),
+			makeItem({ id: "ls-running", kind: "tool", title: "List Project", detail: "Trying another path.", status: "running", tool: "ls", targetPath: "Project", step: 2 }),
+		],
+	}), { now: new Date("2026-05-06T00:00:42.000Z") });
+
+	assert.equal(view.status.tone, "running");
+	assert.equal(view.timeline?.status, "recovering");
+	assert.equal(view.timeline?.title, "执行遇到问题，正在换一种方式继续 · 42s");
+	assert.match(view.timeline?.collapsedSummary ?? "", /正在换一种方式继续/);
+	assert.equal(view.recovery, null);
+	assert.equal(view.visibleSteps.some((step) => step.status === "failed" || step.status === "retryable"), false);
+});
+
+test("buildAgentProcessPanelViewModel groups process details by user-visible phase", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "FRIDAY 正在处理",
+		summary: "正在读取项目文件。",
+		time: {
+			startedAt: "2026-05-06T00:00:00.000Z",
+			updatedAt: "2026-05-06T00:00:12.000Z",
+		},
+		items: [
+			makeItem({ id: "ack", kind: "narration", title: "收到任务", detail: "我会先理解你的需求。", status: "ok", rawEventType: "narration_report", narrationKind: "task_acknowledged" }),
+			makeItem({ id: "plan", kind: "narration", title: "整理方案", detail: "先看文件，再更新内容。", status: "ok", rawEventType: "narration_report", narrationKind: "plan_declared" }),
+			makeItem({ id: "read", kind: "tool", title: "Read Project/a.md", detail: "读取参考文件。", status: "running", tool: "read", targetPath: "Project/a.md" }),
+		],
+	}), { now: new Date("2026-05-06T00:00:12.000Z") });
+
+	assert.ok(view.timeline);
+	assert.ok(view.timeline?.statusBar);
+	assert.equal(view.timeline?.statusBar.phase, "执行");
+	assert.equal(view.timeline?.statusBar.action, "读取项目现状");
+	assert.equal(view.timeline?.statusBar.elapsed, "12s");
+	assert.deepEqual(view.timeline?.groups.map((group) => group.title), ["收到任务", "计划", "执行"]);
+	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false, true]);
+	assert.equal(view.timeline?.groups[2]?.items.length, 1);
 });
 
 test("buildAgentProcessPanelViewModel exposes completed replay summary and evidence strip", async () => {
@@ -409,6 +524,12 @@ test("buildAgentProcessPanelViewModel exposes result artifacts and excludes pend
 	assert.equal(view.diffSummary?.changedFiles, 2);
 	assert.match(view.diffSummary?.summary ?? "", /2 个文件已修改/);
 	assert.doesNotMatch(JSON.stringify(view.resultArtifacts), /Pending|Reference/);
+	assert.ok(view.timeline);
+	assert.deepEqual(view.timeline.finalArtifacts.map((artifact) => artifact.path), [
+		"Notes/Updated.md",
+		"Maps/Project.canvas",
+	]);
+	assert.equal(JSON.stringify(view.timeline.finalArtifacts).includes("Notes/Pending.md"), false);
 });
 
 test("buildAgentProcessPanelViewModel uses approved FRIDAY process labels with duration", async () => {
@@ -500,6 +621,78 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assert.doesNotMatch(JSON.stringify(view.visibleSteps), /Finalize|Future|pending future/i);
 });
 
+test("buildAgentProcessPanelViewModel shows acknowledged task, plan, and stage reports as real timeline steps", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "FRIDAY 正在处理",
+		summary: "已读取相关文件，接下来实现事件链路。",
+		items: [
+			makeItem({
+				id: "narration-ack",
+				kind: "narration",
+				title: "收到任务",
+				detail: "需要把过程叙事放进线性时间线。",
+				status: "ok",
+				rawEventType: "narration_report",
+				narrationKind: "task_acknowledged",
+				narrationSource: "fallback",
+			}),
+			makeItem({
+				id: "narration-plan",
+				kind: "narration",
+				title: "整理方案",
+				detail: "先确认上下文，再执行修改。",
+				status: "ok",
+				rawEventType: "narration_report",
+				narrationKind: "plan_declared",
+				narrationPlan: ["读取相关代码", "补测试", "实现事件链路"],
+				narrationSource: "fallback",
+			}),
+			makeItem({
+				id: "narration-stage",
+				kind: "narration",
+				title: "阶段性汇报",
+				detail: "已读取相关文件，接下来实现事件链路。",
+				status: "running",
+				rawEventType: "narration_report",
+				narrationKind: "stage_report",
+				narrationJustDone: "已读取相关文件",
+				narrationNext: "接下来实现事件链路",
+				narrationSource: "model",
+			}),
+			makeItem({
+				id: "read",
+				kind: "tool",
+				title: "Read src/views/agentProcessPanelViewModel.ts",
+				detail: "Read process view model.",
+				status: "ok",
+				tool: "read",
+				targetPath: "src/views/agentProcessPanelViewModel.ts",
+			}),
+		],
+	}));
+
+	assert.equal(view.mode, "stepped_process");
+	assert.deepEqual(view.visibleSteps.map((step) => step.title), [
+		"收到任务",
+		"整理方案",
+		"阶段性汇报",
+		"读取上下文",
+	]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.title), [
+		"收到任务",
+		"整理方案",
+		"阶段性汇报",
+		"读取项目现状",
+	]);
+	assert.equal(view.timeline?.items[0]?.summary, "需要把过程叙事放进线性时间线。");
+	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "读取相关代码");
+	assert.equal(view.timeline?.items[2]?.summary, "已读取相关文件，接下来实现事件链路。");
+	assert.doesNotMatch(JSON.stringify(view.timeline), /context_ready|Context|Reasoning|Tools|Review|Finalize/);
+});
+
 test("buildAgentProcessPanelViewModel renders reasoning artifacts as visible summary only", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 	const rawCot = "raw chain of thought must never render";
@@ -536,6 +729,61 @@ test("buildAgentProcessPanelViewModel renders reasoning artifacts as visible sum
 	assert.doesNotMatch(JSON.stringify(view), /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
+test("buildAgentProcessPanelViewModel keeps technical detail from repeating the visible summary", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		items: [
+			makeItem({
+				id: "reasoning",
+				kind: "reasoning",
+				title: "FRIDAY reasoning",
+				detail: "Checked the request and selected the document update path.",
+				status: "ok",
+				rawEventType: "model_response",
+			}),
+			makeItem({ id: "final", kind: "final", title: "Final response", detail: "Done.", status: "ok" }),
+		],
+	}));
+
+	const reasoningItem = view.timeline?.items.find((item) => item.kind === "reasoning");
+	assert.ok(reasoningItem, "reasoning timeline item should exist");
+	assert.equal(reasoningItem.summary, "Checked the request and selected the document update path.");
+	assert.equal(reasoningItem.detail, undefined);
+});
+
+test("buildAgentProcessPanelViewModel hides context checkpoint implementation wording", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({
+				id: "checkpoint",
+				kind: "system",
+				title: "Checkpoint saved",
+				detail: "Context package built before native model request. (context_ready)",
+				status: "ok",
+				rawEventType: "checkpoint_saved",
+			}),
+			makeItem({
+				id: "tool",
+				kind: "tool",
+				title: "Read project",
+				detail: "Listed 4 item(s)",
+				status: "running",
+				tool: "ls",
+				targetPath: "Project",
+			}),
+		],
+	}));
+
+	assert.ok(view.timeline);
+	assert.doesNotMatch(JSON.stringify(view.timeline.items), /Context package built|context_ready|native model request/);
+});
+
 test("buildAgentProcessPanelViewModel creates file write steps before approval steps", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -559,6 +807,13 @@ test("buildAgentProcessPanelViewModel creates file write steps before approval s
 	assert.equal(view.visibleSteps[1]?.summary, "Wrote draft content.");
 	assert.equal(view.visibleSteps[2]?.summary, "1 个文件改动待审核");
 	assert.deepEqual(view.visibleSteps[2]?.actions.map((action) => action.label), ["查看改动", "应用", "拒绝"]);
+	assert.ok(view.timeline);
+	assert.equal(view.timeline.status, "waiting");
+	assert.equal(view.timeline.title, "等待确认");
+	assert.match(view.timeline.collapsedSummary ?? "", /需要你确认/);
+	assert.deepEqual(view.timeline.actions.map((action) => action.id), ["view_changes", "apply", "reject"]);
+	assert.equal(view.timeline.items.at(-1)?.kind, "approval");
+	assert.equal(view.timeline.items.at(-1)?.status, "waiting");
 });
 
 function makeSnapshot(overrides = {}) {

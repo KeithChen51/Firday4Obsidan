@@ -32,6 +32,7 @@ import {
 import type { ModelCapabilityInfo } from "../services/AIService";
 import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrationService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
+import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
@@ -1520,20 +1521,9 @@ export class FridaySettingTab extends PluginSettingTab {
 				dropdown.addOption("strict", this.t("settings.agent.permissionMode.strict", "🔒 严格"));
 				dropdown.setValue(this.host.settings.agentRuntime.toolPermissionMode);
 				dropdown.onChange(async (value) => {
-					this.host.settings.agentRuntime.toolPermissionMode = value as "auto" | "standard" | "strict";
-					await this.host.saveSettings();
-				});
-			});
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.fileMutationMode.name", "文件修改模式"))
-			.setDesc(this.t("settings.agent.fileMutationMode.desc", "review：先生成变更计划；autoApproved：授权后直接应用。"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("review", this.t("settings.agent.fileMutationMode.review", "review（默认）"));
-				dropdown.addOption("autoApproved", this.t("settings.agent.fileMutationMode.autoApproved", "auto-approved"));
-				dropdown.setValue(this.host.settings.agentRuntime.fileMutationMode ?? "review");
-				dropdown.onChange(async (value) => {
-					this.host.settings.agentRuntime.fileMutationMode = value as "review" | "autoApproved";
+					const mode = value as ToolPermissionMode;
+					this.host.settings.agentRuntime.toolPermissionMode = mode;
+					this.host.settings.agentRuntime.fileMutationMode = deriveFileMutationModeFromToolPermissionMode(mode);
 					await this.host.saveSettings();
 				});
 			});

@@ -1,7 +1,7 @@
 {
 	"id": "friday-obsidian-plugin",
 	"name": "FRIDAY",
-	"version": "0.2.10",
+	"version": "0.2.11",
 	"minAppVersion": "1.0.0",
 	"description": "AI-native project management assistant - Make Every Day FRIDAY",
 	"author": "FRIDAY Team",

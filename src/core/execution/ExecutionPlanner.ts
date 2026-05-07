@@ -1,8 +1,9 @@
 import type { ExecutionDecision } from "./ExecutionDecision";
 import type { InvocationResolution } from "./InvocationResolver";
+import type { ActiveFileContext } from "../context/ActiveFileContext";
 
 export interface ExecutionPlannerPlanOptions {
-	currentFilePath?: string;
+	activeFileContext?: ActiveFileContext;
 }
 
 export class ExecutionPlanner {

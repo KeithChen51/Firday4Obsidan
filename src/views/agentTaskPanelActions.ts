@@ -31,6 +31,7 @@ export interface AgentTaskPanelActionCallbacks {
 	getContinuePrompt?: () => string;
 	onProgress?: (event: RuntimeProgressEvent) => void;
 	recordAgentTask: (task?: AgentTask) => void;
+	afterMutationReview?: () => Promise<void> | void;
 	render: () => void;
 	signal?: AbortSignal;
 }
@@ -49,9 +50,10 @@ export function createAgentTaskPanelActionHandlers(
 	runtime: AgentTaskPanelRuntime,
 	callbacks: AgentTaskPanelActionCallbacks,
 ): AgentTaskPanelActionHandlers {
-	const refreshTask = async (): Promise<AgentTask | undefined> => {
+	const refreshTask = async (afterTaskRefresh?: () => Promise<void> | void): Promise<AgentTask | undefined> => {
 		const updated = await runtime.getAgentTask(taskId);
 		callbacks.recordAgentTask(updated);
+		await afterTaskRefresh?.();
 		callbacks.render();
 		return updated;
 	};
@@ -101,7 +103,7 @@ export function createAgentTaskPanelActionHandlers(
 				return undefined;
 			}
 			await runtime.acceptEditPlan(planId);
-			return refreshTask();
+			return refreshTask(callbacks.afterMutationReview);
 		},
 
 		async reject(planId?: string) {
@@ -109,7 +111,7 @@ export function createAgentTaskPanelActionHandlers(
 				return undefined;
 			}
 			await runtime.rejectEditPlan(planId);
-			return refreshTask();
+			return refreshTask(callbacks.afterMutationReview);
 		},
 	};
 }

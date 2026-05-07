@@ -111,6 +111,40 @@ test("read -> final answer", async () => {
 	assert.ok(Array.isArray(compactContext?.payload.trimmedChannels));
 });
 
+test("read -> final answer persists visible process narration for replay", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "read -> visible narration replay",
+		files: {
+			"Project/workspace/a.md": "alpha",
+		},
+		settings: {
+			agentRuntime: {
+				toolCallingMode: "native",
+			},
+		},
+		modelSteps: [
+			{
+				assistant: "我理解你的需求是先读取文件，接下来我会调用读取工具。",
+				tool: { name: "read", args: { path: "Project/workspace/a.md" } },
+			},
+			{ assistant: "The file says alpha." },
+		],
+	});
+
+	assert.equal(result.assistantText.includes("我理解你的需求"), false);
+	assert.match(result.assistantText, /alpha/);
+	assertPersistedReplay(result, ["narration_report", "tool_completed", "assistant_final", "turn_completed"]);
+	assert.deepEqual(result.turnEventSummary.narrationTimeline.map((item) => item.kind), [
+		"task_acknowledged",
+		"plan_declared",
+		"stage_report",
+		"stage_report",
+	]);
+	assert.match(result.turnEventSummary.narrationTimeline[0]?.understanding ?? "", /读取文件/);
+	assert.match(result.turnEventSummary.narrationTimeline[2]?.summary ?? "", /我理解你的需求/);
+	assert.equal(JSON.stringify(result.turnEventSummary).includes("raw chain of thought"), false);
+});
+
 test("grep -> read -> final answer", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "grep -> read -> final answer",
@@ -209,40 +243,46 @@ test("gated wiki tool -> denied while wiki feature is disabled", async () => {
 	assertPersistedReplay(result, ["tool_policy_checked", "tool_denied", "assistant_final", "turn_completed"]);
 });
 
-test("permission denied -> no file change", async () => {
+test("standard delete creates mutation review -> no file change", async () => {
 	const result = await runAgentRuntimeScenario({
-		name: "permission denied -> no file change",
+		name: "standard delete creates mutation review -> no file change",
 		files: {
 			"Project/workspace/a.md": "original",
 		},
-		approvals: ["deny"],
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "standard",
+				fileMutationMode: "review",
+			},
+		},
 		modelSteps: [
 			{
 				tool: {
-					name: "write",
-					args: { path: "Project/workspace/a.md", content: "changed", mode: "update" },
+					name: "delete",
+					args: { path: "Project/workspace/a.md" },
 				},
 			},
-			{ assistant: "I did not change the file because approval was denied." },
+			{ assistant: "I prepared the delete for review." },
 		],
 	});
 
-	assert.match(result.assistantText, /approval was denied/i);
+	assert.match(result.assistantText, /prepared the delete/i);
 	assert.equal(result.traces.length, 1);
-	assert.equal(result.traces[0].tool, "write");
-	assert.equal(result.traces[0].status, "denied");
+	assert.equal(result.traces[0].tool, "delete");
+	assert.equal(result.traces[0].status, "ok");
 	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
-	assertEventTypesInclude(result, ["tool_denied", "assistant_final"]);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.pendingMutations[0].operation, "delete");
+	assertEventTypesInclude(result, ["mutation_planned", "tool_completed", "assistant_final"]);
 	assertPersistedReplay(result, [
 		"tool_policy_checked",
-		"tool_approval_requested",
-		"tool_approval_resolved",
-		"tool_denied",
+		"mutation_planned",
+		"tool_completed",
 		"assistant_final",
 		"turn_completed",
 	]);
-	assert.equal(result.turnEventSummary.approvals.requested, 1);
-	assert.equal(result.turnEventSummary.approvals.resolved, 1);
+	assert.equal(result.turnEventSummary.approvals.requested, 0);
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
 });
 
 test("max tool iterations -> safe stop", async () => {

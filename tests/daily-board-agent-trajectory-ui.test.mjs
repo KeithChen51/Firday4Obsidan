@@ -56,6 +56,24 @@ test("DailyBoard completed process disclosure is rebuilt from replay summary whe
 	assert.match(source, /this\.rememberCompletedTrajectorySnapshot\(completedSnapshot\)/);
 });
 
+test("DailyBoard honors timeline default expansion and keeps a manual collapse override", () => {
+	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
+	const isProcessExpandedMatch = source.match(/private isProcessExpanded\([\s\S]*?\n\t\}/);
+	assert.ok(isProcessExpandedMatch, "process expansion predicate should exist");
+	const isProcessExpandedBlock = isProcessExpandedMatch[0] ?? "";
+	const toggleMatch = source.match(/private toggleProcessExpanded\([\s\S]*?\n\t\}/);
+	assert.ok(toggleMatch, "process expansion toggle should exist");
+	const toggleBlock = toggleMatch[0] ?? "";
+
+	assert.match(source, /private aiProcessCollapsedKeys = new Set<string>\(\)/);
+	assert.match(isProcessExpandedBlock, /buildAgentProcessPanelViewModel\(snapshot/);
+	assert.match(isProcessExpandedBlock, /view\.timeline\?\.defaultExpanded/);
+	assert.match(isProcessExpandedBlock, /aiProcessCollapsedKeys\.has\(key\)/);
+	assert.match(toggleBlock, /this\.isProcessExpanded\(snapshot\)/);
+	assert.match(toggleBlock, /this\.aiProcessCollapsedKeys\.add\(key\)/);
+	assert.doesNotMatch(isProcessExpandedBlock, /return Boolean\(key && this\.aiProcessExpandedKeys\.has\(key\)\);/);
+});
+
 test("DailyBoard scopes runtime turns and completed replay to the active conversation session", () => {
 	const viewSource = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
 	const orchestratorSource = fs.readFileSync(executionOrchestratorPath, "utf8").replace(/\r\n?/g, "\n");
@@ -166,7 +184,7 @@ test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-proces
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
 	assert.equal(root.countByClass("avatar"), 1);
 	assert.equal(root.countByClass("friday-runtime-card"), 0);
-	assert.match(root.textContent, /FRIDAY 的工作过程 3s/);
+	assert.match(root.textContent, /正在处理 3s/);
 	assert.doesNotMatch(root.textContent, />/);
 	assert.doesNotMatch(root.textContent, /Read Notes\/today\.md/);
 	assert.doesNotMatch(root.textContent, /Reading project notes/);
@@ -231,7 +249,7 @@ test("renderAgentTrajectoryCard keeps completed file read replay as expandable w
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.match(root.textContent, /FRIDAY 的工作过程 4s/);
+	assert.match(root.textContent, /已处理 4s/);
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 	assert.doesNotMatch(root.textContent, /Read Notes\/Today\.md|Current|Evidence|Timeline/i);
@@ -272,13 +290,89 @@ test("renderAgentTrajectoryCard expanded process panel shows visible steps witho
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
 	assert.equal(root.countByClass("friday-agent-process-mutations"), 0);
-	assert.equal(root.countByClass("friday-agent-process-recovery"), 1);
-	assert.equal(root.countByClass("friday-agent-process-step"), 2);
+	assert.equal(root.countByClass("friday-agent-process-recovery"), 0);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item") >= 2, true);
+	assert.equal(root.countByClass("friday-agent-process-step"), 0);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
-	assert.match(root.textContent, /读取上下文/);
+	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /运行遇到问题/);
 	assert.match(root.textContent, /Notes\/A\.md/);
 	assert.match(root.textContent, /Permission denied/);
+});
+
+test("renderAgentTrajectoryCard expanded process panel uses linear timeline DOM contract", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "Agent is using tools",
+			summary: "Reading project state.",
+			time: { startedAt: "2026-05-06T00:00:00.000Z", updatedAt: "2026-05-06T00:00:18.000Z", durationMs: 18000 },
+			items: [
+				makeItem({ id: "context", kind: "context", title: "Loaded project rules", detail: "Loaded AGENTS.md.", status: "ok" }),
+				makeItem({ id: "read", kind: "tool", title: "Read renderer", detail: "Read renderer state.", status: "ok", tool: "read", targetPath: "src/views/agentTrajectoryRenderer.ts" }),
+				makeItem({ id: "transport", kind: "transport", title: "Model transport", detail: "Model request retry scheduled after HTTP 504; attempt 3/5; backoff 700ms", status: "running", rawEventType: "retry_scheduled" }),
+			],
+		}),
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
+	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 1);
+	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
+	assert.equal(root.countByClass("friday-agent-process-timeline-rail"), 3);
+	assert.equal(root.countByClass("friday-agent-process-timeline-marker"), 3);
+	assert.equal(root.countByClass("friday-agent-process-timeline-content"), 3);
+	assert.match(root.textContent, /正在重试 18s/);
+	assert.match(root.textContent, /收到任务/);
+	assert.match(root.textContent, /读取项目现状/);
+	assert.match(root.textContent, /处理连接重试/);
+	assert.doesNotMatch(root.textContent, /HTTP 504|700ms|Context|Tools|Review|Finalize/);
+	assert.equal(root.countByClass("friday-agent-process-step"), 0);
+});
+
+test("renderAgentTrajectoryCard expanded process panel renders a status bar and phase groups", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "FRIDAY 正在处理",
+			summary: "正在读取项目文件。",
+			time: { startedAt: "2026-05-06T00:00:00.000Z", updatedAt: "2026-05-06T00:00:12.000Z", durationMs: 12000 },
+			items: [
+				makeItem({ id: "ack", kind: "narration", title: "收到任务", detail: "我会先理解你的需求。", status: "ok", rawEventType: "narration_report", narrationKind: "task_acknowledged" }),
+				makeItem({ id: "plan", kind: "narration", title: "整理方案", detail: "先看文件，再更新内容。", status: "ok", rawEventType: "narration_report", narrationKind: "plan_declared" }),
+				makeItem({ id: "read", kind: "tool", title: "Read Project/a.md", detail: "读取参考文件。", status: "running", tool: "read", targetPath: "Project/a.md" }),
+			],
+		}),
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-statusbar"), 1);
+	assert.equal(root.countByClass("friday-agent-process-phase-groups"), 1);
+	assert.equal(root.countByClass("friday-agent-process-phase-group"), 3);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
+	assert.match(root.textContent, /执行/);
+	assert.match(root.textContent, /读取项目现状/);
+	assert.match(root.textContent, /12s/);
+	assert.match(root.textContent, /收到任务/);
+	assert.match(root.textContent, /计划/);
+	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
 test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw reasoning or fixed tabs", async () => {
@@ -313,10 +407,111 @@ test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw rea
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.match(root.textContent, /FRIDAY 的思路 8s/);
+	assert.match(root.textContent, /已处理 8s/);
+	assert.match(root.textContent, /整理方案/);
 	assert.match(root.textContent, /Checked the request and current workspace/);
 	assert.equal(root.textContent.includes(rawCot), false);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
+});
+
+test("renderAgentAnswerFlow renders visible narration in process and keeps final answer separate", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-06T00:00:00.000Z", completedAt: "2026-05-06T00:00:12.000Z", durationMs: 12000 },
+			items: [
+				makeItem({
+					id: "narration-ack",
+					kind: "narration",
+					title: "收到任务",
+					detail: "需要把过程叙事放进线性时间线。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "task_acknowledged",
+				}),
+				makeItem({
+					id: "narration-plan",
+					kind: "narration",
+					title: "整理方案",
+					detail: "先确认上下文，再执行修改。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "plan_declared",
+				}),
+				makeItem({
+					id: "narration-stage",
+					kind: "narration",
+					title: "阶段性汇报",
+					detail: "已读取相关文件，接下来实现事件链路。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "stage_report",
+				}),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "结论已完成。", status: "ok" }),
+			],
+		}),
+		expanded: true,
+		renderContent: (containerEl) => {
+			containerEl.createDiv({ cls: "final-answer", text: "结论已完成。" });
+		},
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+		onToggle: () => {},
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 4);
+	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
+	assert.match(root.textContent, /收到任务/);
+	assert.match(root.textContent, /整理方案/);
+	assert.match(root.textContent, /阶段性汇报/);
+	assert.match(root.findByClass("friday-ai-answer-content")?.textContent ?? "", /结论已完成/);
+	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b|raw chain of thought/i);
+});
+
+test("renderAgentTrajectoryCard shows approval actions in collapsed timeline disclosure", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+	const calls = [];
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "waiting_for_approval",
+			summary: "1 file change pending review.",
+			items: [
+				makeItem({ id: "write", kind: "tool", title: "Write Notes/A.md", detail: "Prepared edit.", status: "ok", tool: "write", targetPath: "Notes/A.md" }),
+				makeItem({ id: "approval", kind: "approval", title: "Approval required", detail: "1 file change pending review.", status: "waiting", tool: "write", targetPath: "Notes/A.md" }),
+			],
+			mutations: [
+				{ id: "m1", event: "planned", operation: "write", targetPath: "Notes/A.md", status: "pending", summary: "Prepared edit.", reason: "" },
+			],
+			actions: [
+				{ id: "apply", label: "应用", enabled: true, targetId: "m1" },
+				{ id: "reject", label: "拒绝", enabled: true, targetId: "m1" },
+			],
+		}),
+		variant: "live",
+		expanded: false,
+		onToggle: () => {},
+		onAction: (action) => calls.push(action.id),
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 0);
+	assert.match(root.textContent, /等待确认/);
+	assert.match(root.textContent, /需要你确认/);
+	assert.match(root.textContent, /查看改动/);
+	assert.match(root.textContent, /应用/);
+	assert.match(root.textContent, /拒绝/);
+	root.findByClass("is-apply")?.onclick?.();
+	root.findByClass("is-reject")?.onclick?.();
+	assert.deepEqual(calls, ["apply", "reject"]);
 });
 
 test("renderAgentTrajectoryCard renders Batch M.1 transport retry as reconnecting without checkpoint claims", async () => {
@@ -348,9 +543,10 @@ test("renderAgentTrajectoryCard renders Batch M.1 transport retry as reconnectin
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.ok(root.hasClassInTree("is-reconnecting"));
-	assert.match(root.textContent, /attempt 1\/4/);
-	assert.match(root.textContent, /700ms/);
+	assert.ok(root.hasClassInTree("is-retrying"));
+	assert.match(root.textContent, /处理连接重试/);
+	assert.match(root.textContent, /第 1\/4 次重试/);
+	assert.doesNotMatch(root.textContent, /HTTP 504|700ms/);
 	assert.doesNotMatch(root.textContent, /checkpoint|resume/i);
 });
 
@@ -387,10 +583,10 @@ test("renderAgentTrajectoryCard renders pending mutation as the current approval
 
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
 	assert.equal(root.countByClass("friday-agent-process-current"), 0);
-	assert.match(root.textContent, /读取上下文/);
+	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /创建\/修改文件/);
-	assert.match(root.textContent, /等待确认文件修改/);
-	assert.match(root.textContent, /1 个文件改动待审核/);
+	assert.match(root.textContent, /等待确认/);
+	assert.match(root.textContent, /准备修改 1 个文件/);
 	assert.match(root.textContent, /查看改动/);
 	assert.match(root.textContent, /应用/);
 	assert.match(root.textContent, /拒绝/);
@@ -429,7 +625,7 @@ test("renderAgentTrajectoryCard renders complex completed replay as collapsed pr
 
 	assert.equal(root.countByClass("friday-agent-process"), 1);
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.match(root.textContent, /FRIDAY 的工作过程 5s/);
+	assert.match(root.textContent, /已处理 5s/);
 	assert.doesNotMatch(root.textContent, />/);
 	assert.doesNotMatch(root.textContent, /Created a sourced answer/);
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
@@ -569,18 +765,55 @@ test("renderAgentAnswerFlow places process disclosure before answer body and art
 
 	const flow = root.findByClass("friday-ai-answer-flow");
 	assert.ok(flow, "answer flow should render");
-	assert.ok(directChildIndex(flow, "friday-agent-process-header") >= 0, "process header should be a direct flow child");
+	assert.ok(directChildIndex(flow, "friday-agent-process-shell") >= 0, "process shell should be a direct flow child");
 	assert.ok(directChildIndex(flow, "friday-ai-answer-content") >= 0, "answer body should be a direct flow child");
 	assert.ok(directChildIndex(flow, "friday-agent-artifacts") >= 0, "artifacts should be a direct flow child");
 	assert.ok(
-		directChildIndex(flow, "friday-agent-process-header") < directChildIndex(flow, "friday-ai-answer-content"),
+		directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"),
 		"process disclosure belongs before the answer body",
 	);
 	assert.ok(
 		directChildIndex(flow, "friday-agent-artifacts") > directChildIndex(flow, "friday-ai-answer-content"),
 		"artifacts belong after the answer body",
 	);
+	assert.equal(flow.findByClass("friday-agent-process-timeline")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
 	assert.equal(flow.children.slice(directChildIndex(flow, "friday-ai-answer-content") + 1).some((child) => child.hasClassInTree("friday-agent-process-header")), false);
+});
+
+test("renderAgentAnswerFlow opens markdown and canvas artifacts from the result area", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+	const opened = [];
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			privacy: { redacted: true, source: "replay" },
+			items: [
+				makeItem({ id: "mutation-md", kind: "mutation", title: "edit Notes/A.md", status: "ok", targetPath: "Notes/A.md" }),
+				makeItem({ id: "mutation-canvas", kind: "mutation", title: "write Maps/A.canvas", status: "ok", targetPath: "Maps/A.canvas" }),
+			],
+			mutations: [
+				{ id: "applied-md", event: "applied", operation: "edit", targetPath: "Notes/A.md", status: "applied", summary: "Updated note.", reason: "" },
+				{ id: "applied-canvas", event: "applied", operation: "write", targetPath: "Maps/A.canvas", status: "applied", summary: "Updated canvas.", reason: "" },
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Final answer body." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+		onOpenArtifact: (pathValue) => opened.push(pathValue),
+	});
+
+	const artifacts = root.findByClass("friday-agent-artifacts");
+	assert.ok(artifacts, "artifact result area should render");
+	assert.equal(artifacts.countByClass("friday-agent-artifact-card"), 2);
+	assert.equal(root.findByClass("friday-agent-process-timeline")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
+	for (const button of artifacts.findAllByClass("friday-agent-artifact-open")) {
+		button.onclick?.();
+	}
+	assert.deepEqual(opened, ["Notes/A.md", "Maps/A.canvas"]);
 });
 
 test("renderAgentAnswerFlow inserts expanded process panel between header and answer body", async () => {
@@ -610,8 +843,10 @@ test("renderAgentAnswerFlow inserts expanded process panel between header and an
 	assert.ok(flow, "answer flow should render");
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "true");
 	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-up");
-	assert.ok(directChildIndex(flow, "friday-agent-process-header") < directChildIndex(flow, "friday-agent-process-panel"));
-	assert.ok(directChildIndex(flow, "friday-agent-process-panel") < directChildIndex(flow, "friday-ai-answer-content"));
+	const shell = flow.findByClass("friday-agent-process-shell");
+	assert.ok(shell, "process shell should contain header and panel");
+	assert.ok(directChildIndex(shell, "friday-agent-process-header") < directChildIndex(shell, "friday-agent-process-panel"));
+	assert.ok(directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"));
 });
 
 test("renderAgentAnswerFlow toggles process disclosure from the title row and chevron button", async () => {
@@ -709,7 +944,7 @@ test("renderAgentAnswerFlow keeps simple workspace read completed process collap
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /FRIDAY 的工作过程 4s/);
+	assert.match(root.textContent, /已处理 4s/);
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
@@ -744,11 +979,11 @@ test("renderAgentAnswerFlow expands completed workspace read process between hea
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
-	assert.match(root.textContent, /读取上下文/);
-	assert.match(root.textContent, /Read Notes\/Today\.md/);
+	assert.match(root.textContent, /读取项目现状/);
+	assert.match(root.textContent, /Notes\/Today\.md/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 	assert.ok(
-		directChildIndex(root.findByClass("friday-ai-answer-flow"), "friday-agent-process-panel") <
+		directChildIndex(root.findByClass("friday-ai-answer-flow"), "friday-agent-process-shell") <
 			directChildIndex(root.findByClass("friday-ai-answer-flow"), "friday-ai-answer-content"),
 	);
 });

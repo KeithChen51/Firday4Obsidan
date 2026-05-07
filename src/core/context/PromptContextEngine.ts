@@ -9,6 +9,10 @@ import {
 	buildPromptToolNameUnionFromRegistry,
 	type AgentMode,
 } from "../tools/ToolRegistry";
+import {
+	normalizeActiveFileContext,
+	type ActiveFileContext,
+} from "./ActiveFileContext";
 
 export interface PromptMentionContext {
 	resolvedCount: number;
@@ -29,7 +33,7 @@ export interface PromptContextBuildInput {
 	};
 	focusPaths?: string;
 	externalPaths?: string;
-	currentFilePath?: string;
+	activeFileContext?: ActiveFileContext;
 	activeProjectRoot?: string;
 	userPrompt: string;
 	fridayMd?: string | null;
@@ -57,6 +61,7 @@ export interface PromptContextSummary {
 	mentionResolvedCount: number;
 	mentionTokenTypes: MentionTokenType[];
 	mentionSourceMap: MentionSourceMapEntry[];
+	activeFileContext?: ActiveFileContext;
 }
 
 export interface PromptContextBuildResult {
@@ -73,6 +78,7 @@ export class PromptContextEngine {
 		const wikiKnowledgeContext = input.wikiKnowledgeContext?.trim() ?? "";
 		const memoryContext = input.memoryContext?.trim() ?? "";
 		const mentionContextText = this.formatMentionContext(input.mentionContext);
+		const activeFileContext = normalizeActiveFileContext(input.activeFileContext);
 		const toolListOptions = {
 			agentMode: input.agentMode ?? "ask",
 			enableExecTool: input.enableExecTool ?? false,
@@ -104,8 +110,12 @@ export class PromptContextEngine {
 			"- When creating a new project file without an explicit folder, default to <projectRoot>/workspace/.",
 			"- If user asks to create/update/save a file, you MUST call write tool to execute it.",
 			"- Never say 'I cannot create/write files' when write tool is available.",
-			"- If user refers to the current or active document, prioritize current active file path.",
+			"- Only treat the active editor file as a task target when Active file context is present below.",
+			"- When Active file context is present, prioritize the supplied active file path.",
+			"- For deictic active-file references, use the active file path as the target and call read before using file contents.",
 			"- Before final response, ensure conclusions are based on tool results.",
+			"- Put short user-visible progress notes in tool_call.assistant, for example what you understood and what you will do next.",
+			"- Keep final response concise; do not repeat progress notes in the final answer.",
 			"",
 			"Tool arguments:",
 			...toolArgumentLines,
@@ -128,13 +138,22 @@ export class PromptContextEngine {
 			"--- End examples ---",
 			"",
 			`Runtime depth: ${input.depth}`,
-			`Current active file: ${input.currentFilePath?.trim() || "(none)"}`,
 			`Active project root: ${input.activeProjectRoot?.trim() || "(none)"}`,
 			`Vault focus paths: ${input.focusPaths?.trim() || "(none)"}`,
 			`External read-only paths: ${input.externalPaths?.trim() || "(none)"}`,
 			`Runtime profile: ${input.runtimeProfileId} (supported=${input.runtimeSupported ?? true})`,
 			`Runtime capabilities: exec=${input.runtimeCapabilities?.supportsExecTool ?? false}, externalRead=${input.runtimeCapabilities?.supportsExternalRead ?? false}`,
 		];
+		if (activeFileContext.mode !== "none") {
+			lines.push(`Current active file: ${activeFileContext.path}`);
+			lines.push(`Active file context mode: ${activeFileContext.mode}`);
+			lines.push(`Active file context reason: ${activeFileContext.reason}`);
+			lines.push(
+				activeFileContext.includeContent
+					? "Active file content: included through explicit mention context when available."
+					: "Active file content: not included; call read before using contents.",
+			);
+		}
 
 		lines.push("");
 		lines.push("Current agent.md excerpt:");
@@ -163,6 +182,7 @@ export class PromptContextEngine {
 			mentionResolvedCount: input.mentionContext?.resolvedCount ?? 0,
 			mentionTokenTypes: [...new Set(input.mentionContext?.tokenTypes ?? [])].sort(),
 			mentionSourceMap: [...(input.mentionContext?.sourceMap ?? [])],
+			activeFileContext,
 		};
 
 		if (assembledContext.text) {

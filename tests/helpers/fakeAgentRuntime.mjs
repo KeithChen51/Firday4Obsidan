@@ -175,6 +175,7 @@ export async function runAgentRuntimeScenario(scenario) {
 			userPrompt: scenario.userPrompt ?? scenario.name ?? "Run scripted Agent scenario.",
 			modelOverride: scenario.modelOverride ?? "scripted-model",
 			depth: scenario.depth ?? 0,
+			activeFileContext: scenario.activeFileContext,
 			currentFilePath: scenario.currentFilePath,
 			extraSystemContext: scenario.extraSystemContext,
 			mentionContext: scenario.mentionContext,
@@ -295,6 +296,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		storePath: runtimeStateStore.getMutationPlanStorePath(),
 	});
 	const storedMutations = (await mutationPlanStore.list()).map(normalizeStoredMutation);
+	const checkpoints = await readStoredCheckpoints(runtimeStateStore.getAgentCheckpointStorePath());
 	const agentTaskStore = new modules.AgentTaskStore({
 		storePath: runtimeStateStore.getAgentTaskStorePath(),
 	});
@@ -332,6 +334,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		turnEventSummary: turnReplay.summary,
 		pendingMutations,
 		storedMutations,
+		checkpoints,
 		reloadedPendingMutations,
 		task,
 		tasks,
@@ -349,6 +352,19 @@ export async function runAgentRuntimeScenario(scenario) {
 		approvalRequests: approvalService.requests,
 		agentMode: scenario.agentMode ?? "ask",
 	};
+}
+
+async function readStoredCheckpoints(storePath) {
+	try {
+		const raw = await fs.readFile(storePath, "utf8");
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? parsed : [];
+	} catch (error) {
+		if (error && typeof error === "object" && error.code === "ENOENT") {
+			return [];
+		}
+		throw error;
+	}
 }
 
 function createRuntimeFacade(modules, runtime) {
@@ -795,6 +811,7 @@ function normalizeAgentTask(task) {
 		availableActions: [...(task.availableActions ?? [])],
 		retryOfTaskId: task.retryOfTaskId,
 		continueFromTaskId: task.continueFromTaskId,
+		runInput: task.runInput ? JSON.parse(JSON.stringify(task.runInput)) : undefined,
 		checkpoint: task.checkpoint ? { ...task.checkpoint } : undefined,
 		createdAt: task.createdAt,
 		updatedAt: task.updatedAt,
@@ -828,6 +845,12 @@ function normalizeEvents({ progress, runtimeResult, pendingMutations, failure })
 	for (const item of progress) {
 		if (item.phase === "start") {
 			events.push(makeEvent("turn_started", { message: item.message }));
+		}
+		if (item.phase === "narration") {
+			events.push(makeEvent("narration_report", {
+				message: item.message,
+				...(item.narration ?? {}),
+			}));
 		}
 		if (item.phase === "context" && item.contextKey === "compact") {
 			events.push(makeEvent("context_built", { message: item.message }));

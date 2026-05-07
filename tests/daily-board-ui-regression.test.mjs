@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
+const activeFilePolicyPath = path.join(projectRoot, "src/core/context/ActiveFileContext.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
 const toolHandlersPath = path.join(projectRoot, "src/services/tools/ObsidianToolHandlers.ts");
 const skillServicePath = path.join(projectRoot, "src/services/SkillCommandService.ts");
@@ -18,6 +19,10 @@ const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function readViewSource() {
 	return fs.readFileSync(viewPath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readActiveFilePolicySource() {
+	return fs.readFileSync(activeFilePolicyPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readRuntimeSource() {
@@ -487,6 +492,26 @@ test("chat composer routes mentions through structured composer and resolver ins
 	assert.doesNotMatch(source, /private stripMentionedFilePaths\(/);
 	assert.doesNotMatch(source, /private buildMentionContext\(/);
 	assert.doesNotMatch(source, /private attachCurrentFileToDraft\(/);
+});
+
+test("chat submit uses explicit active-file context policy instead of naked active editor path", async () => {
+	const source = readViewSource();
+	const match = source.match(/private async submitAiPrompt\([^)]*\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
+	assert.ok(match, "submitAiPrompt block should exist");
+	const block = match[1] ?? "";
+	assert.match(block, /resolveActiveFileContextPolicy\(/);
+	assert.match(block, /activeFileContext/);
+	assert.doesNotMatch(block, /const currentFilePath = this\.app\.workspace\.getActiveFile\(\)\?\.path \?\? ""/);
+	assert.doesNotMatch(block, /executionPlanner\.plan\(resolution, \{ currentFilePath \}\)/);
+	assert.doesNotMatch(block, /currentFilePath,\s*\n\s*mentionContext/);
+});
+
+test("active-file process metadata can explain explicit mention, deictic reference, and command sources", async () => {
+	const source = readViewSource();
+	const policySource = readActiveFilePolicySource();
+	assert.match(policySource, /"@ 当前笔记"/);
+	assert.match(policySource, /"用户明确指代当前文档"/);
+	assert.match(source, /"命令指定"/);
 });
 
 test("@ category labels are localized instead of hardcoded english", async () => {

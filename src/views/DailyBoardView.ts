@@ -46,7 +46,7 @@ import {
 	type ChatMessageUiToken,
 } from "../services/AIService";
 import type { SkillDescriptor } from "../services/SkillCommandService";
-import type { ToolPermissionMode } from "../types/agent";
+import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
 import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
 import type { SyncConflictRecord } from "../types/sync";
@@ -66,6 +66,7 @@ import {
 	type MentionToken,
 	type MentionTokenType,
 } from "../core/context/mention/MentionResolver";
+import { resolveActiveFileContextPolicy } from "../core/context/ActiveFileContext";
 import {
 	createEmptyMentionComposerSnapshot,
 	formatMentionTokenLabel,
@@ -79,6 +80,7 @@ import {
 	createAgentTaskPanelActionHandlers,
 	recordTaskFromRuntimeProgress,
 } from "./agentTaskPanelActions";
+import { buildAgentProcessPanelViewModel } from "./agentProcessPanelViewModel";
 import { renderAgentAnswerFlow, renderAgentTrajectoryCard } from "./agentTrajectoryRenderer";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
@@ -139,6 +141,7 @@ export class DailyBoardView extends ItemView {
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
 	private aiProcessSnapshotsByKey = new Map<string, AgentTrajectorySnapshot>();
 	private aiProcessExpandedKeys = new Set<string>();
+	private aiProcessCollapsedKeys = new Set<string>();
 	private aiAgentTasks: AgentTaskViewState[] = [];
 	private aiRuntimeElapsedTimer: number | null = null;
 	private aiMessageListScrollTop = 0;
@@ -695,22 +698,26 @@ export class DailyBoardView extends ItemView {
 		if (!activeSoul) {
 			throw new Error(this.t("checks.sync.projectMissing", "Project not found."));
 		}
+		const activeFileContext = resolveActiveFileContextPolicy({
+			activeFilePath: filePath,
+			commandRequiresActiveFile: true,
+			commandReason: "命令指定",
+		});
 		const resolution = this.plugin.executionEventRouter.routeToRuntime({
 			type: "sync.conflict_proposal_requested",
 			source: "project_action",
 			projectId,
 			prompt: filePath,
-			currentFilePath: filePath,
 			payload: { filePath },
 		});
 		if (resolution.type !== "runtime" || !resolution.requestedSkillName) {
 			throw new Error("Project conflict proposal could not be resolved to a runtime skill invocation.");
 		}
-		const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath: filePath });
+		const decision = await this.plugin.executionPlanner.plan(resolution, { activeFileContext });
 		const result = await this.plugin.executionOrchestrator.execute(decision, {
 			agentId: activeSoul.id,
 			conversation: [],
-			currentFilePath: filePath,
+			activeFileContext,
 		});
 		const traceSummary = result.traces[0]?.summary ?? "manual";
 		const match = traceSummary.match(/\((ours|theirs|manual)\)/i);
@@ -1396,6 +1403,7 @@ export class DailyBoardView extends ItemView {
 		permissionSelect.onchange = async () => {
 			const value = permissionSelect.value;
 			this.plugin.settings.agentRuntime.toolPermissionMode = value as ToolPermissionMode;
+			this.plugin.settings.agentRuntime.fileMutationMode = deriveFileMutationModeFromToolPermissionMode(value as ToolPermissionMode);
 			await this.plugin.saveSettings();
 			this.renderBoard();
 		};
@@ -1487,11 +1495,13 @@ export class DailyBoardView extends ItemView {
 		this.addMutationReviewButton(actions, this.t("mutation.review.apply", "Apply"), !canApply || this.aiBusy, async () => {
 			await this.plugin.agentRuntimeService.acceptEditPlan(plan.id);
 			new Notice(this.t("mutation.review.applied", "Change applied."), 3000);
+			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
 		});
 		this.addMutationReviewButton(actions, this.t("mutation.review.reject", "Reject"), this.aiBusy, async () => {
 			await this.plugin.agentRuntimeService.rejectEditPlan(plan.id);
 			new Notice(this.t("mutation.review.rejected", "Change rejected."), 3000);
+			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
 		});
 	}
@@ -2741,7 +2751,17 @@ export class DailyBoardView extends ItemView {
 
 	private isProcessExpanded(snapshot: AgentTrajectorySnapshot | null): boolean {
 		const key = this.getTrajectorySnapshotKey(snapshot);
-		return Boolean(key && this.aiProcessExpandedKeys.has(key));
+		if (!key || !snapshot) {
+			return false;
+		}
+		if (this.aiProcessExpandedKeys.has(key)) {
+			return true;
+		}
+		if (this.aiProcessCollapsedKeys.has(key)) {
+			return false;
+		}
+		const view = buildAgentProcessPanelViewModel(snapshot);
+		return Boolean(view.timeline?.defaultExpanded);
 	}
 
 	private toggleProcessExpanded(snapshot: AgentTrajectorySnapshot | null): void {
@@ -2749,9 +2769,11 @@ export class DailyBoardView extends ItemView {
 		if (!key) {
 			return;
 		}
-		if (this.aiProcessExpandedKeys.has(key)) {
+		if (this.isProcessExpanded(snapshot)) {
 			this.aiProcessExpandedKeys.delete(key);
+			this.aiProcessCollapsedKeys.add(key);
 		} else {
+			this.aiProcessCollapsedKeys.delete(key);
 			this.aiProcessExpandedKeys.add(key);
 		}
 		this.renderBoard();
@@ -2985,6 +3007,7 @@ export class DailyBoardView extends ItemView {
 			getContinuePrompt: () => this.aiDraft.trim() || "Continue.",
 			onProgress: (event) => this.handleRuntimeProgress(event),
 			recordAgentTask: (task) => this.recordAgentTask(task),
+			afterMutationReview: () => this.refreshCompletedTrajectorySnapshotsForCurrentSession(),
 			render: () => this.renderBoard(),
 			signal: this.aiSendAbortController?.signal,
 		});
@@ -3062,6 +3085,10 @@ export class DailyBoardView extends ItemView {
 				console.warn("[Friday] Failed to hydrate trajectory replay summary:", error);
 			}
 		}
+	}
+
+	private async refreshCompletedTrajectorySnapshotsForCurrentSession(): Promise<void> {
+		await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
 	}
 
 	private isVisibleAgentTaskStatus(status: AgentTaskStatus): boolean {
@@ -3397,10 +3424,16 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 
-		const currentFilePath = this.app.workspace.getActiveFile()?.path ?? "";
+		const activeFilePath = this.app.workspace.getActiveFile()?.path ?? "";
+		const hasExplicitActiveNoteMention = draftDocument.tokens.some((token) => token.type === "active_note");
+		const activeFileContext = resolveActiveFileContextPolicy({
+			userPrompt: rawPrompt,
+			activeFilePath,
+			hasExplicitActiveNoteMention,
+		});
 		const mentionResolution = await this.mentionResolver.resolve({
 			document: draftDocument,
-			currentFilePath,
+			currentFilePath: activeFileContext.mode === "explicit_mention" ? activeFileContext.path : "",
 			activeProjectRoot: this.getActiveProjectEntry()?.boundaryPath ?? "",
 			readFile: async (pathValue) => {
 				const file = this.app.vault.getAbstractFileByPath(pathValue);
@@ -3474,7 +3507,7 @@ export class DailyBoardView extends ItemView {
 				assistantText = this.buildSkillCatalogReply(skills);
 				shouldStreamFinalText = true;
 			} else {
-				const decision = await this.plugin.executionPlanner.plan(resolution, { currentFilePath });
+				const decision = await this.plugin.executionPlanner.plan(resolution, { activeFileContext });
 				allowedTools = decision.allowedTools?.length ? decision.allowedTools : undefined;
 				allowedModels = decision.allowedModels?.length ? decision.allowedModels : undefined;
 				if (!assistantText) {
@@ -3483,7 +3516,7 @@ export class DailyBoardView extends ItemView {
 						conversationId: this.aiSessionId,
 						conversation: history,
 						modelOverride,
-						currentFilePath,
+						activeFileContext,
 						mentionContext: promptMentionContext,
 						allowedTools,
 						onProgress: (event) => {
@@ -3576,19 +3609,15 @@ export class DailyBoardView extends ItemView {
 				source: "project_action",
 				projectId: this.getActiveProjectEntry()?.projectId,
 				prompt: "Compile the active project wiki now.",
-				currentFilePath: this.app.workspace.getActiveFile()?.path,
 			});
 			if (resolution.type !== "runtime") {
 				throw new Error("Compile button could not be resolved to a runtime invocation.");
 			}
-			const decision = await this.plugin.executionPlanner.plan(resolution, {
-				currentFilePath: this.app.workspace.getActiveFile()?.path,
-			});
+			const decision = await this.plugin.executionPlanner.plan(resolution);
 			const runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 				agentId: activeSoul.id,
 				conversationId: this.aiSessionId,
 				conversation: [],
-				currentFilePath: this.app.workspace.getActiveFile()?.path,
 				onProgress: (event) => {
 					this.handleRuntimeProgress(event);
 				},

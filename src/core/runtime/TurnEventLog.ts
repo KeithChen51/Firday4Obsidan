@@ -3,6 +3,7 @@ import path from "path";
 
 export type TurnEventType =
 	| "turn_started"
+	| "narration_report"
 	| "context_built"
 	| "model_requested"
 	| "model_retry"

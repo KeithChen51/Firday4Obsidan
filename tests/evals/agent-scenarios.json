@@ -251,19 +251,19 @@
       }
     },
     {
-      "id": "delete-requires-strict-approval",
-      "name": "delete requires strict approval and review",
+      "id": "delete-creates-single-mutation-review",
+      "name": "delete creates one high-risk mutation review",
       "files": { "Project/workspace/a.md": "original" },
       "modelSteps": [
         { "tool": { "name": "delete", "args": { "path": "Project/workspace/a.md" } } },
         { "assistant": "I prepared a high-risk delete plan for review." }
       ],
       "expect": {
-        "approvalRequestCount": 1,
+        "approvalRequestCount": 0,
         "pendingMutationCount": 1,
         "pendingMutationOperations": ["delete"],
         "finalFiles": { "Project/workspace/a.md": "original" },
-        "turnEventsInclude": ["tool_approval_requested", "mutation_planned", "turn_completed"]
+        "turnEventsInclude": ["mutation_planned", "turn_completed"]
       }
     },
     {

@@ -14,19 +14,55 @@ test("agent process panel styles define the primary friday-agent-process namespa
 	const styles = read(stylesPath);
 	for (const className of [
 		"friday-agent-process",
+		"friday-agent-process-shell",
 		"friday-agent-process-disclosure",
 		"friday-agent-process-thinking",
 		"friday-agent-process-strip",
 		"friday-agent-process-header",
 		"friday-agent-process-status",
-		"friday-agent-process-step",
 		"friday-agent-process-timeline",
-		"friday-agent-process-step-actions",
+		"friday-agent-process-timeline-panel",
+		"friday-agent-process-timeline-item",
+		"friday-agent-process-timeline-rail",
+		"friday-agent-process-timeline-marker",
+		"friday-agent-process-timeline-content",
+		"friday-agent-process-timeline-title",
+		"friday-agent-process-timeline-summary",
+		"friday-agent-process-timeline-meta",
+		"friday-agent-process-timeline-detail",
 		"friday-agent-process-actions",
 		"friday-agent-process-recovery",
 	]) {
 		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
 	}
+});
+
+test("agent process timeline styles remove fixed narrow primary width caps", () => {
+	const styles = read(stylesPath);
+	const processBlock = extractProcessCss(styles);
+
+	assert.doesNotMatch(processBlock, /\.friday-agent-process-shell\s*\{[\s\S]*?width:\s*min\(100%,\s*640px\)/);
+	assert.doesNotMatch(processBlock, /\.friday-ai-answer-flow\s*\{[\s\S]*?width:\s*min\(100%,\s*720px\)/);
+	assert.match(processBlock, /\.friday-agent-process-shell\s*\{[\s\S]*?width:\s*100%/);
+	assert.match(processBlock, /\.friday-ai-answer-flow\s*\{[\s\S]*?width:\s*100%/);
+	assert.match(processBlock, /\.friday-agent-process-timeline,\s*[\s\S]*?\.friday-ai-answer-content,\s*[\s\S]*?\.friday-agent-artifacts\s*\{[\s\S]*max-width:\s*min\(100%,\s*920px\)/);
+});
+
+test("expanded process shell stacks disclosure and timeline vertically", () => {
+	const styles = read(stylesPath);
+	const shellBlock = styles.match(/\.friday-agent-process-shell\s*\{[\s\S]*?\}/)?.[0] ?? "";
+
+	assert.ok(shellBlock, "process shell style should exist");
+	assert.match(shellBlock, /display:\s*flex/);
+	assert.match(shellBlock, /flex-direction:\s*column/);
+	assert.match(shellBlock, /align-items:\s*stretch/);
+});
+
+test("agent process styles do not retain stale runtime preview CSS", () => {
+	const styles = read(stylesPath);
+
+	assert.doesNotMatch(styles, /\.friday-ai-runtime-preview\b/);
+	assert.doesNotMatch(styles, /\.friday-runtime-[\w-]+\b/);
 });
 
 test("agent answer and artifact styles define document-flow result surfaces", () => {
@@ -91,11 +127,14 @@ test("agent process renderer no longer requires old runtime-card classes", () =>
 	const renderer = read(rendererPath);
 
 	assert.match(renderer, /friday-agent-process/);
+	assert.match(renderer, /friday-agent-process-timeline-item/);
 	assert.match(renderer, /friday-ai-answer-flow/);
 	assert.match(renderer, /friday-agent-artifacts/);
 	assert.doesNotMatch(renderer, /friday-runtime-card/);
 	assert.doesNotMatch(renderer, /friday-runtime-stage/);
 	assert.doesNotMatch(renderer, /friday-runtime-entry/);
+	assert.doesNotMatch(renderer, /renderVisibleStepTimeline/);
+	assert.doesNotMatch(renderer, /friday-agent-process-step/);
 	assert.doesNotMatch(renderer, /renderStages|friday-agent-process-stages/);
 	assert.doesNotMatch(renderer, /renderCurrent|friday-agent-process-current/);
 });

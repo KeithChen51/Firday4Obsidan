@@ -28,6 +28,7 @@ import {
 } from "./RuntimeProtocol";
 import type {
 	AgentChatMessage,
+	AgentNarrationPayload,
 	AgentTurnEvent,
 	AgentTurnInput,
 	AgentTurnResult,
@@ -114,6 +115,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			const result = await this.runFromCheckpoint(input, context, resumeCheckpoint);
 			this.emitCheckpointResumeCompleted(input, context, resumeCheckpoint);
 			return result;
+		}
+		if (this.shouldEmitVisibleNarration(input)) {
+			this.emitTaskAcknowledged(input, context);
+			this.emitPlanDeclared(input, context);
 		}
 		const contextPackage = await this.options.contextEngine.buildContext(input, context, { channel: "native" });
 		if (contextPackage.toolCallingMode === "prompt") {
@@ -229,6 +234,17 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			}
 			const tool = parsed.tool;
 			if (parsed.type === "tool_call" || tool) {
+				const modelNarration = this.extractModelNarration(parsed.assistant ?? "");
+				if (modelNarration) {
+					this.emitStageReport(input, context, {
+						step,
+						summary: modelNarration,
+						justDone: modelNarration,
+						next: "接下来会调用需要的工具获取证据。",
+						source: "model",
+						status: "running",
+					});
+				}
 				if (!tool?.name) {
 					return this.makeResult(input, context, {
 						assistantText: "Tool call is missing tool.name. Runtime execution stopped for this turn.",
@@ -323,7 +339,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				onTransportEvent: (event) => this.emitModelTransport(input, context, step, event),
 			});
 			const assistantStepText = response.assistantText?.trim() || "";
-			if (assistantStepText) {
+			const modelNarration = response.toolCalls.length > 0
+				? this.extractModelNarration(assistantStepText)
+				: "";
+			if (modelNarration) {
+				this.emitStageReport(input, context, {
+					step,
+					summary: modelNarration,
+					justDone: modelNarration,
+					next: "接下来会调用需要的工具获取证据。",
+					source: "model",
+					status: "running",
+				});
+			}
+			if (assistantStepText && !modelNarration) {
 				finalReply = assistantStepText;
 			}
 			this.emitModelResponse(input, context, step, "native", response.assistantText, response.reasoningArtifact);
@@ -531,6 +560,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			summary: result.trace.summary,
 			message: `Step ${step}: tool ${tool.name} finished - ${result.trace.summary}`,
 		});
+		if (this.shouldEmitVisibleNarration(input)) {
+			this.emitToolStageReport(input, context, result.trace);
+		}
 		return result;
 	}
 
@@ -712,6 +744,88 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		});
 	}
 
+	private emitTaskAcknowledged(input: AgentTurnInput, context: AgentExecutionContext): void {
+		const understanding = this.buildTaskUnderstanding(input.userPrompt);
+		this.emitNarration(input, context, {
+			kind: "task_acknowledged",
+			summary: "收到任务，正在确认目标。",
+			understanding,
+			source: "fallback",
+			status: "completed",
+		});
+	}
+
+	private emitPlanDeclared(input: AgentTurnInput, context: AgentExecutionContext): void {
+		this.emitNarration(input, context, {
+			kind: "plan_declared",
+			summary: "先确认上下文，再按需要使用工具推进。",
+			plan: this.buildInitialPlan(input),
+			source: "fallback",
+			status: "completed",
+		});
+	}
+
+	private emitStageReport(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		report: {
+			step?: number;
+			summary: string;
+			justDone?: string;
+			next?: string;
+			source: AgentNarrationPayload["source"];
+			status?: AgentNarrationPayload["status"];
+		},
+	): void {
+		this.emitNarration(input, context, {
+			kind: "stage_report",
+			summary: report.summary,
+			source: report.source,
+			status: report.status ?? "running",
+			...(report.justDone ? { justDone: report.justDone } : {}),
+			...(report.next ? { next: report.next } : {}),
+		}, report.step);
+	}
+
+	private emitToolStageReport(input: AgentTurnInput, context: AgentExecutionContext, trace: RuntimeToolTrace): void {
+		const justDone = this.describeToolProgress(trace);
+		const next = trace.status === "ok"
+			? "接下来会根据工具结果继续推进。"
+			: "接下来会说明问题并选择可恢复的下一步。";
+		this.emitStageReport(input, context, {
+			step: trace.step,
+			summary: `${justDone}${next ? ` ${next}` : ""}`.trim(),
+			justDone,
+			next,
+			source: "fallback",
+			status: trace.status === "ok" ? "completed" : "failed",
+		});
+	}
+
+	private emitNarration(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		narration: AgentNarrationPayload,
+		step?: number,
+	): void {
+		const payload = {
+			...narration,
+			...(step !== undefined ? { step } : {}),
+		};
+		context.emit({
+			type: "narration",
+			payload,
+		});
+		this.report(input, {
+			phase: "narration",
+			depth: input.depth ?? 0,
+			...(step !== undefined ? { step } : {}),
+			narration,
+			summary: narration.summary,
+			message: narration.summary,
+		});
+	}
+
 	private emitFallback(input: AgentTurnInput, context: AgentExecutionContext, message: string): void {
 		context.emit({
 			type: "fallback" as AgentTurnEvent["type"],
@@ -745,6 +859,86 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			default:
 				return `Model request started (${attempt})`;
 		}
+	}
+
+	private shouldEmitVisibleNarration(input: AgentTurnInput): boolean {
+		if (input.metadata?.suppressVisibleNarration === true) {
+			return false;
+		}
+		const prompt = input.userPrompt.trim();
+		if (!prompt) {
+			return false;
+		}
+		if ((input.allowedTools?.length ?? 0) > 0) {
+			return true;
+		}
+		return prompt.length > 80 ||
+			/(read|write|edit|delete|create|file|project|workspace|grep|search|run|test|implement|fix|review|plan|analy[sz]e|读取|读|写|创建|修改|删除|文件|项目|工作区|搜索|查找|运行|测试|实现|修复|审阅|方案|计划|分析|整理|总结|确认|审批)/i.test(prompt);
+	}
+
+	private buildTaskUnderstanding(userPrompt: string): string {
+		const goal = userPrompt.trim().replace(/\s+/g, " ");
+		if (/(read|读取|读|文件|file)/i.test(goal)) {
+			return "需要先读取文件或相关内容，再基于结果回答。";
+		}
+		if (/(write|edit|create|修改|创建|写|产物|文档)/i.test(goal)) {
+			return "需要准备文件修改，并在最终回答中总结修改点。";
+		}
+		if (/(test|run|测试|运行|验证)/i.test(goal)) {
+			return "需要执行验证并汇报关键结果。";
+		}
+		return goal ? `需要处理：${goal.slice(0, 120)}` : "需要结合当前上下文处理这个请求。";
+	}
+
+	private buildInitialPlan(input: AgentTurnInput): string[] {
+		const plan = ["先确认当前上下文。"];
+		if (this.shouldUseToolPlan(input.userPrompt)) {
+			plan.push("再调用必要工具获取证据。");
+		}
+		plan.push("最后在最终回答中只给出结论和结果。");
+		return plan;
+	}
+
+	private shouldUseToolPlan(userPrompt: string): boolean {
+		return /(read|write|edit|delete|create|file|project|workspace|grep|search|run|test|读取|读|写|创建|修改|删除|文件|项目|工作区|搜索|查找|运行|测试|实现|修复)/i.test(userPrompt);
+	}
+
+	private extractModelNarration(text: string): string {
+		const cleaned = text.trim().replace(/^```[\s\S]*?```$/g, "").trim();
+		if (!cleaned || cleaned.length > 320) {
+			return "";
+		}
+		if (this.isIntermediateAssistantText(cleaned)) {
+			return "";
+		}
+		if (/^(我理解|我会|接下来|下一步|先|已经|已|I understand|I will|I'll|Next|Plan:)/i.test(cleaned)) {
+			return cleaned;
+		}
+		if (/接下来我会|我理解你的需求|准备先|先读取|先查看|will call|will use/i.test(cleaned)) {
+			return cleaned;
+		}
+		return "";
+	}
+
+	private describeToolProgress(trace: RuntimeToolTrace): string {
+		const target = trace.targetPath?.trim();
+		const tool = trace.tool.trim().toLowerCase();
+		if (trace.status !== "ok") {
+			return trace.summary || `${trace.tool} 未完成。`;
+		}
+		if (tool === "read") {
+			return target ? `已读取 ${target}。` : "已读取相关内容。";
+		}
+		if (tool === "ls" || tool === "glob") {
+			return target ? `已查看 ${target}。` : "已查看当前范围。";
+		}
+		if (tool === "grep" || tool === "search_text") {
+			return target ? `已在 ${target} 中检索。` : "已完成检索。";
+		}
+		if (tool === "write" || tool === "edit") {
+			return target ? `已准备 ${target} 的文件改动。` : "已准备文件改动。";
+		}
+		return trace.summary || `已完成 ${trace.tool}。`;
 	}
 
 	private async recordMutationPlans(envelope: RuntimeEnvelope, context: AgentExecutionContext): Promise<RuntimeMutationPlan[]> {
