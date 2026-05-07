@@ -2223,6 +2223,536 @@
 	color: var(--text-normal);
 }
 
+/* Agent process panel */
+.friday-agent-process-shell {
+	width: min(100%, 640px);
+}
+
+.friday-agent-process-avatar {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	padding-top: 0;
+}
+
+.friday-agent-process-content {
+	padding: 0;
+}
+
+.friday-ai-answer-row {
+	justify-content: flex-start;
+}
+
+.friday-ai-answer-flow {
+	width: min(100%, 720px);
+	padding: 2px 0 0;
+	color: var(--text-normal);
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.friday-ai-answer-meta {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 6px;
+	color: var(--text-muted);
+	font-size: 0.78em;
+}
+
+.friday-ai-answer-content {
+	max-width: 100%;
+	line-height: 1.58;
+	overflow-wrap: anywhere;
+}
+
+.friday-ai-answer-content.is-streaming {
+	color: var(--text-normal);
+}
+
+.friday-agent-artifacts {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 14px;
+	padding-top: 12px;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.friday-agent-artifacts-title {
+	color: var(--text-normal);
+	font-size: 0.92em;
+	font-weight: 750;
+}
+
+.friday-agent-artifact-card {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 10px;
+	padding: 9px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-secondary);
+}
+
+.friday-agent-artifact-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 42px;
+	min-height: 24px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	color: var(--text-muted);
+	font-size: 0.72em;
+	font-weight: 750;
+}
+
+.friday-agent-artifact-body {
+	min-width: 0;
+}
+
+.friday-agent-artifact-name {
+	font-size: 0.88em;
+	font-weight: 700;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-artifact-meta,
+.friday-agent-artifact-diff-meta {
+	color: var(--text-muted);
+	font-size: 0.76em;
+	line-height: 1.4;
+}
+
+.friday-agent-artifact-open {
+	min-height: 28px;
+	padding: 3px 9px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	color: var(--text-normal);
+	font-size: 0.78em;
+	font-weight: 650;
+	cursor: pointer;
+}
+
+.friday-agent-artifact-open:hover {
+	border-color: color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border));
+}
+
+.friday-agent-artifact-open:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+	outline-offset: 2px;
+}
+
+.friday-agent-artifact-diff-summary {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 10px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--background-secondary) 74%, transparent);
+}
+
+.friday-agent-artifact-diff-title {
+	font-size: 0.8em;
+	font-weight: 700;
+}
+
+.friday-agent-artifact-diff-file {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	gap: 8px;
+	color: var(--text-muted);
+	font-size: 0.76em;
+}
+
+.friday-agent-artifact-diff-path {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-thinking,
+.friday-agent-process,
+.friday-agent-process-panel {
+	color: var(--text-normal);
+}
+
+.friday-agent-process-thinking {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 0;
+}
+
+.friday-agent-process-strip {
+	position: relative;
+}
+
+.friday-agent-process {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+
+.friday-agent-process-panel {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px 0 0 30px;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.friday-agent-process-disclosure {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 6px;
+	width: 100%;
+	min-height: 30px;
+	padding: 2px 0;
+	border-color: transparent;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 0.86em;
+	font-weight: 650;
+	text-align: left;
+	cursor: default;
+}
+
+.friday-agent-process-disclosure.is-clickable {
+	cursor: pointer;
+}
+
+.friday-agent-process-disclosure:hover {
+	color: var(--text-normal);
+}
+
+.friday-agent-process-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-agent-process-header-main {
+	display: flex;
+	flex: 0 1 auto;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.friday-agent-process-thinking-copy {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.friday-agent-process-status {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 22px;
+	padding: 2px 7px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+	color: var(--text-muted);
+	font-size: 0.74em;
+	font-weight: 700;
+	white-space: nowrap;
+}
+
+.friday-agent-process-status.is-running,
+.friday-agent-process-status.is-reconnecting {
+	border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-status.is-waiting {
+	border-color: color-mix(in srgb, var(--color-orange) 46%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-status.is-failed {
+	border-color: color-mix(in srgb, var(--color-red) 46%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-status.is-completed,
+.friday-agent-process-status.is-safe_stopped {
+	border-color: color-mix(in srgb, var(--color-green) 42%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-headline {
+	font-size: 0.92em;
+	font-weight: 700;
+	line-height: 1.35;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-summary,
+.friday-agent-process-section-summary,
+.friday-agent-process-meta {
+	font-size: 0.8em;
+	line-height: 1.45;
+	color: var(--text-muted);
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-toggle,
+.friday-agent-process-action {
+	min-height: 26px;
+	border-radius: 8px;
+	font-size: 0.78em;
+	font-weight: 650;
+	cursor: pointer;
+	transition: border-color 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.friday-agent-process-toggle {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 26px;
+	height: 26px;
+	min-width: 26px;
+	max-width: 26px;
+	margin-left: 0;
+	padding: 0;
+	appearance: none;
+	border: 0;
+	background: transparent;
+	background-image: none;
+	box-shadow: none;
+	color: var(--text-muted);
+}
+
+.friday-agent-process-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 16px;
+	height: 16px;
+	pointer-events: none;
+}
+
+.friday-agent-process-chevron svg {
+	width: 16px;
+	height: 16px;
+}
+
+.friday-agent-process-action {
+	padding: 3px 8px;
+	border: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+	color: var(--text-normal);
+	white-space: nowrap;
+}
+
+.friday-agent-process-action.is-primary {
+	border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+}
+
+.friday-agent-process-action.is-danger {
+	border-color: color-mix(in srgb, var(--color-red) 42%, var(--background-modifier-border));
+}
+
+.friday-agent-process-action:disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+
+.friday-agent-process-toggle:hover,
+.friday-agent-process-action:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--interactive-accent) 48%, var(--background-modifier-border));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-toggle:hover {
+	background: transparent;
+	box-shadow: none;
+}
+
+.friday-agent-process-toggle:focus-visible,
+.friday-agent-process-action:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--interactive-accent) 68%, transparent);
+	outline-offset: 2px;
+}
+
+.friday-agent-process-body,
+.friday-agent-process-timeline {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+}
+
+.friday-agent-process-step,
+.friday-agent-process-recovery {
+	padding: 0;
+	border: 0;
+	border-radius: 8px;
+	background: transparent;
+}
+
+.friday-agent-process-step {
+	display: grid;
+	grid-template-columns: 16px minmax(0, 1fr);
+	gap: 8px;
+	align-items: start;
+}
+
+.friday-agent-process-step-marker {
+	width: 10px;
+	height: 10px;
+	margin-top: 5px;
+	border-radius: 999px;
+	background: var(--text-muted);
+}
+
+.friday-agent-process-step.is-completed .friday-agent-process-step-marker {
+	background: var(--color-green);
+}
+
+.friday-agent-process-step.is-running .friday-agent-process-step-marker {
+	background: var(--interactive-accent);
+}
+
+.friday-agent-process-step.is-waiting_for_approval .friday-agent-process-step-marker {
+	background: var(--color-orange);
+}
+
+.friday-agent-process-step.is-failed .friday-agent-process-step-marker,
+.friday-agent-process-step.is-retryable .friday-agent-process-step-marker,
+.friday-agent-process-step.is-denied .friday-agent-process-step-marker {
+	background: var(--color-red);
+}
+
+.friday-agent-process-step-title,
+.friday-agent-process-step-action-label {
+	font-size: 0.84em;
+	font-weight: 650;
+	line-height: 1.35;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-step-title-row {
+	display: flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 8px;
+}
+
+.friday-agent-process-step-body,
+.friday-agent-process-step-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.friday-agent-process-step-action {
+	display: grid;
+	grid-template-columns: 14px minmax(0, 1fr);
+	gap: 4px;
+	color: var(--text-muted);
+}
+
+.friday-agent-process-step-action-bullet {
+	color: var(--text-faint);
+}
+
+.friday-agent-process-step-action-copy {
+	min-width: 0;
+}
+
+.friday-agent-process-step-files,
+.friday-agent-process-step-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+
+.friday-agent-process-file-ref {
+	display: inline-flex;
+	align-items: center;
+	max-width: 100%;
+	padding: 2px 6px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--background-primary) 78%, transparent);
+	color: var(--text-muted);
+	font-size: 0.76em;
+	font-weight: 650;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	justify-content: flex-end;
+}
+
+.friday-agent-process-overflow {
+	color: var(--text-muted);
+	font-size: 0.76em;
+}
+
+@media (max-width: 720px) {
+	.friday-agent-artifact-card,
+	.friday-agent-artifact-diff-file {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.friday-agent-process-header {
+		grid-template-columns: minmax(0, 1fr) auto;
+	}
+
+	.friday-agent-process-status,
+	.friday-agent-process-header-main {
+		grid-column: 1 / -1;
+	}
+
+	.friday-agent-process-panel {
+		padding-left: 22px;
+	}
+
+	.friday-agent-process-actions {
+		justify-content: flex-start;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.friday-agent-process-toggle,
+	.friday-agent-process-action,
+	.friday-agent-artifact-open {
+		transition: none;
+	}
+}
+/* End agent process panel */
+
 .friday-ai-override-bar {
 	display: flex;
 	align-items: center;

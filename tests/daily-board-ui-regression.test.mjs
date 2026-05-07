@@ -9,6 +9,7 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const toolHandlersPath = path.join(projectRoot, "src/services/tools/ObsidianToolHandlers.ts");
 const skillServicePath = path.join(projectRoot, "src/services/SkillCommandService.ts");
 const builtinSkillPath = path.join(projectRoot, "src/skills/packs/builtin/index.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
@@ -21,6 +22,10 @@ function readViewSource() {
 
 function readRuntimeSource() {
 	return fs.readFileSync(runtimePath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readToolHandlersSource() {
+	return fs.readFileSync(toolHandlersPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readSkillServiceSource() {
@@ -141,10 +146,12 @@ test("compile intent stays on runtime path instead of calling compile helper dir
 
 test("runtime no longer performs its own auto-skill selection inside buildSystemPrompt", async () => {
 	const source = readRuntimeSource();
+	const handlersSource = readToolHandlersSource();
 	assert.doesNotMatch(source, /suggestSkillsForPrompt\(/);
 	assert.match(source, /extraSystemContext\?\.includes\("\[SkillInvocation\]"\)/);
-	assert.match(source, /toolUseSkill\(/);
-	assert.match(source, /invocationMode:\s*"auto"/);
+	assert.match(source, /ObsidianToolAdapter/);
+	assert.match(handlersSource, /async toolUseSkill\(/);
+	assert.match(handlersSource, /invocationMode:\s*"auto"/);
 });
 
 test("invocation resolver no longer relies on compile intent hardcoding", async () => {
@@ -373,8 +380,10 @@ test("compile button routes through planner and orchestrator", async () => {
 
 test("runtime now loads memory directly from the memory v1 store", async () => {
 	const source = readRuntimeSource();
+	const handlersSource = readToolHandlersSource();
 	assert.match(source, /memoryStore\.readPromptContext\(/);
-	assert.match(source, /toolMemory\(/);
+	assert.match(source, /ObsidianToolAdapter/);
+	assert.match(handlersSource, /async toolMemory\(/);
 	assert.doesNotMatch(source, /memory\.extraction_requested/);
 });
 

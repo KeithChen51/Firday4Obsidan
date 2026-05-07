@@ -12,6 +12,8 @@ const jiti = createJiti(import.meta.url);
 const orchestratorPath = path.join(projectRoot, "src/core/execution/ExecutionOrchestrator.ts");
 const promptContextPath = path.join(projectRoot, "src/core/context/PromptContextEngine.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const toolAdapterPath = path.join(projectRoot, "src/services/tools/ObsidianToolAdapter.ts");
+const toolHandlersPath = path.join(projectRoot, "src/services/tools/ObsidianToolHandlers.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const registryPath = path.join(projectRoot, "src/core/tools/ToolRegistry.ts");
 
@@ -36,9 +38,13 @@ test("agent runtime exposes use_skill as a first-class runtime tool and reinject
 	const registry = await jiti.import(registryPath);
 	const useSkill = registry.ToolRegistry.getInstance().get("use_skill");
 	const source = read(runtimePath);
+	const adapterSource = read(toolAdapterPath);
+	const handlersSource = read(toolHandlersPath);
 	assert.equal(useSkill?.handlerName, "toolUseSkill");
 	assert.equal(useSkill?.category, "skill");
-	assert.match(source, /toolUseSkill\(/);
+	assert.match(source, /ObsidianToolAdapter/);
+	assert.match(adapterSource, /name === "use_skill"/);
+	assert.match(handlersSource, /async toolUseSkill\(/);
 	assert.match(source, /extractLoadedSkillSystemContext\(/);
 	assert.match(source, /role:\s*"system", content: loadedSkillContext/);
 });

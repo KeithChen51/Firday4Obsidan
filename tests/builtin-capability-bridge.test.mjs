@@ -11,6 +11,7 @@ const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const toolHandlersPath = path.join(projectRoot, "src/services/tools/ObsidianToolHandlers.ts");
 const compileCapabilityPath = path.join(projectRoot, "src/platform/capability/WikiCompileCapability.ts");
 const lookupCapabilityPath = path.join(projectRoot, "src/platform/capability/WikiLookupCapability.ts");
 const memoryStorePath = path.join(projectRoot, "src/core/memory/MemoryStoreV1.ts");
@@ -18,6 +19,10 @@ const conflictCapabilityPath = path.join(projectRoot, "src/platform/capability/G
 
 function readRuntimeSource() {
 	return fs.readFileSync(runtimePath, "utf8");
+}
+
+function readToolHandlersSource() {
+	return fs.readFileSync(toolHandlersPath, "utf8");
 }
 
 async function loadCapabilityModules() {
@@ -31,6 +36,7 @@ async function loadCapabilityModules() {
 
 test("builtin execution paths are bridged through dedicated capability modules", async () => {
 	const source = readRuntimeSource();
+	const toolHandlersSource = readToolHandlersSource();
 	assert.match(source, /WikiCompileCapability/);
 	assert.match(source, /WikiLookupCapability/);
 	assert.match(source, /MemoryStoreV1/);
@@ -39,10 +45,10 @@ test("builtin execution paths are bridged through dedicated capability modules",
 	assert.doesNotMatch(source, /runMaintainMemorySkill\(/);
 	assert.doesNotMatch(source, /runResolveConflictSkill\(/);
 	assert.match(source, /wikiLookupCapability\.execute\(/);
-	assert.match(source, /memoryStore\.write\(/);
+	assert.match(toolHandlersSource, /memoryStore\.write\(/);
 	assert.match(source, /memoryStore\.readPromptContext\(/);
 	assert.match(source, /gitConflictCapability\.generateProposal\(/);
-	assert.match(source, /wikiCompileCapability\.execute\(/);
+	assert.match(toolHandlersSource, /wikiCompileCapability\.execute\(/);
 });
 
 test("capability bridge modules export executable classes", async () => {

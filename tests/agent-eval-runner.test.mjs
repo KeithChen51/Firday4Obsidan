@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
+import { isDeepStrictEqual } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { runAgentRuntimeScenario } from "./helpers/fakeAgentRuntime.mjs";
@@ -10,6 +11,53 @@ import { runAgentRuntimeScenario } from "./helpers/fakeAgentRuntime.mjs";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const evalPath = path.join(projectRoot, "tests/evals/agent-scenarios.json");
+const requiredScenarioIds = [
+	"read-one-file-cites-evidence",
+	"grep-then-read-match",
+	"file-missing-clear-failure",
+	"project-relative-read-resolves-workspace-path",
+	"bare-filename-resolves-unique-active-project-file",
+	"ambiguous-bare-filename-returns-candidates",
+	"raw-write-denied-with-workspace-suggestion",
+	"repeated-invalid-path-does-not-loop",
+	"write-request-creates-mutation-plan",
+	"reject-mutation-keeps-file-unchanged",
+	"edit-conflict-becomes-conflicted",
+	"delete-requires-strict-approval",
+	"organize-mode-plans-links-and-tags",
+	"review-mode-detects-structure-issues",
+	"debug-profile-allows-exec",
+	"normal-mode-hides-exec",
+	"retryable-transport-no-prompt-fallback",
+	"oversized-context-triggers-compaction",
+	"dirty-tool-history-is-repaired-before-model-request",
+	"tool-iteration-limit-safe-stop",
+];
+const supportedExpectKeys = new Set([
+	"assistantIncludes",
+	"assistantExcludes",
+	"status",
+	"terminalStatus",
+	"finalFiles",
+	"pendingMutationCount",
+	"pendingMutationOperations",
+	"storedMutationStatuses",
+	"approvalRequestCount",
+	"traceTools",
+	"traceStatuses",
+	"traceTargetPaths",
+	"modelCalls",
+	"nativeToolsInclude",
+	"nativeToolsExclude",
+	"turnEventsInclude",
+	"recoveryTimelineIncludes",
+	"loopPreventionTimelineIncludes",
+	"modelRequestExcludes",
+	"modelRequestMaxApproxTokens",
+	"toolBoundaryViolationCount",
+	"contextTrimmed",
+	"safeStopped",
+]);
 
 async function loadEvalScenarios() {
 	const raw = await fs.readFile(evalPath, "utf8");
@@ -21,6 +69,19 @@ async function loadEvalScenarios() {
 }
 
 const scenarios = await loadEvalScenarios();
+
+test("agent eval scenario catalog covers required Claude-grade tool-layer paths", () => {
+	const ids = new Set(scenarios.map((scenario) => scenario.id));
+	assert.equal(ids.size, scenarios.length, "scenario ids must be unique");
+	for (const requiredId of requiredScenarioIds) {
+		assert.ok(ids.has(requiredId), `missing required scenario id: ${requiredId}`);
+	}
+	for (const scenario of scenarios) {
+		for (const key of Object.keys(scenario.expect ?? {})) {
+			assert.ok(supportedExpectKeys.has(key), `unsupported expect key ${key} in ${scenario.id}`);
+		}
+	}
+});
 
 for (const scenario of scenarios) {
 	test(`agent eval: ${scenario.id}`, async () => {
@@ -86,6 +147,9 @@ function assertScenario(result, expect) {
 	if (Array.isArray(expect.traceStatuses)) {
 		assert.deepEqual(result.traces.map((trace) => trace.status), expect.traceStatuses);
 	}
+	if (Array.isArray(expect.traceTargetPaths)) {
+		assert.deepEqual(result.traces.map((trace) => trace.targetPath ?? ""), expect.traceTargetPaths);
+	}
 	if (expect.modelCalls) {
 		for (const [key, value] of Object.entries(expect.modelCalls)) {
 			assert.equal(result.modelCalls[key], value);
@@ -108,6 +172,20 @@ function assertScenario(result, expect) {
 		for (const type of expect.turnEventsInclude) {
 			assert.ok(eventTypes.includes(type), `expected replay to include ${type}`);
 		}
+	}
+	if (Array.isArray(expect.recoveryTimelineIncludes)) {
+		assertTimelineIncludes(
+			result.turnEventSummary.recoveryTimeline ?? [],
+			expect.recoveryTimelineIncludes,
+			"recoveryTimeline",
+		);
+	}
+	if (Array.isArray(expect.loopPreventionTimelineIncludes)) {
+		assertTimelineIncludes(
+			result.turnEventSummary.loopPreventionTimeline ?? [],
+			expect.loopPreventionTimelineIncludes,
+			"loopPreventionTimeline",
+		);
 	}
 	if (Array.isArray(expect.modelRequestExcludes)) {
 		assert.ok(
@@ -147,6 +225,28 @@ function assertScenario(result, expect) {
 		assert.equal(result.turnEventSummary.status, "safe_stopped");
 		assert.ok(result.turnEvents.some((event) => event.type === "max_tool_iterations"));
 	}
+}
+
+function assertTimelineIncludes(actualItems, expectedItems, label) {
+	for (const expected of expectedItems) {
+		assert.ok(
+			actualItems.some((actual) => matchesPartial(actual, expected)),
+			`expected ${label} to include ${JSON.stringify(expected)}, got ${JSON.stringify(actualItems)}`,
+		);
+	}
+}
+
+function matchesPartial(actual, expected) {
+	if (Array.isArray(expected)) {
+		return isDeepStrictEqual(actual, expected);
+	}
+	if (!expected || typeof expected !== "object") {
+		return isDeepStrictEqual(actual, expected);
+	}
+	if (!actual || typeof actual !== "object" || Array.isArray(actual)) {
+		return false;
+	}
+	return Object.entries(expected).every(([key, value]) => matchesPartial(actual[key], value));
 }
 
 function escapeRegExp(value) {

@@ -18,6 +18,7 @@ export const AGENT_TURN_EVENT_TYPES = [
 	"checkpoint_resume_rejected",
 	"checkpoint_resume_completed",
 	"fallback",
+	"max_tool_iterations",
 	"task_updated",
 	"turn_completed",
 	"turn_failed",

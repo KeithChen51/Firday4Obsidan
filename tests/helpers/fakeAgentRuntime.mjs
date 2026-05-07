@@ -878,8 +878,11 @@ function normalizeEvents({ progress, runtimeResult, pendingMutations, failure })
 	if (runtimeResult.parseError) {
 		events.push(makeEvent("parse_error", { message: runtimeResult.parseError }));
 	}
-	if ((runtimeResult.assistantText ?? "").includes("Maximum tool-iteration limit reached")) {
-		events.push(makeEvent("max_tool_iterations", { message: "Maximum tool iteration limit reached." }));
+	if (runtimeResult.status === "safe_stopped" || (runtimeResult.assistantText ?? "").includes("Maximum tool-iteration limit reached")) {
+		events.push(makeEvent("max_tool_iterations", {
+			status: "safe_stopped",
+			summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+		}));
 	}
 	for (const mutation of pendingMutations) {
 		events.push(makeEvent("mutation_planned", {

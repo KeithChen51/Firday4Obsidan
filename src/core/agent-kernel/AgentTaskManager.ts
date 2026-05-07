@@ -105,7 +105,7 @@ export class AgentTaskManager {
 			this.emitTask(context, task);
 			return task;
 		}
-		if (this.isMaxToolIterationStop(result.assistantText)) {
+		if (this.isMaxToolIterationStop(result)) {
 			const task = await this.options.taskStore.markFailed(taskId, {
 				summary: "Runtime stopped at the maximum tool iteration limit.",
 				failureReason: result.assistantText,
@@ -270,8 +270,8 @@ export class AgentTaskManager {
 		return /(abort|cancel|cancelled|canceled)/i.test(message);
 	}
 
-	private isMaxToolIterationStop(assistantText: string): boolean {
-		return assistantText.includes("Maximum tool-iteration limit reached");
+	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
+		return result.status === "safe_stopped" || result.assistantText.includes("Maximum tool-iteration limit reached");
 	}
 
 	private truncate(value: string, maxLength: number): string {

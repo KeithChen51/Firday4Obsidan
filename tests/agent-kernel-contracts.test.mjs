@@ -53,8 +53,10 @@ test("Agent Kernel contracts export stable statuses, event types, and failure ca
 		"waiting_for_user",
 		"failed",
 		"cancelled",
+		"safe_stopped",
 	]);
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_started"));
+	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("max_tool_iterations"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_completed"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_failed"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_cancelled"));

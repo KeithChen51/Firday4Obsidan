@@ -40,3 +40,25 @@ test("native tool definitions respect disabled and allowed tool filters", async 
 
 	assert.deepEqual(definitions.map((tool) => tool.name).sort(), ["exec", "read"]);
 });
+
+test("native filesystem tool descriptions align with project-relative path normalization", async () => {
+	const mod = await loadRegistry();
+	const registry = mod.ToolRegistry.getInstance();
+	const definitions = registry.buildNativeToolDefinitions({ agentMode: "developer", enableExecTool: true });
+	const byName = new Map(definitions.map((tool) => [tool.name, tool]));
+	const filesystemTools = ["ls", "read", "grep", "search_text", "glob", "write", "edit", "delete"];
+
+	for (const name of filesystemTools) {
+		const tool = byName.get(name);
+		assert.ok(tool, `${name} definition missing`);
+		assert.match(tool.description, /project-relative paths/i, `${name} description should mention project-relative paths`);
+		assert.doesNotMatch(tool.description, /Vault-relative path by default/i, `${name} description should not force vault-relative defaults`);
+		const pathSchema = tool.parameters.properties.path;
+		assert.equal(typeof pathSchema?.description, "string", `${name} path schema should describe path behavior`);
+		assert.match(pathSchema.description, /project-relative/i, `${name} path schema should mention project-relative normalization`);
+	}
+
+	assert.match(byName.get("read").description, /allowed external/i);
+	assert.match(byName.get("write").description, /active project workspace/i);
+	assert.match(byName.get("delete").description, /canonical vault path/i);
+});

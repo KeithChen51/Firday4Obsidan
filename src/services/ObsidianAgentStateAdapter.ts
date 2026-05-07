@@ -368,9 +368,9 @@ export class ObsidianAgentStateAdapter {
 			case "cancelled":
 				return task.status;
 			case "failed":
-				return result.status === "failed" ? "failed" : "completed";
+				return result.status === "failed" || result.status === "safe_stopped" ? result.status : "completed";
 			default:
-				return "completed";
+				return result.status === "safe_stopped" ? "safe_stopped" : "completed";
 		}
 	}
 
@@ -382,10 +382,17 @@ export class ObsidianAgentStateAdapter {
 				payload: { summary: this.truncate(result.parseError, 240), traceId: result.traceId },
 			});
 		}
-		if (this.isMaxToolIterationStop(result.assistantText)) {
+		if (this.isMaxToolIterationStop(result)) {
+			if (result.events?.some((event) => event.type === "max_tool_iterations")) {
+				return events;
+			}
 			events.push({
 				type: "max_tool_iterations",
-				payload: { summary: "Maximum tool iteration limit reached.", traceId: result.traceId },
+				payload: {
+					status: "safe_stopped",
+					summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+					traceId: result.traceId,
+				},
 			});
 		}
 		return events;
@@ -407,7 +414,7 @@ export class ObsidianAgentStateAdapter {
 		return {
 			type: "turn_completed",
 			payload: {
-				status: this.isMaxToolIterationStop(result.assistantText)
+				status: this.isMaxToolIterationStop(result)
 					? "safe_stopped"
 					: status === "waiting_for_approval" || status === "waiting_for_user" ? status : "completed",
 				traceId: result.traceId,
@@ -415,8 +422,8 @@ export class ObsidianAgentStateAdapter {
 		};
 	}
 
-	private isMaxToolIterationStop(assistantText: string): boolean {
-		return assistantText.includes("Maximum tool-iteration limit reached");
+	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
+		return result.status === "safe_stopped" || result.assistantText.includes("Maximum tool-iteration limit reached");
 	}
 
 	private buildFailureDiagnostics(message: string, status: AgentTurnStatus): Record<string, unknown> {

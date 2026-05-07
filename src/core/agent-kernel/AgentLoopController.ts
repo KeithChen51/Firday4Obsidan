@@ -1,4 +1,8 @@
 import type { ToolCall } from "../../types/tools";
+import { ToolBoundaryFilter, type ToolBoundaryMessage, type ToolBoundaryRepair } from "../context/ToolBoundaryFilter";
+import { formatForModel } from "../tools/ToolResultFormatter";
+import { normalizeToolInvocation, type NormalizedToolInvocation } from "../tools/ToolInvocationNormalizer";
+import type { ToolResultFailureClass, ToolResultPayload, ToolResultRecovery } from "../tools/ToolResultContract";
 import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
 import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
@@ -19,7 +23,6 @@ import {
 import {
 	hasMutationPlans,
 	isResponseEnvelope,
-	MAX_TOOL_ITERATION_MESSAGE,
 	parseKernelRuntimeEnvelope,
 	type RuntimeEnvelope,
 } from "./RuntimeProtocol";
@@ -49,8 +52,41 @@ interface AgentLoopInitialState {
 	traces?: RuntimeToolTrace[];
 }
 
+interface FailedToolInvocationRecord {
+	invocation: NormalizedToolInvocation;
+	result: ToolExecutionResult;
+	status: RuntimeToolTrace["status"];
+	failureClass: ToolResultFailureClass;
+}
+
+class FailedToolInvocationTracker {
+	private readonly records = new Map<string, FailedToolInvocationRecord>();
+
+	findDuplicate(invocation: NormalizedToolInvocation): FailedToolInvocationRecord | undefined {
+		return this.records.get(invocation.identity);
+	}
+
+	record(invocation: NormalizedToolInvocation, result: ToolExecutionResult): void {
+		const status = result.payload.status ?? result.trace.status;
+		if (status === "ok" || result.payload.ok || result.trace.ok) {
+			return;
+		}
+		const failureClass = result.payload.failureClass ?? result.trace.failureClass;
+		if (!failureClass) {
+			return;
+		}
+		this.records.set(invocation.identity, {
+			invocation,
+			result,
+			status: result.trace.status,
+			failureClass,
+		});
+	}
+}
+
 export class AgentLoopController implements RuntimeTurnExecutorPort {
 	private readonly failureClassifier: AgentFailureClassifierPort;
+	private readonly toolBoundaryFilter = new ToolBoundaryFilter();
 
 	constructor(private readonly options: AgentLoopControllerOptions) {
 		this.failureClassifier = options.failureClassifier ?? new AgentFailureClassifier();
@@ -160,6 +196,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
+		const failedInvocations = new FailedToolInvocationTracker();
 		let finalReply = "";
 		for (let step = startStep; step <= maxIterations; step += 1) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
@@ -204,7 +241,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
-				});
+				}, failedInvocations);
 				traces.push(executed.trace);
 				modelMessages.push({
 					role: "assistant",
@@ -242,12 +279,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				contextSummary: contextPackage.contextSummary,
 			});
 		}
-		return this.makeResult(input, context, {
-			assistantText: finalReply ? `${finalReply}\n\n${MAX_TOOL_ITERATION_MESSAGE}` : MAX_TOOL_ITERATION_MESSAGE,
-			traces,
-			rawFinalReply: finalReply,
-			contextSummary: contextPackage.contextSummary,
-		});
+		return this.buildMaxToolIterationResult(input, context, "prompt", maxIterations, finalReply, traces, contextPackage);
 	}
 
 	private async runNativeLoop(
@@ -260,6 +292,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
+		const failedInvocations = new FailedToolInvocationTracker();
 		const tools = await this.options.toolExecution.listNativeTools({ input, context, allowedTools: input.allowedTools });
 		if (tools.length === 0) {
 			return this.makeResult(input, context, {
@@ -273,6 +306,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		let finalReply = "";
 		let lastToolPayload: ToolExecutionResult["payload"] | null = null;
 		for (let step = startStep; step <= maxIterations; step += 1) {
+			const repairs = this.repairNativeModelMessages(modelMessages);
+			if (repairs.length > 0) {
+				this.reportNativeMessageRepairs(input, step, repairs);
+			}
 			this.emitModelRequest(input, context, step, "native", modelMessages);
 			const response = await this.options.modelDriver.requestWithTools({
 				messages: cloneMessages(modelMessages),
@@ -300,6 +337,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					assistantStepText,
 					finalReply,
 					lastToolPayload,
+					failedInvocations,
 				);
 				return terminal;
 			}
@@ -312,7 +350,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					id: toolCall.id,
 					name: toolCall.name,
 					args: toolCall.args ?? {},
-				});
+				}, failedInvocations);
 				traces.push(executed.trace);
 				lastToolPayload = executed.payload;
 				completedToolCalls.push({
@@ -354,12 +392,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				safetyReason: "Native tool result appended to model messages.",
 			});
 		}
-		return this.makeResult(input, context, {
-			assistantText: finalReply ? `${finalReply}\n\n${MAX_TOOL_ITERATION_MESSAGE}` : MAX_TOOL_ITERATION_MESSAGE,
-			traces,
-			rawFinalReply: finalReply,
-			contextSummary: contextPackage.contextSummary,
-		});
+		return this.buildMaxToolIterationResult(input, context, "native", maxIterations, finalReply, traces, contextPackage);
 	}
 
 	private async resolveNativeNoToolResult(
@@ -370,6 +403,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		assistantStepText: string,
 		finalReply: string,
 		lastToolPayload: ToolExecutionResult["payload"] | null,
+		failedInvocations?: FailedToolInvocationTracker,
 	): Promise<AgentTurnResult> {
 		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload);
 		if (!assistantStepText || this.isIntermediateAssistantText(assistantStepText)) {
@@ -401,7 +435,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				const executed = await this.executeTool(input, context, traces.length + 1, {
 					name: tool.name,
 					args: tool.args ?? {},
-				});
+				}, failedInvocations);
 				traces.push(executed.trace);
 				return this.makeResult(input, context, {
 					assistantText: fallbackAssistant || executed.trace.summary,
@@ -445,7 +479,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 		step: number,
 		tool: ToolCall,
+		failedInvocations?: FailedToolInvocationTracker,
 	): Promise<ToolExecutionResult> {
+		const invocation = normalizeToolInvocation(tool);
 		context.emit({
 			type: "tool_call",
 			payload: { step, tool: tool.name, args: tool.args ?? {}, toolCallId: tool.id },
@@ -457,20 +493,32 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			tool: tool.name,
 			message: `Step ${step}: calling tool ${tool.name}`,
 		});
-		const result = await this.options.toolExecution.executeTool({ input, context, step, tool });
+		const previousFailure = failedInvocations?.findDuplicate(invocation);
+		const result = previousFailure
+			? this.buildDuplicateFailedToolResult(step, tool, previousFailure)
+			: await this.options.toolExecution.executeTool({ input, context, step, tool });
+		if (!previousFailure) {
+			failedInvocations?.record(invocation, result);
+		}
+		const recovery = result.payload.recovery;
+		const recoverable = recovery?.recoverable ?? result.trace.failureClass === "transport_unstable";
+		const retryable = recovery?.retryable ?? result.trace.failureClass === "transport_unstable";
 		context.emit({
 			type: "tool_result",
 			payload: {
 				step,
 				tool: tool.name,
 				toolCallId: tool.id ?? result.trace.runId,
-				status: result.trace.status,
+				status: result.payload.status ?? result.trace.status,
 				summary: result.trace.summary,
-				targetPath: result.trace.targetPath,
-				error: result.trace.error,
-				failureClass: result.trace.failureClass,
-				recoverable: result.trace.failureClass === "transport_unstable",
-				retryable: result.trace.failureClass === "transport_unstable",
+				targetPath: result.payload.trace?.targetPath ?? result.trace.targetPath,
+				error: result.payload.error ?? result.trace.error,
+				failureClass: result.payload.failureClass ?? result.trace.failureClass,
+				recoverable,
+				retryable,
+				...(recovery ? { recovery } : {}),
+				...(recovery?.candidatePaths ? { candidatePaths: recovery.candidatePaths } : {}),
+				...(recovery?.suggestedArgs ? { suggestedArgs: recovery.suggestedArgs } : {}),
 			},
 		});
 		this.report(input, {
@@ -484,6 +532,94 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			message: `Step ${step}: tool ${tool.name} finished - ${result.trace.summary}`,
 		});
 		return result;
+	}
+
+	private buildDuplicateFailedToolResult(
+		step: number,
+		tool: ToolCall,
+		previousFailure: FailedToolInvocationRecord,
+	): ToolExecutionResult {
+		const previousPayload = previousFailure.result.payload;
+		const failureClass = previousFailure.failureClass ?? previousPayload.failureClass ?? "invalid_input";
+		const message = `Identical call already failed earlier in this turn for ${tool.name}. Use recovery.suggestedArgs/candidatePaths if present, or change the tool arguments before retrying.`;
+		const recovery = this.buildDuplicateRecovery(previousPayload.recovery, message);
+		const payload: ToolResultPayload = {
+			ok: false,
+			tool: tool.name,
+			status: "failed",
+			failureClass,
+			error: message,
+			recovery,
+			...(previousPayload.trace ? { trace: { ...previousPayload.trace } } : {}),
+		};
+		const previousTrace = previousFailure.result.trace;
+		const trace: RuntimeToolTrace = {
+			...previousTrace,
+			runId: `${previousTrace.runId || tool.name}-duplicate-${step}`,
+			step,
+			tool: tool.name,
+			targetPath: previousTrace.targetPath,
+			status: "failed",
+			failureClass,
+			ok: false,
+			summary: message,
+			error: message,
+		};
+		return {
+			trace,
+			payload,
+			modelResultText: formatForModel(payload),
+		};
+	}
+
+	private buildDuplicateRecovery(
+		previousRecovery: ToolResultRecovery | undefined,
+		message: string,
+	): ToolResultRecovery {
+		return {
+			...(previousRecovery ?? {}),
+			recoverable: true,
+			retryable: false,
+			code: "duplicate_failed_tool_call",
+			message,
+			...(previousRecovery?.suggestedArgs ? { suggestedArgs: { ...previousRecovery.suggestedArgs } } : {}),
+			...(previousRecovery?.candidatePaths ? { candidatePaths: [...previousRecovery.candidatePaths] } : {}),
+		};
+	}
+
+	private buildMaxToolIterationResult(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		channel: "native" | "prompt",
+		maxIterations: number,
+		finalReply: string,
+		traces: RuntimeToolTrace[],
+		contextPackage: ContextPackage,
+	): AgentTurnResult {
+		const assistantText = "Tool iteration limit reached; stopped further tool calls for this turn.";
+		context.emit({
+			type: "max_tool_iterations",
+			status: "safe_stopped",
+			payload: {
+				channel,
+				maxIterations,
+				toolTraces: traces.length,
+				status: "safe_stopped",
+				summary: assistantText,
+			},
+		});
+		this.report(input, {
+			phase: "done",
+			depth: input.depth ?? 0,
+			message: assistantText,
+		});
+		return this.makeResult(input, context, {
+			status: "safe_stopped",
+			assistantText,
+			traces,
+			rawFinalReply: finalReply,
+			contextSummary: contextPackage.contextSummary,
+		});
 	}
 
 	private makeResult(
@@ -703,6 +839,32 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			return this.runPromptLoop(input, context, contextPackage, initialState);
 		}
 		return this.runNativeLoop(input, context, contextPackage, initialState);
+	}
+
+	private repairNativeModelMessages(messages: AgentChatMessage[]): ToolBoundaryRepair[] {
+		const result = this.toolBoundaryFilter.repair(messages as ToolBoundaryMessage[], {
+			maxToolResultTokens: 4096,
+		});
+		if (result.repairs.length === 0) {
+			return [];
+		}
+		messages.splice(0, messages.length, ...(result.messages as AgentChatMessage[]));
+		return result.repairs;
+	}
+
+	private reportNativeMessageRepairs(input: AgentTurnInput, step: number, repairs: ToolBoundaryRepair[]): void {
+		const summary = repairs
+			.reduce<Record<string, number>>((counts, repair) => {
+				counts[repair.reason] = (counts[repair.reason] ?? 0) + 1;
+				return counts;
+			}, {});
+		this.report(input, {
+			phase: "context",
+			depth: input.depth ?? 0,
+			step,
+			summary: JSON.stringify(summary),
+			message: `Step ${step}: repaired native tool-call history before model request.`,
+		});
 	}
 
 	private async markCheckpointConsumed(

@@ -58,6 +58,20 @@ test("tool gateway does not execute a policy-denied tool", async () => {
 	assert.equal(executed, false);
 	assert.equal(result.status, "denied");
 	assert.equal(result.decision.code, "tool_unknown");
+	assert.deepEqual(result.audit.policy, {
+		allow: false,
+		code: "tool_unknown",
+		reason: "Unknown tool: unknown_tool.",
+		approval: "none",
+	});
+	assert.equal(result.audit.tool, "unknown_tool");
+	assert.equal(result.audit.capability, "unknown");
+	assert.equal(result.audit.scope, "vault");
+	assert.equal(result.audit.targetPath, "Project/workspace/a.md");
+	assert.deepEqual(result.audit.execution, {
+		attempted: false,
+		status: "denied",
+	});
 });
 
 test("tool gateway stops when human approval denies a risky tool", async () => {
@@ -88,9 +102,20 @@ test("tool gateway stops when human approval denies a risky tool", async () => {
 	assert.equal(executed, false);
 	assert.equal(result.status, "denied");
 	assert.equal(result.approval?.reason, "User denied tool call.");
+	assert.deepEqual(result.audit.approval, {
+		requested: true,
+		allowed: false,
+		persisted: false,
+		viaRule: false,
+		reason: "User denied tool call.",
+	});
+	assert.deepEqual(result.audit.execution, {
+		attempted: false,
+		status: "denied",
+	});
 });
 
-test("tool gateway executes allowed tools and normalizes failures", async () => {
+test("tool gateway records allowed read success with no approval", async () => {
 	const { gateway, policy } = await loadModules();
 	const toolGateway = new gateway.ToolGateway(new policy.CapabilityPolicy());
 
@@ -100,13 +125,29 @@ test("tool gateway executes allowed tools and normalizes failures", async () => 
 	});
 	assert.equal(success.status, "ok");
 	assert.deepEqual(success.data, { content: "alpha" });
+	assert.equal(success.audit.policy.approval, "none");
+	assert.equal(success.audit.policy.reason, "Tool read is allowed.");
+	assert.deepEqual(success.audit.execution, {
+		attempted: true,
+		status: "ok",
+	});
+});
+
+test("tool gateway classifies execution failures through the governor", async () => {
+	const { gateway, policy } = await loadModules();
+	const toolGateway = new gateway.ToolGateway(new policy.CapabilityPolicy());
 
 	const failed = await toolGateway.run({
 		policyInput: createPolicyInput({ toolName: "read" }),
 		execute: async () => {
-			throw new Error("read failed");
+			throw new Error("504 Gateway Timeout");
 		},
 	});
 	assert.equal(failed.status, "failed");
-	assert.equal(failed.error, "read failed");
+	assert.equal(failed.error, "504 Gateway Timeout");
+	assert.deepEqual(failed.audit.execution, {
+		attempted: true,
+		status: "failed",
+		failureClass: "transport_unstable",
+	});
 });

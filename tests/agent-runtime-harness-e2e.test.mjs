@@ -262,11 +262,17 @@ test("max tool iterations -> safe stop", async () => {
 		],
 	});
 
-	assert.match(result.assistantText, /Maximum tool-iteration limit reached/);
+	assert.equal(result.assistantText.includes("Maximum tool-iteration limit reached"), false);
 	assert.equal(result.traces.length, 1);
 	assert.equal(result.modelCalls.total, 1);
 	assertEventTypesInclude(result, ["max_tool_iterations", "assistant_final"]);
 	assertPersistedReplay(result, ["max_tool_iterations", "turn_completed"], { status: "safe_stopped" });
+	const maxIterationEvent = result.turnEvents.find((event) => event.type === "max_tool_iterations");
+	assert.equal(maxIterationEvent?.payload.status, "safe_stopped");
+	assert.equal(
+		JSON.stringify(maxIterationEvent?.payload ?? {}).includes("Maximum tool iteration limit reached"),
+		false,
+	);
 });
 
 test("native mode success", async () => {

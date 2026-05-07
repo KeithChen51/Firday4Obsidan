@@ -26,7 +26,7 @@ function makeCheckpoint(overrides = {}) {
 		channel: overrides.channel ?? "native",
 		step: overrides.step ?? 1,
 		nextStep: overrides.nextStep ?? 2,
-		createdAt: overrides.createdAt ?? "2026-05-05T00:00:00.000Z",
+		createdAt: overrides.createdAt ?? new Date().toISOString(),
 		modelOverride: "deepseek/deepseek-v4-pro",
 		mode: "ask",
 		allowedTools: ["read"],
@@ -232,4 +232,93 @@ test("AgentLoopController rejects unsafe checkpoint boundaries and falls back to
 		result: "rejected",
 		reason: "Tool execution was in flight.",
 	}]);
+});
+
+test("AgentLoopController repairs dirty native checkpoint messages before the next model request", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const checkpoint = makeCheckpoint({
+		id: "checkpoint-dirty-native-history",
+		modelMessages: [
+			{ role: "system", content: "system prompt" },
+			{ role: "user", content: "Read project-relative notes" },
+			{
+				role: "assistant",
+				content: "",
+				toolCalls: [{ id: "call-ok", name: "read", args: { path: "notes/source.md" } }],
+			},
+			{ role: "tool", content: "TOOL_RESULT clean", toolCallId: "call-ok", name: "read" },
+			{ role: "tool", content: "TOOL_RESULT duplicate", toolCallId: "call-ok", name: "read" },
+			{ role: "tool", content: "TOOL_RESULT orphan", toolCallId: "call-orphan", name: "read" },
+			{
+				role: "assistant",
+				content: "",
+				toolCalls: [{ id: "call-dangling", name: "grep", args: { pattern: "todo" } }],
+			},
+			{ role: "user", content: "continue" },
+		],
+	});
+	let observedMessages = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				throw new Error("checkpoint resume should not rebuild context");
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				observedMessages = input.messages;
+				return {
+					assistantText: "Recovered from clean tool history.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool() {
+				throw new Error("completed checkpoint tool should not be re-run");
+			},
+		},
+		checkpoint: {
+			async save() {},
+			async getResumeCheckpoint() {
+				return checkpoint;
+			},
+			async markConsumed() {},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-dirty-resume",
+		taskId: "task-dirty-resume",
+		traceId: "trace-dirty-resume",
+		conversationId: "conversation-checkpoint",
+		agentId: "agent-checkpoint",
+		conversation: [],
+		userPrompt: "continue",
+		mode: "ask",
+		allowedTools: ["read", "grep"],
+		retryOfTaskId: "task-original",
+		metadata: { resumeFromCheckpointId: checkpoint.id },
+	});
+
+	assert.equal(result.assistantText, "Recovered from clean tool history.");
+	assert.equal(observedMessages.filter((message) => message.role === "tool").length, 1);
+	assert.equal(observedMessages.some((message) => message.role === "tool" && message.toolCallId === "call-orphan"), false);
+	assert.equal(
+		observedMessages.some((message) =>
+			Array.isArray(message.toolCalls) && message.toolCalls.some((toolCall) => toolCall.id === "call-dangling")
+		),
+		false,
+	);
 });

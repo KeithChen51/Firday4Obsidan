@@ -2,6 +2,7 @@ import type { StepTraceEvent } from "../../turn-state/TurnStateMachine";
 import type { LlmTransportChannel, LlmTransportEventType } from "../../llm/LlmTransportTelemetry";
 import type { ReasoningArtifact } from "../../llm/ReasoningArtifact";
 import type { AgentMode } from "../../tools/ToolRegistry";
+import type { ToolResultFailureClass } from "../../tools/ToolResultContract";
 import type { AgentTask } from "../../tasks/AgentTask";
 import type { RuntimeProfile } from "../../../platform/runtime/RuntimeProfile";
 import type { AgentFailure } from "./AgentFailure";
@@ -13,6 +14,7 @@ export const AGENT_TURN_STATUSES = [
 	"waiting_for_user",
 	"failed",
 	"cancelled",
+	"safe_stopped",
 ] as const;
 
 export type AgentTurnStatus = typeof AGENT_TURN_STATUSES[number];
@@ -110,7 +112,7 @@ export interface RuntimeToolTrace {
 	persistedRule: boolean;
 	viaRule: boolean;
 	status: "ok" | "failed" | "denied";
-	failureClass?: "invalid_input" | "dependency_unavailable" | "transport_unstable" | "tool_runtime_error";
+	failureClass?: ToolResultFailureClass;
 	ok: boolean;
 	summary: string;
 	error?: string;

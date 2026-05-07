@@ -31,6 +31,20 @@ test("studio content generator leaves generated.ts untouched when content is unc
 	assert.equal(fs.statSync(generatedPath).mtimeMs, before);
 });
 
+test("studio content generator normalizes markdown line endings in generated snapshots", () => {
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-studio-content-"));
+	const studioRoot = path.join(tempRoot, "src", "content", "studio");
+	fs.mkdirSync(studioRoot, { recursive: true });
+	fs.writeFileSync(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\r\n\r\n## 0.0.1\r\n\r\n- Added.\r\n", "utf8");
+	fs.writeFileSync(path.join(studioRoot, "README.md"), "# Studio\r\n\r\nHello\r\n", "utf8");
+
+	runGenerator(tempRoot);
+
+	const generated = fs.readFileSync(path.join(studioRoot, "generated.ts"), "utf8");
+	assert.match(generated, /"# Studio\\n\\nHello\\n"/);
+	assert.doesNotMatch(generated, /\\r\\n/);
+});
+
 function runGenerator(cwd) {
 	const result = spawnSync(process.execPath, [scriptPath], {
 		cwd,

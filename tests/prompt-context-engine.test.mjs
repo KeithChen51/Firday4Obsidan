@@ -22,8 +22,8 @@ test("prompt context engine builds runtime prompt envelope with context summary 
 		depth: 1,
 		permissionMode: "auto",
 		runtimeProfileId: "win_desktop",
-		focusPaths: "Projects/demo",
-		currentFilePath: "Projects/demo/raw/spec.md",
+		focusPaths: "<projectRoot>",
+		currentFilePath: "<projectRoot>/raw/spec.md",
 		userPrompt: "Compile the current project wiki",
 		fridayMd: "Global rules",
 		agentProfile: "Agent profile excerpt",
@@ -41,6 +41,30 @@ test("prompt context engine builds runtime prompt envelope with context summary 
 	assert.equal(result.summary.hasMemoryContext, true);
 	assert.equal(result.summary.hasAutoSkillContext, true);
 	assert.ok(result.summary.used <= result.summary.hardLimit);
+});
+
+test("prompt path guidance delegates active project normalization to the tool layer", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		activeProjectRoot: "<projectRoot>",
+		userPrompt: "Create a test note",
+		agentProfile: "agent",
+	});
+
+	assert.match(result.prompt, /File tools accept project-relative paths and canonical vault paths\./);
+	assert.match(result.prompt, /The tool layer normalizes project-relative paths under the active project when one is selected\./);
+	assert.match(result.prompt, /workspace\/test\.md and <projectRoot>\/workspace\/test\.md normalize to the same canonical vault path: <projectRoot>\/workspace\/test\.md\./);
+	assert.match(result.prompt, /If a TOOL_RESULT failure includes recovery\.suggestedArgs, use those suggested args on the next attempt/);
+	assert.match(result.prompt, /"path":"workspace\/test\.md"/);
+	assert.match(result.prompt, /"path":"<projectRoot>\/workspace\/test\.md"/);
+	assert.doesNotMatch(result.prompt, /manually prefix/i);
+	assert.doesNotMatch(result.prompt, /write\/delete only supports Vault-relative paths/);
+	assert.doesNotMatch(result.prompt, /prefer scoping ls\/grep\/search_text\/glob to that root/);
 });
 
 test("prompt context engine reports trimmed channels when envelope exceeds hard limit", async () => {
@@ -77,8 +101,8 @@ test("prompt context engine includes structured mention context in prompt and su
 			resolvedCount: 2,
 			tokenTypes: ["folder", "note"],
 			sourceMap: [
-				{ tokenId: "note-1", tokenType: "note", channel: "mentioned_notes", target: "Projects/demo/raw/spec.md" },
-				{ tokenId: "folder-1", tokenType: "folder", channel: "folder_structures", target: "Projects/demo/raw/specs" },
+				{ tokenId: "note-1", tokenType: "note", channel: "mentioned_notes", target: "<projectRoot>/raw/spec.md" },
+				{ tokenId: "folder-1", tokenType: "folder", channel: "folder_structures", target: "<projectRoot>/raw/specs" },
 			],
 			entries: [
 				{
