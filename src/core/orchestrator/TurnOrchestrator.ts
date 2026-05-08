@@ -3,6 +3,8 @@ import { StepEventName, TurnStateMachine } from "../turn-state/TurnStateMachine"
 
 const PHASE_TO_STEP_EVENT: Record<RuntimeProgressEvent["phase"], StepEventName> = {
 	start: "STEP_START",
+	intake: "STEP_NARRATION",
+	plan: "STEP_CHECKPOINT",
 	narration: "STEP_NARRATION",
 	context: "STEP_CONTEXT",
 	model_request: "STEP_MODEL_REQUEST",

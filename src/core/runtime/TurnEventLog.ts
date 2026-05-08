@@ -3,6 +3,12 @@ import path from "path";
 
 export type TurnEventType =
 	| "turn_started"
+	| "intake_decision"
+	| "plan_create"
+	| "plan_update"
+	| "plan_revise"
+	| "plan_complete"
+	| "plan_skip"
 	| "narration_report"
 	| "context_built"
 	| "model_requested"

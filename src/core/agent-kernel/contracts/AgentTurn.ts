@@ -8,6 +8,7 @@ import type { RuntimeProfile } from "../../../platform/runtime/RuntimeProfile";
 import type { ActiveFileContext } from "../../context/ActiveFileContext";
 import type { AgentFailure } from "./AgentFailure";
 import type { AgentTurnEvent } from "./AgentTurnEvent";
+import type { IntakeDecision, RuntimePlanProgress } from "../PlanState";
 
 export const AGENT_TURN_STATUSES = [
 	"completed",
@@ -49,6 +50,8 @@ export interface AgentNarrationPayload {
 export interface RuntimeProgressEvent {
 	phase:
 		| "start"
+		| "intake"
+		| "plan"
 		| "narration"
 		| "context"
 		| "model_request"
@@ -73,6 +76,8 @@ export interface RuntimeProgressEvent {
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
 	narration?: AgentNarrationPayload;
+	intake?: IntakeDecision;
+	plan?: RuntimePlanProgress;
 	reasoningProvider?: ReasoningArtifact["provider"];
 	reasoningRawFormat?: ReasoningArtifact["rawFormat"];
 	reasoningContinuationPolicy?: ReasoningArtifact["continuationPolicy"];

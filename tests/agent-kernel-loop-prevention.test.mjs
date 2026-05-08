@@ -11,6 +11,17 @@ const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
 const loopPath = path.join(projectRoot, "src/core/agent-kernel/AgentLoopController.ts");
+const RAW_MAX_TOOL_ITERATION_TEXTS = [
+	"Tool iteration limit reached; stopped further tool calls for this turn.",
+	"Maximum tool-iteration limit reached",
+];
+
+function assertNoRawMaxToolIterationText(value) {
+	const serialized = typeof value === "string" ? value : JSON.stringify(value ?? {});
+	for (const rawText of RAW_MAX_TOOL_ITERATION_TEXTS) {
+		assert.equal(serialized.includes(rawText), false, `exposed raw runtime text: ${rawText}`);
+	}
+}
 
 test("AgentLoopController returns a structured duplicate failure without executing identical failed native calls twice", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
@@ -390,8 +401,10 @@ test("AgentLoopController emits max_tool_iterations and safe_stopped without raw
 	});
 
 	assert.equal(result.status, "safe_stopped");
-	assert.equal(result.assistantText.includes("Maximum tool-iteration limit reached"), false);
-	assert.ok(result.events.some((event) => event.type === "max_tool_iterations"));
+	assertNoRawMaxToolIterationText(result.assistantText);
+	const maxIterationEvent = result.events.find((event) => event.type === "max_tool_iterations");
+	assert.ok(maxIterationEvent);
+	assertNoRawMaxToolIterationText(maxIterationEvent.payload?.summary);
 	const terminal = result.events.at(-1);
 	assert.equal(terminal.type, "turn_completed");
 	assert.equal(terminal.status, "safe_stopped");

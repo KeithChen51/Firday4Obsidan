@@ -1,5 +1,6 @@
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import type { HumanApprovalRequest, HumanApprovalResolution } from "./HumanApprovalPort";
+import { containsRawMaxToolIterationText } from "./RuntimeProtocol";
 import type { AgentTurnInput, AgentTurnResult } from "./contracts";
 import type {
 	AgentTask,
@@ -271,7 +272,7 @@ export class AgentTaskManager {
 	}
 
 	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
-		return result.status === "safe_stopped" || result.assistantText.includes("Maximum tool-iteration limit reached");
+		return result.status === "safe_stopped" || containsRawMaxToolIterationText(result.assistantText);
 	}
 
 	private truncate(value: string, maxLength: number): string {

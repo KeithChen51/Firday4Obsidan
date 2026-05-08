@@ -13,6 +13,7 @@ const jiti = createJiti(import.meta.url);
 const aiServicePath = path.join(projectRoot, "src/services/AIService.ts");
 const reasoningAdapterPath = path.join(projectRoot, "src/core/llm/ReasoningAdapter.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const runtimeProtocolPath = path.join(projectRoot, "src/core/agent-kernel/RuntimeProtocol.ts");
 
 async function loadAiServiceModule() {
 	return jiti.import(aiServicePath);
@@ -292,12 +293,17 @@ test("native runtime loop preserves structured assistant tool calls instead of s
 });
 
 test("legacy runtime max-iteration replay event uses clean safe-stop payload", async () => {
+	const { MAX_TOOL_ITERATION_SAFE_SUMMARY, RAW_MAX_TOOL_ITERATION_TEXTS } = await jiti.import(runtimeProtocolPath);
 	const source = readRuntimeSource();
 	const maxIterationEventBlock = source.match(/type:\s*"max_tool_iterations"[\s\S]*?payload:\s*\{[\s\S]*?\},\s*\}\);/)?.[0] ?? "";
 
 	assert.match(maxIterationEventBlock, /status:\s*"safe_stopped"/);
-	assert.match(maxIterationEventBlock, /Tool iteration limit reached; stopped further tool calls for this turn\./);
+	assert.match(maxIterationEventBlock, /summary:\s*MAX_TOOL_ITERATION_SAFE_SUMMARY/);
+	assert.equal(MAX_TOOL_ITERATION_SAFE_SUMMARY, "工具调用次数过多，FRIDAY 已安全停止本轮操作。");
+	for (const rawText of RAW_MAX_TOOL_ITERATION_TEXTS) {
+		assert.doesNotMatch(maxIterationEventBlock, new RegExp(rawText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+	}
 	assert.doesNotMatch(maxIterationEventBlock, /Maximum tool iteration limit reached/);
 	assert.doesNotMatch(source, /const overflowTip = "Maximum tool-iteration limit reached/);
-	assert.match(source, /status:\s*"safe_stopped",\s*assistantText: finalReply \? `\$\{finalReply\}\\n\\n\$\{overflowTip\}` : overflowTip/);
+	assert.match(source, /status:\s*"safe_stopped",\s*assistantText: MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT/);
 });

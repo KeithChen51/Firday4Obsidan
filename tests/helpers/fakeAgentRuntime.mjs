@@ -12,6 +12,7 @@ const helperDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(helperDir, "../..");
 const fakeVaultPath = path.join(helperDir, "fakeVault.mjs");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const runtimeProtocolPath = path.join(projectRoot, "src/core/agent-kernel/RuntimeProtocol.ts");
 const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
 const turnReplayReaderPath = path.join(projectRoot, "src/core/runtime/TurnReplayReader.ts");
 const mutationPlanStorePath = path.join(projectRoot, "src/core/mutations/MutationPlanStore.ts");
@@ -23,8 +24,9 @@ async function loadHarnessModules() {
 			obsidian: fakeVaultPath,
 		},
 	});
-	const [runtimeModule, kernelModule, fakeVaultModule, replayModule, mutationPlanStoreModule, agentTaskStoreModule] = await Promise.all([
+	const [runtimeModule, runtimeProtocolModule, kernelModule, fakeVaultModule, replayModule, mutationPlanStoreModule, agentTaskStoreModule] = await Promise.all([
 		jiti.import(runtimePath),
+		jiti.import(runtimeProtocolPath),
 		jiti.import(kernelPath),
 		jiti.import(fakeVaultPath),
 		jiti.import(turnReplayReaderPath),
@@ -33,6 +35,8 @@ async function loadHarnessModules() {
 	]);
 	return {
 		AgentRuntimeService: runtimeModule.AgentRuntimeService,
+		containsRawMaxToolIterationText: runtimeProtocolModule.containsRawMaxToolIterationText,
+		MAX_TOOL_ITERATION_SAFE_SUMMARY: runtimeProtocolModule.MAX_TOOL_ITERATION_SAFE_SUMMARY,
 		AgentKernel: kernelModule.AgentKernel,
 		AgentRuntimeFacade: kernelModule.AgentRuntimeFacade,
 		TurnReplayReader: replayModule.TurnReplayReader,
@@ -312,6 +316,7 @@ export async function runAgentRuntimeScenario(scenario) {
 		reloadedPendingMutations = extractPendingMutationsFromEditPlans(workbenchStateStore.getEditPlans());
 	}
 	const events = normalizeEvents({
+		protocol: modules,
 		progress,
 		runtimeResult,
 		pendingMutations,
@@ -840,7 +845,7 @@ function normalizePendingMutation(mutation) {
 	};
 }
 
-function normalizeEvents({ progress, runtimeResult, pendingMutations, failure }) {
+function normalizeEvents({ protocol, progress, runtimeResult, pendingMutations, failure }) {
 	const events = [];
 	for (const item of progress) {
 		if (item.phase === "start") {
@@ -901,10 +906,10 @@ function normalizeEvents({ progress, runtimeResult, pendingMutations, failure })
 	if (runtimeResult.parseError) {
 		events.push(makeEvent("parse_error", { message: runtimeResult.parseError }));
 	}
-	if (runtimeResult.status === "safe_stopped" || (runtimeResult.assistantText ?? "").includes("Maximum tool-iteration limit reached")) {
+	if (runtimeResult.status === "safe_stopped" || protocol.containsRawMaxToolIterationText(runtimeResult.assistantText ?? "")) {
 		events.push(makeEvent("max_tool_iterations", {
 			status: "safe_stopped",
-			summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+			summary: protocol.MAX_TOOL_ITERATION_SAFE_SUMMARY,
 		}));
 	}
 	for (const mutation of pendingMutations) {

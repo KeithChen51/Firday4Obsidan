@@ -1,6 +1,8 @@
 import type { AgentTrajectoryAction, AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
 import {
 	buildAgentProcessPanelViewModel,
+	type AgentComposerTaskBarTaskView,
+	type AgentComposerTaskBarView,
 	type AgentProcessActionView,
 	type AgentProcessArtifactView,
 	type AgentProcessDiffSummaryView,
@@ -36,6 +38,77 @@ export interface RenderAgentAnswerFlowOptions {
 	renderAssistantAvatar: (containerEl: HTMLElement) => void;
 	renderIcon?: RenderAgentProcessIcon;
 	onOpenArtifact?: (path: string) => void;
+}
+
+export interface RenderComposerTaskBarOptions {
+	containerEl: HTMLElement;
+	taskBar: AgentComposerTaskBarView | null;
+	expanded: boolean;
+	onToggle: () => void;
+	renderIcon?: RenderAgentProcessIcon;
+}
+
+export function renderComposerTaskBar(options: RenderComposerTaskBarOptions): void {
+	const { containerEl, taskBar, expanded, onToggle, renderIcon } = options;
+	if (!taskBar) {
+		return;
+	}
+	const barEl = containerEl.createDiv({
+		cls: `friday-composer-task-bar is-${expanded ? "expanded" : "collapsed"}`,
+		attr: {
+			"data-expanded": expanded ? "true" : "false",
+		},
+	});
+	const buttonEl = barEl.createEl("button", {
+		cls: "friday-composer-task-bar-summary",
+		attr: {
+			type: "button",
+			"aria-expanded": expanded ? "true" : "false",
+		},
+	});
+	buttonEl.onclick = () => onToggle();
+	buttonEl.createSpan({ cls: "friday-composer-task-bar-status", text: taskBar.collapsed.statusLabel });
+	buttonEl.createSpan({ cls: "friday-composer-task-bar-step", text: taskBar.collapsed.stepLabel });
+	buttonEl.createSpan({ cls: "friday-composer-task-bar-title", text: taskBar.collapsed.taskTitle });
+	buttonEl.createSpan({ cls: "friday-composer-task-bar-elapsed", text: taskBar.collapsed.elapsed });
+	renderChevronIcon(buttonEl, expanded ? "chevron-up" : "chevron-right", renderIcon);
+	if (taskBar.actionSlot) {
+		barEl.createDiv({ cls: "friday-composer-task-bar-action-slot" });
+	}
+	if (!expanded) {
+		return;
+	}
+	const listEl = barEl.createDiv({ cls: "friday-composer-task-bar-list" });
+	for (const task of taskBar.expandedTasks) {
+		const itemEl = listEl.createDiv({
+			cls: `friday-composer-task-bar-item is-${task.status}`,
+			attr: {
+				"data-task-id": task.id,
+				"data-status": task.status,
+			},
+		});
+		itemEl.createSpan({ cls: "friday-composer-task-bar-item-index", text: String(task.index) });
+		itemEl.createSpan({ cls: "friday-composer-task-bar-item-title", text: task.title });
+		itemEl.createSpan({
+			cls: `friday-composer-task-bar-item-status is-${task.status}`,
+			text: formatComposerTaskStatus(task.status),
+		});
+	}
+}
+
+function formatComposerTaskStatus(status: AgentComposerTaskBarTaskView["status"]): string {
+	switch (status) {
+		case "completed":
+			return "已完成";
+		case "in_progress":
+			return "执行中";
+		case "pending":
+			return "未开始";
+		case "skipped":
+			return "已跳过";
+		case "failed":
+			return "未完成/失败";
+	}
 }
 
 export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOptions): void {
@@ -113,7 +186,7 @@ function renderTimelineProcess(
 	const iconEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-icon friday-agent-process-avatar" });
 	renderAssistantAvatar(iconEl);
 	const titleEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-title" });
-	titleEl.createDiv({ cls: "friday-agent-process-headline", text: timeline.title });
+	titleEl.createDiv({ cls: "friday-agent-process-headline", text: displayTimelineText(timeline.title) });
 	if (timeline.collapsedSummary) {
 		titleEl.createDiv({ cls: "friday-agent-process-disclosure-summary", text: timeline.collapsedSummary });
 	}
@@ -178,9 +251,13 @@ function renderTimelineStatusBar(
 			"data-status": timeline.statusBar.status,
 		},
 	});
-	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-phase", text: timeline.statusBar.phase });
-	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-action", text: timeline.statusBar.action });
+	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-phase", text: displayTimelineText(timeline.statusBar.phase) });
+	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-action", text: displayTimelineText(timeline.statusBar.action) });
 	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-elapsed", text: timeline.statusBar.elapsed });
+}
+
+function displayTimelineText(value: string): string {
+	return value;
 }
 
 function renderTimelineGroups(
@@ -243,7 +320,7 @@ function renderTimelineItem(
 	railEl.createDiv({ cls: "friday-agent-process-timeline-marker" });
 	const contentEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-content" });
 	const titleRowEl = contentEl.createDiv({ cls: "friday-agent-process-timeline-title-row" });
-	titleRowEl.createDiv({ cls: "friday-agent-process-timeline-title", text: item.title });
+	titleRowEl.createDiv({ cls: "friday-agent-process-timeline-title", text: displayTimelineText(item.title) });
 	if (item.meta) {
 		titleRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
 	}

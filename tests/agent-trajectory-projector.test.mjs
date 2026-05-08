@@ -29,6 +29,8 @@ function makeReplaySummary(overrides = {}) {
 		completedAt: "2026-05-05T00:00:08.000Z",
 		durationMs: 8000,
 		modelCalls: { requested: 1, completed: 1, failed: 0 },
+		intakeTimeline: [],
+		planTimeline: [],
 		narrationTimeline: [],
 		checkpoints: { saved: 0, resumed: 0, rejected: 0, latestBoundary: "" },
 		checkpointTimeline: [],
@@ -73,6 +75,76 @@ function makeReplaySummary(overrides = {}) {
 		...overrides,
 	};
 }
+
+test("projectRuntimeProgress projects first-person intake and plan task bar state without fake plans for simple tasks", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const simpleSnapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-simple" },
+		{
+			phase: "intake",
+			depth: 0,
+			message: "我理解你希望确认今天的会议时间。",
+			intake: {
+				complexity: "simple",
+				route: "answer",
+				statement: "我理解你希望确认今天的会议时间。",
+				requiresPlan: false,
+				source: "fallback",
+			},
+		},
+	]);
+
+	assert.equal(simpleSnapshot.plan, undefined);
+	assert.equal(simpleSnapshot.items.some((item) => item.kind === "plan"), false);
+
+	const snapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-plan", taskId: "task-plan" },
+		{
+			phase: "intake",
+			depth: 0,
+			message: "我理解你希望优化 FRIDAY 的工作过程展示。",
+			intake: {
+				complexity: "complex",
+				route: "plan_and_execute",
+				statement: "我理解你希望优化 FRIDAY 的工作过程展示。",
+				requiresPlan: true,
+				source: "fallback",
+			},
+		},
+		{
+			phase: "plan",
+			depth: 0,
+			message: "Plan created.",
+			plan: {
+				type: "plan_create",
+				state: {
+					planId: "plan-turn-plan",
+					visibility: "task_bar",
+					status: "running",
+					currentTaskId: "plan-turn-plan-1",
+					tasks: [
+						{ id: "plan-turn-plan-1", title: "梳理现状", status: "in_progress" },
+						{ id: "plan-turn-plan-2", title: "实现过程展示", status: "pending" },
+					],
+				},
+			},
+		},
+	]);
+
+	const intakeItem = snapshot.items.find((item) => item.kind === "intake");
+	assert.equal(intakeItem?.detail, "我理解你希望优化 FRIDAY 的工作过程展示。");
+	assert.doesNotMatch(intakeItem?.title ?? "", /已理解任务|任务理解/);
+	assert.equal(snapshot.headline, intakeItem?.detail);
+	assert.equal(snapshot.summary, intakeItem?.detail);
+	assert.equal(snapshot.items.some((item) => item.kind === "plan" && item.rawEventType === "plan_create"), false);
+	assert.equal(snapshot.plan?.status, "running");
+	assert.equal(snapshot.plan?.currentTaskId, "plan-turn-plan-1");
+	assert.deepEqual(snapshot.plan?.tasks.map((task) => [task.title, task.status]), [
+		["梳理现状", "in_progress"],
+		["实现过程展示", "pending"],
+	]);
+});
 
 test("projectRuntimeProgress maps live context model tool done events into ordered stages and items", async () => {
 	const { projectRuntimeProgress } = await loadProjector();
@@ -295,12 +367,12 @@ test("projectRuntimeProgress projects model retry progress into a running transp
 			phase: "model_retry",
 			depth: 0,
 			step: 1,
-			message: "Model request retry scheduled after HTTP 504 (attempt 1/4, retrying in 700ms)",
+			message: "Model request retry scheduled after HTTP 504 (attempt 2/6, retrying in 700ms)",
 			transport: {
 				type: "retry_scheduled",
 				requestId: "llm-live-1",
-				attempt: 1,
-				maxAttempts: 4,
+				attempt: 2,
+				maxAttempts: 6,
 				delayMs: 700,
 				httpStatus: 504,
 				retryable: true,
@@ -312,13 +384,157 @@ test("projectRuntimeProgress projects model retry progress into a running transp
 	]);
 
 	assert.equal(snapshot.status, "running");
-	assert.equal(snapshot.headline, "Reconnecting to model");
-	assert.match(snapshot.summary, /attempt 1\/4/);
+	assert.equal(snapshot.headline, "正在恢复请求");
+	assert.equal(snapshot.summary, "网络波动，正在恢复请求（第 2/5 次）");
 	const transportItem = snapshot.items.find((item) => item.kind === "transport");
 	assert.equal(transportItem?.status, "running");
 	assert.equal(transportItem?.step, 1);
 	assert.equal(transportItem?.rawEventType, "retry_scheduled");
-	assert.match(transportItem?.detail ?? "", /700ms/);
+	assert.equal(transportItem?.detail, "网络波动，正在恢复请求（第 2/5 次）");
+});
+
+test("projectRuntimeProgress keeps normal model request transport out of recovery narration", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", turnId: "turn-normal-transport" },
+		{
+			phase: "model_retry",
+			depth: 0,
+			step: 1,
+			message: "Model request started.",
+			transport: {
+				type: "request_started",
+				requestId: "llm-normal",
+				attempt: 1,
+				maxAttempts: 6,
+				retryable: false,
+				channel: "chat",
+				endpointIndex: 0,
+				endpointCount: 1,
+			},
+		},
+		{
+			phase: "model_retry",
+			depth: 0,
+			step: 1,
+			message: "Model request succeeded.",
+			transport: {
+				type: "request_succeeded",
+				requestId: "llm-normal",
+				attempt: 1,
+				maxAttempts: 6,
+				retryable: false,
+				channel: "chat",
+				endpointIndex: 0,
+				endpointCount: 1,
+			},
+		},
+	]);
+
+	assert.equal(snapshot.items.some((item) => item.kind === "transport"), false);
+	assert.doesNotMatch(JSON.stringify(snapshot), /重试|恢复请求|Reconnecting|reconnect/i);
+});
+
+test("projectReplaySummary restores intake and plan timelines for completed task bar replay", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		intakeTimeline: [
+			{
+				complexity: "complex",
+				route: "plan_and_execute",
+				statement: "我理解你希望整理项目发布流程。",
+				requiresPlan: true,
+				source: "fallback",
+				at: "2026-05-05T00:00:01.000Z",
+			},
+		],
+		planTimeline: [
+			{
+				type: "plan_create",
+				state: {
+					planId: "plan-replay",
+					visibility: "task_bar",
+					status: "completed",
+					currentTaskId: "plan-replay-2",
+					tasks: [
+						{ id: "plan-replay-1", title: "确认版本", status: "completed" },
+						{ id: "plan-replay-2", title: "运行构建", status: "completed" },
+					],
+				},
+				at: "2026-05-05T00:00:02.000Z",
+			},
+		],
+	}));
+
+	assert.equal(snapshot.items.find((item) => item.kind === "intake")?.detail, "我理解你希望整理项目发布流程。");
+	assert.equal(snapshot.headline, snapshot.items.find((item) => item.kind === "intake")?.detail);
+	assert.equal(snapshot.items.some((item) => item.kind === "plan" && item.rawEventType === "plan_create"), false);
+	assert.equal(snapshot.plan?.status, "completed");
+	assert.deepEqual(snapshot.plan?.tasks.map((task) => task.status), ["completed", "completed"]);
+});
+
+test("projectReplaySummary keeps completed replay plan progress out of process timeline", async () => {
+	const { projectReplaySummary } = await loadProjector();
+	const numberedPlanDetail = "1. Gather context\n2. Update projector\n3. Run regression tests";
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		planTimeline: [
+			{
+				type: "plan_create",
+				state: {
+					planId: "plan-replay",
+					visibility: "task_bar",
+					status: "running",
+					currentTaskId: "plan-replay-1",
+					tasks: [
+						{ id: "plan-replay-1", title: "Gather context", status: "in_progress" },
+						{ id: "plan-replay-2", title: "Update projector", status: "pending" },
+						{ id: "plan-replay-3", title: "Run regression tests", status: "pending" },
+					],
+				},
+				at: "2026-05-05T00:00:01.000Z",
+			},
+			{
+				type: "plan_update",
+				state: {
+					planId: "plan-replay",
+					visibility: "task_bar",
+					status: "running",
+					currentTaskId: "plan-replay-2",
+					tasks: [
+						{ id: "plan-replay-1", title: "Gather context", status: "completed" },
+						{ id: "plan-replay-2", title: "Update projector", status: "in_progress" },
+						{ id: "plan-replay-3", title: "Run regression tests", status: "pending" },
+					],
+				},
+				at: "2026-05-05T00:00:02.000Z",
+			},
+			{
+				type: "plan_complete",
+				state: {
+					planId: "plan-replay",
+					visibility: "task_bar",
+					status: "completed",
+					currentTaskId: "plan-replay-3",
+					tasks: [
+						{ id: "plan-replay-1", title: "Gather context", status: "completed" },
+						{ id: "plan-replay-2", title: "Update projector", status: "completed" },
+						{ id: "plan-replay-3", title: "Run regression tests", status: "completed" },
+					],
+				},
+				at: "2026-05-05T00:00:03.000Z",
+			},
+		],
+	}));
+
+	assert.equal(snapshot.plan?.status, "completed");
+	assert.deepEqual(snapshot.plan?.tasks.map((task) => task.status), ["completed", "completed", "completed"]);
+	assert.equal(snapshot.items.some((item) => item.kind === "plan"), false);
+	assert.equal(snapshot.items.some((item) => item.rawEventType === "plan_update"), false);
+	assert.equal(snapshot.items.some((item) => item.rawEventType === "plan_complete"), false);
+	assert.doesNotMatch(JSON.stringify(snapshot.items), new RegExp(numberedPlanDetail.replaceAll("\n", "\\\\n")));
 });
 
 test("projectReplaySummary projects tool mutation and task timelines into a completed snapshot", async () => {
@@ -500,8 +716,8 @@ test("projectReplaySummary projects exhausted transport replay as retryable mode
 			{
 				type: "request_exhausted",
 				step: 1,
-				attempt: 4,
-				maxAttempts: 4,
+				attempt: 5,
+				maxAttempts: 6,
 				httpStatus: 504,
 				message: "Retries exhausted",
 			},
@@ -516,7 +732,7 @@ test("projectReplaySummary projects exhausted transport replay as retryable mode
 	const transportItem = snapshot.items.find((item) => item.kind === "transport");
 	assert.equal(transportItem?.status, "failed");
 	assert.equal(transportItem?.rawEventType, "request_exhausted");
-	assert.match(transportItem?.detail ?? "", /attempt 4\/4/);
+	assert.equal(transportItem?.detail, "请求多次未成功，请稍后重试。");
 });
 
 test("projectReplaySummary exposes checkpoint resume before retry for resumable failures", async () => {

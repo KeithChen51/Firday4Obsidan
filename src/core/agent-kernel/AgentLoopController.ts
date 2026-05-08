@@ -23,6 +23,8 @@ import {
 import {
 	hasMutationPlans,
 	isResponseEnvelope,
+	MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
+	MAX_TOOL_ITERATION_SAFE_SUMMARY,
 	parseKernelRuntimeEnvelope,
 	type RuntimeEnvelope,
 } from "./RuntimeProtocol";
@@ -36,6 +38,14 @@ import type {
 	RuntimeProgressEvent,
 	RuntimeToolTrace,
 } from "./contracts";
+import {
+	completePlanTask,
+	completePlanState,
+	createPlanState,
+	type IntakeDecision,
+	type IntakeComplexity,
+	type PlanState,
+} from "./PlanState";
 
 export interface AgentLoopControllerOptions {
 	contextEngine: ContextEnginePort;
@@ -51,6 +61,14 @@ export interface AgentLoopControllerOptions {
 interface AgentLoopInitialState {
 	startStep?: number;
 	traces?: RuntimeToolTrace[];
+}
+
+interface ActivePlanState {
+	current: PlanState | null;
+	contextReady: boolean;
+	executionStarted: boolean;
+	finalStarted: boolean;
+	lastEmittedPlanSignature?: string;
 }
 
 interface FailedToolInvocationRecord {
@@ -116,11 +134,22 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			this.emitCheckpointResumeCompleted(input, context, resumeCheckpoint);
 			return result;
 		}
-		if (this.shouldEmitVisibleNarration(input)) {
-			this.emitTaskAcknowledged(input, context);
-			this.emitPlanDeclared(input, context);
+		const activePlan: ActivePlanState = {
+			current: null,
+			contextReady: false,
+			executionStarted: false,
+			finalStarted: false,
+		};
+		const intake = this.buildIntakeDecision(input);
+		if (this.shouldEmitVisibleNarration(input, intake)) {
+			this.emitIntakeDecision(input, context, intake);
+			if (intake.requiresPlan) {
+				activePlan.current = this.emitPlanCreated(input, context);
+				activePlan.lastEmittedPlanSignature = this.planStateMeaningfulSignature(activePlan.current);
+			}
 		}
 		const contextPackage = await this.options.contextEngine.buildContext(input, context, { channel: "native" });
+		this.emitPlanContextReady(input, context, activePlan);
 		if (contextPackage.toolCallingMode === "prompt") {
 			await this.saveCheckpoint(input, context, {
 				boundary: "context_ready",
@@ -132,7 +161,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				traces: [],
 				safetyReason: "Context package built before prompt model request.",
 			});
-			return this.runPromptLoop(input, context, contextPackage);
+			const result = await this.runPromptLoop(input, context, contextPackage, {}, activePlan);
+			this.emitPlanFinalizing(input, context, activePlan);
+			this.emitPlanCompleted(input, context, activePlan.current);
+			return result;
 		}
 		if (contextPackage.toolCallingMode === "native") {
 			await this.saveCheckpoint(input, context, {
@@ -145,7 +177,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				traces: [],
 				safetyReason: "Context package built before native model request.",
 			});
-			return this.runNativeLoop(input, context, contextPackage);
+			const result = await this.runNativeLoop(input, context, contextPackage, {}, activePlan);
+			this.emitPlanFinalizing(input, context, activePlan);
+			this.emitPlanCompleted(input, context, activePlan.current);
+			return result;
 		}
 		try {
 			await this.saveCheckpoint(input, context, {
@@ -158,7 +193,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				traces: [],
 				safetyReason: "Context package built before native model request.",
 			});
-			return await this.runNativeLoop(input, context, contextPackage);
+			const result = await this.runNativeLoop(input, context, contextPackage, {}, activePlan);
+			this.emitPlanFinalizing(input, context, activePlan);
+			this.emitPlanCompleted(input, context, activePlan.current);
+			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error ?? "");
 			if (this.isRetryableTransportFailure(message)) {
@@ -181,7 +219,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				traces: [],
 				safetyReason: "Prompt fallback context package built before model request.",
 			});
-			const result = await this.runPromptLoop(input, context, promptContext);
+			const result = await this.runPromptLoop(input, context, promptContext, {}, activePlan);
+			this.emitPlanFinalizing(input, context, activePlan);
+			this.emitPlanCompleted(input, context, activePlan.current);
 			return {
 				...result,
 				parseError: result.parseError
@@ -196,6 +236,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 		contextPackage: ContextPackage,
 		initialState: AgentLoopInitialState = {},
+		activePlan?: ActivePlanState,
 	): Promise<AgentTurnResult> {
 		const startStep = initialState.startStep ?? 1;
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
@@ -205,7 +246,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		let finalReply = "";
 		for (let step = startStep; step <= maxIterations; step += 1) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
-			const response = await this.options.modelDriver.requestText({
+			const rawResponse = await this.options.modelDriver.requestText({
 				messages: cloneMessages(modelMessages),
 				modelOverride: input.modelOverride?.trim() || undefined,
 				signal: context.signal,
@@ -215,6 +256,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				budget: context.budget,
 				onTransportEvent: (event) => this.emitModelTransport(input, context, step, event),
 			});
+			const response = normalizeTextModelResponse(rawResponse);
 			finalReply = response.assistantText.trim();
 			this.emitModelResponse(input, context, step, "prompt", response.assistantText, response.reasoningArtifact);
 
@@ -236,6 +278,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			if (parsed.type === "tool_call" || tool) {
 				const modelNarration = this.extractModelNarration(parsed.assistant ?? "");
 				if (modelNarration) {
+					this.emitPlanExecutionStarted(input, context, activePlan);
 					this.emitStageReport(input, context, {
 						step,
 						summary: modelNarration,
@@ -254,6 +297,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 						contextSummary: contextPackage.contextSummary,
 					});
 				}
+				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
@@ -303,6 +347,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 		contextPackage: ContextPackage,
 		initialState: AgentLoopInitialState = {},
+		activePlan?: ActivePlanState,
 	): Promise<AgentTurnResult> {
 		const startStep = initialState.startStep ?? 1;
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
@@ -343,6 +388,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				? this.extractModelNarration(assistantStepText)
 				: "";
 			if (modelNarration) {
+				this.emitPlanExecutionStarted(input, context, activePlan);
 				this.emitStageReport(input, context, {
 					step,
 					summary: modelNarration,
@@ -367,6 +413,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					finalReply,
 					lastToolPayload,
 					failedInvocations,
+					activePlan,
 				);
 				return terminal;
 			}
@@ -375,6 +422,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			const loadedSkillContexts: string[] = [];
 			const completedToolCalls: AgentCheckpointToolResultRef[] = [];
 			for (const toolCall of response.toolCalls) {
+				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, step, {
 					id: toolCall.id,
 					name: toolCall.name,
@@ -433,6 +481,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		finalReply: string,
 		lastToolPayload: ToolExecutionResult["payload"] | null,
 		failedInvocations?: FailedToolInvocationTracker,
+		activePlan?: ActivePlanState,
 	): Promise<AgentTurnResult> {
 		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload);
 		if (!assistantStepText || this.isIntermediateAssistantText(assistantStepText)) {
@@ -461,6 +510,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 						contextSummary: contextPackage.contextSummary,
 					});
 				}
+				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, traces.length + 1, {
 					name: tool.name,
 					args: tool.args ?? {},
@@ -560,7 +610,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			summary: result.trace.summary,
 			message: `Step ${step}: tool ${tool.name} finished - ${result.trace.summary}`,
 		});
-		if (this.shouldEmitVisibleNarration(input)) {
+		if (this.shouldEmitToolStageNarration(input)) {
 			this.emitToolStageReport(input, context, result.trace);
 		}
 		return result;
@@ -628,7 +678,6 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		traces: RuntimeToolTrace[],
 		contextPackage: ContextPackage,
 	): AgentTurnResult {
-		const assistantText = "Tool iteration limit reached; stopped further tool calls for this turn.";
 		context.emit({
 			type: "max_tool_iterations",
 			status: "safe_stopped",
@@ -637,17 +686,17 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				maxIterations,
 				toolTraces: traces.length,
 				status: "safe_stopped",
-				summary: assistantText,
+				summary: MAX_TOOL_ITERATION_SAFE_SUMMARY,
 			},
 		});
 		this.report(input, {
 			phase: "done",
 			depth: input.depth ?? 0,
-			message: assistantText,
+			message: MAX_TOOL_ITERATION_SAFE_SUMMARY,
 		});
 		return this.makeResult(input, context, {
 			status: "safe_stopped",
-			assistantText,
+			assistantText: MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
 			traces,
 			rawFinalReply: finalReply,
 			contextSummary: contextPackage.contextSummary,
@@ -755,14 +804,168 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		});
 	}
 
-	private emitPlanDeclared(input: AgentTurnInput, context: AgentExecutionContext): void {
-		this.emitNarration(input, context, {
-			kind: "plan_declared",
-			summary: "先确认上下文，再按需要使用工具推进。",
-			plan: this.buildInitialPlan(input),
-			source: "fallback",
-			status: "completed",
+	private emitIntakeDecision(input: AgentTurnInput, context: AgentExecutionContext, intake: IntakeDecision): void {
+		const payload: Record<string, unknown> = {
+			complexity: intake.complexity,
+			route: intake.route,
+			statement: intake.statement,
+			requiresPlan: intake.requiresPlan,
+			source: intake.source,
+		};
+		context.emit({
+			type: "intake_decision",
+			payload,
 		});
+		this.report(input, {
+			phase: "intake",
+			depth: input.depth ?? 0,
+			intake,
+			summary: intake.statement,
+			message: intake.statement,
+		});
+	}
+
+	private emitPlanCreated(input: AgentTurnInput, context: AgentExecutionContext): PlanState {
+		const planState = createPlanState({
+			planId: `plan-${context.turnId}`,
+			tasks: this.buildInitialPlan(input),
+		});
+		const payload = {
+			type: "plan_create" as const,
+			state: planState,
+		};
+		context.emit({
+			type: "plan_create",
+			payload,
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			plan: payload,
+			summary: "Plan created.",
+			message: "Plan created.",
+		});
+		return planState;
+	}
+
+	private emitPlanCompleted(input: AgentTurnInput, context: AgentExecutionContext, planState: PlanState | null): void {
+		if (!planState) {
+			return;
+		}
+		const completed = completePlanState(planState);
+		const payload = {
+			type: "plan_complete" as const,
+			state: completed,
+		};
+		context.emit({
+			type: "plan_complete",
+			payload,
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			plan: this.asTaskBarPlanProgress(payload),
+			summary: "Plan completed.",
+			message: "Plan completed.",
+		});
+	}
+
+	private emitPlanContextReady(input: AgentTurnInput, context: AgentExecutionContext, activePlan?: ActivePlanState): void {
+		if (!activePlan?.current || activePlan.contextReady) {
+			return;
+		}
+		const taskId = activePlan.current.currentTaskId;
+		if (!taskId) {
+			return;
+		}
+		activePlan.contextReady = true;
+		activePlan.current = completePlanTask(activePlan.current, taskId, {
+			reason: "上下文已准备好。",
+		});
+		this.emitPlanUpdated(input, context, activePlan.current, taskId, "上下文已准备好。", activePlan);
+	}
+
+	private emitPlanExecutionStarted(input: AgentTurnInput, context: AgentExecutionContext, activePlan?: ActivePlanState): void {
+		if (!activePlan?.current || activePlan.executionStarted) {
+			return;
+		}
+		activePlan.executionStarted = true;
+		const taskId = activePlan.current.currentTaskId;
+		this.emitPlanUpdated(input, context, activePlan.current, taskId, "正在执行计划项。", activePlan);
+	}
+
+	private emitPlanFinalizing(input: AgentTurnInput, context: AgentExecutionContext, activePlan?: ActivePlanState): void {
+		if (!activePlan?.current || activePlan.finalStarted) {
+			return;
+		}
+		const taskId = activePlan.current.currentTaskId;
+		if (!taskId) {
+			return;
+		}
+		activePlan.finalStarted = true;
+		activePlan.current = completePlanTask(activePlan.current, taskId, {
+			reason: "正在整理最终回答。",
+		});
+		this.emitPlanUpdated(input, context, activePlan.current, taskId, "正在整理最终回答。", activePlan);
+	}
+
+	private emitPlanUpdated(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		planState: PlanState,
+		taskId: string | undefined,
+		message: string,
+		activePlan?: ActivePlanState,
+	): void {
+		const nextSignature = this.planStateMeaningfulSignature(planState);
+		if (activePlan?.lastEmittedPlanSignature === nextSignature) {
+			return;
+		}
+		if (activePlan) {
+			activePlan.lastEmittedPlanSignature = nextSignature;
+		}
+		const payload = {
+			type: "plan_update" as const,
+			state: planState,
+			...(taskId ? { taskId } : {}),
+			message,
+		};
+		context.emit({
+			type: "plan_update",
+			payload,
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			plan: this.asTaskBarPlanProgress(payload),
+			summary: message,
+			message,
+		});
+	}
+
+	private planStateMeaningfulSignature(planState: PlanState): string {
+		return JSON.stringify({
+			status: planState.status,
+			currentTaskId: planState.currentTaskId,
+			tasks: planState.tasks.map((task) => ({
+				id: task.id,
+				title: task.title,
+				status: task.status,
+				summary: task.summary ?? "",
+			})),
+		});
+	}
+
+	private asTaskBarPlanProgress(plan: {
+		type: "plan_update" | "plan_complete";
+		state: PlanState;
+		taskId?: string;
+		message?: string;
+	}) {
+		return {
+			...plan,
+			type: "plan_create" as const,
+		};
 	}
 
 	private emitStageReport(
@@ -839,29 +1042,36 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	}
 
 	private formatTransportProgressMessage(event: LlmTransportEvent): string {
-		const attempt = `attempt ${event.attempt}/${event.maxAttempts}`;
-		const status = event.httpStatus !== undefined ? `HTTP ${event.httpStatus}` : event.message;
-		const suffix = status ? ` after ${status}` : "";
+		const recoveryAttempt = `网络波动，正在恢复请求（第 ${event.attempt}/${Math.max(1, event.maxAttempts - 1)} 次）`;
 		switch (event.type) {
-			case "retry_scheduled": {
-				const backoff = event.delayMs !== undefined ? `, retrying in ${event.delayMs}ms` : "";
-				return `Model request retry scheduled${suffix} (${attempt}${backoff})`;
-			}
+			case "retry_scheduled":
+				return recoveryAttempt;
 			case "retry_started":
-				return `Model request retry started (${attempt})`;
+				return recoveryAttempt;
 			case "request_exhausted":
-				return `Model request retries exhausted${suffix} (${attempt})`;
+				return "请求多次未成功，请稍后重试。";
 			case "request_failed":
-				return `Model request failed${suffix} (${attempt})`;
+				return "本次模型请求未成功。";
 			case "request_succeeded":
-				return `Model request succeeded (${attempt})`;
+				return "模型请求已完成。";
 			case "request_started":
 			default:
-				return `Model request started (${attempt})`;
+				return "模型请求已开始。";
 		}
 	}
 
-	private shouldEmitVisibleNarration(input: AgentTurnInput): boolean {
+	private shouldEmitVisibleNarration(input: AgentTurnInput, intake = this.buildIntakeDecision(input)): boolean {
+		if (input.metadata?.suppressVisibleNarration === true) {
+			return false;
+		}
+		const prompt = input.userPrompt.trim();
+		if (!prompt) {
+			return false;
+		}
+		return intake.requiresPlan;
+	}
+
+	private shouldEmitToolStageNarration(input: AgentTurnInput): boolean {
 		if (input.metadata?.suppressVisibleNarration === true) {
 			return false;
 		}
@@ -872,12 +1082,92 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		if ((input.allowedTools?.length ?? 0) > 0) {
 			return true;
 		}
-		return prompt.length > 80 ||
-			/(read|write|edit|delete|create|file|project|workspace|grep|search|run|test|implement|fix|review|plan|analy[sz]e|读取|读|写|创建|修改|删除|文件|项目|工作区|搜索|查找|运行|测试|实现|修复|审阅|方案|计划|分析|整理|总结|确认|审批)/i.test(prompt);
+		return /(read|write|edit|delete|create|file|project|workspace|grep|search|run|test|读取|读|写|创建|修改|删除|文件|项目|工作区|搜索|查找|运行|测试|实现|修复)/i.test(prompt);
+	}
+
+	private buildIntakeDecision(input: AgentTurnInput): IntakeDecision {
+		const complexity = this.classifyIntakeComplexity(input);
+		const route = complexity === "unclear"
+			? "clarify"
+			: complexity === "complex"
+				? "plan_and_execute"
+				: "answer";
+		return {
+			complexity,
+			route,
+			statement: this.buildTaskUnderstanding(input.userPrompt),
+			requiresPlan: complexity === "complex",
+			source: "runtime",
+		};
+	}
+
+	private classifyIntakeComplexity(input: AgentTurnInput): IntakeComplexity {
+		const prompt = input.userPrompt.trim();
+		if (!prompt) {
+			return "unclear";
+		}
+		if (this.isSimpleAnswerLikePrompt(prompt) && !this.hasMutationTool(input)) {
+			return "simple";
+		}
+		if (this.hasComplexTaskSignal(prompt) || this.hasMutationTool(input)) {
+			return "complex";
+		}
+		if ((input.allowedTools?.length ?? 0) > 0 || this.hasLightTaskSignal(prompt) || this.hasOneStepLightTaskSignal(prompt)) {
+			return "light";
+		}
+		return "simple";
+	}
+
+	private hasMutationTool(input: AgentTurnInput): boolean {
+		return (input.allowedTools ?? []).some((tool) => /(edit|write|delete|create|patch|apply|rename|move)/i.test(tool));
+	}
+
+	private isSimpleAnswerLikePrompt(prompt: string): boolean {
+		const normalized = prompt.trim();
+		if (/^(rewrite|rephrase|polish|translate|summari[sz]e|explain|what|when|where|who|why|how)\b/i.test(normalized)) {
+			return true;
+		}
+		if (/^(改写|润色|翻译|总结|解释|说明|什么|谁|何时|哪里|为什么|怎么|现在几点)/.test(normalized)) {
+			return true;
+		}
+		return normalized.length <= 80 && /(\?|？)$/.test(normalized);
+	}
+
+	private hasComplexTaskSignal(prompt: string): boolean {
+		if (this.isSimpleAnswerLikePrompt(prompt)) {
+			return false;
+		}
+		if (this.hasMultiStepTaskSignal(prompt)) {
+			return true;
+		}
+		if (/(implement|optimi[sz]e|refactor|debug|fix|plan|analy[sz]e|research|investigate|architect|design|root cause|bug|failure|failing|regression)/i.test(prompt)) {
+			return true;
+		}
+		if (this.hasOneStepLightTaskSignal(prompt)) {
+			return false;
+		}
+		return /(implement|optimi[sz]e|refactor|debug|fix|review|audit|plan|analy[sz]e|research|investigate|build|create|update|delete|write|test|verify|实现|优化|重构|调试|修复|审阅|检查|验收|方案|计划|分析|研究|排查|创建|更新|删除|写|测试|验证)/i.test(prompt);
+	}
+
+	private hasLightTaskSignal(prompt: string): boolean {
+		return /(read|open|list|grep|search|find|run|读取|读|打开|列出|搜索|查找|运行|文件|项目|工作区)/i.test(prompt);
+	}
+
+	private hasOneStepLightTaskSignal(prompt: string): boolean {
+		return /\b(read|open|list|grep|search|find|run|check|test|verify|review|audit|write|update)\b/i.test(prompt);
+	}
+
+	private hasMultiStepTaskSignal(prompt: string): boolean {
+		return /\b(first|then|next|finally|after that|step by step)\b/i.test(prompt) ||
+			/\b(and|,)\s+(then\s+)?(implement|debug|fix|refactor|analy[sz]e|research|investigate|update|write|run|test|verify|review|check|read|build|create)\b/i.test(prompt);
 	}
 
 	private buildTaskUnderstanding(userPrompt: string): string {
 		const goal = userPrompt.trim().replace(/\s+/g, " ");
+		const friendly = this.buildFriendlyTaskUnderstanding(goal);
+		if (friendly) {
+			return friendly;
+		}
 		if (/(read|读取|读|文件|file)/i.test(goal)) {
 			return "需要先读取文件或相关内容，再基于结果回答。";
 		}
@@ -890,17 +1180,51 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return goal ? `需要处理：${goal.slice(0, 120)}` : "需要结合当前上下文处理这个请求。";
 	}
 
-	private buildInitialPlan(input: AgentTurnInput): string[] {
-		const plan = ["先确认当前上下文。"];
-		if (this.shouldUseToolPlan(input.userPrompt)) {
-			plan.push("再调用必要工具获取证据。");
+	private buildFriendlyTaskUnderstanding(goal: string): string {
+		if (/(read|读取|file|文件)/i.test(goal)) {
+			return "我理解你希望读取文件并基于结果回答。";
 		}
-		plan.push("最后在最终回答中只给出结论和结果。");
-		return plan;
+		if (/(write|edit|create|修改|创建|文档|产物)/i.test(goal)) {
+			return "我理解你希望我准备文件修改，并在最后说明改动结果。";
+		}
+		if (/(test|run|验证|测试|运行)/i.test(goal)) {
+			return "我理解你希望我运行验证并汇报关键结果。";
+		}
+		return goal ? `我理解你希望我处理：${goal.slice(0, 120)}` : "我理解你希望我结合当前上下文处理这个请求。";
+	}
+
+	private buildInitialPlan(input: AgentTurnInput): string[] {
+		return this.buildFriendlyInitialPlan(input);
+	}
+
+	private buildFriendlyInitialPlan(input: AgentTurnInput): string[] {
+		const goal = input.userPrompt.trim();
+		if (/(fix|debug|bug|failure|failing|修复|调试|故障|失败|报错|排查)/i.test(goal)) {
+			return ["定位问题根因", "实现并验证修复", "汇总改动和风险"];
+		}
+		if (/(implement|build|create|feature|实现|开发|构建|创建|功能)/i.test(goal)) {
+			return ["确定实现范围", "完成代码改动", "运行验证并汇总"];
+		}
+		if (/(optimi[sz]e|refactor|performance|优化|重构|性能)/i.test(goal)) {
+			return ["确认优化目标", "调整实现结构", "验证影响并汇总"];
+		}
+		if (/(review|audit|check|验收|审阅|检查|评审)/i.test(goal)) {
+			return ["梳理检查范围", "逐项审查证据", "汇总发现和风险"];
+		}
+		if (/(analy[sz]e|research|investigate|分析|研究|排查)/i.test(goal)) {
+			return ["收集相关证据", "分析关键结论", "整理结论和建议"];
+		}
+		if (/(test|verify|run|测试|验证|运行)/i.test(goal)) {
+			return ["确定验证范围", "运行相关检查", "汇报验证结果"];
+		}
+		if (/(read|open|grep|search|find|读取|打开|搜索|查找|文件)/i.test(goal)) {
+			return ["读取相关内容", "基于结果回答"];
+		}
+		return ["处理核心请求", "给出结果"];
 	}
 
 	private shouldUseToolPlan(userPrompt: string): boolean {
-		return /(read|write|edit|delete|create|file|project|workspace|grep|search|run|test|读取|读|写|创建|修改|删除|文件|项目|工作区|搜索|查找|运行|测试|实现|修复)/i.test(userPrompt);
+		return this.hasComplexTaskSignal(userPrompt);
 	}
 
 	private extractModelNarration(text: string): string {
@@ -1242,6 +1566,16 @@ function cloneMessages(messages: AgentChatMessage[]): AgentChatMessage[] {
 		...(message.parts ? { parts: [...message.parts] } : {}),
 		...(message.toolCalls ? { toolCalls: message.toolCalls.map(cloneToolCallLike) } : {}),
 	}));
+}
+
+function normalizeTextModelResponse(response: Awaited<ReturnType<ModelDriverPort["requestText"]>> | string): Awaited<ReturnType<ModelDriverPort["requestText"]>> {
+	if (typeof response === "string") {
+		return {
+			assistantText: response,
+			toolCalls: [],
+		};
+	}
+	return response;
 }
 
 function cloneToolCallLike(call: unknown): unknown {

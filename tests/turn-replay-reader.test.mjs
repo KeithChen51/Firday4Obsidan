@@ -204,6 +204,76 @@ test("TurnReplayReader restores user-visible narration timeline without raw reas
 	assert.equal(JSON.stringify(summary).includes(rawCot), false);
 });
 
+test("TurnReplayReader restores intake decisions and plan state timeline", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-plan-"));
+	const resolvePath = resolveTurnPath(root);
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const ref = { conversationId: "agent", turnId: "turn-plan" };
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { summary: "Runtime started" } },
+		{
+			type: "intake_decision",
+			payload: {
+				complexity: "complex",
+				route: "plan_and_execute",
+				statement: "我理解你希望优化 FRIDAY 的过程展示。",
+				requiresPlan: true,
+				source: "fallback",
+			},
+		},
+		{
+			type: "plan_create",
+			payload: {
+				type: "plan_create",
+				state: {
+					planId: "plan-turn-plan",
+					visibility: "task_bar",
+					status: "running",
+					currentTaskId: "plan-turn-plan-1",
+					tasks: [
+						{ id: "plan-turn-plan-1", title: "确认现状", status: "in_progress" },
+						{ id: "plan-turn-plan-2", title: "实现展示", status: "pending" },
+					],
+				},
+			},
+		},
+		{
+			type: "plan_complete",
+			payload: {
+				type: "plan_complete",
+				state: {
+					planId: "plan-turn-plan",
+					visibility: "task_bar",
+					status: "completed",
+					currentTaskId: "plan-turn-plan-2",
+					tasks: [
+						{ id: "plan-turn-plan-1", title: "确认现状", status: "completed" },
+						{ id: "plan-turn-plan-2", title: "实现展示", status: "completed" },
+					],
+				},
+			},
+		},
+		{ type: "turn_completed", payload: { status: "completed" } },
+	]);
+
+	const events = await reader.readTurn(ref);
+	const summary = reader.summarize(events);
+
+	assert.deepEqual(summary.intakeTimeline.map((item) => item.statement), [
+		"我理解你希望优化 FRIDAY 的过程展示。",
+	]);
+	assert.equal(summary.intakeTimeline[0]?.requiresPlan, true);
+	assert.deepEqual(summary.planTimeline.map((item) => item.type), ["plan_create", "plan_complete"]);
+	assert.equal(summary.planTimeline.at(-1)?.state.status, "completed");
+	assert.deepEqual(summary.planTimeline.at(-1)?.state.tasks.map((task) => [task.title, task.status]), [
+		["确认现状", "completed"],
+		["实现展示", "completed"],
+	]);
+});
+
 test("TurnReplayReader reports sequence gaps and late events after a terminal event", async () => {
 	const { TurnReplayReader } = await loadModules();
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-"));

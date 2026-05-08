@@ -4,6 +4,18 @@ import test from "node:test";
 
 import { runAgentRuntimeScenario } from "./helpers/fakeAgentRuntime.mjs";
 
+const RAW_MAX_TOOL_ITERATION_TEXTS = [
+	"Tool iteration limit reached; stopped further tool calls for this turn.",
+	"Maximum tool-iteration limit reached",
+];
+
+function assertNoRawMaxToolIterationText(value) {
+	const serialized = typeof value === "string" ? value : JSON.stringify(value ?? {});
+	for (const rawText of RAW_MAX_TOOL_ITERATION_TEXTS) {
+		assert.equal(serialized.includes(rawText), false, `exposed raw runtime text: ${rawText}`);
+	}
+}
+
 function assertEventTypesInclude(result, expectedTypes) {
 	const actualTypes = result.events.map((event) => event.type);
 	for (const expectedType of expectedTypes) {
@@ -111,7 +123,7 @@ test("read -> final answer", async () => {
 	assert.ok(Array.isArray(compactContext?.payload.trimmedChannels));
 });
 
-test("read -> final answer persists visible process narration for replay", async () => {
+test("read -> final answer persists visible process narration for replay without fake plan", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "read -> visible narration replay",
 		files: {
@@ -135,13 +147,12 @@ test("read -> final answer persists visible process narration for replay", async
 	assert.match(result.assistantText, /alpha/);
 	assertPersistedReplay(result, ["narration_report", "tool_completed", "assistant_final", "turn_completed"]);
 	assert.deepEqual(result.turnEventSummary.narrationTimeline.map((item) => item.kind), [
-		"task_acknowledged",
-		"plan_declared",
 		"stage_report",
 		"stage_report",
 	]);
-	assert.match(result.turnEventSummary.narrationTimeline[0]?.understanding ?? "", /读取文件/);
-	assert.match(result.turnEventSummary.narrationTimeline[2]?.summary ?? "", /我理解你的需求/);
+	assert.equal(result.turnEventSummary.narrationTimeline.some((item) => item.kind === "task_acknowledged"), false);
+	assert.equal(result.turnEventSummary.narrationTimeline.some((item) => item.kind === "plan_declared"), false);
+	assert.match(result.turnEventSummary.narrationTimeline[0]?.summary ?? "", /我理解你的需求/);
 	assert.equal(JSON.stringify(result.turnEventSummary).includes("raw chain of thought"), false);
 });
 
@@ -302,17 +313,17 @@ test("max tool iterations -> safe stop", async () => {
 		],
 	});
 
-	assert.equal(result.assistantText.includes("Maximum tool-iteration limit reached"), false);
+	assertNoRawMaxToolIterationText(result.assistantText);
 	assert.equal(result.traces.length, 1);
 	assert.equal(result.modelCalls.total, 1);
 	assertEventTypesInclude(result, ["max_tool_iterations", "assistant_final"]);
 	assertPersistedReplay(result, ["max_tool_iterations", "turn_completed"], { status: "safe_stopped" });
 	const maxIterationEvent = result.turnEvents.find((event) => event.type === "max_tool_iterations");
 	assert.equal(maxIterationEvent?.payload.status, "safe_stopped");
-	assert.equal(
-		JSON.stringify(maxIterationEvent?.payload ?? {}).includes("Maximum tool iteration limit reached"),
-		false,
-	);
+	assertNoRawMaxToolIterationText(maxIterationEvent?.payload);
+	const assistantFinalEvent = result.events.find((event) => event.type === "assistant_final");
+	assertNoRawMaxToolIterationText(assistantFinalEvent?.payload);
+	assertNoRawMaxToolIterationText(result.turnEventSummary.finalAnswerSummary);
 });
 
 test("native mode success", async () => {

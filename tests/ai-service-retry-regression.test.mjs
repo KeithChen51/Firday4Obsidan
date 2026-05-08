@@ -69,6 +69,12 @@ test("ai service does not silently replay stream requests on retryable transport
 	assert.match(source, /if \(isRetryableLlmFailure\(error\)\)/);
 });
 
+test("ai service retry budget allows five retries after the first request", () => {
+	const source = readAiServiceSource();
+	assert.match(source, /MAX_RETRY_ATTEMPTS = 5/);
+	assert.match(source, /return AIService\.MAX_RETRY_ATTEMPTS \+ 1/);
+});
+
 test("chatWithTools emits retry scheduled telemetry before retrying a 504", async () => {
 	let calls = 0;
 	const { AIService, cleanup } = await loadAiServiceWithRequestUrl(async () => {
@@ -107,11 +113,12 @@ test("chatWithTools emits retry scheduled telemetry before retrying a 504", asyn
 		]);
 		assert.equal(events[1].channel, "chat_with_tools");
 		assert.equal(events[1].attempt, 1);
-		assert.equal(events[1].maxAttempts, 4);
+		assert.equal(events[1].maxAttempts, 6);
 		assert.equal(events[1].delayMs, 700);
 		assert.equal(events[1].httpStatus, 504);
 		assert.equal(events[1].retryable, true);
 		assert.equal(events[2].attempt, 2);
+		assert.equal(events[2].maxAttempts, 6);
 	} finally {
 		cleanup();
 	}
@@ -136,11 +143,11 @@ test("chat emits exhausted telemetry when retryable failures reach max attempts"
 			/503/,
 		);
 
-		assert.equal(calls, 4);
+		assert.equal(calls, 6);
 		const exhausted = events.at(-1);
 		assert.equal(exhausted.type, "request_exhausted");
-		assert.equal(exhausted.attempt, 4);
-		assert.equal(exhausted.maxAttempts, 4);
+		assert.equal(exhausted.attempt, 6);
+		assert.equal(exhausted.maxAttempts, 6);
 		assert.equal(exhausted.httpStatus, 503);
 		assert.equal(exhausted.retryable, false);
 		const serialized = JSON.stringify(events);
@@ -185,6 +192,7 @@ test("chat emits request succeeded telemetry after a successful retry", async ()
 		assert.equal(calls, 2);
 		assert.equal(events.at(-1).type, "request_succeeded");
 		assert.equal(events.at(-1).attempt, 2);
+		assert.equal(events.at(-1).maxAttempts, 6);
 		assert.equal(events.at(-1).retryable, false);
 		assert.equal(new Set(events.map((event) => event.requestId)).size, 1);
 	} finally {

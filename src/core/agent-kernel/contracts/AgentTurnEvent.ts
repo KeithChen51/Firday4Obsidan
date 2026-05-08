@@ -3,6 +3,12 @@ import type { AgentTurnStatus } from "./AgentTurn";
 
 export const AGENT_TURN_EVENT_TYPES = [
 	"turn_started",
+	"intake_decision",
+	"plan_create",
+	"plan_update",
+	"plan_revise",
+	"plan_complete",
+	"plan_skip",
 	"narration",
 	"model_request",
 	"model_response",

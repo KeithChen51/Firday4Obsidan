@@ -10,6 +10,8 @@ export type AgentTrajectoryStatus =
 
 export type AgentTrajectoryItemKind =
 	| "context"
+	| "intake"
+	| "plan"
 	| "narration"
 	| "reasoning"
 	| "model"
@@ -69,6 +71,28 @@ export interface AgentTrajectoryItem {
 	narrationNext?: string;
 }
 
+export type AgentTrajectoryPlanTaskStatus = "pending" | "in_progress" | "completed" | "skipped" | "failed";
+
+export interface AgentTrajectoryPlanTask {
+	id: string;
+	title: string;
+	status: AgentTrajectoryPlanTaskStatus;
+	summary?: string;
+	startedAt?: string;
+	completedAt?: string;
+}
+
+export interface AgentTrajectoryPlanState {
+	planId: string;
+	visibility: "hidden" | "task_bar";
+	status: "pending" | "running" | "completed" | "skipped" | "failed";
+	currentTaskId?: string;
+	tasks: AgentTrajectoryPlanTask[];
+	createdAt?: string;
+	updatedAt?: string;
+	completedAt?: string;
+}
+
 export interface AgentTrajectoryAction {
 	id: "resume" | "retry" | "cancel" | "continue" | "approve" | "reject" | "apply" | "view_changes" | "view_replay";
 	label: string;
@@ -111,6 +135,7 @@ export interface AgentTrajectorySnapshot {
 	items: AgentTrajectoryItem[];
 	actions: AgentTrajectoryAction[];
 	mutations: AgentTrajectoryMutation[];
+	plan?: AgentTrajectoryPlanState;
 	failure?: AgentTrajectoryFailure;
 	privacy: {
 		redacted: boolean;

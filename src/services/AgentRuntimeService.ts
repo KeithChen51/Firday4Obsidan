@@ -12,7 +12,17 @@ import { deriveFileMutationModeFromToolPermissionMode } from "../types/agent";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
 import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
-import type { AgentNarrationPayload, AgentTurnResult as KernelAgentTurnResult } from "../core/agent-kernel/contracts";
+import {
+	containsRawMaxToolIterationText,
+	MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
+	MAX_TOOL_ITERATION_SAFE_SUMMARY,
+} from "../core/agent-kernel/RuntimeProtocol";
+import type {
+	AgentNarrationPayload,
+	AgentTurnResult as KernelAgentTurnResult,
+	IntakeDecision,
+	RuntimePlanProgress,
+} from "../core/agent-kernel/contracts";
 import { createObsidianAgentLoopController } from "./ObsidianKernelRuntimePorts";
 import { ObsidianAgentStateAdapter } from "./ObsidianAgentStateAdapter";
 import { FridaySettings } from "../types/settings";
@@ -173,6 +183,8 @@ export interface RuntimeContextSummary {
 export interface RuntimeProgressEvent {
 	phase:
 		| "start"
+		| "intake"
+		| "plan"
 		| "narration"
 		| "context"
 		| "model_request"
@@ -197,6 +209,8 @@ export interface RuntimeProgressEvent {
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
 	narration?: AgentNarrationPayload;
+	intake?: IntakeDecision;
+	plan?: RuntimePlanProgress;
 	message: string;
 }
 
@@ -747,25 +761,21 @@ export class AgentRuntimeService {
 	}
 
 	private formatModelTransportProgressMessage(event: LlmTransportEvent): string {
-		const attempt = `attempt ${event.attempt}/${event.maxAttempts}`;
-		const status = event.httpStatus !== undefined ? `HTTP ${event.httpStatus}` : event.message;
-		const suffix = status ? ` after ${status}` : "";
+		const recoveryAttempt = `网络波动，正在恢复请求（第 ${event.attempt}/${Math.max(1, event.maxAttempts - 1)} 次）`;
 		switch (event.type) {
-			case "retry_scheduled": {
-				const backoff = event.delayMs !== undefined ? `, retrying in ${event.delayMs}ms` : "";
-				return `Model request retry scheduled${suffix} (${attempt}${backoff})`;
-			}
+			case "retry_scheduled":
+				return recoveryAttempt;
 			case "retry_started":
-				return `Model request retry started (${attempt})`;
+				return recoveryAttempt;
 			case "request_exhausted":
-				return `Model request retries exhausted${suffix} (${attempt})`;
+				return "请求多次未成功，请稍后重试。";
 			case "request_failed":
-				return `Model request failed${suffix} (${attempt})`;
+				return "本次模型请求未成功。";
 			case "request_succeeded":
-				return `Model request succeeded (${attempt})`;
+				return "模型请求已完成。";
 			case "request_started":
 			default:
-				return `Model request started (${attempt})`;
+				return "模型请求已开始。";
 		}
 	}
 
@@ -1231,7 +1241,7 @@ export class AgentRuntimeService {
 				type: "max_tool_iterations",
 				payload: {
 					status: "safe_stopped",
-					summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+					summary: MAX_TOOL_ITERATION_SAFE_SUMMARY,
 				},
 			});
 		}
@@ -1519,7 +1529,8 @@ export class AgentRuntimeService {
 	}
 
 	private isMaxToolIterationStop(result: RuntimeTurnResult | undefined): boolean {
-		return result?.status === "safe_stopped" || (result?.assistantText ?? "").includes("Maximum tool-iteration limit reached");
+		const assistantText = result?.assistantText ?? "";
+		return result?.status === "safe_stopped" || containsRawMaxToolIterationText(assistantText);
 	}
 
 	private resolveConversationId(agentId: string | undefined): string {
@@ -1917,10 +1928,9 @@ export class AgentRuntimeService {
 			};
 		}
 
-		const overflowTip = "Tool iteration limit reached; stopped further tool calls for this turn.";
 		return {
 			status: "safe_stopped",
-			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
+			assistantText: MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
 			traces,
 			rawFinalReply: finalReply,
 		};
@@ -2118,10 +2128,9 @@ export class AgentRuntimeService {
 			}
 		}
 
-		const overflowTip = "Tool iteration limit reached; stopped further tool calls for this turn.";
 		return {
 			status: "safe_stopped",
-			assistantText: finalReply ? `${finalReply}\n\n${overflowTip}` : overflowTip,
+			assistantText: MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
 			traces,
 			rawFinalReply: finalReply,
 		};

@@ -15,6 +15,17 @@ const replayRecorderPath = path.join(projectRoot, "src/core/agent-kernel/AgentRe
 const executionContextPath = path.join(projectRoot, "src/core/agent-kernel/AgentExecutionContext.ts");
 const eventLogPath = path.join(projectRoot, "src/core/runtime/TurnEventLog.ts");
 const replayReaderPath = path.join(projectRoot, "src/core/runtime/TurnReplayReader.ts");
+const RAW_MAX_TOOL_ITERATION_TEXTS = [
+	"Tool iteration limit reached; stopped further tool calls for this turn.",
+	"Maximum tool-iteration limit reached",
+];
+
+function assertNoRawMaxToolIterationText(value) {
+	const serialized = typeof value === "string" ? value : JSON.stringify(value ?? {});
+	for (const rawText of RAW_MAX_TOOL_ITERATION_TEXTS) {
+		assert.equal(serialized.includes(rawText), false, `exposed raw runtime text: ${rawText}`);
+	}
+}
 
 async function loadModules() {
 	const [recorderModule, contextModule, logModule, readerModule] = await Promise.all([
@@ -245,7 +256,7 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 			channel: "native",
 			maxIterations: 2,
 			status: "safe_stopped",
-			summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+			summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
 		},
 	});
 	context.emit({ type: "turn_completed", status: "safe_stopped", payload: { status: "safe_stopped" } });
@@ -258,7 +269,7 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 			traceId: context.traceId,
 			conversationId: context.conversationId,
 			status: "safe_stopped",
-			assistantText: "Tool iteration limit reached; stopped further tool calls for this turn.",
+			assistantText: "工具调用次数过多，FRIDAY 已安全停止本轮操作。请缩小任务范围后再试。",
 			events: context.snapshotEvents(),
 			traces: [],
 			rawFinalReply: "",
@@ -291,7 +302,9 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 		tool: "",
 		toolCallId: "",
 		status: "safe_stopped",
-		summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+		summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
 		at: summary.loopPreventionTimeline[0]?.at,
 	}]);
+	assertNoRawMaxToolIterationText(summary.finalAnswerSummary);
+	assertNoRawMaxToolIterationText(summary.loopPreventionTimeline);
 });

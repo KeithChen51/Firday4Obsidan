@@ -154,7 +154,7 @@ const VISION_PROBE_IMAGE_DATA_URL =
 	"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a6u8AAAAASUVORK5CYII=";
 
 export class AIService {
-	private static readonly MAX_RETRY_ATTEMPTS = 3;
+	private static readonly MAX_RETRY_ATTEMPTS = 5;
 
 	constructor(private readonly getConfig: () => FridaySettings["llm"]) {}
 

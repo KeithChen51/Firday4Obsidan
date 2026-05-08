@@ -80,8 +80,11 @@ import {
 	createAgentTaskPanelActionHandlers,
 	recordTaskFromRuntimeProgress,
 } from "./agentTaskPanelActions";
-import { buildAgentProcessPanelViewModel } from "./agentProcessPanelViewModel";
-import { renderAgentAnswerFlow, renderAgentTrajectoryCard } from "./agentTrajectoryRenderer";
+import {
+	buildAgentProcessPanelViewModel,
+	type AgentComposerTaskBarView,
+} from "./agentProcessPanelViewModel";
+import { renderAgentAnswerFlow, renderAgentTrajectoryCard, renderComposerTaskBar } from "./agentTrajectoryRenderer";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
@@ -142,6 +145,8 @@ export class DailyBoardView extends ItemView {
 	private aiProcessSnapshotsByKey = new Map<string, AgentTrajectorySnapshot>();
 	private aiProcessExpandedKeys = new Set<string>();
 	private aiProcessCollapsedKeys = new Set<string>();
+	private aiComposerTaskBarExpanded = false;
+	private aiComposerTaskBarHostEl: HTMLElement | null = null;
 	private aiAgentTasks: AgentTaskViewState[] = [];
 	private aiRuntimeElapsedTimer: number | null = null;
 	private aiMessageListScrollTop = 0;
@@ -285,6 +290,7 @@ export class DailyBoardView extends ItemView {
 		} else {
 			this.renderAiPage(contentEl);
 		}
+		this.renderBackgroundAgentStatus(shell);
 		if (this.plugin.settings.projects.length > 0 && !this.aiSessionNavCollapsed) {
 			this.renderAiSessionDrawer(shell);
 		}
@@ -355,6 +361,7 @@ export class DailyBoardView extends ItemView {
 		this.aiMessageListEl = null;
 		this.aiQueueHintEl = null;
 		this.aiErrorEl = null;
+		this.aiComposerTaskBarHostEl = null;
 		this.aiSendButtonEl = null;
 		this.aiModelSelectEl = null;
 		this.aiPermissionSelectEl = null;
@@ -408,7 +415,6 @@ export class DailyBoardView extends ItemView {
 				option.value = this.getProjectKey(project);
 				option.selected = this.getProjectKey(activeProject) === this.getProjectKey(project);
 			}
-			selectEl.disabled = this.aiBusy;
 			selectEl.onchange = () => {
 				void this.switchActiveProject(selectEl.value);
 			};
@@ -430,6 +436,41 @@ export class DailyBoardView extends ItemView {
 		this.addNavButton(containerEl, "tools", this.t("nav.checks", "Tools"), "sliders-horizontal");
 	}
 
+	private renderBackgroundAgentStatus(containerEl: HTMLElement): void {
+		const completedSnapshot = this.getCompletedBackgroundAgentStatusSnapshot();
+		if (
+			this.activePage === "chat" ||
+			(!this.aiBusy && !this.aiRuntimeTrajectorySnapshot && !completedSnapshot && !this.aiLastError)
+		) {
+			return;
+		}
+		const statusEl = containerEl.createEl("button", { cls: "friday-background-agent-status" });
+		statusEl.type = "button";
+		const isFailed = Boolean(this.aiLastError && !this.aiBusy);
+		const isRunning = this.aiBusy || Boolean(this.aiRuntimeTrajectorySnapshot);
+		statusEl.addClass(isFailed ? "is-failed" : isRunning ? "is-running" : "is-completed");
+		statusEl.createSpan({
+			cls: "friday-background-agent-status-label",
+			text: isFailed
+				? this.t("ai.background.failed", "FRIDAY 运行异常")
+				: isRunning
+					? this.t("ai.background.running", "FRIDAY 正在运行")
+					: this.t("ai.background.completed", "FRIDAY 任务完成"),
+		});
+		statusEl.onclick = () => {
+			this.activePage = "chat";
+			this.aiForceScrollToBottomOnce = true;
+			this.renderBoard();
+		};
+	}
+
+	private getCompletedBackgroundAgentStatusSnapshot(): AgentTrajectorySnapshot | null {
+		return Array.from(this.aiProcessSnapshotsByKey.values()).reverse().find((snapshot) =>
+			this.isSnapshotOwnedByCurrentSession(snapshot) &&
+			snapshot.status === "completed"
+		) ?? null;
+	}
+
 	private addNavButton(
 		containerEl: HTMLElement,
 		page: "chat" | "sync" | "tools",
@@ -444,7 +485,6 @@ export class DailyBoardView extends ItemView {
 		const iconEl = button.createSpan({ cls: "friday-nav-button-icon" });
 		setIcon(iconEl, icon);
 		button.createSpan({ cls: "friday-nav-button-label", text: label });
-		button.disabled = this.aiBusy && page !== this.activePage;
 		button.onclick = () => {
 			this.activePage = page;
 			this.aiForceScrollToBottomOnce = true;
@@ -780,7 +820,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async switchActiveProject(projectId: string): Promise<void> {
-		if (!projectId || projectId === this.plugin.settings.activeProjectId || this.aiBusy) {
+		if (!projectId || projectId === this.plugin.settings.activeProjectId) {
 			return;
 		}
 		await this.plugin.setActiveProject(projectId);
@@ -1334,7 +1374,10 @@ export class DailyBoardView extends ItemView {
 		this.renderEditPlanReviewPanel(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
+		const taskBarHostEl = composerWrap.createDiv({ cls: "friday-ai-composer-task-bar-host" });
+		this.aiComposerTaskBarHostEl = taskBarHostEl;
 		const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });
+		this.syncComposerTaskBar();
 		this.composer = new MentionComposer({
 			parent: composerEl,
 			placeholder: this.t(
@@ -1449,6 +1492,50 @@ export class DailyBoardView extends ItemView {
 
 		this.syncAiComposerControls();
 		this.restoreAiMessageListScrollState(messageListEl);
+	}
+
+	private getComposerTaskBarView(): AgentComposerTaskBarView | null {
+		const snapshot = this.selectComposerTaskBarSnapshot();
+		if (!snapshot) {
+			return null;
+		}
+		return buildAgentProcessPanelViewModel(snapshot).composerTaskBar;
+	}
+
+	private syncComposerTaskBar(): void {
+		if (!this.aiComposerTaskBarHostEl?.isConnected) {
+			return;
+		}
+		this.aiComposerTaskBarHostEl.empty();
+		renderComposerTaskBar({
+			containerEl: this.aiComposerTaskBarHostEl,
+			taskBar: this.getComposerTaskBarView(),
+			expanded: this.aiComposerTaskBarExpanded,
+			onToggle: () => {
+				this.aiComposerTaskBarExpanded = !this.aiComposerTaskBarExpanded;
+				this.syncComposerTaskBar();
+			},
+			renderIcon: (iconEl, icon) => setIcon(iconEl, icon),
+		});
+	}
+
+	private selectComposerTaskBarSnapshot(): AgentTrajectorySnapshot | null {
+		const completedSnapshot = this.getCompletedComposerTaskBarSnapshot();
+		const liveSnapshot = this.aiRuntimeTrajectorySnapshot;
+		if (completedSnapshot && this.isSameTrajectorySnapshotIdentity(completedSnapshot, liveSnapshot)) {
+			return completedSnapshot;
+		}
+		return liveSnapshot ?? completedSnapshot;
+	}
+
+	private getCompletedComposerTaskBarSnapshot(): AgentTrajectorySnapshot | null {
+		return Array.from(this.aiProcessSnapshotsByKey.values()).reverse().find((snapshot) =>
+			this.isSnapshotOwnedByCurrentSession(snapshot) &&
+			Boolean(snapshot.plan) &&
+			snapshot.plan?.visibility === "task_bar" &&
+			snapshot.status === "completed" &&
+			snapshot.plan?.status === "completed"
+		) ?? null;
 	}
 
 	private renderEditPlanReviewPanel(containerEl: HTMLElement): void {
@@ -2322,7 +2409,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private async switchAiSession(sessionId: string): Promise<void> {
-		if (!sessionId || sessionId === this.aiSessionId || this.aiBusy) {
+		if (!sessionId || sessionId === this.aiSessionId) {
 			return;
 		}
 		let target = this.aiSessions.find((session) => session.sessionId === sessionId) ?? null;
@@ -2638,6 +2725,13 @@ export class DailyBoardView extends ItemView {
 			cls: `friday-ai-message-content${isStreaming ? " is-streaming" : ""}`,
 		});
 		this.renderAiMessageContent(contentEl, message);
+		if (resultSnapshot) {
+			this.renderTrajectoryCard(
+				containerEl,
+				resultSnapshot,
+				resultSnapshot.status === "running" ? "live" : "completed",
+			);
+		}
 	}
 
 	private renderAssistantAvatar(containerEl: HTMLElement): void {
@@ -2692,9 +2786,7 @@ export class DailyBoardView extends ItemView {
 		index: number,
 		lastAssistantIndex: number,
 	): AgentTrajectorySnapshot | null {
-		void index;
-		void lastAssistantIndex;
-		if (this.aiBusy || message.role !== "assistant") {
+		if (message.role !== "assistant" && message.role !== "user") {
 			return null;
 		}
 		const key = this.getMessageTrajectorySnapshotKey(message);
@@ -2702,7 +2794,59 @@ export class DailyBoardView extends ItemView {
 			return null;
 		}
 		const snapshot = this.aiProcessSnapshotsByKey.get(key) ?? null;
-		return this.isSnapshotOwnedByCurrentSession(snapshot) ? snapshot : null;
+		if (!this.isSnapshotOwnedByCurrentSession(snapshot)) {
+			return null;
+		}
+		if (message.role === "user") {
+			if (index < lastAssistantIndex) {
+				return null;
+			}
+			return this.aiRuntimeTrajectorySnapshot === snapshot ? snapshot : null;
+		}
+		if (message.role === "assistant") {
+			if (index !== lastAssistantIndex) {
+				return null;
+			}
+			return this.aiRuntimeTrajectorySnapshot === snapshot ? null : snapshot;
+		}
+		return null;
+	}
+
+	private bindRuntimeSnapshotToLatestUserMessage(snapshot: AgentTrajectorySnapshot | null): void {
+		if (!this.isSnapshotOwnedByCurrentSession(snapshot)) {
+			return;
+		}
+		for (let index = this.aiConversation.length - 1; index >= 0; index -= 1) {
+			const message = this.aiConversation[index];
+			if (message?.role !== "user") {
+				continue;
+			}
+			const uiMeta = message.uiMeta ?? {};
+			message.uiMeta = {
+				...uiMeta,
+				conversationId: uiMeta.conversationId?.trim() || snapshot.identity.conversationId || this.aiSessionId,
+				turnId: uiMeta.turnId?.trim() || snapshot.identity.turnId,
+				taskId: uiMeta.taskId?.trim() || snapshot.identity.taskId,
+			};
+			const key = this.getMessageTrajectorySnapshotKey(message);
+			if (key) {
+				this.aiProcessSnapshotsByKey.set(key, snapshot);
+			}
+			return;
+		}
+	}
+
+	private isLiveRuntimeSnapshotAttachedToMessage(): boolean {
+		const liveKey = this.getTrajectorySnapshotKey(this.aiRuntimeTrajectorySnapshot);
+		return Boolean(liveKey && this.aiProcessSnapshotsByKey.get(liveKey) === this.aiRuntimeTrajectorySnapshot);
+	}
+
+	private isSameTrajectorySnapshotIdentity(
+		left: AgentTrajectorySnapshot | null,
+		right: AgentTrajectorySnapshot | null,
+	): boolean {
+		const leftKey = this.getTrajectorySnapshotKey(left);
+		return Boolean(leftKey && leftKey === this.getTrajectorySnapshotKey(right));
 	}
 
 	private getMessageTrajectorySnapshotKey(message: ChatMessage): string {
@@ -2830,7 +2974,7 @@ export class DailyBoardView extends ItemView {
 			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message, index, lastAssistantIndex);
 			this.renderAiMessage(containerEl, message, false, completedSnapshotForMessage);
 		}
-		if (this.aiRuntimeTrajectorySnapshot) {
+		if (this.aiRuntimeTrajectorySnapshot && !this.isLiveRuntimeSnapshotAttachedToMessage()) {
 			this.renderRuntimeExecutionPreview(containerEl);
 		} else if (this.aiStreamingPreview) {
 			this.renderAiMessage(
@@ -2882,6 +3026,7 @@ export class DailyBoardView extends ItemView {
 		this.syncAiErrorRegion();
 		this.syncAiQueueHint();
 		this.syncAiComposerControls();
+		this.syncComposerTaskBar();
 	}
 
 	private syncAiErrorRegion(): void {
@@ -3771,7 +3916,10 @@ export class DailyBoardView extends ItemView {
 			if (!this.aiRuntimeTrajectorySnapshot) {
 				return;
 			}
-			this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.refreshElapsed() ?? this.aiRuntimeTrajectorySnapshot;
+			const refreshedSnapshot = this.aiRuntimeTrajectoryStore.refreshElapsed();
+			this.aiRuntimeTrajectorySnapshot = refreshedSnapshot ?? this.aiRuntimeTrajectorySnapshot;
+			this.bindRuntimeSnapshotToLatestUserMessage(this.aiRuntimeTrajectorySnapshot);
+			this.syncComposerTaskBar();
 			this.syncAiLiveChatShell();
 			this.scheduleRuntimeElapsedTimer();
 		}, 1000);
@@ -3791,8 +3939,10 @@ export class DailyBoardView extends ItemView {
 			render: () => this.syncAiLiveChatShell(),
 		});
 		this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
+		this.bindRuntimeSnapshotToLatestUserMessage(this.aiRuntimeTrajectorySnapshot);
 		const terminalProgress = event.phase === "error" || event.phase === "done";
 		if (terminalProgress) {
+			this.rememberCompletedTrajectorySnapshot(this.aiRuntimeTrajectorySnapshot);
 			const completedSnapshot = this.aiRuntimeTrajectoryStore.completeFromProgress();
 			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
 			this.aiRuntimeTrajectorySnapshot = null;

@@ -451,7 +451,7 @@
           {
             "event": "max_tool_iterations",
             "status": "safe_stopped",
-            "summary": "Tool iteration limit reached; stopped further tool calls for this turn."
+            "summary": "工具调用次数过多，FRIDAY 已安全停止本轮操作。"
           }
         ],
         "turnEventsInclude": ["max_tool_iterations", "turn_completed"]

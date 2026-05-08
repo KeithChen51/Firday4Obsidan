@@ -24,7 +24,7 @@ test("transport telemetry request events do not expose raw endpoint URLs or secr
 		endpointIndex: 0,
 		endpointCount: 2,
 		attempt: 1,
-		maxAttempts: 4,
+		maxAttempts: 6,
 		retryable: false,
 		message: "POST https://secret.example.com/v1/chat/completions Authorization: Bearer sk-testsecret123456",
 	});
@@ -55,14 +55,14 @@ test("retry scheduled telemetry includes attempt, max attempts, delay, retryabil
 		endpointIndex: 0,
 		endpointCount: 1,
 		attempt: 1,
-		maxAttempts: 4,
+		maxAttempts: 6,
 		delayMs: 700,
 		retryable: true,
 		error: new Error("504 Gateway Timeout from upstream"),
 	});
 
 	assert.equal(event.attempt, 1);
-	assert.equal(event.maxAttempts, 4);
+	assert.equal(event.maxAttempts, 6);
 	assert.equal(event.delayMs, 700);
 	assert.equal(event.retryable, true);
 	assert.equal(event.httpStatus, 504);
@@ -77,8 +77,8 @@ test("exhausted transport telemetry marks the retryable request as no longer ret
 		channel: "chat",
 		endpointIndex: 0,
 		endpointCount: 1,
-		attempt: 4,
-		maxAttempts: 4,
+		attempt: 6,
+		maxAttempts: 6,
 		retryable: true,
 		error: "503 temporarily unavailable",
 	});
@@ -98,7 +98,7 @@ test("one model request keeps the same transport request id across retry attempt
 		endpointIndex: 0,
 		endpointCount: 1,
 		attempt: 1,
-		maxAttempts: 4,
+		maxAttempts: 6,
 		delayMs: 700,
 		retryable: true,
 		error: "network timeout",
@@ -110,7 +110,7 @@ test("one model request keeps the same transport request id across retry attempt
 		endpointIndex: 0,
 		endpointCount: 1,
 		attempt: 2,
-		maxAttempts: 4,
+		maxAttempts: 6,
 		retryable: true,
 		message: "Retrying model request",
 	});

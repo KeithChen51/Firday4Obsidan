@@ -6,7 +6,13 @@ import type { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionC
 import { validateCheckpointForResume, type AgentLoopCheckpoint } from "../core/agent-kernel/checkpoints/AgentLoopCheckpoint";
 import type { AgentLoopCheckpointStore } from "../core/agent-kernel/checkpoints/AgentLoopCheckpointStore";
 import type { AgentTurnInput, AgentTurnResult, AgentTurnStatus, RuntimeMutationPlan } from "../core/agent-kernel/contracts";
-import { extractMutationPlans, type RuntimeEnvelope } from "../core/agent-kernel/RuntimeProtocol";
+import {
+	containsRawMaxToolIterationText,
+	extractMutationPlans,
+	MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
+	MAX_TOOL_ITERATION_SAFE_SUMMARY,
+	type RuntimeEnvelope,
+} from "../core/agent-kernel/RuntimeProtocol";
 import type { TurnEventInput, TurnEventLog } from "../core/runtime/TurnEventLog";
 import type { StepTraceEvent } from "../core/turn-state/TurnStateMachine";
 import type { AgentTask } from "../core/tasks/AgentTask";
@@ -148,7 +154,7 @@ export class ObsidianAgentStateAdapter {
 		result: AgentTurnResult,
 		options: ObsidianCompleteTurnOptions = {},
 	): Promise<AgentTurnResult> {
-		const finalResult = this.withPendingMutationNotice(result, context);
+		const finalResult = this.withSafeStopUserText(this.withPendingMutationNotice(result, context));
 		const taskPendingMutations = this.collectPendingMutations(finalResult, context);
 		const task = await this.taskManager.completeTurn({ ...finalResult, pendingMutations: taskPendingMutations }, context);
 		const status = this.resolveTurnStatus(task, finalResult);
@@ -390,7 +396,7 @@ export class ObsidianAgentStateAdapter {
 				type: "max_tool_iterations",
 				payload: {
 					status: "safe_stopped",
-					summary: "Tool iteration limit reached; stopped further tool calls for this turn.",
+					summary: MAX_TOOL_ITERATION_SAFE_SUMMARY,
 					traceId: result.traceId,
 				},
 			});
@@ -422,8 +428,21 @@ export class ObsidianAgentStateAdapter {
 		};
 	}
 
+	private withSafeStopUserText(result: AgentTurnResult): AgentTurnResult {
+		if (!this.isMaxToolIterationStop(result)) {
+			return result;
+		}
+		if (!containsRawMaxToolIterationText(result.assistantText)) {
+			return result;
+		}
+		return {
+			...result,
+			assistantText: MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
+		};
+	}
+
 	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
-		return result.status === "safe_stopped" || result.assistantText.includes("Maximum tool-iteration limit reached");
+		return result.status === "safe_stopped" || containsRawMaxToolIterationText(result.assistantText);
 	}
 
 	private buildFailureDiagnostics(message: string, status: AgentTurnStatus): Record<string, unknown> {

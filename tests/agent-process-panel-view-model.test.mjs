@@ -384,13 +384,13 @@ test("buildAgentProcessPanelViewModel renders transport retry without checkpoint
 	const view = buildAgentProcessPanelViewModel(makeSnapshot({
 		status: "running",
 		headline: "Reconnecting to model",
-		summary: "Model request retry scheduled after HTTP 504; attempt 1/4; backoff 700ms",
+		summary: "网络波动，正在恢复请求（第 1/5 次）",
 		items: [
 			makeItem({
 				id: "transport",
 				kind: "transport",
 				title: "Model transport",
-				detail: "Model request retry scheduled after HTTP 504; attempt 1/4; backoff 700ms",
+				detail: "网络波动，正在恢复请求（第 1/5 次）",
 				status: "running",
 				rawEventType: "retry_scheduled",
 				step: 3,
@@ -401,17 +401,68 @@ test("buildAgentProcessPanelViewModel renders transport retry without checkpoint
 	assert.equal(view.mode, "stepped_process");
 	assert.equal(view.surface, "compact_live_process");
 	assert.equal(view.status.tone, "reconnecting");
-	assert.equal(view.visibleSteps.at(-1)?.title, "重新连接模型");
+	assert.equal(view.visibleSteps.at(-1)?.title, "恢复请求");
 	assert.equal(view.visibleSteps.at(-1)?.status, "running");
-	assert.match(view.header.summary, /attempt 1\/4/);
-	assert.match(view.header.summary, /700ms/);
+	assert.equal(view.header.summary, "网络波动，正在恢复请求（第 1/5 次）");
 	assert.doesNotMatch(JSON.stringify(view), /checkpoint|resume/i);
 	assert.ok(view.timeline);
 	assert.equal(view.timeline.status, "retrying");
-	assert.equal(view.timeline.collapsedSummary, "模型连接不稳定，正在恢复。");
+	assert.equal(view.timeline.collapsedSummary, "网络波动，正在恢复请求（第 1/5 次）");
 	assert.equal(view.timeline.items.at(-1)?.kind, "retry");
-	assert.equal(view.timeline.items.at(-1)?.title, "处理连接重试");
-	assert.doesNotMatch(view.timeline.items.at(-1)?.summary ?? "", /HTTP|504|700ms|request/i);
+	assert.equal(view.timeline.items.at(-1)?.title, "恢复请求");
+	assert.equal(view.timeline.items.at(-1)?.summary, "网络波动，正在恢复请求（第 1/5 次）");
+});
+
+test("buildAgentProcessPanelViewModel normalizes raw retry transport copy to approved recovery wording", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "Reconnecting to model",
+		summary: "HTTP 429 gateway backoff; request id req-1; attempt 1/4",
+		items: [
+			makeItem({
+				id: "transport",
+				kind: "transport",
+				title: "Model transport",
+				detail: "模型连接不稳定，正在恢复。第 1/4 次重试；HTTP 429 gateway backoff; request id req-1",
+				status: "running",
+				rawEventType: "retry_started",
+			}),
+		],
+	}));
+
+	assert.equal(view.timeline?.status, "retrying");
+	assert.equal(view.header.summary, "网络波动，正在恢复请求（第 1/5 次）");
+	assert.equal(view.timeline?.collapsedSummary, "网络波动，正在恢复请求（第 1/5 次）");
+	assert.equal(view.timeline?.items.at(-1)?.summary, "网络波动，正在恢复请求（第 1/5 次）");
+	assert.doesNotMatch(JSON.stringify(view), /模型连接不稳定|第\s*1\/4\s*次重试|第\s*1\/4\s*次/);
+});
+
+test("buildAgentProcessPanelViewModel renders exhausted model requests with approved failure copy", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "failed",
+		headline: "Agent failed",
+		summary: "HTTP 504 gateway timeout after attempt 5/5; request exhausted",
+		items: [
+			makeItem({
+				id: "transport",
+				kind: "transport",
+				title: "Request exhausted",
+				detail: "HTTP 504 gateway timeout after attempt 5/5; request exhausted",
+				status: "failed",
+				rawEventType: "request_exhausted",
+			}),
+		],
+	}));
+
+	assert.equal(view.timeline?.status, "failed");
+	assert.equal(view.header.summary, "请求多次未成功，请稍后重试。");
+	assert.equal(view.timeline?.collapsedSummary, "请求多次未成功，请稍后重试。");
+	assert.equal(view.timeline?.items.at(-1)?.summary, "请求多次未成功，请稍后重试。");
+	assert.doesNotMatch(JSON.stringify(view), /模型连接不稳定|第\s*5\/5\s*次重试/);
 });
 
 test("buildAgentProcessPanelViewModel shows recoverable tool errors as a running warning", async () => {
@@ -816,6 +867,235 @@ test("buildAgentProcessPanelViewModel creates file write steps before approval s
 	assert.equal(view.timeline.items.at(-1)?.status, "waiting");
 });
 
+test("buildAgentProcessPanelViewModel exposes composer task bar from plan state without process narration", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		time: {
+			startedAt: "2026-05-07T00:00:00.000Z",
+			updatedAt: "2026-05-07T00:00:09.000Z",
+		},
+		plan: {
+			planId: "plan-1",
+			visibility: "task_bar",
+			status: "running",
+			currentTaskId: "task-2",
+			tasks: [
+				{ id: "task-1", title: "确认现状", status: "completed" },
+				{ id: "task-2", title: "实现 Composer Task Bar", status: "in_progress" },
+				{ id: "task-3", title: "运行验收测试", status: "pending" },
+			],
+		},
+		items: [
+			makeItem({
+				id: "intake",
+				kind: "intake",
+				title: "我理解你希望优化工作过程展示。",
+				detail: "我理解你希望优化工作过程展示。",
+				status: "ok",
+			}),
+		],
+	}), { now: new Date("2026-05-07T00:00:12.000Z") });
+
+	assert.ok(view.composerTaskBar, "planned running task should expose composer task bar");
+	assert.equal(view.durationSeconds, 12);
+	assert.equal(view.timeline?.statusBar?.elapsed, "12s");
+	assert.deepEqual(view.composerTaskBar.collapsed, {
+		statusLabel: "正在执行",
+		stepLabel: "2/3",
+		taskTitle: "实现 Composer Task Bar",
+		elapsed: "12s",
+	});
+	assert.equal(view.composerTaskBar.expandedTasks.length, 3);
+	assert.equal(view.composerTaskBar.actionSlot, null);
+	assert.doesNotMatch(JSON.stringify(view.composerTaskBar), /当前：|刚刚完成：|接下来：|做了什么|正在做什么/);
+});
+
+test("buildAgentProcessPanelViewModel renders intake as the first receipt instead of an internal action", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const statement = "我理解你希望修复 Intake 可见性。";
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: statement,
+		summary: statement,
+		items: [
+			makeItem({
+				id: "live:intake:1",
+				kind: "intake",
+				title: statement,
+				detail: statement,
+				status: "running",
+				rawEventType: "intake_decision",
+			}),
+		],
+	}));
+
+	assert.equal(view.visibleSteps[0]?.title, statement);
+	assert.equal(view.visibleSteps[0]?.summary, statement);
+	assert.equal(view.timeline?.items[0]?.kind, "receipt");
+	assert.equal(view.timeline?.items[0]?.title, statement);
+	assert.equal(view.timeline?.items[0]?.summary, "");
+	assert.notEqual(view.timeline?.items[0]?.title, "执行操作");
+	assert.doesNotMatch(JSON.stringify(view.timeline), /执行操作/);
+});
+
+test("buildAgentProcessPanelViewModel keeps intake and task acknowledgement as one natural statement", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const statement = "I understand you want the intake area to show one natural statement.";
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: statement,
+		summary: statement,
+		items: [
+			makeItem({
+				id: "live:intake:1",
+				kind: "intake",
+				title: statement,
+				detail: statement,
+				status: "ok",
+				rawEventType: "intake_decision",
+			}),
+			makeItem({
+				id: "live:narration:ack:2",
+				kind: "narration",
+				title: "Received task",
+				detail: "Received task. I will avoid repeating this acknowledgement.",
+				status: "ok",
+				rawEventType: "narration_report",
+				narrationKind: "task_acknowledged",
+			}),
+		],
+	}));
+
+	assert.deepEqual(view.visibleSteps.map((step) => step.title), [statement]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt"]);
+	assert.equal(view.timeline?.items[0]?.title, statement);
+	assert.equal(view.timeline?.items[0]?.summary, "");
+	assert.equal(view.timeline?.items[0]?.detail, undefined);
+	assert.equal(countOccurrences(JSON.stringify(view.timeline?.groups ?? []), statement), 1);
+	assert.doesNotMatch(JSON.stringify(view.timeline?.groups ?? []), /Received task|Understood task|Task understanding/);
+});
+
+test("buildAgentProcessPanelViewModel keeps generic plan_create out of the process timeline while task bar uses plan state", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const statement = "我理解你希望修复过程区首屏展示。";
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: statement,
+		summary: statement,
+		plan: {
+			planId: "plan-1",
+			visibility: "task_bar",
+			status: "running",
+			currentTaskId: "plan-1-1",
+			tasks: [
+				{ id: "plan-1-1", title: "确认 intake 展示", status: "in_progress" },
+				{ id: "plan-1-2", title: "聚合重复 context", status: "pending" },
+				{ id: "plan-1-3", title: "运行回归测试", status: "pending" },
+			],
+		},
+		items: [
+			makeItem({ id: "live:intake:1", kind: "intake", title: statement, detail: statement, status: "running", rawEventType: "intake_decision" }),
+			makeItem({
+				id: "live:plan:plan_create:2",
+				kind: "plan",
+				title: "整理计划",
+				detail: "1. 确认 intake 展示\n2. 聚合重复 context\n3. 运行回归测试",
+				status: "running",
+				rawEventType: "plan_create",
+			}),
+		],
+	}));
+
+	assert.ok(view.composerTaskBar);
+	assert.deepEqual(view.composerTaskBar.expandedTasks.map((task) => task.title), [
+		"确认 intake 展示",
+		"聚合重复 context",
+		"运行回归测试",
+	]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt"]);
+	assert.doesNotMatch(JSON.stringify(view.timeline), /整理计划|确认 intake 展示\n2\. 聚合重复 context|运行回归测试/);
+});
+
+test("buildAgentProcessPanelViewModel compacts repeated context timeline items without crossing stage boundaries", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({ id: "ctx-1", kind: "context", title: "Loaded project rules", detail: "Read AGENTS.md.", status: "ok" }),
+			makeItem({ id: "stage-1", kind: "narration", narrationKind: "stage_report", title: "阶段性汇报", detail: "已读取项目规则。", status: "ok" }),
+			makeItem({ id: "ctx-2", kind: "context", title: "Loaded project rules", detail: "Read package.json.", status: "ok" }),
+			makeItem({ id: "ctx-3", kind: "tool", title: "read src/main.ts", detail: "Read src/main.ts.", status: "ok", tool: "read", targetPath: "src/main.ts" }),
+			makeItem({ id: "write-1", kind: "tool", title: "edit src/main.ts", detail: "Updated src/main.ts.", status: "ok", tool: "edit", targetPath: "src/main.ts" }),
+			makeItem({ id: "ctx-4", kind: "context", title: "Loaded project rules", detail: "Read tsconfig.json.", status: "ok" }),
+		],
+	}));
+
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context", "stage_report", "context", "file_change", "context"]);
+	const contexts = view.timeline?.items.filter((item) => item.kind === "context") ?? [];
+	assert.equal(contexts.length, 3);
+	const lastContext = view.timeline?.items.at(-1);
+	assert.equal(lastContext?.kind, "context", "file changes should stop context compaction");
+	assert.doesNotMatch(lastContext?.summary ?? "", /4 批|4 batch/);
+});
+
+test("buildAgentProcessPanelViewModel treats approval failure and file changes as context compaction barriers", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({ id: "ctx-1", kind: "context", title: "Loaded project rules", detail: "Read AGENTS.md.", status: "ok" }),
+			makeItem({ id: "approval-1", kind: "approval", title: "Approval required", detail: "Approve write.", status: "waiting", tool: "write", targetPath: "Notes/today.md" }),
+			makeItem({ id: "ctx-2", kind: "context", title: "Loaded current note", detail: "Read Notes/today.md.", status: "ok" }),
+			makeItem({ id: "failure-1", kind: "failure", title: "Run failed", detail: "grep failed.", status: "failed" }),
+			makeItem({ id: "ctx-3", kind: "context", title: "Loaded retry context", detail: "Read retry notes.", status: "ok" }),
+			makeItem({ id: "write-1", kind: "tool", title: "edit Notes/today.md", detail: "Updated Notes/today.md.", status: "ok", tool: "edit", targetPath: "Notes/today.md" }),
+			makeItem({ id: "ctx-4", kind: "context", title: "Loaded final context", detail: "Read final notes.", status: "ok" }),
+		],
+	}));
+
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context", "approval", "context", "blocked", "context", "file_change", "context"]);
+	const contexts = view.timeline?.items.filter((item) => item.kind === "context") ?? [];
+	assert.equal(contexts.length, 4);
+	for (const item of contexts) {
+		assert.doesNotMatch(item.summary ?? "", /批|batch/, `${item.id} should not merge across a non-context item`);
+	}
+});
+
+test("buildAgentProcessPanelViewModel uses approved recovery copy for request retries", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		time: {
+			startedAt: "2026-05-07T00:00:00.000Z",
+			updatedAt: "2026-05-07T00:00:18.000Z",
+		},
+		items: [
+			makeItem({
+				id: "transport",
+				kind: "transport",
+				title: "正在恢复请求",
+				detail: "网络波动，正在恢复请求（第 3/5 次）",
+				status: "running",
+				rawEventType: "retry_scheduled",
+			}),
+		],
+	}));
+
+	assert.equal(view.timeline?.status, "retrying");
+	assert.equal(view.timeline?.collapsedSummary, "网络波动，正在恢复请求（第 3/5 次）");
+	assert.equal(view.timeline?.items.at(-1)?.title, "恢复请求");
+	assert.equal(view.timeline?.items.at(-1)?.summary, "网络波动，正在恢复请求（第 3/5 次）");
+	assert.doesNotMatch(JSON.stringify(view), /重连|重新连接|Reconnecting|连接重试|模型连接不稳定/);
+});
+
 function makeSnapshot(overrides = {}) {
 	return {
 		identity: { turnId: "turn-1", taskId: "task-1", traceId: "trace-1", conversationId: "conversation-1" },
@@ -845,4 +1125,8 @@ function makeItem(overrides = {}) {
 		status: overrides.status ?? "ok",
 		...overrides,
 	};
+}
+
+function countOccurrences(value, needle) {
+	return value.split(needle).length - 1;
 }

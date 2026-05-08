@@ -2,6 +2,7 @@ import { readFile } from "fs/promises";
 
 import type { TurnEventRecord, TurnEventRef } from "./TurnEventLog";
 import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
+import type { IntakeDecision, PlanState, RuntimePlanProgress } from "../agent-kernel/PlanState";
 
 export interface TurnReplayReaderOptions {
 	resolveTurnPath: (ref: TurnEventRef) => string;
@@ -27,6 +28,8 @@ export interface TurnReplaySummary extends TurnEventRef {
 		completed: number;
 		failed: number;
 	};
+	intakeTimeline: Array<IntakeDecision & { at?: string }>;
+	planTimeline: Array<RuntimePlanProgress & { at?: string }>;
 	reasoningTimeline: Array<{
 		step: number;
 		provider: ReasoningArtifact["provider"] | "unknown";
@@ -252,6 +255,8 @@ export class TurnReplayReader {
 				completed: events.filter((event) => event.type === "model_completed").length,
 				failed: events.filter((event) => event.type === "model_failed").length,
 			},
+			intakeTimeline: this.summarizeIntakeTimeline(events),
+			planTimeline: this.summarizePlanTimeline(events),
 			reasoningTimeline: this.summarizeReasoningTimeline(events),
 			narrationTimeline: this.summarizeNarrationTimeline(events),
 			transport: {
@@ -375,6 +380,114 @@ export class TurnReplayReader {
 			});
 		}
 		return timeline;
+	}
+
+	private summarizeIntakeTimeline(events: TurnEventRecord[]): TurnReplaySummary["intakeTimeline"] {
+		const timeline: TurnReplaySummary["intakeTimeline"] = [];
+		for (const event of events) {
+			if (event.type !== "intake_decision") {
+				continue;
+			}
+			const statement = this.getPayloadText(event, "statement");
+			if (!statement) {
+				continue;
+			}
+			timeline.push({
+				complexity: this.toIntakeComplexity(this.getPayloadText(event, "complexity")),
+				route: this.toIntakeRoute(this.getPayloadText(event, "route")),
+				statement,
+				requiresPlan: this.getPayloadOptionalBoolean(event, "requiresPlan") ?? false,
+				source: this.toIntakeSource(this.getPayloadText(event, "source")),
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
+	private summarizePlanTimeline(events: TurnEventRecord[]): TurnReplaySummary["planTimeline"] {
+		const timeline: TurnReplaySummary["planTimeline"] = [];
+		for (const event of events) {
+			if (!["plan_create", "plan_update", "plan_revise", "plan_complete", "plan_skip"].includes(event.type)) {
+				continue;
+			}
+			const state = this.getPlanStateFromEvent(event);
+			if (!state) {
+				continue;
+			}
+			timeline.push({
+				type: event.type as RuntimePlanProgress["type"],
+				state,
+				taskId: this.getPayloadText(event, "taskId") || undefined,
+				message: this.getPayloadText(event, "message") || this.getPayloadText(event, "summary") || undefined,
+				at: event.at,
+			});
+		}
+		return timeline;
+	}
+
+	private toIntakeComplexity(value: string): IntakeDecision["complexity"] {
+		if (value === "simple" || value === "light" || value === "complex" || value === "unclear") {
+			return value;
+		}
+		return "unclear";
+	}
+
+	private toIntakeRoute(value: string): IntakeDecision["route"] {
+		if (value === "answer" || value === "clarify" || value === "plan_and_execute") {
+			return value;
+		}
+		return "answer";
+	}
+
+	private toIntakeSource(value: string): IntakeDecision["source"] {
+		if (value === "runtime" || value === "model" || value === "fallback") {
+			return value;
+		}
+		return "fallback";
+	}
+
+	private getPlanStateFromEvent(event: TurnEventRecord): PlanState | null {
+		const rawState = this.getPayloadRecord(event, "state");
+		const planId = this.getRecordText(rawState, "planId");
+		const rawTasks = rawState.tasks;
+		if (!planId || !Array.isArray(rawTasks)) {
+			return null;
+		}
+		const tasks = rawTasks
+			.filter((task): task is Record<string, unknown> => Boolean(task && typeof task === "object" && !Array.isArray(task)))
+			.map((task) => ({
+				id: this.getRecordText(task, "id"),
+				title: this.getRecordText(task, "title"),
+				status: this.toPlanTaskStatus(this.getRecordText(task, "status")),
+				...(this.getRecordText(task, "summary") ? { summary: this.getRecordText(task, "summary") } : {}),
+				...(this.getRecordText(task, "startedAt") ? { startedAt: this.getRecordText(task, "startedAt") } : {}),
+				...(this.getRecordText(task, "completedAt") ? { completedAt: this.getRecordText(task, "completedAt") } : {}),
+			}))
+			.filter((task) => task.id && task.title);
+		return {
+			planId,
+			visibility: this.getRecordText(rawState, "visibility") === "hidden" ? "hidden" : "task_bar",
+			status: this.toPlanStateStatus(this.getRecordText(rawState, "status")),
+			...(this.getRecordText(rawState, "currentTaskId") ? { currentTaskId: this.getRecordText(rawState, "currentTaskId") } : {}),
+			tasks,
+			...(this.getRecordText(rawState, "createdAt") ? { createdAt: this.getRecordText(rawState, "createdAt") } : {}),
+			...(this.getRecordText(rawState, "updatedAt") ? { updatedAt: this.getRecordText(rawState, "updatedAt") } : {}),
+			...(this.getRecordText(rawState, "completedAt") ? { completedAt: this.getRecordText(rawState, "completedAt") } : {}),
+		};
+	}
+
+	private toPlanTaskStatus(value: string): PlanState["tasks"][number]["status"] {
+		if (value === "pending" || value === "in_progress" || value === "completed" || value === "skipped" || value === "failed") {
+			return value;
+		}
+		return "pending";
+	}
+
+	private toPlanStateStatus(value: string): PlanState["status"] {
+		if (value === "pending" || value === "running" || value === "completed" || value === "skipped" || value === "failed") {
+			return value;
+		}
+		return "running";
 	}
 
 	private toNarrationKind(value: string): TurnReplaySummary["narrationTimeline"][number]["kind"] | null {

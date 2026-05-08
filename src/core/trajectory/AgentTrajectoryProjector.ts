@@ -8,10 +8,12 @@ import type {
 	AgentTrajectoryItemKind,
 	AgentTrajectoryItemStatus,
 	AgentTrajectoryMutation,
+	AgentTrajectoryPlanState,
 	AgentTrajectorySnapshot,
 	AgentTrajectoryStage,
 	AgentTrajectoryStatus,
 } from "./AgentTrajectory";
+import type { IntakeDecision, PlanState, RuntimePlanProgress } from "../agent-kernel/PlanState";
 
 type RuntimeProgressIdentity = Partial<AgentTrajectoryIdentity>;
 type RuntimeProgressWithIdentity = RuntimeProgressEvent & RuntimeProgressIdentity & {
@@ -26,6 +28,8 @@ type ReplaySummaryWithIdentity = TurnReplaySummary & Partial<Pick<AgentTrajector
 type ProjectableNarration =
 	| NonNullable<RuntimeProgressWithIdentity["narration"]>
 	| TurnReplaySummary["narrationTimeline"][number];
+type ProjectableIntake = IntakeDecision & { at?: string };
+type ProjectablePlan = RuntimePlanProgress & { at?: string };
 
 const STAGE_LABELS: Record<AgentTrajectoryStage["key"], string> = {
 	context: "Context",
@@ -102,6 +106,14 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		...(replaySummary.completedAt ? { completedAt: replaySummary.completedAt } : {}),
 		...(typeof replaySummary.durationMs === "number" ? { durationMs: replaySummary.durationMs } : {}),
 	};
+
+	for (const [index, intake] of (replaySummary.intakeTimeline ?? []).entries()) {
+		projectIntake(snapshot, intake, `replay:intake:${index}`, true);
+	}
+
+	for (const plan of replaySummary.planTimeline ?? []) {
+		projectPlan(snapshot, plan);
+	}
 
 	for (const [index, narration] of (replaySummary.narrationTimeline ?? []).entries()) {
 		upsertItem(snapshot, stageForNarration(narration.kind), {
@@ -279,6 +291,23 @@ function applyRuntimeProgress(
 			snapshot.summary = safeText(event.message);
 			setStageStatus(snapshot, "context", "running");
 			break;
+		case "intake": {
+			const intake = event.intake ?? {
+				complexity: "unclear" as const,
+				route: "answer" as const,
+				statement: event.message,
+				requiresPlan: false,
+				source: "fallback" as const,
+			};
+			projectIntake(snapshot, { ...intake, at: event.at }, `live:intake:${index}`, false);
+			break;
+		}
+		case "plan": {
+			if (event.plan) {
+				projectPlan(snapshot, event.plan);
+			}
+			break;
+		}
 		case "narration": {
 			const narration = event.narration ?? {
 				kind: "stage_report" as const,
@@ -363,10 +392,13 @@ function applyRuntimeProgress(
 			break;
 		case "model_retry": {
 			const transport = event.transport;
+			if (!isVisibleTransportEvent(transport?.type)) {
+				break;
+			}
 			const itemStatus = transport?.type === "request_exhausted" ? "failed" : "running";
 			if (!isWaitingStatus(snapshot.status)) {
 				snapshot.status = itemStatus === "failed" ? "failed" : "running";
-				snapshot.headline = "Reconnecting to model";
+				snapshot.headline = itemStatus === "failed" ? "请求恢复失败" : "正在恢复请求";
 			}
 			snapshot.summary = formatRuntimeTransportDetail(event);
 			setStageStatus(snapshot, "reasoning", itemStatus);
@@ -529,6 +561,37 @@ function applyRuntimeProgress(
 		default:
 			break;
 	}
+}
+
+function projectIntake(
+	snapshot: AgentTrajectorySnapshot,
+	intake: ProjectableIntake,
+	id: string,
+	completed: boolean,
+): void {
+	const statement = safeText(intake.statement);
+	if (!statement) {
+		return;
+	}
+	snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
+	snapshot.headline = statement;
+	snapshot.summary = statement;
+	upsertItem(snapshot, "context", {
+		id,
+		kind: "intake",
+		title: statement,
+		detail: statement,
+		status: completed ? "ok" : "running",
+		at: intake.at,
+		rawEventType: "intake_decision",
+	});
+}
+
+function projectPlan(
+	snapshot: AgentTrajectorySnapshot,
+	plan: ProjectablePlan,
+): void {
+	snapshot.plan = clonePlanState(plan.state);
 }
 
 function findLatestFailedToolItem(snapshot: AgentTrajectorySnapshot): AgentTrajectoryItem | null {
@@ -895,10 +958,12 @@ function buildReplayFailure(
 
 function stageForKind(kind: AgentTrajectoryItemKind): AgentTrajectoryStage["key"] {
 	switch (kind) {
+		case "intake":
 		case "narration":
 		case "context":
 		case "task":
 			return "context";
+		case "plan":
 		case "model":
 		case "reasoning":
 		case "transport":
@@ -946,6 +1011,26 @@ function formatNarrationDetail(narration: ProjectableNarration): string {
 		return safeText([narration.justDone, narration.next].filter(Boolean).join("，"));
 	}
 	return safeText(narration.summary);
+}
+
+function clonePlanState(state: PlanState): AgentTrajectoryPlanState {
+	return {
+		planId: state.planId,
+		visibility: state.visibility,
+		status: state.status,
+		...(state.currentTaskId ? { currentTaskId: state.currentTaskId } : {}),
+		tasks: state.tasks.map((task) => ({
+			id: task.id,
+			title: task.title,
+			status: task.status,
+			...(task.summary ? { summary: task.summary } : {}),
+			...(task.startedAt ? { startedAt: task.startedAt } : {}),
+			...(task.completedAt ? { completedAt: task.completedAt } : {}),
+		})),
+		...(state.createdAt ? { createdAt: state.createdAt } : {}),
+		...(state.updatedAt ? { updatedAt: state.updatedAt } : {}),
+		...(state.completedAt ? { completedAt: state.completedAt } : {}),
+	};
 }
 
 function mapNarrationStatus(
@@ -1013,23 +1098,26 @@ function formatRuntimeTransportDetail(event: RuntimeProgressEvent): string {
 	if (!transport) {
 		return safeText(event.message);
 	}
-	const parts = [
-		event.message,
-		`attempt ${transport.attempt}/${transport.maxAttempts}`,
-		transport.delayMs !== undefined ? `backoff ${transport.delayMs}ms` : "",
-		transport.httpStatus !== undefined ? `HTTP ${transport.httpStatus}` : "",
-	].filter((part) => part.length > 0);
-	return safeText(parts.join("; "));
+	if (transport.type === "request_exhausted") {
+		return "请求多次未成功，请稍后重试。";
+	}
+	return formatRecoveryAttempt(transport.attempt, transport.maxAttempts);
 }
 
 function formatReplayTransportDetail(transport: TurnReplaySummary["transportTimeline"][number]): string {
-	const parts = [
-		transport.message,
-		`attempt ${transport.attempt}/${transport.maxAttempts}`,
-		transport.delayMs !== undefined ? `backoff ${transport.delayMs}ms` : "",
-		transport.httpStatus !== undefined ? `HTTP ${transport.httpStatus}` : "",
-	].filter((part) => part.length > 0);
-	return safeText(parts.join("; "));
+	if (transport.type === "request_exhausted") {
+		return "请求多次未成功，请稍后重试。";
+	}
+	return formatRecoveryAttempt(transport.attempt, transport.maxAttempts);
+}
+
+function isVisibleTransportEvent(type: string | undefined): boolean {
+	return type === "retry_scheduled" || type === "retry_started" || type === "request_exhausted";
+}
+
+function formatRecoveryAttempt(attempt: number, maxAttempts: number): string {
+	const displayMax = Math.max(1, maxAttempts - 1);
+	return `网络波动，正在恢复请求（第 ${attempt}/${displayMax} 次）`;
 }
 
 function isWaitingStatus(status: AgentTrajectoryStatus): boolean {

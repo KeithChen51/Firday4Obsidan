@@ -35,6 +35,14 @@ export class AgentReplayRecorder {
 		switch (event.type) {
 			case "turn_started":
 				return [this.replayEvent(event, "turn_started", payload)];
+			case "intake_decision":
+				return [this.replayEvent(event, "intake_decision", payload)];
+			case "plan_create":
+			case "plan_update":
+			case "plan_revise":
+			case "plan_complete":
+			case "plan_skip":
+				return [this.replayEvent(event, event.type, payload)];
 			case "narration":
 				return [this.replayEvent(event, "narration_report", payload)];
 			case "context_compacted":

@@ -61,6 +61,10 @@ type AgentProcessStepKey =
 	| "failure"
 	| "internal";
 
+const USER_VISIBLE_RETRY_LIMIT = 5;
+const RETRY_RECOVERY_COPY_PREFIX = "网络波动，正在恢复请求";
+const REQUEST_EXHAUSTED_COPY = "请求多次未成功，请稍后重试。";
+
 export interface AgentProcessStatusView {
 	key: AgentTrajectoryStatus;
 	label: string;
@@ -206,6 +210,24 @@ export interface AgentProcessTimelineView {
 	diffSummary: AgentProcessDiffSummaryView | null;
 }
 
+export interface AgentComposerTaskBarTaskView {
+	id: string;
+	index: number;
+	title: string;
+	status: "pending" | "in_progress" | "completed" | "skipped" | "failed";
+}
+
+export interface AgentComposerTaskBarView {
+	collapsed: {
+		statusLabel: string;
+		stepLabel: string;
+		taskTitle: string;
+		elapsed: string;
+	};
+	expandedTasks: AgentComposerTaskBarTaskView[];
+	actionSlot: null;
+}
+
 export interface AgentProcessStepActionView {
 	id: string;
 	label: string;
@@ -255,6 +277,7 @@ export interface AgentProcessPanelViewModel {
 		summary: string;
 	};
 	timeline: AgentProcessTimelineView | null;
+	composerTaskBar: AgentComposerTaskBarView | null;
 	visibleSteps: AgentProcessStepView[];
 	evidence: AgentProcessEvidenceView[];
 	mutations: AgentProcessMutationView[];
@@ -306,6 +329,10 @@ export function buildAgentProcessPanelViewModel(
 		diffSummary,
 		recovery,
 	});
+	const composerTaskBarDurationSeconds = snapshot.status === "running"
+		? durationSeconds
+		: calculateRecordedDurationSeconds(snapshot, durationSeconds);
+	const composerTaskBar = buildComposerTaskBar(snapshot, composerTaskBarDurationSeconds);
 
 	return {
 		mode,
@@ -323,6 +350,7 @@ export function buildAgentProcessPanelViewModel(
 			summary: headerSummary(snapshot, visibleSteps),
 		},
 		timeline,
+		composerTaskBar,
 		visibleSteps,
 		evidence,
 		mutations,
@@ -357,6 +385,7 @@ function createEmptyViewModel(): AgentProcessPanelViewModel {
 			summary: "",
 		},
 		timeline: null,
+		composerTaskBar: null,
 		visibleSteps: [],
 		evidence: [],
 		mutations: [],
@@ -387,7 +416,7 @@ function isLifecycleOnlyItem(item: AgentTrajectoryItem): boolean {
 }
 
 function isRenderableTrajectoryItem(item: AgentTrajectoryItem): boolean {
-	return !isLifecycleOnlyItem(item);
+	return !isLifecycleOnlyItem(item) && !(item.kind === "plan" && item.rawEventType === "plan_create");
 }
 
 function resolveSurface(
@@ -477,7 +506,7 @@ function buildStatus(
 
 function statusTone(status: AgentTrajectoryStatus, visibleSteps: AgentProcessStepView[]): AgentProcessTone {
 	const currentStep = visibleSteps.at(-1);
-	if (currentStep?.title === "重新连接模型" && currentStep.status !== "failed") {
+	if (currentStep?.title === "恢复请求" && currentStep.status !== "failed") {
 		return "reconnecting";
 	}
 	switch (status) {
@@ -501,7 +530,7 @@ function statusTone(status: AgentTrajectoryStatus, visibleSteps: AgentProcessSte
 
 function statusLabel(status: AgentTrajectoryStatus, tone: AgentProcessTone): string {
 	if (tone === "reconnecting") {
-		return "Reconnecting";
+		return "恢复中";
 	}
 	switch (status) {
 		case "waiting_for_approval":
@@ -550,7 +579,15 @@ function headerSummary(snapshot: AgentTrajectorySnapshot, visibleSteps: AgentPro
 		const waitingStep = visibleSteps.find((step) => step.status === "waiting_for_approval");
 		return shortText(waitingStep?.summary || "文件改动待审核。");
 	}
-	return shortText(snapshot.summary || visibleSteps.at(-1)?.summary || "");
+	const latestTransportStep = [...visibleSteps].reverse().find((step) => step.id.includes(":transport:"));
+	if (latestTransportStep) {
+		return retryTimelineSummaryForStep(latestTransportStep);
+	}
+	const summary = snapshot.summary || visibleSteps.at(-1)?.summary || "";
+	if (snapshot.status === "failed") {
+		return shortText(sanitizeFailedRequestSummary(summary));
+	}
+	return shortText(summary);
 }
 
 interface TimelineBuildContext {
@@ -589,7 +626,7 @@ function buildTimelineView(
 			diffSummary: context.diffSummary,
 		};
 	}
-	const items = buildTimelineItems(snapshot, context);
+	const items = compactRepeatedContextTimelineItems(buildTimelineItems(snapshot, context));
 	const actions = buildTimelineActions(context.actions, status);
 	const groups = buildTimelineGroups(items, status);
 	return {
@@ -605,6 +642,54 @@ function buildTimelineView(
 		finalArtifacts: context.resultArtifacts,
 		diffSummary: context.diffSummary,
 	};
+}
+
+function buildComposerTaskBar(
+	snapshot: AgentTrajectorySnapshot,
+	durationSeconds: number,
+): AgentComposerTaskBarView | null {
+	const plan = snapshot.plan;
+	if (!plan || plan.visibility !== "task_bar" || plan.tasks.length === 0) {
+		return null;
+	}
+	const currentTask = plan.tasks.find((task) => task.id === plan.currentTaskId) ??
+		plan.tasks.find((task) => task.status === "in_progress") ??
+		plan.tasks.at(-1);
+	if (!currentTask) {
+		return null;
+	}
+	const currentIndex = Math.max(1, plan.tasks.findIndex((task) => task.id === currentTask.id) + 1);
+	return {
+		collapsed: {
+			statusLabel: composerTaskBarStatusLabel(snapshot.status, plan.status),
+			stepLabel: `${currentIndex}/${plan.tasks.length}`,
+			taskTitle: currentTask.title,
+			elapsed: formatDuration(durationSeconds),
+		},
+		expandedTasks: plan.tasks.map((task, index) => ({
+			id: task.id,
+			index: index + 1,
+			title: task.title,
+			status: task.status,
+		})),
+		actionSlot: null,
+	};
+}
+
+function composerTaskBarStatusLabel(
+	snapshotStatus: AgentTrajectoryStatus,
+	planStatus: NonNullable<AgentTrajectorySnapshot["plan"]>["status"],
+): string {
+	if (snapshotStatus === "failed" || planStatus === "failed") {
+		return "运行异常";
+	}
+	if (snapshotStatus === "completed" || planStatus === "completed") {
+		return "已完成";
+	}
+	if (snapshotStatus === "cancelled") {
+		return "已取消";
+	}
+	return "正在执行";
 }
 
 function hasRecoverableToolWarning(snapshot: AgentTrajectorySnapshot): boolean {
@@ -650,7 +735,7 @@ function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: numb
 		case "waiting":
 			return "等待确认";
 		case "retrying":
-			return `正在重试 ${duration}`;
+			return `正在恢复请求 ${duration}`;
 		case "failed":
 			return "运行遇到问题";
 		case "running":
@@ -672,7 +757,7 @@ function collapsedTimelineSummary(
 		return "FRIDAY 准备修改文件，需要你确认后继续。";
 	}
 	if (status === "retrying") {
-		return "模型连接不稳定，正在恢复。";
+		return retrySummaryFromItems(items);
 	}
 	if (status === "recovering") {
 		return "执行遇到问题，正在换一种方式继续。";
@@ -688,6 +773,11 @@ function collapsedTimelineSummary(
 		return "完成：本次工作已结束。";
 	}
 	return sanitizeTimelineSummary(items.find((item) => item.status === "running")?.summary || snapshot.summary || items.at(-1)?.summary || "");
+}
+
+function retrySummaryFromItems(items: AgentProcessTimelineItemView[]): string {
+	const retryItem = [...items].reverse().find((item) => item.kind === "retry");
+	return retryItem?.summary || "网络波动，正在恢复请求（第 1/5 次）";
 }
 
 function buildTimelineItems(
@@ -789,6 +879,9 @@ function buildTimelineStatusBar(
 function timelineGroupIdForItem(item: AgentProcessTimelineItemView): string {
 	switch (item.kind) {
 		case "receipt":
+			if (isIntakeReceiptTimelineItem(item)) {
+				return "intake";
+			}
 			return "receipt";
 		case "plan":
 		case "reasoning":
@@ -807,6 +900,8 @@ function timelineGroupIdForItem(item: AgentProcessTimelineItemView): string {
 
 function timelineGroupTitle(id: string): string {
 	switch (id) {
+		case "intake":
+			return "";
 		case "receipt":
 			return "收到任务";
 		case "plan":
@@ -842,8 +937,15 @@ function timelineGroupStatus(items: AgentProcessTimelineItemView[]): AgentProces
 }
 
 function timelineGroupSummary(items: AgentProcessTimelineItemView[]): string {
+	if (items.length > 0 && items.every(isIntakeReceiptTimelineItem)) {
+		return "";
+	}
 	const activeItem = items.find((item) => item.status === "running" || item.status === "waiting") ?? items.at(-1);
 	return activeItem?.summary || activeItem?.title || "";
+}
+
+function isIntakeReceiptTimelineItem(item: AgentProcessTimelineItemView): boolean {
+	return item.kind === "receipt" && item.summary === "" && item.title !== "收到任务";
 }
 
 function shouldAddReceiptItem(context: TimelineBuildContext): boolean {
@@ -884,6 +986,7 @@ function timelineItemFromStep(
 		.filter((action) => action.kind === "control" && action.action)
 		.map((action) => action.action?.id)
 		.filter((value): value is AgentTrajectoryAction["id"] => Boolean(value));
+	const artifactRefs = step.fileRefs.map((file) => file.path);
 	return {
 		id: `timeline:${step.id}`,
 		kind,
@@ -892,6 +995,7 @@ function timelineItemFromStep(
 		summary,
 		...(meta ? { meta } : {}),
 		...(detail ? { detail } : {}),
+		...(artifactRefs.length > 0 ? { artifactRefs } : {}),
 		...(actionRefs.length > 0 ? { actionRefs } : {}),
 	};
 }
@@ -927,6 +1031,11 @@ function timelineKindForStep(step: AgentProcessStepView): AgentProcessTimelineIt
 	return "tool_batch";
 }
 
+function isIntakeReceiptStep(step: AgentProcessStepView): boolean {
+	return step.id.includes(":receipt:") &&
+		(step.id.includes(":intake") || step.actions.some((action) => action.rawEventType === "intake_decision"));
+}
+
 function timelineStatusForStep(
 	status: AgentProcessStepStatus,
 	kind: AgentProcessTimelineItemKind,
@@ -957,11 +1066,12 @@ function timelineTitleForStep(
 	step: AgentProcessStepView,
 	kind: AgentProcessTimelineItemKind,
 ): string {
+	if (kind === "receipt") {
+		return step.title || "收到任务";
+	}
 	switch (kind) {
 		case "context":
 			return "读取项目现状";
-		case "receipt":
-			return "收到任务";
 		case "plan":
 			return "整理方案";
 		case "stage_report":
@@ -973,7 +1083,7 @@ function timelineTitleForStep(
 		case "approval":
 			return "等待确认";
 		case "retry":
-			return "处理连接重试";
+			return "恢复请求";
 		case "blocked":
 			return step.status === "retryable" ? "遇到可恢复问题" : "运行遇到问题";
 		default:
@@ -994,7 +1104,7 @@ function timelineSummaryForStep(
 			: "FRIDAY 准备修改文件，需要你确认后继续。";
 	}
 	if (kind === "retry") {
-		return status === "running" ? "模型连接不稳定，正在恢复。" : "模型连接出现波动，已记录恢复过程。";
+		return retryTimelineSummaryForStep(step);
 	}
 	if (kind === "context") {
 		const fileCount = step.fileRefs.length;
@@ -1003,7 +1113,13 @@ function timelineSummaryForStep(
 		}
 		return sanitizeTimelineSummary(step.summary || "已读取项目上下文。");
 	}
-	if (kind === "receipt" || kind === "plan" || kind === "stage_report") {
+	if (kind === "receipt") {
+		const summary = sanitizeTimelineSummary(step.summary);
+		return isIntakeReceiptStep(step) && normalizeTimelineDedupeText(step.title) === normalizeTimelineDedupeText(summary)
+			? ""
+			: summary;
+	}
+	if (kind === "plan" || kind === "stage_report") {
 		return sanitizeTimelineSummary(step.summary);
 	}
 	if (kind === "reasoning") {
@@ -1047,11 +1163,11 @@ function timelineMetaForStep(step: AgentProcessStepView, kind: AgentProcessTimel
 }
 
 function retryAttemptMeta(value: string): string {
-	const match = value.match(/attempt\s+(\d+)\s*\/\s*(\d+)/i) ?? value.match(/第\s*(\d+)\s*\/\s*(\d+)\s*次/);
-	if (!match) {
+	const attempt = parseRetryAttempt(value);
+	if (!attempt) {
 		return "";
 	}
-	return `第 ${match[1]}/${match[2]} 次重试`;
+	return `第 ${attempt}/${USER_VISIBLE_RETRY_LIMIT} 次`;
 }
 
 function timelineDetailForStep(
@@ -1092,7 +1208,7 @@ function timelineDetailForStep(
 
 function sanitizeTimelineDetail(value: string, kind: AgentProcessTimelineItemKind): string {
 	if (kind === "retry") {
-		return retryAttemptMeta(value) || "连接恢复记录。";
+		return retryRecoverySummary(value);
 	}
 	if (/Context package built before|context_ready/i.test(value)) {
 		return "";
@@ -1120,8 +1236,95 @@ function sanitizeTimelineSummary(value: string): string {
 	if (/task failed/i.test(text)) {
 		return "运行遇到问题。";
 	}
+	if (isRequestExhaustedText(text)) {
+		return REQUEST_EXHAUSTED_COPY;
+	}
 	if (/HTTP\s+\d+|status\s+\d+|backoff|request id|gateway|transport/i.test(text)) {
-		return "模型连接不稳定，正在恢复。";
+		return REQUEST_EXHAUSTED_COPY;
+	}
+	return text;
+}
+
+function retryTimelineSummaryForStep(step: AgentProcessStepView): string {
+	const event = retryEventFromStep(step);
+	const rawText = retryRawTextForStep(step);
+	if (event === "request_exhausted" || step.status === "failed" || isRequestExhaustedText(rawText)) {
+		return REQUEST_EXHAUSTED_COPY;
+	}
+	if (event === "retry_scheduled" || event === "retry_started" || isRetryRecoveryText(rawText)) {
+		return retryRecoverySummary(rawText);
+	}
+	return retryRecoverySummary(step.summary);
+}
+
+function transportSummaryForItems(items: AgentTrajectoryItem[]): string {
+	const event = transportEventFromItems(items);
+	const rawText = items.map((item) => `${item.detail || ""} ${item.title || ""}`).join(" ");
+	if (event === "request_exhausted" || items.some((item) => item.status === "failed") || isRequestExhaustedText(rawText)) {
+		return REQUEST_EXHAUSTED_COPY;
+	}
+	if (event === "retry_scheduled" || event === "retry_started" || isRetryRecoveryText(rawText)) {
+		return retryRecoverySummary(rawText);
+	}
+	return sanitizeTimelineSummary(firstMeaningfulDetail(items));
+}
+
+function transportEventFromItems(items: AgentTrajectoryItem[]): string {
+	return [...items].reverse().find((item) =>
+		item.rawEventType === "retry_scheduled" ||
+		item.rawEventType === "retry_started" ||
+		item.rawEventType === "request_exhausted"
+	)?.rawEventType || "";
+}
+
+function retryEventFromStep(step: AgentProcessStepView): string {
+	return step.actions.find((action) =>
+		action.rawEventType === "retry_scheduled" ||
+		action.rawEventType === "retry_started" ||
+		action.rawEventType === "request_exhausted"
+	)?.rawEventType || "";
+}
+
+function retryRawTextForStep(step: AgentProcessStepView): string {
+	return [
+		step.summary,
+		...step.actions.map((action) => `${action.detail} ${action.label}`),
+	].join(" ");
+}
+
+function retryRecoverySummary(value: string): string {
+	const attempt = parseRetryAttempt(value) || 1;
+	return `${RETRY_RECOVERY_COPY_PREFIX}（第 ${attempt}/${USER_VISIBLE_RETRY_LIMIT} 次）`;
+}
+
+function parseRetryAttempt(value: string): number | null {
+	const text = cleanText(value);
+	const match = text.match(/attempt\s+(\d+)\s*\/\s*\d+/i) ??
+		text.match(/第\s*(\d+)\s*\/\s*\d+\s*次/) ??
+		text.match(/第\s*(\d+)\s*次/);
+	if (!match) {
+		return null;
+	}
+	const attempt = Number.parseInt(match[1] || "", 10);
+	if (!Number.isFinite(attempt)) {
+		return null;
+	}
+	return Math.min(USER_VISIBLE_RETRY_LIMIT, Math.max(1, attempt));
+}
+
+function isRetryRecoveryText(value: string): boolean {
+	return /attempt\s+\d+\s*\/\s*\d+|第\s*\d+\s*\/\s*\d+\s*次|backoff|retry_scheduled|retry_started/i.test(value) ||
+		(value.includes("模型连接") && value.includes("不稳定"));
+}
+
+function isRequestExhaustedText(value: string): boolean {
+	return /request[_\s-]*exhausted|max(?:imum)? retries exhausted|exhausted retries|after attempt\s+\d+\s*\/\s*\d+/i.test(value);
+}
+
+function sanitizeFailedRequestSummary(value: string): string {
+	const text = cleanText(value);
+	if (isRequestExhaustedText(text) || /HTTP\s+\d+|status\s+\d+|backoff|request id|gateway|transport/i.test(text)) {
+		return REQUEST_EXHAUSTED_COPY;
 	}
 	return text;
 }
@@ -1132,6 +1335,96 @@ function normalizeTimelineDedupeText(value: string): string {
 		.toLowerCase()
 		.replace(/[。.!?]+$/g, "")
 		.replace(/\s+/g, " ");
+}
+
+function compactRepeatedContextTimelineItems(
+	items: AgentProcessTimelineItemView[],
+): AgentProcessTimelineItemView[] {
+	const compacted: AgentProcessTimelineItemView[] = [];
+	let activeContext: AgentProcessTimelineItemView | null = null;
+	let activeBatches = 0;
+	let activeCommands = 0;
+	for (const item of items) {
+		if (item.kind === "context") {
+			const commandCount = contextCommandCount(item);
+			if (!activeContext) {
+				activeContext = { ...item };
+				activeBatches = 1;
+				activeCommands = commandCount;
+				compacted.push(activeContext);
+				continue;
+			}
+			activeBatches += 1;
+			activeCommands += commandCount;
+			mergeContextTimelineItem(activeContext, item, activeBatches, activeCommands);
+			continue;
+		}
+		compacted.push(item);
+		activeContext = null;
+		activeBatches = 0;
+		activeCommands = 0;
+	}
+	return compacted;
+}
+
+function mergeContextTimelineItem(
+	target: AgentProcessTimelineItemView,
+	item: AgentProcessTimelineItemView,
+	batches: number,
+	commands: number,
+): void {
+	target.status = mergeTimelineStatus(target.status, item.status);
+	target.summary = `已合并 ${batches} 批项目现状读取。`;
+	target.meta = commands > 0 ? `已运行 ${commands} 条命令` : `${batches} 批`;
+	target.artifactRefs = mergeUnique([...(target.artifactRefs ?? []), ...(item.artifactRefs ?? [])]);
+	target.actionRefs = mergeUnique([...(target.actionRefs ?? []), ...(item.actionRefs ?? [])]);
+	target.detail = mergeTimelineDetails(target.detail, item.detail);
+}
+
+function contextCommandCount(item: AgentProcessTimelineItemView): number {
+	const match = item.meta?.match(/\d+/);
+	if (match) {
+		return Number(match[0]);
+	}
+	return 1;
+}
+
+function mergeTimelineStatus(
+	current: AgentProcessTimelineItemStatus,
+	next: AgentProcessTimelineItemStatus,
+): AgentProcessTimelineItemStatus {
+	if (current === "error" || next === "error") {
+		return "error";
+	}
+	if (current === "waiting" || next === "waiting") {
+		return "waiting";
+	}
+	if (current === "running" || next === "running") {
+		return "running";
+	}
+	if (current === "warning" || next === "warning") {
+		return "warning";
+	}
+	return current === "done" || next === "done" ? "done" : "pending";
+}
+
+function mergeTimelineDetails(
+	current: AgentProcessTimelineDetailView | undefined,
+	next: AgentProcessTimelineDetailView | undefined,
+): AgentProcessTimelineDetailView | undefined {
+	const lines = mergeUnique([...(current?.lines ?? []), ...(next?.lines ?? [])].filter(Boolean));
+	if (lines.length === 0) {
+		return current ?? next;
+	}
+	return {
+		title: current?.title ?? next?.title,
+		lines,
+		initiallyExpanded: Boolean(current?.initiallyExpanded || next?.initiallyExpanded),
+	};
+}
+
+function mergeUnique(values: string[]): string[] {
+	return [...new Set(values.filter(Boolean))];
 }
 
 function buildTimelineActions(
@@ -1162,7 +1455,7 @@ function buildVisibleSteps(
 	if (!hasVisibleProcessTrigger(snapshot, visibleItems)) {
 		return [];
 	}
-	const items = enrichItemsFromSnapshot(snapshot, visibleItems);
+	const items = coalesceReceiptItems(enrichItemsFromSnapshot(snapshot, visibleItems));
 	const builders: StepBuilder[] = [];
 	for (const item of items) {
 		if (item.kind === "final") {
@@ -1190,6 +1483,28 @@ function buildVisibleSteps(
 		.filter((step) => step.actions.length > 0 || step.fileRefs.length > 0 || step.status !== "completed");
 }
 
+function coalesceReceiptItems(items: AgentTrajectoryItem[]): AgentTrajectoryItem[] {
+	const hasIntake = items.some((item) => item.kind === "intake");
+	if (!hasIntake) {
+		return items;
+	}
+	let keptIntake = false;
+	return items.filter((item) => {
+		if (item.kind === "intake") {
+			if (keptIntake) {
+				return false;
+			}
+			keptIntake = true;
+			return true;
+		}
+		return !isTaskAcknowledgementItem(item);
+	});
+}
+
+function isTaskAcknowledgementItem(item: AgentTrajectoryItem): boolean {
+	return item.kind === "narration" && item.narrationKind === "task_acknowledged";
+}
+
 function hasVisibleProcessTrigger(
 	snapshot: AgentTrajectorySnapshot,
 	visibleItems: AgentTrajectoryItem[],
@@ -1198,6 +1513,7 @@ function hasVisibleProcessTrigger(
 		return true;
 	}
 	return visibleItems.some((item) =>
+		item.kind === "intake" ||
 		item.kind === "context" ||
 		item.kind === "reasoning" ||
 		item.kind === "narration" ||
@@ -1325,6 +1641,9 @@ function failureToItem(snapshot: AgentTrajectorySnapshot): AgentTrajectoryItem {
 }
 
 function semanticStepKey(item: AgentTrajectoryItem): AgentProcessStepKey {
+	if (item.kind === "intake") {
+		return "receipt";
+	}
 	if (item.kind === "narration") {
 		if (item.narrationKind === "task_acknowledged") {
 			return "receipt";
@@ -1432,6 +1751,9 @@ function deriveStepStatus(
 }
 
 function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): string {
+	if (builder.key === "receipt" && builder.items.some((item) => item.kind === "intake")) {
+		return firstMeaningfulDetail(builder.items) || "FRIDAY 正在理解你的请求";
+	}
 	switch (builder.key) {
 		case "receipt":
 			return "收到任务";
@@ -1448,7 +1770,7 @@ function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): str
 		case "approval":
 			return "等待确认文件修改";
 		case "transport":
-			return "重新连接模型";
+			return "恢复请求";
 		case "failure":
 			return status === "retryable" ? "运行遇到问题，可重试" : "运行遇到问题";
 		default:
@@ -1472,7 +1794,7 @@ function summaryForStep(
 		return firstMeaningfulDetail(builder.items);
 	}
 	if (builder.key === "transport") {
-		return firstMeaningfulDetail(builder.items);
+		return transportSummaryForItems(builder.items);
 	}
 	if (builder.key === "receipt" || builder.key === "plan" || builder.key === "stage_report") {
 		return firstMeaningfulDetail(builder.items);
@@ -1577,7 +1899,9 @@ function ensureChangeApprovalControls(
 function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionView {
 	const narrationDetail = item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
 		? item.narrationPlan.join("\n")
-		: cleanText(item.detail);
+		: item.kind === "transport"
+			? transportSummaryForItems([item])
+			: cleanText(item.detail);
 	return {
 		id: item.id,
 		label: item.title,
@@ -1817,6 +2141,22 @@ function calculateDurationSeconds(
 		return 0;
 	}
 	return Math.max(0, Math.round((Math.max(...timestamps) - Math.min(...timestamps)) / 1000));
+}
+
+function calculateRecordedDurationSeconds(
+	snapshot: AgentTrajectorySnapshot,
+	fallbackSeconds: number,
+): number {
+	const time = snapshot.time ?? {};
+	if (typeof time.durationMs === "number") {
+		return Math.max(0, Math.round(time.durationMs / 1000));
+	}
+	const startedMs = time.startedAt ? Date.parse(time.startedAt) : NaN;
+	const endedMs = time.completedAt || time.updatedAt ? Date.parse(time.completedAt ?? time.updatedAt ?? "") : NaN;
+	if (Number.isFinite(startedMs) && Number.isFinite(endedMs)) {
+		return Math.max(0, Math.round((endedMs - startedMs) / 1000));
+	}
+	return fallbackSeconds;
 }
 
 function formatDuration(seconds: number): string {
