@@ -1625,10 +1625,21 @@ export class DailyBoardView extends ItemView {
 			snapshot.plan?.status === "completed";
 	}
 
+	private isCurrentSessionEditPlan(plan: EditPlanRecord): boolean {
+		const currentSessionId = this.aiSessionId.trim();
+		const originConversationId = plan.originConversationId?.trim();
+		return Boolean(currentSessionId && originConversationId && originConversationId === currentSessionId);
+	}
+
 	private getPendingEditPlans(): EditPlanRecord[] {
 		return this.plugin.workbenchStateStore
 			.getEditPlans()
-			.filter((plan) => plan.items.some((item) => item.status === "pending" || item.status === "conflicted"));
+			.filter((plan) => this.isCurrentSessionEditPlan(plan))
+			.map((plan) => ({
+				...plan,
+				items: plan.items.filter((item) => item.status === "pending"),
+			}))
+			.filter((plan) => plan.items.length > 0);
 	}
 
 	private hasPendingComposerDecision(): boolean {

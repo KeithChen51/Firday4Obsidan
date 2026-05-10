@@ -282,6 +282,24 @@ test("mutation review uses pending-language buttons and notices", async () => {
 	assert.doesNotMatch(itemBlock, /"Reject"/);
 });
 
+test("composer mutation review only blocks on current-session pending edit plans", async () => {
+	const source = readViewSource();
+	const pendingMatch = source.match(/private getPendingEditPlans\(\): EditPlanRecord\[] \{([\s\S]*?)\n\t\}\n\n\tprivate hasPendingComposerDecision/);
+	assert.ok(pendingMatch, "getPendingEditPlans block should exist");
+	const pendingBlock = pendingMatch[1] ?? "";
+	const sessionMatch = source.match(/private isCurrentSessionEditPlan\(plan: EditPlanRecord\): boolean \{([\s\S]*?)\n\t\}\n\n\tprivate getPendingEditPlans/);
+	assert.ok(sessionMatch, "isCurrentSessionEditPlan block should exist");
+	const sessionBlock = sessionMatch[1] ?? "";
+
+	assert.match(pendingBlock, /filter\(\(plan\) => this\.isCurrentSessionEditPlan\(plan\)\)/);
+	assert.match(pendingBlock, /item\.status === "pending"/);
+	assert.match(pendingBlock, /items: plan\.items\.filter\(\(item\) => item\.status === "pending"\)/);
+	assert.doesNotMatch(pendingBlock, /item\.status === "conflicted"/);
+	assert.match(sessionBlock, /this\.aiSessionId\.trim\(\)/);
+	assert.match(sessionBlock, /plan\.originConversationId\?\.trim\(\)/);
+	assert.match(sessionBlock, /originConversationId === currentSessionId/);
+});
+
 test("sync actions stay on sync page instead of jumping to tools page", async () => {
 	const source = readViewSource();
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);
