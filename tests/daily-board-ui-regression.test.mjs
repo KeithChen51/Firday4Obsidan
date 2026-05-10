@@ -218,15 +218,24 @@ test("pending approvals occupy the composer body instead of only a transcript ca
 	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
 	assert.ok(renderMatch, "renderAiPage block should exist");
 	const renderBlock = renderMatch[1] ?? "";
+	const syncMatch = source.match(/private syncComposerDecisionPanel\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate syncAiComposerControls/);
+	assert.ok(syncMatch, "syncComposerDecisionPanel block should exist");
+	const syncBlock = syncMatch[1] ?? "";
+	const inputMatch = source.match(/private renderComposerInput\(parent: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderComposerDecisionPanel/);
+	assert.ok(inputMatch, "renderComposerInput block should exist");
+	const inputBlock = inputMatch[1] ?? "";
 	const composerIndex = renderBlock.indexOf('const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });');
-	const decisionIndex = renderBlock.indexOf("this.renderComposerDecisionPanel(composerEl");
-	const mentionComposerIndex = renderBlock.indexOf("this.composer = new MentionComposer");
+	const bodyHostIndex = renderBlock.indexOf("this.aiComposerBodyEl = composerEl;", composerIndex);
+	const decisionSyncIndex = renderBlock.indexOf("this.syncComposerDecisionPanel();", bodyHostIndex);
 	const toolbarIndex = renderBlock.indexOf('const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });');
 
 	assert.ok(composerIndex >= 0, "composer body should still be created");
-	assert.ok(decisionIndex > composerIndex, "approval decision panel should render inside the composer body");
-	assert.ok(mentionComposerIndex > decisionIndex, "normal composer should be the fallback after the decision branch");
-	assert.ok(toolbarIndex > mentionComposerIndex, "composer chrome should remain after the body branch");
+	assert.ok(bodyHostIndex > composerIndex, "composer body should be saved as the decision host");
+	assert.ok(decisionSyncIndex > bodyHostIndex, "approval decision panel sync should run against the composer body");
+	assert.ok(toolbarIndex > decisionSyncIndex, "composer chrome should remain after the body branch");
+	assert.match(syncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
+	assert.match(syncBlock, /this\.renderComposerInput\(this\.aiComposerBodyEl\)/);
+	assert.match(inputBlock, /this\.composer = new MentionComposer/);
 	assert.doesNotMatch(renderBlock, /this\.renderEditPlanReviewPanel\(chatShellEl\)/);
 });
 
@@ -235,8 +244,12 @@ test("composer approval body keeps model permission skill and context chrome ava
 	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
 	assert.ok(renderMatch, "renderAiPage block should exist");
 	const renderBlock = renderMatch[1] ?? "";
+	const syncMatch = source.match(/private syncComposerDecisionPanel\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate syncAiComposerControls/);
+	assert.ok(syncMatch, "syncComposerDecisionPanel block should exist");
+	const syncBlock = syncMatch[1] ?? "";
 
-	assert.match(renderBlock, /this\.renderComposerDecisionPanel\(composerEl/);
+	assert.match(renderBlock, /this\.syncComposerDecisionPanel\(\)/);
+	assert.match(syncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
 	assert.match(renderBlock, /const modelSelect = toolbarEl\.createEl\("select"/);
 	assert.match(renderBlock, /const permissionSelect = toolbarEl\.createEl\("select"/);
 	assert.match(renderBlock, /text: this\.t\("ai\.skill\.button", "\+Skill"\)/);

@@ -126,6 +126,23 @@ test("runtime progress refreshes an existing live process without rebuilding the
 	assert.match(progressBlock, /!terminalProgress && nextView\.shouldRenderProcessPanel && this\.syncLiveRuntimeProgressProcess\(\)/);
 });
 
+test("runtime progress syncs the composer decision panel when file review arrives", () => {
+	const source = readViewSource();
+	const liveShellBlock = extractMethod(source, "syncAiLiveChatShell", "syncAiRuntimeShell");
+	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
+	const composerSyncBlock = extractMethod(source, "syncComposerDecisionPanel", "syncAiComposerControls");
+
+	assert.match(source, /private aiComposerBodyEl: HTMLElement \| null = null/);
+	assert.match(liveShellBlock, /this\.syncComposerDecisionPanel\(\)/);
+	assert.match(progressRefreshBlock, /this\.syncComposerDecisionPanel\(\)/);
+	assert.match(composerSyncBlock, /this\.getPendingEditPlans\(\)/);
+	assert.match(composerSyncBlock, /this\.approvalQueue\.list\(\)/);
+	assert.match(composerSyncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
+	assert.match(composerSyncBlock, /this\.renderComposerInput\(this\.aiComposerBodyEl\)/);
+	assert.match(composerSyncBlock, /this\.composer\?\.destroy\(\)/);
+	assert.doesNotMatch(composerSyncBlock, /syncAiLiveChatShell\(|renderAiMessageList\(|renderBoard\(/);
+});
+
 test("streaming answer updates existing content without rebuilding the process shell", () => {
 	const source = readViewSource();
 	const streamContentBlock = extractMethod(source, "syncAiStreamingPreviewContent", "syncElementFromTemplate");

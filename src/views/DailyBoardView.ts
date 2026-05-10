@@ -165,6 +165,7 @@ export class DailyBoardView extends ItemView {
 	private aiProcessCollapsedKeys = new Set<string>();
 	private aiComposerTaskBarExpanded = false;
 	private aiComposerTaskBarHostEl: HTMLElement | null = null;
+	private aiComposerBodyEl: HTMLElement | null = null;
 	private aiAgentTasks: AgentTaskViewState[] = [];
 	private aiRuntimeElapsedTimer: number | null = null;
 	private aiMessageListScrollTop = 0;
@@ -178,6 +179,7 @@ export class DailyBoardView extends ItemView {
 	private aiSessionRenameId = "";
 	private aiSessionRenameDraft = "";
 	private composer: MentionComposer | null = null;
+	private aiComposerDecisionKey = "";
 	private aiMessageListEl: HTMLElement | null = null;
 	private aiQueueHintEl: HTMLElement | null = null;
 	private aiErrorEl: HTMLElement | null = null;
@@ -384,6 +386,8 @@ export class DailyBoardView extends ItemView {
 		this.aiQueueHintEl = null;
 		this.aiErrorEl = null;
 		this.aiComposerTaskBarHostEl = null;
+		this.aiComposerBodyEl = null;
+		this.aiComposerDecisionKey = "";
 		this.aiSendButtonEl = null;
 		this.aiModelSelectEl = null;
 		this.aiPermissionSelectEl = null;
@@ -1447,32 +1451,9 @@ export class DailyBoardView extends ItemView {
 		const taskBarHostEl = composerWrap.createDiv({ cls: "friday-ai-composer-task-bar-host" });
 		this.aiComposerTaskBarHostEl = taskBarHostEl;
 		const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });
+		this.aiComposerBodyEl = composerEl;
 		this.syncComposerTaskBar();
-		const pendingApprovals = this.approvalQueue.list();
-		const pendingEditPlans = this.getPendingEditPlans();
-		if (pendingApprovals.length > 0 || pendingEditPlans.length > 0) {
-			this.composer = null;
-			this.renderComposerDecisionPanel(composerEl, pendingApprovals, pendingEditPlans);
-		} else {
-			this.composer = new MentionComposer({
-				parent: composerEl,
-				placeholder: this.t(
-					"ai.input.placeholder.rich",
-					"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
-				),
-				initialSnapshot: this.getComposerSnapshot(),
-				disabled: false,
-				onChange: (snapshot) => {
-					this.aiComposerSnapshot = snapshot;
-					this.aiDraft = snapshot.text;
-					this.syncAiSendButtonState();
-				},
-				onSubmit: () => {
-					void this.submitAiPrompt();
-				},
-				getSuggestions: async (query) => this.buildComposerSuggestions(query),
-			});
-		}
+		this.syncComposerDecisionPanel();
 
 		const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });
 		const modelOptions = this.buildModelOptions(activeSoulDefinition);
@@ -1652,6 +1633,37 @@ export class DailyBoardView extends ItemView {
 
 	private hasPendingComposerDecision(): boolean {
 		return this.approvalQueue.list().length > 0 || this.getPendingEditPlans().length > 0;
+	}
+
+	private getComposerDecisionKey(pendingApprovals: PendingApproval[], pendingEditPlans: EditPlanRecord[]): string {
+		const approvalKey = pendingApprovals.map((item) => item.id).join("|");
+		const editPlanKey = pendingEditPlans.map((plan) => {
+			const itemKey = plan.items.map((item) => `${item.path}:${item.status}:${item.changeType}`).join(",");
+			return `${plan.id}:${itemKey}`;
+		}).join("|");
+		return `${approvalKey}::${editPlanKey}`;
+	}
+
+	private renderComposerInput(parent: HTMLElement): void {
+		this.composer?.destroy();
+		this.composer = new MentionComposer({
+			parent,
+			placeholder: this.t(
+				"ai.input.placeholder.rich",
+				"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
+			),
+			initialSnapshot: this.getComposerSnapshot(),
+			disabled: false,
+			onChange: (snapshot) => {
+				this.aiComposerSnapshot = snapshot;
+				this.aiDraft = snapshot.text;
+				this.syncAiSendButtonState();
+			},
+			onSubmit: () => {
+				void this.submitAiPrompt();
+			},
+			getSuggestions: async (query) => this.buildComposerSuggestions(query),
+		});
 	}
 
 	private renderComposerDecisionPanel(
@@ -3305,6 +3317,7 @@ export class DailyBoardView extends ItemView {
 		this.restoreAiMessageListScrollState(this.aiMessageListEl);
 		this.syncAiErrorRegion();
 		this.syncAiQueueHint();
+		this.syncComposerDecisionPanel();
 		this.syncAiComposerControls();
 		this.syncComposerTaskBar();
 	}
@@ -3362,6 +3375,38 @@ export class DailyBoardView extends ItemView {
 				text: this.t("ai.queue.badge", "待发送 {count}", { count: this.aiQueuedPrompts.length }),
 			});
 		}
+	}
+
+	private syncComposerDecisionPanel(): void {
+		if (this.activePage !== "chat" || !this.aiComposerBodyEl?.isConnected) {
+			return;
+		}
+		const pendingApprovals = this.approvalQueue.list();
+		const pendingEditPlans = this.getPendingEditPlans();
+		if (pendingApprovals.length > 0 || pendingEditPlans.length > 0) {
+			const nextDecisionKey = this.getComposerDecisionKey(pendingApprovals, pendingEditPlans);
+			if (
+				this.aiComposerDecisionKey === nextDecisionKey &&
+				this.aiComposerBodyEl.querySelector(".friday-composer-decision-panel")
+			) {
+				this.syncAiSendButtonState();
+				return;
+			}
+			this.aiComposerDecisionKey = nextDecisionKey;
+			this.composer?.destroy();
+			this.composer = null;
+			this.aiComposerBodyEl.empty();
+			this.renderComposerDecisionPanel(this.aiComposerBodyEl, pendingApprovals, pendingEditPlans);
+			this.syncAiSendButtonState();
+			return;
+		}
+
+		this.aiComposerDecisionKey = "";
+		if (!this.composer) {
+			this.aiComposerBodyEl.empty();
+			this.renderComposerInput(this.aiComposerBodyEl);
+		}
+		this.syncAiSendButtonState();
 	}
 
 	private syncAiComposerControls(): void {
@@ -4384,6 +4429,7 @@ export class DailyBoardView extends ItemView {
 		this.syncElementFromTemplate(processEl, nextProcessEl);
 		this.syncAiErrorRegion();
 		this.syncAiQueueHint();
+		this.syncComposerDecisionPanel();
 		this.syncAiComposerControls();
 		this.syncComposerTaskBar();
 		return true;
