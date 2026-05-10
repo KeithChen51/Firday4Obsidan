@@ -2914,12 +2914,26 @@ export class DailyBoardView extends ItemView {
 		setIcon(avatarEl, FRIDAY_ICON_ID);
 	}
 
+	private normalizeDisplayedAssistantMessageContent(content: string): string {
+		return content
+			.replace(
+				/Pending file changes:\s*(\d+)\s*change\(s\)\s*prepared but not applied\.\s*Review and apply or reject them in FRIDAY\./gi,
+				(_match, count: string) => `已准备好 ${count} 个待应用的文件修改，确认后才会写入 Obsidian。`,
+			)
+			.replace(/^Applied file creation:\s*(.+)$/gim, "已应用文件创建：$1")
+			.replace(/^Applied file (?:update|change):\s*(.+)$/gim, "已应用文件修改：$1")
+			.replace(/^Applied file deletion:\s*(.+)$/gim, "已应用文件删除：$1");
+	}
+
 	private renderAiMessageContent(containerEl: HTMLElement, message: ChatMessage): void {
 		if (message.role === "user" && message.uiMeta?.segments?.length) {
 			this.renderStructuredUserMessageBody(containerEl, message.uiMeta.segments);
 			return;
 		}
-		void MarkdownRenderer.renderMarkdown(message.content, containerEl, "", this);
+		const content = message.role === "assistant"
+			? this.normalizeDisplayedAssistantMessageContent(message.content)
+			: message.content;
+		void MarkdownRenderer.renderMarkdown(content, containerEl, "", this);
 	}
 
 	private isCurrentConversationId(conversationId?: string | null): boolean {
@@ -4257,17 +4271,127 @@ export class DailyBoardView extends ItemView {
 			if (now - this.aiRuntimeLastRenderAt >= 50) {
 				this.aiRuntimeLastRenderAt = now;
 				this.aiForceScrollToBottomOnce = true;
-				this.syncAiLiveChatShell();
+				if (!this.syncAiStreamingPreviewContent()) {
+					this.syncAiLiveChatShell();
+				}
 			}
 			// Yield to UI thread to present progressive text updates.
 			await this.sleep(delay);
 		}
 		this.aiForceScrollToBottomOnce = true;
-		this.syncAiLiveChatShell();
+		if (!this.syncAiStreamingPreviewContent()) {
+			this.syncAiLiveChatShell();
+		}
 	}
 
 	private sleep(ms: number): Promise<void> {
 		return new Promise((resolve) => window.setTimeout(resolve, ms));
+	}
+
+	private syncAiStreamingPreviewContent(): boolean {
+		if (this.activePage !== "chat" || !this.aiMessageListEl?.isConnected) {
+			return false;
+		}
+		const contentEl = this.aiMessageListEl.querySelector(".friday-ai-answer-content.is-streaming");
+		if (!(contentEl instanceof HTMLElement)) {
+			return false;
+		}
+		this.captureAiMessageListScrollState(this.aiMessageListEl);
+		contentEl.empty();
+		this.renderAiMessageContent(contentEl, {
+			role: "assistant",
+			content: this.aiStreamingPreview,
+		});
+		this.restoreAiMessageListScrollState(this.aiMessageListEl);
+		return true;
+	}
+
+	private syncElementFromTemplate(targetEl: Element, templateEl: Element): void {
+		for (const name of targetEl.getAttributeNames()) {
+			if (!templateEl.hasAttribute(name)) {
+				targetEl.removeAttribute(name);
+			}
+		}
+		for (const name of templateEl.getAttributeNames()) {
+			const value = templateEl.getAttribute(name);
+			if (value !== null) {
+				targetEl.setAttribute(name, value);
+			}
+		}
+		this.syncChildNodesFromTemplate(targetEl, templateEl);
+	}
+
+	private syncChildNodesFromTemplate(targetEl: Element, templateEl: Element): void {
+		const templateNodes = Array.from(templateEl.childNodes);
+		for (const [index, templateNode] of templateNodes.entries()) {
+			const targetNode = targetEl.childNodes.item(index);
+			if (!targetNode) {
+				targetEl.appendChild(templateNode);
+				continue;
+			}
+			if (!this.canSyncNodeFromTemplate(targetNode, templateNode)) {
+				targetNode.replaceWith(templateNode);
+				continue;
+			}
+			if (targetNode.nodeType === Node.TEXT_NODE && templateNode.nodeType === Node.TEXT_NODE) {
+				if (targetNode.nodeValue !== templateNode.nodeValue) {
+					targetNode.nodeValue = templateNode.nodeValue;
+				}
+				continue;
+			}
+			if (targetNode instanceof Element && templateNode instanceof Element) {
+				if (this.shouldReplaceElementFromTemplate(targetNode, templateNode)) {
+					targetNode.replaceWith(templateNode);
+					continue;
+				}
+				this.syncElementFromTemplate(targetNode, templateNode);
+			}
+		}
+		while (targetEl.childNodes.length > templateNodes.length) {
+			targetEl.lastChild?.remove();
+		}
+	}
+
+	private canSyncNodeFromTemplate(targetNode: Node, templateNode: Node): boolean {
+		if (targetNode.nodeType !== templateNode.nodeType) {
+			return false;
+		}
+		if (targetNode instanceof Element && templateNode instanceof Element) {
+			return targetNode.tagName === templateNode.tagName &&
+				targetNode.namespaceURI === templateNode.namespaceURI;
+		}
+		return targetNode.nodeType === Node.TEXT_NODE || targetNode.nodeType === Node.COMMENT_NODE;
+	}
+
+	private shouldReplaceElementFromTemplate(targetEl: Element, templateEl: Element): boolean {
+		const interactiveTags = new Set(["BUTTON", "A", "INPUT", "SELECT", "TEXTAREA"]);
+		return interactiveTags.has(targetEl.tagName) || interactiveTags.has(templateEl.tagName);
+	}
+
+	private syncLiveRuntimeProgressProcess(): boolean {
+		if (this.activePage !== "chat") {
+			this.syncBackgroundAgentStatus();
+			return true;
+		}
+		if (!this.aiMessageListEl?.isConnected || !this.aiRuntimeTrajectorySnapshot) {
+			return false;
+		}
+		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+		if (!(processEl instanceof HTMLElement)) {
+			return false;
+		}
+		const scratchEl = document.createElement("div");
+		this.renderTrajectoryCard(scratchEl, this.aiRuntimeTrajectorySnapshot, "live");
+		const nextProcessEl = scratchEl.querySelector(".friday-agent-process-shell.is-live");
+		if (!(nextProcessEl instanceof HTMLElement)) {
+			return false;
+		}
+		this.syncElementFromTemplate(processEl, nextProcessEl);
+		this.syncAiErrorRegion();
+		this.syncAiQueueHint();
+		this.syncAiComposerControls();
+		this.syncComposerTaskBar();
+		return true;
 	}
 
 	private syncLiveRuntimeElapsedProcess(): void {
@@ -4368,6 +4492,9 @@ export class DailyBoardView extends ItemView {
 		if (forceRender || now - this.aiRuntimeLastRenderAt >= 120) {
 			this.aiRuntimeLastRenderAt = now;
 			this.aiForceScrollToBottomOnce = true;
+			if (!terminalProgress && nextView.shouldRenderProcessPanel && this.syncLiveRuntimeProgressProcess()) {
+				return;
+			}
 			this.syncAiRuntimeShell();
 		}
 	}

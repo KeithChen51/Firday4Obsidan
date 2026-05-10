@@ -991,7 +991,7 @@ test("buildAgentProcessPanelViewModel exposes result artifacts and excludes pend
 		],
 		mutations: [
 			{ id: "pending", event: "planned", operation: "edit", targetPath: "Notes/Pending.md", status: "pending", summary: "Pending edit.", reason: "" },
-			{ id: "applied-md", event: "applied", operation: "edit", targetPath: "Notes/Updated.md", status: "applied", summary: "Updated note.", reason: "" },
+			{ id: "applied-md", event: "applied", operation: "edit", targetPath: "Notes/Updated.md", status: "applied", summary: "Applied file update: Notes/Updated.md", reason: "" },
 			{ id: "applied-canvas", event: "applied", operation: "write", targetPath: "Maps/Project.canvas", status: "applied", summary: "Updated canvas.", reason: "" },
 		],
 	}));
@@ -1007,6 +1007,8 @@ test("buildAgentProcessPanelViewModel exposes result artifacts and excludes pend
 	assert.equal(view.diffSummary?.changedFiles, 2);
 	assert.match(view.diffSummary?.summary ?? "", /2 个文件已修改/);
 	assert.doesNotMatch(JSON.stringify(view.resultArtifacts), /Pending|Reference/);
+	assert.doesNotMatch(JSON.stringify(view.diffSummary), /Applied file|file update/);
+	assert.match(JSON.stringify(view.diffSummary), /已应用文件修改/);
 	assert.ok(view.timeline);
 	assert.deepEqual(view.timeline.finalArtifacts.map((artifact) => artifact.path), [
 		"Notes/Updated.md",

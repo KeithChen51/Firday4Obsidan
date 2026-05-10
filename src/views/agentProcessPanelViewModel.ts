@@ -2176,8 +2176,8 @@ function buildMutations(snapshot: AgentTrajectorySnapshot): AgentProcessMutation
 		event: mutation.event,
 		operation: mutation.operation,
 		targetPath: mutation.targetPath,
-		summary: cleanText(mutation.summary),
-		reason: cleanText(mutation.reason),
+		summary: mutationDisplaySummary(mutation.summary),
+		reason: mutationDisplaySummary(mutation.reason),
 		tone: mutationTone(mutation.event),
 	}));
 }
@@ -2195,10 +2195,15 @@ function buildResultArtifacts(snapshot: AgentTrajectorySnapshot): AgentProcessAr
 			extension: extensionForPath(mutation.targetPath),
 			metadata: metadataForPath(mutation.targetPath),
 			status: artifactStatusForMutation(mutation),
-			summary: cleanText(mutation.summary || mutation.reason),
+			summary: mutationDisplaySummary(mutation.summary || mutation.reason),
 		});
 	}
 	return [...artifacts.values()];
+}
+
+function mutationDisplaySummary(value: string | undefined): string {
+	const text = cleanText(value);
+	return normalizeFileMutationStatusText(text) || text;
 }
 
 function buildDiffSummary(artifacts: AgentProcessArtifactView[]): AgentProcessDiffSummaryView | null {

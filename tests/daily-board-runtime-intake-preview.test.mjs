@@ -104,6 +104,42 @@ test("runtime elapsed refresh updates the live process in place without rebuildi
 	assert.doesNotMatch(refreshBlock, /containerEl\.empty\(\)|renderAiMessageList\(/);
 });
 
+test("runtime progress refreshes an existing live process without rebuilding the message list", () => {
+	const source = readViewSource();
+	const shellSyncBlock = extractMethod(source, "syncElementFromTemplate", "syncLiveRuntimeProgressProcess");
+	const childSyncBlock = extractMethod(source, "syncChildNodesFromTemplate", "canSyncNodeFromTemplate");
+	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
+	const progressBlock = extractMethod(source, "handleRuntimeProgress", "buildRuntimeReply");
+	const progressInPlaceIndex = progressBlock.indexOf("this.syncLiveRuntimeProgressProcess()");
+	const progressFallbackIndex = progressBlock.indexOf("this.syncAiRuntimeShell()", progressInPlaceIndex);
+
+	assert.match(shellSyncBlock, /syncChildNodesFromTemplate/);
+	assert.doesNotMatch(shellSyncBlock, /replaceChildren|containerEl\.empty\(\)|renderAiMessageList\(/);
+	assert.match(childSyncBlock, /appendChild\(templateNode\)/);
+	assert.match(childSyncBlock, /replaceWith\(templateNode\)/);
+	assert.doesNotMatch(childSyncBlock, /replaceChildren|containerEl\.empty\(\)|renderAiMessageList\(/);
+	assert.match(progressRefreshBlock, /querySelector\("\.friday-agent-process-shell\.is-live"\)/);
+	assert.match(progressRefreshBlock, /document\.createElement\("div"\)/);
+	assert.doesNotMatch(progressRefreshBlock, /containerEl\.empty\(\)|renderAiMessageList\(/);
+	assert.ok(progressInPlaceIndex >= 0, "runtime progress should attempt in-place live process refresh");
+	assert.ok(progressFallbackIndex > progressInPlaceIndex, "runtime progress should only rebuild after in-place refresh cannot handle the update");
+	assert.match(progressBlock, /!terminalProgress && nextView\.shouldRenderProcessPanel && this\.syncLiveRuntimeProgressProcess\(\)/);
+});
+
+test("streaming answer updates existing content without rebuilding the process shell", () => {
+	const source = readViewSource();
+	const streamContentBlock = extractMethod(source, "syncAiStreamingPreviewContent", "syncElementFromTemplate");
+	const streamBlock = extractMethod(source, "streamAssistantText", "sleep");
+	const streamingUpdateIndex = streamBlock.indexOf("this.syncAiStreamingPreviewContent()");
+	const streamingFallbackIndex = streamBlock.indexOf("this.syncAiLiveChatShell()", streamingUpdateIndex);
+
+	assert.match(streamContentBlock, /querySelector\("\.friday-ai-answer-content\.is-streaming"\)/);
+	assert.match(streamContentBlock, /this\.renderAiMessageContent/);
+	assert.doesNotMatch(streamContentBlock, /renderAiMessageList\(|friday-agent-process-shell/);
+	assert.ok(streamingUpdateIndex >= 0, "streaming should attempt content-only updates first");
+	assert.ok(streamingFallbackIndex > streamingUpdateIndex, "streaming should only rebuild when no streaming content exists yet");
+});
+
 test("runtime fallback reply does not expose internal diagnostics as assistant text", () => {
 	const source = readViewSource();
 	const replyBlock = extractMethod(source, "buildRuntimeReply", "buildSkillCatalogReply");
@@ -111,6 +147,19 @@ test("runtime fallback reply does not expose internal diagnostics as assistant t
 	assert.doesNotMatch(replyBlock, /Runtime profile|Step traces|Context budget|Context sources|工具执行记录/);
 	assert.doesNotMatch(replyBlock, /trace\.tool|result\.runtimeProfile|result\.stepTraces|result\.contextSummary/);
 	assert.match(replyBlock, /ai\.runtime\.fallback/);
+});
+
+test("assistant message rendering sanitizes legacy file mutation notices", () => {
+	const source = readViewSource();
+	const normalizeBlock = extractMethod(source, "normalizeDisplayedAssistantMessageContent", "renderAiMessageContent");
+	const renderContentBlock = extractMethod(source, "renderAiMessageContent", "isCurrentConversationId");
+
+	assert.match(renderContentBlock, /message\.role === "assistant"/);
+	assert.match(renderContentBlock, /normalizeDisplayedAssistantMessageContent/);
+	assert.match(normalizeBlock, /Pending file changes/);
+	assert.match(normalizeBlock, /确认后才会写入 Obsidian/);
+	assert.match(normalizeBlock, /Applied file/);
+	assert.doesNotMatch(renderContentBlock, /MarkdownRenderer\.renderMarkdown\(message\.content/);
 });
 
 test("rememberCompletedTrajectorySnapshot forces completed process strips collapsed", () => {
