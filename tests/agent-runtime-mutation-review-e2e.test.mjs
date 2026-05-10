@@ -39,7 +39,7 @@ test("standard review mode records a pending write mutation without changing the
 	assert.equal(result.pendingMutations[0].status, "pending");
 	assert.equal(result.pendingMutations[0].operation, "write");
 	assert.equal(result.pendingMutations[0].targetPath, "Project/workspace/a.md");
-	assert.equal(result.traces[0].summary, "Prepared file update for review: Project/workspace/a.md");
+	assert.equal(result.traces[0].summary, "已准备文件更新，确认后才会写入 Obsidian：Project/workspace/a.md");
 	assert.equal(result.turnEventSummary.mutations.planned, 1);
 	assert.equal(result.turnEventSummary.mutations.applied, 0);
 	assert.deepEqual(result.storedMutations.map((plan) => plan.id), [result.pendingMutations[0].planId]);
@@ -51,8 +51,8 @@ test("standard review mode records a pending write mutation without changing the
 	assert.equal(planned.payload.targetPath, "Project/workspace/a.md");
 	assert.equal(typeof planned.payload.beforeHash, "string");
 	assert.equal(typeof planned.payload.proposedHash, "string");
-	assert.equal(planned.payload.summary, "Prepared file update for review: Project/workspace/a.md");
-	assert.match(result.assistantText, /not applied/i);
+	assert.equal(planned.payload.summary, "已准备文件更新，确认后才会写入 Obsidian：Project/workspace/a.md");
+	assert.match(result.assistantText, /确认后才会写入 Obsidian/);
 });
 
 test("native write mutation records the model tool call id for review correlation", async () => {
@@ -297,7 +297,7 @@ test("standard review create write edit and delete summaries stay prepared until
 				name: "write",
 				args: { path: "Project/workspace/new.md", content: "created", mode: "create" },
 			},
-			expected: "Prepared file creation for review: Project/workspace/new.md",
+			expected: "已准备文件创建，确认后才会写入 Obsidian：Project/workspace/new.md",
 		},
 		{
 			name: "write",
@@ -306,7 +306,7 @@ test("standard review create write edit and delete summaries stay prepared until
 				name: "write",
 				args: { path: "Project/workspace/a.md", content: "changed", mode: "update" },
 			},
-			expected: "Prepared file update for review: Project/workspace/a.md",
+			expected: "已准备文件更新，确认后才会写入 Obsidian：Project/workspace/a.md",
 		},
 		{
 			name: "edit",
@@ -315,7 +315,7 @@ test("standard review create write edit and delete summaries stay prepared until
 				name: "edit",
 				args: { path: "Project/workspace/edit.md", edits: [{ search: "old", replace: "new" }] },
 			},
-			expected: "Prepared file update for review: Project/workspace/edit.md",
+			expected: "已准备文件更新，确认后才会写入 Obsidian：Project/workspace/edit.md",
 		},
 		{
 			name: "delete",
@@ -324,7 +324,7 @@ test("standard review create write edit and delete summaries stay prepared until
 				name: "delete",
 				args: { path: "Project/workspace/delete.md" },
 			},
-			expected: "Prepared file deletion for review: Project/workspace/delete.md",
+			expected: "已准备文件删除，确认后才会写入 Obsidian：Project/workspace/delete.md",
 		},
 	];
 
@@ -360,6 +360,7 @@ test("standard review create write edit and delete summaries stay prepared until
 		]) {
 			assert.doesNotMatch(summary, /\b(completed|applied|created|modified|deleted)\b/i, `${item.name} summary should not imply completion`);
 			assert.doesNotMatch(summary, /已创建|已修改|已删除/, `${item.name} summary should not use completed Chinese mutation language`);
+			assert.match(summary, /确认后才会写入 Obsidian/, `${item.name} summary should keep review-first wording`);
 		}
 	}
 });
@@ -440,6 +441,17 @@ test("apply failure records mutation_apply_failed and keeps the plan pending", a
 	assert.deepEqual(result.storedMutations.map((plan) => plan.status), ["pending"]);
 });
 
+test("accepting an already reviewed mutation does not transition a completed task to failed", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		afterTurnActions: ["acceptFirstEditPlan", "acceptFirstEditPlan"],
+	}));
+
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "changed" });
+	assert.deepEqual(result.storedMutations.map((plan) => plan.status), ["applied"]);
+	assert.equal(result.tasks.at(-1)?.status, "completed");
+	assert.doesNotMatch(JSON.stringify(result), /Invalid AgentTask transition/);
+});
+
 test("final answer does not imply review-first writes were already applied", async () => {
 	const result = await runAgentRuntimeScenario(writeScenario({
 		modelSteps: [
@@ -455,8 +467,7 @@ test("final answer does not imply review-first writes were already applied", asy
 
 	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
 	assert.equal(result.pendingMutations.length, 1);
-	assert.match(result.assistantText, /not applied/i);
-	assert.match(result.assistantText, /review/i);
+	assert.match(result.assistantText, /确认后才会写入 Obsidian/);
 });
 
 test("autoApproved folder delete is refused instead of bypassing mutation review", async () => {

@@ -83,7 +83,7 @@ test("buildAgentProcessPanelViewModel hides completed direct-answer and clarify 
 	}
 });
 
-test("buildAgentProcessPanelViewModel keeps light tasks compact while task_with_process expands", async () => {
+test("buildAgentProcessPanelViewModel expands running task surfaces and folds completed tasks", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
 	const lightView = buildAgentProcessPanelViewModel(makeSnapshot({
@@ -137,9 +137,9 @@ test("buildAgentProcessPanelViewModel keeps light tasks compact while task_with_
 		],
 	}), { now: new Date("2026-05-10T00:00:03.000Z") });
 
-	assert.equal(lightView.surface, "compact_live_process");
+	assert.equal(lightView.surface, "expanded_live_process");
 	assert.equal(lightView.timeline?.status, "running");
-	assert.equal(lightView.timeline?.defaultExpanded, false);
+	assert.equal(lightView.timeline?.defaultExpanded, true);
 	assert.equal(lightView.composerTaskBar, null);
 	assert.equal(processView.surface, "expanded_live_process");
 	assert.equal(processView.timeline?.defaultExpanded, true);
@@ -229,7 +229,7 @@ test("projected intake routes drive process panel surfaces", async () => {
 	]);
 
 	assert.equal(buildAgentProcessPanelViewModel(directSnapshot).shouldRenderProcessPanel, false);
-	assert.equal(buildAgentProcessPanelViewModel(lightSnapshot).timeline?.defaultExpanded, false);
+	assert.equal(buildAgentProcessPanelViewModel(lightSnapshot).timeline?.defaultExpanded, true);
 });
 
 test("projected retry and approval states use human-facing process labels", async () => {
@@ -338,10 +338,10 @@ test("buildAgentProcessPanelViewModel still shows visible target and evidence ac
 	}));
 
 	assert.equal(targetView.shouldRenderProcessPanel, true);
-	assert.equal(targetView.surface, "compact_live_process");
+	assert.equal(targetView.surface, "expanded_live_process");
 	assert.deepEqual(targetView.evidence.map((item) => item.label), ["Notes/current.md"]);
 	assert.equal(evidenceView.shouldRenderProcessPanel, true);
-	assert.equal(evidenceView.surface, "compact_live_process");
+	assert.equal(evidenceView.surface, "expanded_live_process");
 	assert.deepEqual(evidenceView.evidence.map((item) => item.label), ["event-1"]);
 });
 
@@ -390,7 +390,7 @@ test("buildAgentProcessPanelViewModel exposes a running timeline view from the s
 	assert.ok(view.timeline, "task work should expose timeline view");
 	assert.equal(view.timeline.status, "running");
 	assert.equal(view.timeline.title, "正在处理 11s");
-	assert.equal(view.timeline.defaultExpanded, false);
+	assert.equal(view.timeline.defaultExpanded, true);
 	assert.equal(view.timeline.canExpand, true);
 	assert.deepEqual(view.timeline.items.map((item) => item.kind), ["receipt", "context"]);
 	assert.deepEqual(view.timeline.items.map((item) => item.title), ["收到任务", "读取项目现状"]);
@@ -692,7 +692,7 @@ test("buildAgentProcessPanelViewModel exposes running task focus summary and can
 	}));
 
 	assert.equal(view.mode, "stepped_process");
-	assert.equal(view.surface, "compact_live_process");
+	assert.equal(view.surface, "expanded_live_process");
 	assert.equal(view.visibleSteps.at(-1)?.title, "读取上下文");
 	assert.equal(view.visibleSteps.at(-1)?.status, "running");
 	assert.match(view.header.summary, /Reading project notes/);
@@ -723,10 +723,7 @@ test("buildAgentProcessPanelViewModel prioritizes waiting approval state and act
 	assert.equal(view.status.tone, "waiting");
 	assert.equal(view.visibleSteps.at(-1)?.title, "等待确认");
 	assert.equal(view.visibleSteps.at(-1)?.status, "waiting_for_approval");
-	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.label), [
-		"允许执行",
-		"拒绝",
-	]);
+	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.kind), ["event"]);
 	assert.equal(view.actions[0]?.reason, "Use the approval controls.");
 });
 
@@ -818,7 +815,7 @@ test("buildAgentProcessPanelViewModel renders transport retry without checkpoint
 	}));
 
 	assert.equal(view.mode, "stepped_process");
-	assert.equal(view.surface, "compact_live_process");
+	assert.equal(view.surface, "expanded_live_process");
 	assert.equal(view.status.tone, "reconnecting");
 	assert.equal(view.visibleSteps.at(-1)?.title, "恢复请求");
 	assert.equal(view.visibleSteps.at(-1)?.status, "running");
@@ -933,7 +930,7 @@ test("buildAgentProcessPanelViewModel groups process details by user-visible pha
 	assert.equal(view.timeline?.statusBar.action, "读取项目现状");
 	assert.equal(view.timeline?.statusBar.elapsed, "12s");
 	assert.deepEqual(view.timeline?.groups.map((group) => group.title), ["收到任务", "计划", "执行"]);
-	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false, true]);
+	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false, false]);
 	assert.equal(view.timeline?.groups[2]?.items.length, 1);
 });
 
@@ -1295,14 +1292,16 @@ test("buildAgentProcessPanelViewModel creates file write steps before approval s
 	]);
 	assert.equal(view.visibleSteps[1]?.summary, "Wrote draft content.");
 	assert.equal(view.visibleSteps[2]?.summary, "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。");
-	assert.deepEqual(view.visibleSteps[2]?.actions.map((action) => action.label), ["查看改动", "应用修改", "不应用"]);
+	assert.deepEqual(view.visibleSteps[2]?.actions.map((action) => action.kind), ["event"]);
 	assert.ok(view.timeline);
 	assert.equal(view.timeline.status, "waiting");
 	assert.equal(view.timeline.title, "等待确认");
 	assert.match(view.timeline.collapsedSummary ?? "", /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
-	assert.deepEqual(view.timeline.actions.map((action) => action.id), ["view_changes", "apply", "reject"]);
+	assert.deepEqual(view.timeline.actions.map((action) => action.id), []);
+	assert.equal(view.timeline.items.at(-1)?.actionRefs, undefined);
 	assert.equal(view.timeline.items.at(-1)?.kind, "approval");
 	assert.equal(view.timeline.items.at(-1)?.status, "waiting");
+	assert.doesNotMatch(JSON.stringify(view.timeline.items), /1 file change pending review|Pending file changes|Applied file/);
 });
 
 test("buildAgentProcessPanelViewModel exposes composer task bar from plan state without process narration", async () => {

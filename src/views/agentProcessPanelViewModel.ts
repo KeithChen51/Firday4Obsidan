@@ -478,7 +478,7 @@ function resolveSurface(
 	if (mode === "completed_replay") {
 		return "collapsed_completed_replay";
 	}
-	if (snapshot.status === "running" && interactionRoute === "task_with_process") {
+	if (snapshot.status === "running") {
 		return "expanded_live_process";
 	}
 	return "compact_live_process";
@@ -865,12 +865,12 @@ function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: numb
 
 function timelineDefaultExpanded(
 	status: AgentProcessTimelineStatus,
-	interactionRoute: AgentProcessInteractionRoute | null,
+	_interactionRoute: AgentProcessInteractionRoute | null,
 ): boolean {
 	if (status === "waiting" || status === "retrying" || status === "recovering") {
 		return true;
 	}
-	return status === "running" && interactionRoute === "task_with_process";
+	return status === "running";
 }
 
 function collapsedTimelineSummary(
@@ -961,18 +961,7 @@ function buildTimelineGroups(
 		status: timelineGroupStatus(group.items),
 		summary: timelineGroupSummary(group.items),
 	}));
-	const activeIndex = result.findIndex((group) =>
-		group.status === "running" ||
-		group.status === "waiting" ||
-		group.status === "warning" ||
-		group.status === "error"
-	);
-	if (timelineStatusValue !== "completed" && activeIndex >= 0) {
-		const activeGroup = result[activeIndex];
-		if (activeGroup) {
-			activeGroup.defaultExpanded = true;
-		}
-	}
+	void timelineStatusValue;
 	return result;
 }
 
@@ -984,7 +973,12 @@ function buildTimelineStatusBar(
 	if (groups.length === 0) {
 		return null;
 	}
-	const activeGroup = groups.find((group) => group.defaultExpanded) ?? groups.at(-1);
+	const activeGroup = groups.find((group) =>
+		group.status === "running" ||
+		group.status === "waiting" ||
+		group.status === "warning" ||
+		group.status === "error"
+	) ?? groups.at(-1);
 	if (!activeGroup) {
 		return null;
 	}
@@ -1338,6 +1332,9 @@ function sanitizeTimelineDetail(value: string, kind: AgentProcessTimelineItemKin
 	if (kind === "retry") {
 		return retryRecoverySummary(value);
 	}
+	if (kind === "approval" && normalizeFileMutationStatusText(value)) {
+		return "";
+	}
 	if (/Context package built before|context_ready/i.test(value)) {
 		return "";
 	}
@@ -1361,6 +1358,10 @@ function sanitizeTimelineSummary(value: string): string {
 	if (/^Tool requested\.?$/i.test(text)) {
 		return "正在执行操作。";
 	}
+	const fileMutationStatusText = normalizeFileMutationStatusText(text);
+	if (fileMutationStatusText) {
+		return fileMutationStatusText;
+	}
 	if (/task failed/i.test(text)) {
 		return "运行遇到问题。";
 	}
@@ -1371,6 +1372,29 @@ function sanitizeTimelineSummary(value: string): string {
 		return REQUEST_EXHAUSTED_COPY;
 	}
 	return text;
+}
+
+function normalizeFileMutationStatusText(text: string): string {
+	if (
+		/Pending file changes/i.test(text) ||
+		/\b\d+\s+file changes?\s+pending review\b/i.test(text) ||
+		/Prepared\b.*\bfile (creation|update|deletion|change)\b.*\b(review|confirmation)/i.test(text)
+	) {
+		return "已准备好文件修改，确认后才会写入 Obsidian。";
+	}
+	if (/Applied file creation/i.test(text)) {
+		return "已应用文件创建。";
+	}
+	if (/Applied file (update|change)/i.test(text)) {
+		return "已应用文件修改。";
+	}
+	if (/Applied file deletion/i.test(text)) {
+		return "已应用文件删除。";
+	}
+	if (/Rejected file/i.test(text)) {
+		return "已取消文件修改，文件未被写入。";
+	}
+	return "";
 }
 
 function retryTimelineSummaryForStep(step: AgentProcessStepView): string {
@@ -1559,12 +1583,19 @@ function buildTimelineActions(
 	actions: AgentProcessActionView[],
 	status: AgentProcessTimelineStatus,
 ): AgentProcessTimelineActionView[] {
-	if (status !== "waiting" && status !== "failed") {
+	if (status === "waiting") {
+		return [];
+	}
+	if (status !== "failed") {
 		return [];
 	}
 	const hasFileChangeDecision = actions.some((action) => action.id === "apply" || action.id === "view_changes");
 	return actions
-		.filter((action) => action.id !== "view_replay")
+		.filter((action) =>
+			action.id === "resume" ||
+			action.id === "retry" ||
+			action.id === "continue"
+		)
 		.map((action) => ({
 			id: action.id,
 			label: timelineActionLabel(action, hasFileChangeDecision),
@@ -2065,118 +2096,20 @@ function buildStepControlActions(
 	actions: AgentProcessActionView[],
 ): AgentProcessStepActionView[] {
 	if (builder.key === "approval") {
-		const targetIds = new Set(builder.items.map((item) => item.actionRef).filter((value): value is string => Boolean(value)));
-		const pendingMutationIds = snapshot.mutations
-			.filter((mutation) => mutation.event === "planned" && (builder.fileRefs.size === 0 || builder.fileRefs.has(mutation.targetPath)))
-			.map((mutation) => mutation.id);
-		for (const id of pendingMutationIds) {
-			targetIds.add(id);
-		}
-		const relevantActions = actions.filter((action) =>
-			action.id === "apply" ||
-			action.id === "reject" ||
-			action.id === "approve" ||
-			action.id === "view_changes" ||
-				(targetIds.size > 0 && action.targetId && targetIds.has(action.targetId))
-		);
-		const controls = pendingMutationIds.length > 0
-			? ensureChangeApprovalControls(relevantActions, [...targetIds][0])
-			: ensureHighRiskApprovalControls(relevantActions, [...targetIds][0]);
-		return controls.map(toStepControlAction);
+		void snapshot;
+		void actions;
+		return [];
 	}
 	if (builder.key === "failure") {
 		return actions
 			.filter((action) =>
 				action.id === "resume" ||
 				action.id === "retry" ||
-				action.id === "continue" ||
-				action.id === "apply" ||
-				action.id === "reject"
+				action.id === "continue"
 			)
 			.map(toStepControlAction);
 	}
 	return [];
-}
-
-function ensureChangeApprovalControls(
-	actions: AgentProcessActionView[],
-	targetId: string | undefined,
-): AgentProcessActionView[] {
-	const controls = [...actions];
-	if (!controls.some((action) => action.id === "view_changes")) {
-		controls.unshift({
-			id: "view_changes",
-			label: "查看改动",
-			enabled: true,
-			targetId,
-			tone: "secondary",
-		});
-	}
-	if (!controls.some((action) => action.id === "apply" || action.id === "approve")) {
-		controls.push({
-			id: "apply",
-			label: "应用修改",
-			enabled: true,
-			targetId,
-			tone: "primary",
-		});
-	}
-	if (!controls.some((action) => action.id === "reject")) {
-		controls.push({
-			id: "reject",
-			label: "不应用",
-			enabled: true,
-			targetId,
-			tone: "danger",
-		});
-	}
-	return controls.map(normalizeChangeApprovalControl);
-}
-
-function ensureHighRiskApprovalControls(
-	actions: AgentProcessActionView[],
-	targetId: string | undefined,
-): AgentProcessActionView[] {
-	const controls = [...actions].filter((action) => action.id === "approve" || action.id === "reject");
-	if (!controls.some((action) => action.id === "approve")) {
-		controls.push({
-			id: "approve",
-			label: "允许执行",
-			enabled: true,
-			targetId,
-			tone: "primary",
-		});
-	}
-	if (!controls.some((action) => action.id === "reject")) {
-		controls.push({
-			id: "reject",
-			label: "拒绝",
-			enabled: true,
-			targetId,
-			tone: "danger",
-		});
-	}
-	return controls.map(normalizeHighRiskApprovalControl);
-}
-
-function normalizeChangeApprovalControl(action: AgentProcessActionView): AgentProcessActionView {
-	if (action.id === "apply" || action.id === "approve") {
-		return { ...action, label: "应用修改" };
-	}
-	if (action.id === "reject") {
-		return { ...action, label: "不应用" };
-	}
-	return action;
-}
-
-function normalizeHighRiskApprovalControl(action: AgentProcessActionView): AgentProcessActionView {
-	if (action.id === "approve") {
-		return { ...action, label: "允许执行", reason: action.reason || "请在确认面板中处理。" };
-	}
-	if (action.id === "reject") {
-		return { ...action, label: "拒绝", reason: action.reason || "请在确认面板中处理。" };
-	}
-	return action;
 }
 
 function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionView {

@@ -370,7 +370,7 @@ export class ObsidianAgentStateAdapter {
 		if (pendingCount === 0) {
 			return result;
 		}
-		const notice = `Pending file changes: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
+		const notice = `已准备好 ${pendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。请在 FRIDAY 中确认应用或不应用。`;
 		if (result.assistantText.includes(notice)) {
 			return result;
 		}

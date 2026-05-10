@@ -90,6 +90,29 @@ test("runtime preflight progress keeps the local intake preview until visible pr
 	assert.ok(streamClearIndex < streamPreviewIndex, "final streaming should clear before streaming content renders");
 });
 
+test("runtime elapsed refresh updates the live process in place without rebuilding the message list", () => {
+	const source = readViewSource();
+	const refreshBlock = extractMethod(source, "syncLiveRuntimeElapsedProcess", "scheduleRuntimeElapsedTimer");
+	const timerBlock = extractMethod(source, "scheduleRuntimeElapsedTimer", "clearRuntimeElapsedTimer");
+
+	assert.match(timerBlock, /this\.syncLiveRuntimeElapsedProcess\(\)/);
+	assert.doesNotMatch(timerBlock, /syncAiLiveChatShell\(\)/);
+	assert.doesNotMatch(timerBlock, /renderAiMessageList\(/);
+	assert.match(refreshBlock, /querySelector\("\.friday-agent-process-shell\.is-live"\)/);
+	assert.match(refreshBlock, /friday-agent-process-headline/);
+	assert.match(refreshBlock, /friday-agent-process-statusbar-elapsed/);
+	assert.doesNotMatch(refreshBlock, /containerEl\.empty\(\)|renderAiMessageList\(/);
+});
+
+test("runtime fallback reply does not expose internal diagnostics as assistant text", () => {
+	const source = readViewSource();
+	const replyBlock = extractMethod(source, "buildRuntimeReply", "buildSkillCatalogReply");
+
+	assert.doesNotMatch(replyBlock, /Runtime profile|Step traces|Context budget|Context sources|工具执行记录/);
+	assert.doesNotMatch(replyBlock, /trace\.tool|result\.runtimeProfile|result\.stepTraces|result\.contextSummary/);
+	assert.match(replyBlock, /ai\.runtime\.fallback/);
+});
+
 test("rememberCompletedTrajectorySnapshot forces completed process strips collapsed", () => {
 	const source = readViewSource();
 	const rememberBlock = extractMethod(source, "rememberCompletedTrajectorySnapshot", "isProcessExpanded");

@@ -138,7 +138,7 @@ export function isPendingFileMutationStatus(status: string | undefined): boolean
 }
 
 export function formatPendingFileMutationSummary(input: FileMutationSummaryInput): string {
-	return withTarget(`Prepared ${fileMutationLabel(input)} for review`, input.targetPath);
+	return withTarget(`已准备${fileMutationLabel(input)}，确认后才会写入 Obsidian`, input.targetPath);
 }
 
 export function formatFileMutationEventSummary(input: FileMutationSummaryInput): string {
@@ -148,38 +148,38 @@ export function formatFileMutationEventSummary(input: FileMutationSummaryInput):
 	}
 	const label = fileMutationLabel(input);
 	if (normalizedStatus === "applied" || normalizedStatus === "accepted") {
-		return withTarget(`Applied ${label}`, input.targetPath);
+		return withTarget(`已应用${label}`, input.targetPath);
 	}
 	if (normalizedStatus === "rejected") {
-		return withTarget(`Rejected ${label}; no file was changed`, input.targetPath);
+		return withTarget(`已取消${label}，文件未被写入`, input.targetPath);
 	}
 	if (normalizedStatus === "conflicted") {
-		return withTarget(`File changed before review could apply ${label}`, input.targetPath);
+		return withTarget(`${label}需要重新确认，文件已在外部变化`, input.targetPath);
 	}
 	if (normalizedStatus === "apply_failed") {
-		return withTarget(`Could not apply ${label}`, input.targetPath);
+		return withTarget(`${label}未能应用`, input.targetPath);
 	}
-	return withTarget(`Reviewed ${label}`, input.targetPath);
+	return withTarget(`已确认${label}`, input.targetPath);
 }
 
 function fileMutationLabel(input: FileMutationSummaryInput): string {
 	const operation = (input.operation ?? "").trim().toLowerCase();
 	const changeType = (input.changeType ?? "").trim().toLowerCase();
 	if (changeType === "create") {
-		return "file creation";
+		return "文件创建";
 	}
 	if (changeType === "delete" || operation === "delete") {
-		return "file deletion";
+		return "文件删除";
 	}
 	if (changeType === "update" || operation === "edit") {
-		return "file update";
+		return "文件更新";
 	}
-	return "file change";
+	return "文件修改";
 }
 
 function withTarget(summary: string, targetPath: string | undefined): string {
 	const target = targetPath?.trim();
-	return target ? `${summary}: ${target}` : summary;
+	return target ? `${summary}：${target}` : summary;
 }
 
 function safeStringify(value: unknown, maxChars: number): string {

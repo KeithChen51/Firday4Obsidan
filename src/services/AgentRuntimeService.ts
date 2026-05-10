@@ -1005,19 +1005,27 @@ export class AgentRuntimeService {
 		if (!taskId) {
 			return;
 		}
+		const currentTask = await this.agentTaskStore.get(taskId);
+		if (
+			currentTask?.status === "completed" ||
+			currentTask?.status === "cancelled" ||
+			currentTask?.status === "failed"
+		) {
+			return;
+		}
 		if (status === "failed") {
 			const task = await this.agentTaskStore.markFailed(taskId, {
-				summary: reason ?? "Mutation apply failed.",
-				failureReason: reason ?? "Mutation apply failed.",
+				summary: reason ?? "文件修改未能应用。",
+				failureReason: reason ?? "文件修改未能应用。",
 			});
 			await this.recordTaskLifecycleEvent(task);
 			return;
 		}
 		if (status === "conflicted") {
 			const task = await this.agentTaskStore.markWaitingForUser(taskId, {
-				summary: reason ?? "File changed before apply. Review the conflict before continuing.",
+				summary: reason ?? "文件已在外部变化，需要重新确认后再继续。",
 				waitingForUser: {
-					prompt: reason ?? "Resolve the mutation conflict.",
+					prompt: reason ?? "请确认这次文件修改冲突。",
 				},
 			});
 			await this.recordTaskLifecycleEvent(task);
@@ -1026,12 +1034,12 @@ export class AgentRuntimeService {
 		const remainingPendingCount = await this.countPendingMutationPlansForTask(taskId);
 		if (remainingPendingCount > 0) {
 			const task = await this.agentTaskStore.markWaitingForApproval(taskId, {
-				summary: `Waiting for review of ${remainingPendingCount} pending file change(s).`,
+				summary: `已准备好 ${remainingPendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。`,
 				waitingForApproval: {
 					kind: "mutation",
 					tool: record.tool,
 					targetPath: record.items[0]?.path ?? "",
-					summary: "Review remaining pending file changes.",
+					summary: "还有文件修改等待确认。",
 				},
 				pendingMutationCount: remainingPendingCount,
 				changedFileCount: remainingPendingCount,
@@ -1041,8 +1049,8 @@ export class AgentRuntimeService {
 		}
 		const task = await this.agentTaskStore.markCompleted(taskId, {
 			summary: status === "rejected"
-				? "Pending file changes were rejected."
-				: "Pending file changes were applied.",
+				? "待确认的文件修改已取消。"
+				: "文件修改已应用。",
 			pendingMutationCount: 0,
 			changedFileCount: 0,
 		});
@@ -1234,7 +1242,7 @@ export class AgentRuntimeService {
 		if (pendingCount === 0) {
 			return result;
 		}
-		const notice = `Pending file changes: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
+		const notice = `已准备好 ${pendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。请在 FRIDAY 中确认应用或不应用。`;
 		if (result.assistantText.includes(notice)) {
 			return result;
 		}

@@ -4270,6 +4270,49 @@ export class DailyBoardView extends ItemView {
 		return new Promise((resolve) => window.setTimeout(resolve, ms));
 	}
 
+	private syncLiveRuntimeElapsedProcess(): void {
+		if (this.activePage !== "chat") {
+			this.syncBackgroundAgentStatus();
+			return;
+		}
+		if (!this.aiMessageListEl?.isConnected || !this.aiRuntimeTrajectorySnapshot) {
+			return;
+		}
+		const view = buildAgentProcessPanelViewModel(this.aiRuntimeTrajectorySnapshot);
+		if (!view.timeline) {
+			return;
+		}
+		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+		if (!(processEl instanceof HTMLElement)) {
+			this.syncAiLiveChatShell();
+			return;
+		}
+		const headlineEl = processEl.querySelector(".friday-agent-process-headline");
+		if (headlineEl instanceof HTMLElement) {
+			headlineEl.setText(view.timeline.title);
+		}
+		const summaryEl = processEl.querySelector(".friday-agent-process-disclosure-summary");
+		if (summaryEl instanceof HTMLElement && view.timeline.collapsedSummary) {
+			summaryEl.setText(view.timeline.collapsedSummary);
+		}
+		const statusBar = view.timeline.statusBar;
+		if (!statusBar) {
+			return;
+		}
+		const phaseEl = processEl.querySelector(".friday-agent-process-statusbar-phase");
+		if (phaseEl instanceof HTMLElement) {
+			phaseEl.setText(statusBar.phase);
+		}
+		const actionEl = processEl.querySelector(".friday-agent-process-statusbar-action");
+		if (actionEl instanceof HTMLElement) {
+			actionEl.setText(statusBar.action);
+		}
+		const elapsedEl = processEl.querySelector(".friday-agent-process-statusbar-elapsed");
+		if (elapsedEl instanceof HTMLElement) {
+			elapsedEl.setText(statusBar.elapsed);
+		}
+	}
+
 	private scheduleRuntimeElapsedTimer(): void {
 		if (this.aiRuntimeElapsedTimer != null || !this.aiRuntimeTrajectorySnapshot) {
 			return;
@@ -4283,7 +4326,7 @@ export class DailyBoardView extends ItemView {
 			this.aiRuntimeTrajectorySnapshot = refreshedSnapshot ?? this.aiRuntimeTrajectorySnapshot;
 			this.bindRuntimeSnapshotToLatestUserMessage(this.aiRuntimeTrajectorySnapshot);
 			this.syncComposerTaskBar();
-			this.syncAiLiveChatShell();
+			this.syncLiveRuntimeElapsedProcess();
 			this.scheduleRuntimeElapsedTimer();
 		}, 1000);
 	}
@@ -4355,78 +4398,12 @@ export class DailyBoardView extends ItemView {
 	private buildRuntimeReply(result: RuntimeTurnResult): string {
 		const normalizedAssistantText = this.normalizeRuntimeAssistantText(result.assistantText);
 		if (normalizedAssistantText.trim() && !this.isIntermediateRuntimeReply(normalizedAssistantText)) {
-			const parts = [normalizedAssistantText.trim()];
-			if (result.parseError) {
-				parts.push(
-					"",
-					this.t("ai.runtime.parseHint", "Runtime parse hint: {error}", {
-						error: result.parseError,
-					}),
-				);
-			}
-			return parts.join("\n");
-		}
-
-		const parts: string[] = [];
-		if (result.runtimeProfile) {
-			parts.push(
-				this.t("ai.runtime.profile", "Runtime profile: {profile}", {
-					profile: result.runtimeProfile.id,
-				}),
-			);
-		}
-		if (result.turnId) {
-			parts.push(this.t("ai.runtime.turnId", "Turn: {id}", { id: result.turnId }));
-		}
-		if (result.stepTraces?.length) {
-			parts.push(
-				this.t("ai.runtime.steps", "Step traces: {count}", {
-					count: result.stepTraces.length,
-				}),
-			);
-		}
-		if (result.contextSummary) {
-			parts.push(
-				this.t("ai.runtime.contextBudget", "Context budget: used={used}, soft={soft}, hard={hard}", {
-					used: result.contextSummary.used,
-					soft: result.contextSummary.softLimit,
-					hard: result.contextSummary.hardLimit,
-				}),
-			);
-			parts.push(
-				this.t("ai.runtime.contextFlags", "Context sources: wiki={wiki}, memory={memory}, autoSkill={autoSkill}, trimmed={trimmed}", {
-					wiki: result.contextSummary.hasWikiContext,
-					memory: result.contextSummary.hasMemoryContext,
-					autoSkill: result.contextSummary.hasAutoSkillContext,
-					trimmed: result.contextSummary.trimmedChannels.join(",") || "none",
-				}),
-			);
-		}
-		if (normalizedAssistantText.trim() && !this.isIntermediateRuntimeReply(normalizedAssistantText)) {
-			if (parts.length > 0) {
-				parts.push("");
-			}
-			parts.push(normalizedAssistantText.trim());
+			return normalizedAssistantText.trim();
 		}
 		if (result.parseError) {
-			parts.push(
-				this.t("ai.runtime.parseHint", "Runtime parse hint: {error}", {
-					error: result.parseError,
-				}),
-			);
+			return this.t("ai.runtime.fallbackWithIssue", "FRIDAY 暂时没能整理出可直接展示的回复。你可以稍后重试，或查看上方过程。");
 		}
-		if (result.traces.length > 0) {
-			parts.push(this.t("ai.runtime.traceTitle", "工具执行记录："));
-			for (const trace of result.traces) {
-				const status = trace.ok
-					? this.t("ai.runtime.traceStatus.ok", "成功")
-					: this.t("ai.runtime.traceStatus.fail", "失败");
-				const summary = trace.summary || trace.error || this.t("common.unknownError", "Unknown error");
-				const detail = trace.targetPath ? `（${trace.targetPath}）` : "";
-				parts.push(`- ${trace.tool}${detail}：${status} · ${summary}`);
-			}
-		}
-		return parts.join("\n");
+		return this.t("ai.runtime.fallback", "FRIDAY 已处理完这次请求。过程已经整理在上方。");
 	}
 
 	private buildSkillCatalogReply(skills: SkillDescriptor[]): string {

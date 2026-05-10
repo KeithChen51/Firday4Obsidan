@@ -199,7 +199,7 @@ test("summarizeForTrace matches current runtime summaries for existing tools", a
 	assert.equal(summarizeForTrace("search_text", { matches: [{}] }), "search_text matched 1 result(s)");
 	assert.equal(summarizeForTrace("glob", { files: ["a.md"] }), "glob matched 1 file(s)");
 	assert.equal(summarizeForTrace("memory", { summary: "Remembered" }), "Remembered");
-	assert.equal(summarizeForTrace("write", { path: "Project/a.md", status: "pending_review" }), "Prepared file change for review: Project/a.md");
+	assert.equal(summarizeForTrace("write", { path: "Project/a.md", status: "pending_review" }), "已准备文件修改，确认后才会写入 Obsidian：Project/a.md");
 	assert.equal(summarizeForTrace("delete", { path: "Project", deletedType: "folder" }), "Delete completed folder Project");
 	assert.equal(summarizeForTrace("edit", { path: "Project/a.md", appliedEdits: 2 }), "Edited Project/a.md (2 replacement(s))");
 	assert.equal(summarizeForTrace("exec", { exitCode: 0 }), "Exec completed (exit code 0)");
@@ -207,7 +207,7 @@ test("summarizeForTrace matches current runtime summaries for existing tools", a
 });
 
 test("summarizeForTrace uses prepared language for pending file mutations", async () => {
-	const { summarizeForTrace } = await jiti.import(formatterPath);
+	const { formatFileMutationEventSummary, summarizeForTrace } = await jiti.import(formatterPath);
 
 	const summaries = [
 		summarizeForTrace("write", { path: "Project/new.md", type: "create", status: "pending_review" }),
@@ -217,13 +217,18 @@ test("summarizeForTrace uses prepared language for pending file mutations", asyn
 	];
 
 	assert.deepEqual(summaries, [
-		"Prepared file creation for review: Project/new.md",
-		"Prepared file update for review: Project/existing.md",
-		"Prepared file update for review: Project/edit.md",
-		"Prepared file deletion for review: Project/delete.md",
+		"已准备文件创建，确认后才会写入 Obsidian：Project/new.md",
+		"已准备文件更新，确认后才会写入 Obsidian：Project/existing.md",
+		"已准备文件更新，确认后才会写入 Obsidian：Project/edit.md",
+		"已准备文件删除，确认后才会写入 Obsidian：Project/delete.md",
 	]);
 	for (const summary of summaries) {
 		assert.doesNotMatch(summary, /\b(completed|applied|created|modified|deleted)\b/i);
 		assert.doesNotMatch(summary, /已创建|已修改|已删除/);
+		assert.match(summary, /确认后才会写入 Obsidian/);
 	}
+	assert.equal(
+		formatFileMutationEventSummary({ operation: "write", targetPath: "Project/new.md", changeType: "create", status: "applied" }),
+		"已应用文件创建：Project/new.md",
+	);
 });

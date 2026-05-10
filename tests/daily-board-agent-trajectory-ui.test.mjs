@@ -1237,7 +1237,6 @@ test("DailyBoard rebinds refreshed elapsed snapshots and syncs task bar from the
 	assert.deepEqual(calls, [
 		["bind", refreshedSnapshot],
 		["task-bar"],
-		["live-shell"],
 	]);
 	assert.equal(timerCallbacks.length, 2, "timer should schedule the next elapsed refresh while still running");
 });
@@ -1995,12 +1994,10 @@ test("renderAgentTrajectoryCard shows approval actions in collapsed timeline dis
 	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 0);
 	assert.match(root.textContent, /等待确认/);
 	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
-	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用修改/);
-	assert.match(root.textContent, /不应用/);
-	root.findByClass("is-apply")?.onclick?.();
-	root.findByClass("is-reject")?.onclick?.();
-	assert.deepEqual(calls, ["apply", "reject"]);
+	assert.equal(root.countByClass("friday-agent-process-action"), 0);
+	assert.equal(root.findByClass("is-apply"), null);
+	assert.equal(root.findByClass("is-reject"), null);
+	assert.deepEqual(calls, []);
 });
 
 test("renderAgentTrajectoryCard renders Batch M.1 transport retry as reconnecting without checkpoint claims", async () => {
@@ -2078,13 +2075,12 @@ test("renderAgentTrajectoryCard renders pending mutation as the current approval
 	assert.match(root.textContent, /创建\/修改文件/);
 	assert.match(root.textContent, /等待确认/);
 	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
-	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用修改/);
-	assert.match(root.textContent, /不应用/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
-	root.findByClass("is-apply")?.onclick?.();
-	root.findByClass("is-reject")?.onclick?.();
-	assert.deepEqual(calls, ["apply", "reject"]);
+	assert.doesNotMatch(root.textContent, /1 file change pending review|Pending file changes|Applied file/);
+	assert.equal(root.countByClass("friday-agent-process-action"), 0);
+	assert.equal(root.findByClass("is-apply"), null);
+	assert.equal(root.findByClass("is-reject"), null);
+	assert.deepEqual(calls, []);
 });
 
 test("renderAgentTrajectoryCard renders complex completed replay as collapsed process disclosure", async () => {
@@ -2796,12 +2792,10 @@ test("renderAgentTrajectoryCard renders trajectory actions without deciding avai
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-action"), 2);
+	assert.equal(root.countByClass("friday-agent-process-action"), 1);
 	assert.equal(root.findByClass("is-retry")?.disabled, false);
-	assert.equal(root.findByClass("is-apply")?.disabled, true);
-	assert.equal(root.findByClass("is-apply")?.attributes.title, "No pending mutation.");
+	assert.equal(root.findByClass("is-apply"), null);
 	root.findByClass("is-retry")?.onclick?.();
-	root.findByClass("is-apply")?.onclick?.();
 	assert.deepEqual(calls, ["retry"]);
 });
 
