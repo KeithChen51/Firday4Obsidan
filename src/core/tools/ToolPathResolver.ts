@@ -88,6 +88,7 @@ export class ToolPathResolver {
 
 		const targetPath = this.resolveVaultTargetPath(input.intent, normalizedInput);
 		const candidates = this.resolveCandidates(input.intent, normalizedInput, targetPath);
+
 		if (WRITE_INTENTS.has(input.intent) && this.isRawPath(targetPath)) {
 			const suggestedPath = this.buildWorkspaceSuggestion(targetPath);
 			return this.failed({
@@ -113,6 +114,18 @@ export class ToolPathResolver {
 				code: "empty_path",
 				reason: "Path is required.",
 			});
+		}
+
+		const boundaryFailure = this.resolveProjectBoundaryFailure(
+			input.intent,
+			inputPath,
+			normalizedInput,
+			targetPath,
+			candidates,
+			projectRoot,
+		);
+		if (boundaryFailure) {
+			return boundaryFailure;
 		}
 
 		if (isBarePath(normalizedInput) && (READ_EXISTING_INTENTS.has(input.intent) || input.intent === "search")) {
@@ -192,6 +205,88 @@ export class ToolPathResolver {
 			return normalizeVaultPath(`workspace/${normalizedInput}`);
 		}
 		return normalizedInput;
+	}
+
+	private resolveProjectBoundaryFailure(
+		intent: ToolPathIntent,
+		inputPath: string,
+		normalizedInput: string,
+		targetPath: string,
+		candidates: string[],
+		projectRoot: string | undefined,
+	): ToolPathResolution | null {
+		if (!this.hasActiveProjectBoundary()) {
+			return null;
+		}
+		if (!normalizedInput && !targetPath) {
+			return null;
+		}
+
+		const outsideCandidates = this.findOutsideProjectCandidates(intent, normalizedInput, targetPath);
+		const boundaryCandidates = candidates.length > 0
+			? candidates.filter((candidate) => !isPathWithin(candidate, this.activeProjectRoot))
+			: outsideCandidates;
+		const targetOutsideProject = Boolean(targetPath) && !isPathWithin(targetPath, this.activeProjectRoot);
+		if (WRITE_INTENTS.has(intent) && targetPath && !targetOutsideProject) {
+			return null;
+		}
+		const bareMissingEverywhere = isBarePath(normalizedInput) && boundaryCandidates.length === 0;
+		if (!targetOutsideProject && boundaryCandidates.length === 0) {
+			return null;
+		}
+		if (targetOutsideProject && bareMissingEverywhere) {
+			return null;
+		}
+
+		const targetLabel = targetPath || normalizedInput;
+		return this.failed({
+			scope: "vault",
+			inputPath,
+			normalizedInput,
+			targetPath,
+			projectRoot,
+			candidates: boundaryCandidates,
+			code: "project_boundary_mismatch",
+			reason: `Path is outside the active project boundary: ${targetLabel} (activeProjectRoot=${this.activeProjectRoot}). Switch to the owning project or use a path under ${this.activeProjectRoot}.`,
+		});
+	}
+
+	private hasActiveProjectBoundary(): boolean {
+		return Boolean(this.activeProjectRoot) && !isWholeVaultProjectRoot(this.activeProjectRoot);
+	}
+
+	private findOutsideProjectCandidates(intent: ToolPathIntent, normalizedInput: string, targetPath: string): string[] {
+		if (!this.hasActiveProjectBoundary()) {
+			return [];
+		}
+		const pools = this.getCandidatePools(intent);
+		const inputLower = normalizedInput.toLowerCase();
+		const targetLower = targetPath.toLowerCase();
+		const suffixLower = inputLower ? `/${inputLower}` : "";
+		const matches = pools.filter((item) => {
+			if (isPathWithin(item, this.activeProjectRoot)) {
+				return false;
+			}
+			const itemLower = item.toLowerCase();
+			if (targetLower && itemLower === targetLower) {
+				return true;
+			}
+			if (inputLower && isBarePath(normalizedInput)) {
+				return path.posix.basename(itemLower) === inputLower;
+			}
+			return Boolean(suffixLower) && itemLower.endsWith(suffixLower);
+		});
+		return [...new Set(matches)].sort();
+	}
+
+	private getCandidatePools(intent: ToolPathIntent): string[] {
+		if (intent === "read_directory") {
+			return this.vaultFolders;
+		}
+		if (intent === "search" || intent === "delete_path") {
+			return [...this.vaultFiles, ...this.vaultFolders].sort();
+		}
+		return this.vaultFiles;
 	}
 
 	private resolveCandidates(intent: ToolPathIntent, normalizedInput: string, targetPath: string): string[] {

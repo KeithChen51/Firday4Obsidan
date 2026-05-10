@@ -114,6 +114,17 @@ interface SessionListGroup {
 	sessions: ConversationSession[];
 }
 
+interface AiTurnTarget {
+	sessionId: string;
+	projectId?: string;
+	conversation: ChatMessage[];
+}
+
+interface AiTurnFailureStatus {
+	target: AiTurnTarget;
+	message: string;
+}
+
 export class DailyBoardView extends ItemView {
 	private refreshTimer: number | null = null;
 	private activePage: "chat" | "sync" | "tools" = "chat";
@@ -139,10 +150,16 @@ export class DailyBoardView extends ItemView {
 	private aiQueuedPrompts: MentionComposerSnapshot[] = [];
 	private aiBusy = false;
 	private aiLastError = "";
+	private aiActiveTurnTarget: AiTurnTarget | null = null;
+	private aiBackgroundTurnTarget: AiTurnTarget | null = null;
+	private aiBackgroundTurnFailure: AiTurnFailureStatus | null = null;
+	private aiLocalIntakePreview = "";
 	private aiStreamingPreview = "";
 	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
+	private aiStreamingTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
 	private aiProcessSnapshotsByKey = new Map<string, AgentTrajectorySnapshot>();
+	private aiProcessSnapshotProjectIds = new WeakMap<AgentTrajectorySnapshot, string>();
 	private aiProcessExpandedKeys = new Set<string>();
 	private aiProcessCollapsedKeys = new Set<string>();
 	private aiComposerTaskBarExpanded = false;
@@ -163,6 +180,7 @@ export class DailyBoardView extends ItemView {
 	private aiMessageListEl: HTMLElement | null = null;
 	private aiQueueHintEl: HTMLElement | null = null;
 	private aiErrorEl: HTMLElement | null = null;
+	private aiBackgroundAgentStatusHostEl: HTMLElement | null = null;
 	private aiSendButtonEl: HTMLButtonElement | null = null;
 	private aiModelSelectEl: HTMLSelectElement | null = null;
 	private aiPermissionSelectEl: HTMLSelectElement | null = null;
@@ -225,6 +243,7 @@ export class DailyBoardView extends ItemView {
 		this.composer?.destroy();
 		this.composer = null;
 		this.resetAiChatShellRefs();
+		this.aiBackgroundAgentStatusHostEl = null;
 		this.approvalQueue.clearWithDecision("deny");
 		this.plugin.toolApprovalService.clearPromptHandler();
 		this.aiSendAbortController?.abort();
@@ -268,6 +287,7 @@ export class DailyBoardView extends ItemView {
 		this.composer?.destroy();
 		this.composer = null;
 		this.resetAiChatShellRefs();
+		this.aiBackgroundAgentStatusHostEl = null;
 		this.contentEl.empty();
 
 		const shell = this.contentEl.createDiv({ cls: "friday-shell" });
@@ -290,7 +310,8 @@ export class DailyBoardView extends ItemView {
 		} else {
 			this.renderAiPage(contentEl);
 		}
-		this.renderBackgroundAgentStatus(shell);
+		this.aiBackgroundAgentStatusHostEl = shell.createDiv({ cls: "friday-background-agent-status-host" });
+		this.renderBackgroundAgentStatus(this.aiBackgroundAgentStatusHostEl);
 		if (this.plugin.settings.projects.length > 0 && !this.aiSessionNavCollapsed) {
 			this.renderAiSessionDrawer(shell);
 		}
@@ -437,17 +458,19 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private renderBackgroundAgentStatus(containerEl: HTMLElement): void {
-		const completedSnapshot = this.getCompletedBackgroundAgentStatusSnapshot();
+		const statusTarget = this.getBackgroundAgentStatusTarget();
+		const completedSnapshot = this.getCompletedBackgroundAgentStatusSnapshot(statusTarget);
+		const failedStatus = this.getBackgroundAgentFailureStatus(statusTarget);
+		const isRunning = this.aiBusy || Boolean(this.aiRuntimeTrajectorySnapshot);
+		const isFailed = Boolean((failedStatus || (!statusTarget && this.aiLastError)) && !isRunning);
 		if (
-			this.activePage === "chat" ||
-			(!this.aiBusy && !this.aiRuntimeTrajectorySnapshot && !completedSnapshot && !this.aiLastError)
+			(this.activePage === "chat" && !statusTarget) ||
+			(!isRunning && !completedSnapshot && !isFailed)
 		) {
 			return;
 		}
 		const statusEl = containerEl.createEl("button", { cls: "friday-background-agent-status" });
 		statusEl.type = "button";
-		const isFailed = Boolean(this.aiLastError && !this.aiBusy);
-		const isRunning = this.aiBusy || Boolean(this.aiRuntimeTrajectorySnapshot);
 		statusEl.addClass(isFailed ? "is-failed" : isRunning ? "is-running" : "is-completed");
 		statusEl.createSpan({
 			cls: "friday-background-agent-status-label",
@@ -457,18 +480,57 @@ export class DailyBoardView extends ItemView {
 					? this.t("ai.background.running", "FRIDAY 正在运行")
 					: this.t("ai.background.completed", "FRIDAY 任务完成"),
 		});
-		statusEl.onclick = () => {
-			this.activePage = "chat";
-			this.aiForceScrollToBottomOnce = true;
-			this.renderBoard();
+		statusEl.onclick = async () => {
+			await this.openBackgroundAgentStatusTarget(statusTarget);
 		};
 	}
 
-	private getCompletedBackgroundAgentStatusSnapshot(): AgentTrajectorySnapshot | null {
-		return Array.from(this.aiProcessSnapshotsByKey.values()).reverse().find((snapshot) =>
-			this.isSnapshotOwnedByCurrentSession(snapshot) &&
+	private getBackgroundAgentStatusTarget(): AiTurnTarget | null {
+		if (this.aiActiveTurnTarget && !this.isCurrentAiTurnTarget(this.aiActiveTurnTarget)) {
+			return this.aiActiveTurnTarget;
+		}
+		if (this.aiBackgroundTurnTarget && !this.isCurrentAiTurnTarget(this.aiBackgroundTurnTarget)) {
+			return this.aiBackgroundTurnTarget;
+		}
+		if (this.aiBackgroundTurnFailure && !this.isCurrentAiTurnTarget(this.aiBackgroundTurnFailure.target)) {
+			return this.aiBackgroundTurnFailure.target;
+		}
+		return null;
+	}
+
+	private getCompletedBackgroundAgentStatusSnapshot(target?: AiTurnTarget | null): AgentTrajectorySnapshot | null {
+		const sessionId = target?.sessionId ?? this.aiSessionId;
+		const projectId = target?.projectId ?? this.plugin.settings.activeProjectId;
+		const entry = Array.from(this.aiProcessSnapshotsByKey.entries()).reverse().find(([key, snapshot]) =>
+			this.isSnapshotEntryOwnedBySession(key, snapshot, sessionId, projectId) &&
 			snapshot.status === "completed"
-		) ?? null;
+		);
+		return entry?.[1] ?? null;
+	}
+
+	private getBackgroundAgentFailureStatus(target?: AiTurnTarget | null): AiTurnFailureStatus | null {
+		if (!this.aiBackgroundTurnFailure) {
+			return null;
+		}
+		if (!target) {
+			return this.aiBackgroundTurnFailure;
+		}
+		return this.isSameAiTurnTarget(this.aiBackgroundTurnFailure.target, target)
+			? this.aiBackgroundTurnFailure
+			: null;
+	}
+
+	private async openBackgroundAgentStatusTarget(target: AiTurnTarget | null): Promise<void> {
+		this.activePage = "chat";
+		this.aiForceScrollToBottomOnce = true;
+		if (target?.projectId && target.projectId !== this.plugin.settings.activeProjectId) {
+			await this.plugin.setActiveProject(target.projectId);
+		}
+		if (target?.sessionId) {
+			await this.switchAiSession(target.sessionId, target.conversation);
+		} else {
+			this.renderBoard();
+		}
 	}
 
 	private addNavButton(
@@ -1520,22 +1582,51 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private selectComposerTaskBarSnapshot(): AgentTrajectorySnapshot | null {
-		const completedSnapshot = this.getCompletedComposerTaskBarSnapshot();
 		const liveSnapshot = this.aiRuntimeTrajectorySnapshot;
-		if (completedSnapshot && this.isSameTrajectorySnapshotIdentity(completedSnapshot, liveSnapshot)) {
-			return completedSnapshot;
+		if (liveSnapshot) {
+			const completedSnapshot = this.getCompletedComposerTaskBarSnapshot();
+			if (completedSnapshot && this.isSameTrajectorySnapshotIdentity(completedSnapshot, liveSnapshot)) {
+				return completedSnapshot;
+			}
+			return liveSnapshot;
 		}
-		return liveSnapshot ?? completedSnapshot;
+		if (this.aiStreamingTrajectorySnapshot) {
+			return this.aiStreamingTrajectorySnapshot;
+		}
+		if (this.aiBusy || this.aiLocalIntakePreview || this.aiStreamingPreview) {
+			return null;
+		}
+		return this.getCompletedComposerTaskBarSnapshot();
 	}
 
 	private getCompletedComposerTaskBarSnapshot(): AgentTrajectorySnapshot | null {
+		const latestAssistantSnapshot = this.getLatestAssistantCompletedTrajectorySnapshot();
+		if (latestAssistantSnapshot !== undefined) {
+			return this.isCompletedComposerTaskBarSnapshot(latestAssistantSnapshot) ? latestAssistantSnapshot : null;
+		}
 		return Array.from(this.aiProcessSnapshotsByKey.values()).reverse().find((snapshot) =>
-			this.isSnapshotOwnedByCurrentSession(snapshot) &&
-			Boolean(snapshot.plan) &&
-			snapshot.plan?.visibility === "task_bar" &&
-			snapshot.status === "completed" &&
-			snapshot.plan?.status === "completed"
+			this.isCompletedComposerTaskBarSnapshot(snapshot)
 		) ?? null;
+	}
+
+	private getLatestAssistantCompletedTrajectorySnapshot(): AgentTrajectorySnapshot | null | undefined {
+		for (let index = this.aiConversation.length - 1; index >= 0; index -= 1) {
+			const message = this.aiConversation[index];
+			if (message?.role !== "assistant") {
+				continue;
+			}
+			const snapshot = this.getCompletedTrajectorySnapshotForMessage(message);
+			return snapshot?.status === "completed" ? snapshot : null;
+		}
+		return undefined;
+	}
+
+	private isCompletedComposerTaskBarSnapshot(snapshot: AgentTrajectorySnapshot | null): snapshot is AgentTrajectorySnapshot {
+		return this.isSnapshotOwnedByCurrentSession(snapshot) &&
+			Boolean(snapshot.plan) &&
+			(snapshot.plan?.visibility === "task_bar" || snapshot.plan?.visibility === "visible") &&
+			snapshot.status === "completed" &&
+			snapshot.plan?.status === "completed";
 	}
 
 	private renderEditPlanReviewPanel(containerEl: HTMLElement): void {
@@ -2389,7 +2480,9 @@ export class DailyBoardView extends ItemView {
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
+		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.clearRuntimeElapsedTimer();
@@ -2408,18 +2501,28 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private async switchAiSession(sessionId: string): Promise<void> {
-		if (!sessionId || sessionId === this.aiSessionId) {
+	private async switchAiSession(sessionId: string, fallbackConversation?: ChatMessage[]): Promise<void> {
+		if (!sessionId || (sessionId === this.aiSessionId && !fallbackConversation)) {
 			return;
 		}
 		let target = this.aiSessions.find((session) => session.sessionId === sessionId) ?? null;
-		if (!target) {
+		if (!target && !fallbackConversation) {
 			await this.ensureAiSessionLoaded();
 			target = this.aiSessions.find((session) => session.sessionId === sessionId) ?? null;
 		}
 		if (!target) {
-			new Notice(this.t("ai.sessions.notFound", "未找到对话记录"), 4000);
-			return;
+			if (!fallbackConversation) {
+				new Notice(this.t("ai.sessions.notFound", "未找到对话记录"), 4000);
+				return;
+			}
+			target = {
+				sessionId,
+				soulId: this.plugin.settings.activeSoulId,
+				projectId: this.plugin.settings.activeProjectId || undefined,
+				updatedAt: new Date().toISOString(),
+				filePath: "",
+				messages: fallbackConversation,
+			};
 		}
 		this.aiSessionId = target.sessionId;
 		this.aiConversation = [...target.messages];
@@ -2429,7 +2532,9 @@ export class DailyBoardView extends ItemView {
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.aiQueuedPrompts = [];
 		this.aiLastError = "";
+		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.clearRuntimeElapsedTimer();
@@ -2756,6 +2861,22 @@ export class DailyBoardView extends ItemView {
 		return Boolean(currentConversationId && candidateConversationId && candidateConversationId === currentConversationId);
 	}
 
+	private isCurrentAiTurnTarget(target: Pick<AiTurnTarget, "sessionId" | "projectId">): boolean {
+		const currentSessionId = this.aiSessionId.trim();
+		const targetSessionId = target.sessionId.trim();
+		const currentProjectId = this.plugin.settings.activeProjectId?.trim() || "";
+		const targetProjectId = target.projectId?.trim() || "";
+		return Boolean(currentSessionId && targetSessionId && currentSessionId === targetSessionId && currentProjectId === targetProjectId);
+	}
+
+	private isSameAiTurnTarget(left: Pick<AiTurnTarget, "sessionId" | "projectId">, right: Pick<AiTurnTarget, "sessionId" | "projectId">): boolean {
+		const leftSessionId = left.sessionId.trim();
+		const rightSessionId = right.sessionId.trim();
+		const leftProjectId = left.projectId?.trim() || "";
+		const rightProjectId = right.projectId?.trim() || "";
+		return Boolean(leftSessionId && rightSessionId && leftSessionId === rightSessionId && leftProjectId === rightProjectId);
+	}
+
 	private isTaskOwnedByCurrentSession(task: { conversationId?: string | null }): boolean {
 		return this.isCurrentConversationId(task.conversationId);
 	}
@@ -2770,21 +2891,70 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private isSnapshotOwnedByCurrentSession(snapshot: AgentTrajectorySnapshot | null): snapshot is AgentTrajectorySnapshot {
+		return this.isSnapshotOwnedBySession(snapshot, this.aiSessionId, this.plugin.settings.activeProjectId);
+	}
+
+	private isSnapshotOwnedBySession(
+		snapshot: AgentTrajectorySnapshot | null,
+		sessionId: string,
+		projectId = this.plugin.settings.activeProjectId,
+	): snapshot is AgentTrajectorySnapshot {
 		if (!snapshot) {
+			return false;
+		}
+		const targetSessionId = sessionId.trim();
+		if (!targetSessionId) {
+			return false;
+		}
+		if (!this.isSnapshotProjectOwned(snapshot, projectId)) {
 			return false;
 		}
 		const conversationId = snapshot.identity.conversationId?.trim();
 		if (conversationId) {
-			return this.isCurrentConversationId(conversationId);
+			return conversationId === targetSessionId;
 		}
 		const taskId = snapshot.identity.taskId?.trim();
-		return Boolean(taskId && this.hasCurrentSessionTask(taskId));
+		if (!taskId) {
+			return false;
+		}
+		if (targetSessionId === this.aiSessionId.trim()) {
+			return this.hasCurrentSessionTask(taskId);
+		}
+		return this.hasSessionMessageTask(targetSessionId, taskId);
+	}
+
+	private isSnapshotEntryOwnedBySession(
+		key: string,
+		snapshot: AgentTrajectorySnapshot | null,
+		sessionId: string,
+		projectId = this.plugin.settings.activeProjectId,
+	): snapshot is AgentTrajectorySnapshot {
+		if (!this.isSnapshotOwnedBySession(snapshot, sessionId, projectId)) {
+			return false;
+		}
+		return key === this.getTrajectorySnapshotKeyForSession(snapshot, sessionId, projectId);
+	}
+
+	private isSnapshotProjectOwned(snapshot: AgentTrajectorySnapshot, projectId?: string): boolean {
+		const expectedProjectId = projectId?.trim() || "";
+		const snapshotProjectId = this.aiProcessSnapshotProjectIds.get(snapshot)?.trim() || "";
+		return !snapshotProjectId || !expectedProjectId || snapshotProjectId === expectedProjectId;
+	}
+
+	private hasSessionMessageTask(sessionId: string, taskId: string): boolean {
+		const normalizedSessionId = sessionId.trim();
+		const normalizedTaskId = taskId.trim();
+		if (!normalizedSessionId || !normalizedTaskId) {
+			return false;
+		}
+		return this.aiSessions.some((session) =>
+			session.sessionId === normalizedSessionId &&
+			session.messages.some((message) => message.uiMeta?.taskId?.trim() === normalizedTaskId)
+		);
 	}
 
 	private getCompletedTrajectorySnapshotForMessage(
 		message: ChatMessage,
-		index: number,
-		lastAssistantIndex: number,
 	): AgentTrajectorySnapshot | null {
 		if (message.role !== "assistant" && message.role !== "user") {
 			return null;
@@ -2798,15 +2968,9 @@ export class DailyBoardView extends ItemView {
 			return null;
 		}
 		if (message.role === "user") {
-			if (index < lastAssistantIndex) {
-				return null;
-			}
 			return this.aiRuntimeTrajectorySnapshot === snapshot ? snapshot : null;
 		}
 		if (message.role === "assistant") {
-			if (index !== lastAssistantIndex) {
-				return null;
-			}
 			return this.aiRuntimeTrajectorySnapshot === snapshot ? null : snapshot;
 		}
 		return null;
@@ -2855,17 +3019,30 @@ export class DailyBoardView extends ItemView {
 		const task = taskId ? this.aiAgentTasks.find((item) => item.id === taskId) : undefined;
 		const turnId = uiMeta?.turnId?.trim() || task?.turnId?.trim() || "";
 		const conversationId = uiMeta?.conversationId?.trim() || task?.conversationId?.trim() || this.aiSessionId.trim();
-		return this.buildTrajectorySnapshotKey(conversationId, turnId, taskId);
+		return this.buildTrajectorySnapshotKey(conversationId, turnId, taskId, this.plugin.settings.activeProjectId);
 	}
 
 	private getTrajectorySnapshotKey(snapshot: AgentTrajectorySnapshot | null): string {
+		return this.getTrajectorySnapshotKeyForSession(
+			snapshot,
+			this.aiSessionId,
+			this.getSnapshotProjectId(snapshot) || this.plugin.settings.activeProjectId,
+		);
+	}
+
+	private getTrajectorySnapshotKeyForSession(
+		snapshot: AgentTrajectorySnapshot | null,
+		sessionId: string,
+		projectId = this.plugin.settings.activeProjectId,
+	): string {
 		if (!snapshot) {
 			return "";
 		}
 		return this.buildTrajectorySnapshotKey(
-			snapshot.identity.conversationId || this.aiSessionId,
+			snapshot.identity.conversationId || sessionId,
 			snapshot.identity.turnId,
 			snapshot.identity.taskId,
+			projectId,
 		);
 	}
 
@@ -2873,23 +3050,40 @@ export class DailyBoardView extends ItemView {
 		conversationId: string | undefined,
 		turnId: string | undefined,
 		taskId: string | undefined,
+		projectId = this.plugin.settings.activeProjectId,
 	): string {
+		const normalizedProjectId = projectId?.trim() || "";
 		const normalizedConversationId = conversationId?.trim() || "";
 		const normalizedTurnId = turnId?.trim() || "";
 		const normalizedTaskId = taskId?.trim() || "";
 		if (!normalizedConversationId || (!normalizedTurnId && !normalizedTaskId)) {
 			return "";
 		}
-		return `${normalizedConversationId}::${normalizedTurnId}::${normalizedTaskId}`;
+		return `${normalizedProjectId}::${normalizedConversationId}::${normalizedTurnId}::${normalizedTaskId}`;
+	}
+
+	private getSnapshotProjectId(snapshot: AgentTrajectorySnapshot | null): string {
+		return snapshot ? this.aiProcessSnapshotProjectIds.get(snapshot)?.trim() || "" : "";
 	}
 
 	private rememberCompletedTrajectorySnapshot(snapshot: AgentTrajectorySnapshot | null): void {
-		if (!this.isSnapshotOwnedByCurrentSession(snapshot)) {
+		this.rememberCompletedTrajectorySnapshotForSession(snapshot, this.aiSessionId);
+	}
+
+	private rememberCompletedTrajectorySnapshotForSession(
+		snapshot: AgentTrajectorySnapshot | null,
+		sessionId: string,
+		projectId = this.plugin.settings.activeProjectId,
+	): void {
+		if (!this.isSnapshotOwnedBySession(snapshot, sessionId, projectId)) {
 			return;
 		}
-		const key = this.getTrajectorySnapshotKey(snapshot);
+		const key = this.getTrajectorySnapshotKeyForSession(snapshot, sessionId, projectId);
 		if (key) {
+			this.aiProcessSnapshotProjectIds.set(snapshot, projectId?.trim() || "");
 			this.aiProcessSnapshotsByKey.set(key, snapshot);
+			this.aiProcessExpandedKeys.delete(key);
+			this.aiProcessCollapsedKeys.add(key);
 		}
 	}
 
@@ -2960,6 +3154,7 @@ export class DailyBoardView extends ItemView {
 		const visibleAgentTasks = this.getVisibleAgentTasksForCurrentSession();
 		if (
 			this.aiConversation.length === 0 &&
+			!this.aiLocalIntakePreview &&
 			!this.aiStreamingPreview &&
 			!this.aiRuntimeTrajectorySnapshot &&
 			pendingApprovals.length === 0 &&
@@ -2969,9 +3164,8 @@ export class DailyBoardView extends ItemView {
 			emptyEl.createEl("h4", { text: this.plugin.t("ai.empty.title") });
 			emptyEl.createEl("p", { text: this.plugin.t("ai.empty.desc") });
 		}
-		const lastAssistantIndex = this.findLastAssistantMessageIndex();
-		for (const [index, message] of this.aiConversation.entries()) {
-			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message, index, lastAssistantIndex);
+		for (const message of this.aiConversation) {
+			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message);
 			this.renderAiMessage(containerEl, message, false, completedSnapshotForMessage);
 		}
 		if (this.aiRuntimeTrajectorySnapshot && !this.isLiveRuntimeSnapshotAttachedToMessage()) {
@@ -2982,6 +3176,16 @@ export class DailyBoardView extends ItemView {
 				{
 					role: "assistant",
 					content: this.aiStreamingPreview,
+				},
+				true,
+				this.aiStreamingTrajectorySnapshot,
+			);
+		} else if (this.aiLocalIntakePreview) {
+			this.renderAiMessage(
+				containerEl,
+				{
+					role: "assistant",
+					content: this.aiLocalIntakePreview,
 				},
 				true,
 			);
@@ -3027,6 +3231,22 @@ export class DailyBoardView extends ItemView {
 		this.syncAiQueueHint();
 		this.syncAiComposerControls();
 		this.syncComposerTaskBar();
+	}
+
+	private syncAiRuntimeShell(): void {
+		if (this.activePage !== "chat") {
+			this.syncBackgroundAgentStatus();
+			return;
+		}
+		this.syncAiLiveChatShell();
+	}
+
+	private syncBackgroundAgentStatus(): void {
+		if (!this.aiBackgroundAgentStatusHostEl?.isConnected) {
+			return;
+		}
+		this.aiBackgroundAgentStatusHostEl.empty();
+		this.renderBackgroundAgentStatus(this.aiBackgroundAgentStatusHostEl);
 	}
 
 	private syncAiErrorRegion(): void {
@@ -3482,27 +3702,30 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
-	private async buildCompletedTrajectorySnapshot(result: RuntimeTurnResult): Promise<AgentTrajectorySnapshot | null> {
+	private async buildCompletedTrajectorySnapshot(
+		result: RuntimeTurnResult,
+		targetConversationId = this.aiSessionId,
+	): Promise<AgentTrajectorySnapshot | null> {
 		const resultIdentity = result as RuntimeTurnResult & {
 			conversationId?: string;
 			taskId?: string;
 			traceId?: string;
 			agentId?: string;
 		};
-		const currentConversationId = this.aiSessionId.trim();
-		if (!currentConversationId) {
+		const normalizedTargetConversationId = targetConversationId.trim();
+		if (!normalizedTargetConversationId) {
 			return null;
 		}
 		const resultConversationId = resultIdentity.conversationId?.trim();
-		if (resultConversationId && resultConversationId !== this.aiSessionId) {
+		if (resultConversationId && resultConversationId !== normalizedTargetConversationId) {
 			return null;
 		}
 		const turnId = resultIdentity.turnId?.trim();
 		if (!turnId) {
 			const completedSnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
-			return this.isSnapshotOwnedByCurrentSession(completedSnapshot) ? completedSnapshot : null;
+			return this.isSnapshotOwnedBySession(completedSnapshot, normalizedTargetConversationId) ? completedSnapshot : null;
 		}
-		const conversationId = resultConversationId || this.aiSessionId;
+		const conversationId = resultConversationId || normalizedTargetConversationId;
 		try {
 			const summary = await this.plugin.agentRuntimeService.readTurnReplaySummary({
 				conversationId,
@@ -3511,24 +3734,25 @@ export class DailyBoardView extends ItemView {
 			});
 			if (summary.totalEvents > 0) {
 				const replaySnapshot = projectReplaySummary(summary);
-				return this.isSnapshotOwnedByCurrentSession(replaySnapshot) ? replaySnapshot : null;
+				return this.isSnapshotOwnedBySession(replaySnapshot, normalizedTargetConversationId) ? replaySnapshot : null;
 			}
 		} catch (error) {
 			console.warn("[Friday] Failed to rebuild trajectory replay summary:", error);
 		}
 		const completedSnapshot = this.aiRuntimeTrajectoryStore.getCompletedSnapshot();
-		return this.isSnapshotOwnedByCurrentSession(completedSnapshot) ? completedSnapshot : null;
+		return this.isSnapshotOwnedBySession(completedSnapshot, normalizedTargetConversationId) ? completedSnapshot : null;
 	}
 
 	private buildAssistantMessageUiMeta(
 		result: RuntimeTurnResult,
 		task?: AgentTask,
+		targetConversationId = this.aiSessionId,
 	): ChatMessageUiMeta | undefined {
 		const resultIdentity = result as RuntimeTurnResult & {
 			conversationId?: string;
 			taskId?: string;
 		};
-		const conversationId = resultIdentity.conversationId?.trim() || task?.conversationId?.trim() || this.aiSessionId.trim();
+		const conversationId = resultIdentity.conversationId?.trim() || task?.conversationId?.trim() || targetConversationId.trim();
 		const turnId = resultIdentity.turnId?.trim() || task?.turnId?.trim() || "";
 		const taskId = resultIdentity.taskId?.trim() || task?.id?.trim() || result.task?.id?.trim() || "";
 		if (!conversationId && !turnId && !taskId) {
@@ -3568,6 +3792,21 @@ export class DailyBoardView extends ItemView {
 			this.renderBoard();
 			return;
 		}
+		if (!this.aiSessionId.trim()) {
+			this.aiSessionId = this.plugin.conversationService.createSessionId();
+		}
+		const turnTarget: AiTurnTarget = {
+			sessionId: this.aiSessionId,
+			projectId: this.plugin.settings.activeProjectId || undefined,
+			conversation: [...this.aiConversation],
+		};
+		const turnActiveProject = this.getActiveProjectEntry();
+
+		this.aiLocalIntakePreview = this.buildLocalIntakePreview(rawPrompt);
+		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
+		this.aiForceScrollToBottomOnce = true;
+		this.syncAiLiveChatShell();
 
 		const activeFilePath = this.app.workspace.getActiveFile()?.path ?? "";
 		const hasExplicitActiveNoteMention = draftDocument.tokens.some((token) => token.type === "active_note");
@@ -3579,7 +3818,7 @@ export class DailyBoardView extends ItemView {
 		const mentionResolution = await this.mentionResolver.resolve({
 			document: draftDocument,
 			currentFilePath: activeFileContext.mode === "explicit_mention" ? activeFileContext.path : "",
-			activeProjectRoot: this.getActiveProjectEntry()?.boundaryPath ?? "",
+			activeProjectRoot: turnActiveProject?.boundaryPath ?? "",
 			readFile: async (pathValue) => {
 				const file = this.app.vault.getAbstractFileByPath(pathValue);
 				if (!(file instanceof TFile)) {
@@ -3598,6 +3837,7 @@ export class DailyBoardView extends ItemView {
 			},
 		});
 		if (mentionResolution.errors.length > 0) {
+			this.aiLocalIntakePreview = "";
 			this.aiLastError = mentionResolution.errors.map((item) => item.message).join(" ");
 			this.syncAiLiveChatShell();
 			return;
@@ -3608,13 +3848,14 @@ export class DailyBoardView extends ItemView {
 		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
 		const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
 		if (resolution.type === "invalid") {
+			this.aiLocalIntakePreview = "";
 			this.aiLastError = resolution.error;
 			this.syncAiLiveChatShell();
 			return;
 		}
 
-		const history = [...this.aiConversation];
-		this.aiConversation.push({
+		const history = [...turnTarget.conversation];
+		turnTarget.conversation.push({
 			role: "user",
 			content: userFacingPrompt,
 			uiMeta: this.buildUserMessageUiMeta({
@@ -3623,21 +3864,32 @@ export class DailyBoardView extends ItemView {
 				resolution,
 			}),
 		});
+		if (this.isCurrentAiTurnTarget(turnTarget) && this.aiConversation !== turnTarget.conversation) {
+			this.aiConversation = turnTarget.conversation;
+		}
 		this.aiDraft = "";
 		this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();
 		this.composer?.replaceSnapshot(this.aiComposerSnapshot);
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.clearRuntimeElapsedTimer();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
+		this.aiActiveTurnTarget = turnTarget;
+		this.aiBackgroundTurnTarget = null;
+		this.aiBackgroundTurnFailure = null;
 		this.aiSendAbortController?.abort();
 		const runAbortController = new AbortController();
 		this.aiSendAbortController = runAbortController;
 		this.aiForceScrollToBottomOnce = true;
-		this.syncAiLiveChatShell();
+		if (this.isCurrentAiTurnTarget(turnTarget)) {
+			this.syncAiLiveChatShell();
+		} else {
+			this.syncBackgroundAgentStatus();
+		}
 
 		try {
 			let modelOverride = effectiveModel || undefined;
@@ -3658,14 +3910,18 @@ export class DailyBoardView extends ItemView {
 				if (!assistantText) {
 					runtimeResult = await this.plugin.executionOrchestrator.execute(decision, {
 						agentId: activeSoul.id,
-						conversationId: this.aiSessionId,
+						conversationId: turnTarget.sessionId,
 						conversation: history,
 						modelOverride,
 						activeFileContext,
 						mentionContext: promptMentionContext,
 						allowedTools,
 						onProgress: (event) => {
-							this.handleRuntimeProgress(event);
+							if (this.isCurrentAiTurnTarget(turnTarget)) {
+								this.handleRuntimeProgress(event);
+							} else {
+								this.syncBackgroundAgentStatus();
+							}
 						},
 						signal: runAbortController.signal,
 					});
@@ -3681,45 +3937,78 @@ export class DailyBoardView extends ItemView {
 			}
 
 			const normalizedAssistantText = assistantText.trim() || this.t("ai.runtime.emptyResponse", "(No valid model response)");
-			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming) {
+			const completedSnapshot = runtimeResult
+				? await this.buildCompletedTrajectorySnapshot(runtimeResult, turnTarget.sessionId)
+				: null;
+			this.rememberCompletedTrajectorySnapshotForSession(completedSnapshot, turnTarget.sessionId, turnTarget.projectId);
+			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming && this.isCurrentAiTurnTarget(turnTarget)) {
+				this.aiStreamingTrajectorySnapshot = completedSnapshot;
 				await this.streamAssistantText(normalizedAssistantText);
 			}
-			const completedSnapshot = runtimeResult
-				? await this.buildCompletedTrajectorySnapshot(runtimeResult)
-				: null;
-			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
 			const assistantUiMeta = runtimeResult
-				? this.buildAssistantMessageUiMeta(runtimeResult, runtimeTask)
+				? this.buildAssistantMessageUiMeta(runtimeResult, runtimeTask, turnTarget.sessionId)
 				: undefined;
 
-			this.aiConversation.push({
+			this.aiLocalIntakePreview = "";
+			this.detachCurrentConversationFromBackgroundTurn(turnTarget);
+			turnTarget.conversation.push({
 				role: "assistant",
 				content: normalizedAssistantText,
 				...(assistantUiMeta ? { uiMeta: assistantUiMeta } : {}),
 			});
-			await this.persistConversation();
+			this.aiBackgroundTurnTarget = turnTarget;
+			if (this.isCurrentAiTurnTarget(turnTarget) && this.aiConversation !== turnTarget.conversation) {
+				this.aiConversation = turnTarget.conversation;
+			}
+			await this.persistConversation({
+				sessionId: turnTarget.sessionId,
+				projectId: turnTarget.projectId,
+				messages: turnTarget.conversation,
+			});
 		} catch (error) {
+			const isCurrentTarget = this.isCurrentAiTurnTarget(turnTarget);
+			let failureMessage = "";
 			if (error instanceof DOMException && error.name === "AbortError") {
-				this.aiLastError = this.t("ai.action.cancelled", "Action cancelled.");
+				failureMessage = this.t("ai.action.cancelled", "Action cancelled.");
 			} else {
 				const message = error instanceof Error ? error.message : String(error ?? "");
-				this.aiLastError = message.trim() || this.t("common.unknownError", "Unknown error");
+				failureMessage = message.trim() || this.t("common.unknownError", "Unknown error");
 				new Notice(
-					this.t("ai.notice.chatFailed", "FRIDAY chat failed: {error}", { error: this.aiLastError }),
+					this.t("ai.notice.chatFailed", "FRIDAY chat failed: {error}", { error: failureMessage }),
 					7000,
 				);
 			}
+			if (isCurrentTarget) {
+				this.aiLastError = failureMessage;
+			} else {
+				this.aiBackgroundTurnFailure = { target: turnTarget, message: failureMessage };
+			}
+			this.aiBackgroundTurnTarget = turnTarget;
 		} finally {
 			this.aiBusy = false;
+			this.aiActiveTurnTarget = null;
+			this.aiLocalIntakePreview = "";
 			this.aiStreamingPreview = "";
+			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
 			this.clearRuntimeElapsedTimer();
 			this.aiSendAbortController = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
-			this.syncAiLiveChatShell();
+			if (this.isCurrentAiTurnTarget(turnTarget)) {
+				this.syncAiRuntimeShell();
+			} else {
+				this.syncBackgroundAgentStatus();
+			}
 			await this.flushQueuedAiPrompt();
 		}
+	}
+
+	private detachCurrentConversationFromBackgroundTurn(target: AiTurnTarget): void {
+		if (this.isCurrentAiTurnTarget(target) || this.aiConversation !== target.conversation) {
+			return;
+		}
+		this.aiConversation = [...this.aiConversation];
 	}
 
 	private async compileWikiByButton(): Promise<void> {
@@ -3741,7 +4030,9 @@ export class DailyBoardView extends ItemView {
 		}
 		this.aiBusy = true;
 		this.aiLastError = "";
+		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.clearRuntimeElapsedTimer();
@@ -3800,7 +4091,9 @@ export class DailyBoardView extends ItemView {
 			);
 		} finally {
 			this.aiBusy = false;
+			this.aiLocalIntakePreview = "";
 			this.aiStreamingPreview = "";
+			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
@@ -3880,10 +4173,19 @@ export class DailyBoardView extends ItemView {
 		});
 	}
 
+	private buildLocalIntakePreview(rawPrompt: string): string {
+		const prompt = rawPrompt.trim();
+		if (!prompt) {
+			return "";
+		}
+		return this.t("ai.intake.preview.local", "FRIDAY 正在理解你的请求");
+	}
+
 	private async streamAssistantText(text: string): Promise<void> {
 		if (!text) {
 			return;
 		}
+		this.aiLocalIntakePreview = "";
 		this.aiRuntimeTrajectorySnapshot = null;
 		const chunkSize = Math.max(8, Math.min(48, Math.ceil(text.length / 80)));
 		const delay = 18;
@@ -3936,9 +4238,15 @@ export class DailyBoardView extends ItemView {
 	private handleRuntimeProgress(event: RuntimeProgressEvent): void {
 		void recordTaskFromRuntimeProgress(event, this.plugin.agentRuntimeService, this.aiRuntimeProgressTaskIds, {
 			recordAgentTask: (task) => this.recordAgentTask(task),
-			render: () => this.syncAiLiveChatShell(),
+			render: () => this.syncAiRuntimeShell(),
 		});
-		this.aiRuntimeTrajectorySnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
+		this.aiStreamingTrajectorySnapshot = null;
+		const nextSnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
+		const nextView = buildAgentProcessPanelViewModel(nextSnapshot);
+		if (nextView.shouldRenderProcessPanel) {
+			this.aiLocalIntakePreview = "";
+		}
+		this.aiRuntimeTrajectorySnapshot = nextSnapshot;
 		this.bindRuntimeSnapshotToLatestUserMessage(this.aiRuntimeTrajectorySnapshot);
 		const terminalProgress = event.phase === "error" || event.phase === "done";
 		if (terminalProgress) {
@@ -3955,7 +4263,7 @@ export class DailyBoardView extends ItemView {
 		if (forceRender || now - this.aiRuntimeLastRenderAt >= 120) {
 			this.aiRuntimeLastRenderAt = now;
 			this.aiForceScrollToBottomOnce = true;
-			this.syncAiLiveChatShell();
+			this.syncAiRuntimeShell();
 		}
 	}
 
@@ -4719,6 +5027,9 @@ export class DailyBoardView extends ItemView {
 			this.aiSessionId = "";
 			this.aiQueuedPrompts = [];
 			this.aiAgentTasks = [];
+			this.aiLocalIntakePreview = "";
+			this.aiStreamingPreview = "";
+			this.aiStreamingTrajectorySnapshot = null;
 			this.aiProcessSnapshotsByKey.clear();
 			return;
 		}
@@ -4751,22 +5062,37 @@ export class DailyBoardView extends ItemView {
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
 		this.aiConversation = [];
 		this.aiAgentTasks = [];
+		this.aiLocalIntakePreview = "";
+		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
 		this.aiProcessSnapshotsByKey.clear();
 	}
 
-	private async persistConversation(): Promise<void> {
+	private async persistConversation(input: {
+		sessionId?: string;
+		projectId?: string;
+		messages?: ChatMessage[];
+	} = {}): Promise<void> {
 		const activeSoul = this.plugin.getActiveSoul();
-		if (!activeSoul || this.aiConversation.length === 0) {
+		const messages = input.messages ?? this.aiConversation;
+		if (!activeSoul || messages.length === 0) {
 			return;
 		}
-		if (!this.aiSessionId) {
-			this.aiSessionId = this.plugin.conversationService.createSessionId();
+		let sessionId = input.sessionId?.trim() || this.aiSessionId.trim();
+		if (!sessionId) {
+			sessionId = this.plugin.conversationService.createSessionId();
+			if (!input.sessionId) {
+				this.aiSessionId = sessionId;
+			}
 		}
+		const projectId = input.projectId !== undefined
+			? input.projectId || undefined
+			: this.plugin.settings.activeProjectId || undefined;
 		const saved = await this.plugin.conversationService.saveSession({
 			soulId: activeSoul.id,
-			projectId: this.plugin.settings.activeProjectId || undefined,
-			sessionId: this.aiSessionId,
-			messages: this.aiConversation,
+			projectId,
+			sessionId,
+			messages,
 		});
 		this.aiSessions = [saved, ...this.aiSessions.filter((session) => session.sessionId !== saved.sessionId)]
 			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))

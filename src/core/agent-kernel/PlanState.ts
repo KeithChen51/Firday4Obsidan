@@ -7,11 +7,13 @@ export interface IntakeDecision {
 	route: IntakeRoute;
 	statement: string;
 	requiresPlan: boolean;
+	shouldShowProcess: boolean;
+	shouldUseVisiblePlan: boolean;
 	source: IntakeDecisionSource;
 }
 
-export type PlanVisibility = "hidden" | "task_bar";
-export type PlanTaskStatus = "pending" | "in_progress" | "completed" | "skipped" | "failed";
+export type PlanVisibility = "hidden" | "task_bar" | "visible" | "internal";
+export type PlanTaskStatus = "pending" | "in_progress" | "completed" | "skipped" | "failed" | "blocked";
 export type PlanStateStatus = "pending" | "running" | "completed" | "skipped" | "failed";
 
 export interface PlanTask {
@@ -41,16 +43,61 @@ export type PlanProgressType =
 	| "plan_complete"
 	| "plan_skip";
 
+export type PlanRevisionChangeType = "add" | "remove" | "rename" | "reorder" | "status";
+
+export interface PlanRevisionChange {
+	type: PlanRevisionChangeType;
+	taskId?: string;
+	title?: string;
+	status?: PlanTaskStatus;
+}
+
 export interface RuntimePlanProgress {
 	type: PlanProgressType;
 	state: PlanState;
 	taskId?: string;
 	message?: string;
+	reason?: string;
+	changes?: PlanRevisionChange[];
 }
+
+export interface RuntimePlanTaskInstruction {
+	id?: string;
+	title: string;
+	status?: PlanTaskStatus;
+	summary?: string;
+}
+
+export type RuntimePlanInstruction =
+	| RuntimePlanCreateInstruction
+	| RuntimePlanReviseInstruction
+	| RuntimePlanSkipInstruction;
+
+export interface RuntimePlanCreateInstruction {
+	type: "plan_create";
+	reason?: string;
+	visibility?: PlanVisibility;
+	tasks?: RuntimePlanTaskInstruction[];
+	tasksMalformed?: boolean;
+}
+
+export interface RuntimePlanReviseInstruction {
+	type: "plan_revise";
+	reason?: string;
+	changes?: PlanRevisionChange[];
+	tasks?: RuntimePlanTaskInstruction[];
+}
+
+export interface RuntimePlanSkipInstruction {
+	type: "plan_skip";
+	reason?: string;
+}
+
+export type CreatePlanTaskInput = string | RuntimePlanTaskInstruction;
 
 export interface CreatePlanStateInput {
 	planId: string;
-	tasks: string[];
+	tasks: CreatePlanTaskInput[];
 	now?: string;
 	visibility?: PlanVisibility;
 }
@@ -64,16 +111,10 @@ export function createPlanState(input: CreatePlanStateInput): PlanState {
 	const now = input.now ?? new Date().toISOString();
 	const planId = input.planId.trim() || "plan";
 	const tasks = input.tasks
-		.map((title) => title.trim())
-		.filter(Boolean)
-		.map((title, index): PlanTask => ({
-			id: `${planId}-${index + 1}`,
-			title,
-			status: index === 0 ? "in_progress" : "pending",
-			...(index === 0 ? { startedAt: now } : {}),
-		}));
+		.map((task, index) => normalizeCreatePlanTask(task, planId, index, now))
+		.filter((task): task is PlanTask => Boolean(task));
 	const currentTask = tasks.find((task) => task.status === "in_progress");
-	return {
+	return normalizePlanState({
 		planId,
 		visibility: input.visibility ?? "task_bar",
 		status: tasks.length > 0 ? "running" : "completed",
@@ -82,7 +123,7 @@ export function createPlanState(input: CreatePlanStateInput): PlanState {
 		createdAt: now,
 		updatedAt: now,
 		...(tasks.length === 0 ? { completedAt: now } : {}),
-	};
+	});
 }
 
 export function completePlanTask(
@@ -129,32 +170,43 @@ export function failPlanTask(
 export function revisePlanState(
 	state: PlanState,
 	input: {
-		tasks: Array<{ id?: string; title: string }>;
+		tasks?: Array<{ id?: string; title: string }>;
+		changes?: PlanRevisionChange[];
+		reason?: string;
 		now?: string;
 	},
 ): PlanState {
 	const now = input.now ?? new Date().toISOString();
 	const existingById = new Map(state.tasks.map((task) => [task.id, task]));
-	const tasks = input.tasks
-		.map((task, index) => ({
-			id: task.id?.trim() || `${state.planId}-${index + 1}`,
-			title: task.title.trim(),
-		}))
-		.filter((task) => task.title.length > 0)
-		.map((task): PlanTask => {
-			const existing = existingById.get(task.id);
-			if (existing) {
-				return { ...existing, title: task.title };
-			}
-			return {
-				id: task.id,
-				title: task.title,
-				status: "pending",
-			};
+	if (input.tasks) {
+		const tasks = input.tasks
+			.map((task, index) => ({
+				id: task.id?.trim() || `${state.planId}-${index + 1}`,
+				title: task.title.trim(),
+			}))
+			.filter((task) => task.title.length > 0)
+			.map((task): PlanTask => {
+				const existing = existingById.get(task.id);
+				if (existing) {
+					return { ...existing, title: task.title };
+				}
+				return {
+					id: task.id,
+					title: task.title,
+					status: "pending",
+				};
+			});
+		return normalizePlanState({
+			...state,
+			status: state.status === "completed" ? "running" : state.status,
+			tasks,
+			updatedAt: now,
 		});
+	}
+	const tasks = applyRevisionChanges(state, input.changes ?? [], now);
 	return normalizePlanState({
 		...state,
-		status: state.status === "completed" ? "running" : state.status,
+		status: state.status === "completed" || state.status === "skipped" ? "running" : state.status,
 		tasks,
 		updatedAt: now,
 	});
@@ -171,10 +223,34 @@ export function completePlanState(
 		currentTaskId: state.tasks.at(-1)?.id,
 		updatedAt: now,
 		completedAt: now,
+		tasks: state.tasks.map((task) => {
+			if (task.status === "blocked") {
+				return { ...task };
+			}
+			return {
+				...task,
+				status: task.status === "skipped" ? "skipped" : "completed",
+				completedAt: task.completedAt ?? now,
+			};
+		}),
+	};
+}
+
+export function skipPlanState(
+	state: PlanState,
+	options: PlanStateMutationOptions = {},
+): PlanState {
+	const now = options.now ?? new Date().toISOString();
+	return {
+		...state,
+		status: "skipped",
+		updatedAt: now,
+		completedAt: now,
 		tasks: state.tasks.map((task) => ({
 			...task,
-			status: task.status === "skipped" ? "skipped" : "completed",
-			completedAt: task.completedAt ?? now,
+			status: task.status === "completed" || task.status === "blocked" ? task.status : "skipped",
+			...(task.status === "completed" || task.status === "blocked" ? {} : { completedAt: task.completedAt ?? now }),
+			...(options.reason && task.status !== "completed" && task.status !== "blocked" ? { summary: options.reason } : {}),
 		})),
 	};
 }
@@ -219,6 +295,39 @@ export function normalizePlanState(state: PlanState): PlanState {
 	};
 }
 
+function normalizeCreatePlanTask(
+	input: CreatePlanTaskInput,
+	planId: string,
+	index: number,
+	now: string,
+): PlanTask | null {
+	if (typeof input === "string") {
+		const title = input.trim();
+		if (!title) {
+			return null;
+		}
+		return {
+			id: `${planId}-${index + 1}`,
+			title,
+			status: index === 0 ? "in_progress" : "pending",
+			...(index === 0 ? { startedAt: now } : {}),
+		};
+	}
+	const title = input.title.trim();
+	if (!title) {
+		return null;
+	}
+	const status = normalizePlanTaskStatus(input.status, index === 0 ? "in_progress" : "pending");
+	return {
+		id: input.id?.trim() || `${planId}-${index + 1}`,
+		title,
+		status,
+		...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
+		...(status === "in_progress" ? { startedAt: now } : {}),
+		...(status === "completed" || status === "skipped" || status === "failed" ? { completedAt: now } : {}),
+	};
+}
+
 function advancePlanTask(
 	state: PlanState,
 	taskId: string,
@@ -226,6 +335,13 @@ function advancePlanTask(
 	options: PlanStateMutationOptions,
 ): PlanState {
 	const now = options.now ?? new Date().toISOString();
+	const target = state.tasks.find((task) => task.id === taskId);
+	if (target?.status === "blocked") {
+		return normalizePlanState({
+			...state,
+			updatedAt: now,
+		});
+	}
 	const tasks = state.tasks.map((task) => {
 		if (task.id !== taskId) {
 			return { ...task };
@@ -248,4 +364,89 @@ function advancePlanTask(
 		tasks,
 		updatedAt: now,
 	});
+}
+
+function applyRevisionChanges(state: PlanState, changes: PlanRevisionChange[], now: string): PlanTask[] {
+	const tasks = state.tasks.map((task) => ({ ...task }));
+	let nextGeneratedIndex = tasks.length + 1;
+	for (const change of changes) {
+		const taskId = change.taskId?.trim();
+		if (change.type === "add") {
+			const title = change.title?.trim();
+			if (!title) {
+				continue;
+			}
+			const id = taskId || `${state.planId}-${nextGeneratedIndex++}`;
+			if (tasks.some((task) => task.id === id)) {
+				continue;
+			}
+			tasks.push({
+				id,
+				title,
+				status: normalizePlanTaskStatus(change.status, "pending"),
+				...(change.status === "in_progress" ? { startedAt: now } : {}),
+			});
+			continue;
+		}
+		if (!taskId) {
+			continue;
+		}
+		const index = tasks.findIndex((task) => task.id === taskId);
+		if (index < 0) {
+			continue;
+		}
+		const task = tasks[index]!;
+		if (change.type === "remove") {
+			tasks.splice(index, 1);
+			continue;
+		}
+		if (change.type === "rename") {
+			const title = change.title?.trim();
+			if (title) {
+				tasks[index] = { ...task, title };
+			}
+			continue;
+		}
+		if (change.type === "status") {
+			if (task.status === "blocked") {
+				continue;
+			}
+			const status = normalizePlanTaskStatus(change.status, task.status);
+			if (status === "in_progress") {
+				for (const other of tasks) {
+					if (other.id !== taskId && other.status === "in_progress") {
+						other.status = "pending";
+					}
+				}
+			}
+			tasks[index] = {
+				...task,
+				status,
+				...(status === "in_progress" ? { startedAt: task.startedAt ?? now } : {}),
+				...(status === "completed" || status === "skipped" || status === "failed" ? { completedAt: task.completedAt ?? now } : {}),
+			};
+			continue;
+		}
+		if (change.type === "reorder") {
+			const [moved] = tasks.splice(index, 1);
+			if (moved) {
+				tasks.push(moved);
+			}
+		}
+	}
+	return tasks;
+}
+
+function normalizePlanTaskStatus(status: PlanTaskStatus | undefined, fallback: PlanTaskStatus): PlanTaskStatus {
+	if (
+		status === "pending" ||
+		status === "in_progress" ||
+		status === "completed" ||
+		status === "skipped" ||
+		status === "failed" ||
+		status === "blocked"
+	) {
+		return status;
+	}
+	return fallback;
 }

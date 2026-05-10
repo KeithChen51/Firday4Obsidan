@@ -76,6 +76,50 @@ function makeReplaySummary(overrides = {}) {
 	};
 }
 
+test("projectRuntimeProgress shows human start copy for start-only progress", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "start",
+			depth: 0,
+			message: "Runtime started.",
+			turnId: "turn-start-only",
+			taskId: "task-start-only",
+			at: "2026-05-07T00:00:00.000Z",
+		},
+	]);
+	const visibleText = JSON.stringify({
+		headline: snapshot.headline,
+		summary: snapshot.summary,
+		items: snapshot.items.map((item) => ({
+			title: item.title,
+			detail: item.detail,
+		})),
+	});
+
+	assert.equal(snapshot.headline, "FRIDAY \u6b63\u5728\u7406\u89e3\u4f60\u7684\u8bf7\u6c42");
+	assert.equal(snapshot.summary, "FRIDAY \u6b63\u5728\u7406\u89e3\u4f60\u7684\u8bf7\u6c42");
+	assert.doesNotMatch(visibleText, /Runtime started|Agent is preparing/);
+});
+
+test("projectRuntimeProgress keeps internal preflight context from replacing thinking copy", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{ phase: "start", depth: 0, message: "Runtime started.", at: "2026-05-08T00:00:00.000Z" },
+		{ phase: "context", depth: 0, contextKey: "instructions", message: "加载项目规则与 Soul 设定", at: "2026-05-08T00:00:00.100Z" },
+		{ phase: "context", depth: 0, contextKey: "skills", message: "匹配相关技能与命令约束", at: "2026-05-08T00:00:00.200Z" },
+		{ phase: "context", depth: 0, contextKey: "memory", message: "加载长期记忆与项目偏好", at: "2026-05-08T00:00:00.300Z" },
+		{ phase: "context", depth: 0, contextKey: "compact", message: "压缩上下文并生成提示包", at: "2026-05-08T00:00:00.400Z" },
+	]);
+
+	assert.equal(snapshot.status, "running");
+	assert.equal(snapshot.headline, "FRIDAY \u6b63\u5728\u7406\u89e3\u4f60\u7684\u8bf7\u6c42");
+	assert.equal(snapshot.summary, "FRIDAY \u6b63\u5728\u7406\u89e3\u4f60\u7684\u8bf7\u6c42");
+	assert.equal(snapshot.items.filter((item) => item.kind === "context").length, 4);
+});
+
 test("projectRuntimeProgress projects first-person intake and plan task bar state without fake plans for simple tasks", async () => {
 	const { projectRuntimeProgress } = await loadProjector();
 
@@ -473,6 +517,38 @@ test("projectReplaySummary restores intake and plan timelines for completed task
 	assert.equal(snapshot.items.some((item) => item.kind === "plan" && item.rawEventType === "plan_create"), false);
 	assert.equal(snapshot.plan?.status, "completed");
 	assert.deepEqual(snapshot.plan?.tasks.map((task) => task.status), ["completed", "completed"]);
+});
+
+test("projectReplaySummary preserves blocked plan task status in trajectory state", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		planTimeline: [
+			{
+				type: "plan_revise",
+				reason: "Waiting on external evidence.",
+				state: {
+					planId: "plan-replay-blocked",
+					visibility: "task_bar",
+					status: "running",
+					currentTaskId: "plan-replay-blocked-1",
+					tasks: [
+						{ id: "plan-replay-blocked-1", title: "Confirm available evidence", status: "in_progress" },
+						{ id: "plan-replay-blocked-2", title: "Patch runtime", status: "blocked" },
+					],
+				},
+				changes: [
+					{ type: "status", taskId: "plan-replay-blocked-2", status: "blocked" },
+				],
+				at: "2026-05-05T00:00:02.000Z",
+			},
+		],
+	}));
+
+	assert.deepEqual(snapshot.plan?.tasks.map((task) => [task.id, task.status]), [
+		["plan-replay-blocked-1", "in_progress"],
+		["plan-replay-blocked-2", "blocked"],
+	]);
 });
 
 test("projectReplaySummary keeps completed replay plan progress out of process timeline", async () => {

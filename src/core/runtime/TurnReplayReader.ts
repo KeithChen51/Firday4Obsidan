@@ -397,6 +397,12 @@ export class TurnReplayReader {
 				route: this.toIntakeRoute(this.getPayloadText(event, "route")),
 				statement,
 				requiresPlan: this.getPayloadOptionalBoolean(event, "requiresPlan") ?? false,
+				shouldShowProcess: this.getPayloadOptionalBoolean(event, "shouldShowProcess") ??
+					this.getPayloadOptionalBoolean(event, "requiresPlan") ??
+					false,
+				shouldUseVisiblePlan: this.getPayloadOptionalBoolean(event, "shouldUseVisiblePlan") ??
+					this.getPayloadOptionalBoolean(event, "requiresPlan") ??
+					false,
 				source: this.toIntakeSource(this.getPayloadText(event, "source")),
 				at: event.at,
 			});
@@ -419,6 +425,8 @@ export class TurnReplayReader {
 				state,
 				taskId: this.getPayloadText(event, "taskId") || undefined,
 				message: this.getPayloadText(event, "message") || this.getPayloadText(event, "summary") || undefined,
+				reason: this.getPayloadText(event, "reason") || undefined,
+				changes: this.getPlanRevisionChangesFromEvent(event),
 				at: event.at,
 			});
 		}
@@ -466,7 +474,7 @@ export class TurnReplayReader {
 			.filter((task) => task.id && task.title);
 		return {
 			planId,
-			visibility: this.getRecordText(rawState, "visibility") === "hidden" ? "hidden" : "task_bar",
+			visibility: this.toPlanVisibility(this.getRecordText(rawState, "visibility")),
 			status: this.toPlanStateStatus(this.getRecordText(rawState, "status")),
 			...(this.getRecordText(rawState, "currentTaskId") ? { currentTaskId: this.getRecordText(rawState, "currentTaskId") } : {}),
 			tasks,
@@ -476,8 +484,39 @@ export class TurnReplayReader {
 		};
 	}
 
+	private getPlanRevisionChangesFromEvent(event: TurnEventRecord): RuntimePlanProgress["changes"] | undefined {
+		const changes = this.getPayloadValue(event, "changes");
+		if (!Array.isArray(changes)) {
+			return undefined;
+		}
+		const normalized = changes
+			.filter((change): change is Record<string, unknown> => Boolean(change && typeof change === "object" && !Array.isArray(change)))
+			.map((change) => ({
+				type: this.toPlanRevisionChangeType(this.getRecordText(change, "type")),
+				...(this.getRecordText(change, "taskId") ? { taskId: this.getRecordText(change, "taskId") } : {}),
+				...(this.getRecordText(change, "title") ? { title: this.getRecordText(change, "title") } : {}),
+				...(this.getRecordText(change, "status") ? { status: this.toPlanTaskStatus(this.getRecordText(change, "status")) } : {}),
+			}))
+			.filter((change): change is NonNullable<RuntimePlanProgress["changes"]>[number] => Boolean(change.type));
+		return normalized.length > 0 ? normalized : undefined;
+	}
+
+	private toPlanRevisionChangeType(value: string): NonNullable<RuntimePlanProgress["changes"]>[number]["type"] | "" {
+		if (value === "add" || value === "remove" || value === "rename" || value === "reorder" || value === "status") {
+			return value;
+		}
+		return "";
+	}
+
+	private toPlanVisibility(value: string): PlanState["visibility"] {
+		if (value === "hidden" || value === "task_bar" || value === "visible" || value === "internal") {
+			return value;
+		}
+		return "task_bar";
+	}
+
 	private toPlanTaskStatus(value: string): PlanState["tasks"][number]["status"] {
-		if (value === "pending" || value === "in_progress" || value === "completed" || value === "skipped" || value === "failed") {
+		if (value === "pending" || value === "in_progress" || value === "completed" || value === "skipped" || value === "failed" || value === "blocked") {
 			return value;
 		}
 		return "pending";
@@ -811,6 +850,10 @@ export class TurnReplayReader {
 	private getPayloadStringArray(event: TurnEventRecord, key: string): string[] {
 		const value = event.payload[key];
 		return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+	}
+
+	private getPayloadValue(event: TurnEventRecord, key: string): unknown {
+		return event.payload[key];
 	}
 
 	private getPayloadRecord(event: TurnEventRecord, key: string): Record<string, unknown> {

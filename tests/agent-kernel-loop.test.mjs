@@ -29,6 +29,26 @@ function planStateSignature(state) {
 	});
 }
 
+function runtimeEnvelope(payload) {
+	return [
+		"```friday-runtime",
+		JSON.stringify(payload),
+		"```",
+	].join("\n");
+}
+
+function eventIndex(events, type) {
+	return events.findIndex((event) => event.type === type);
+}
+
+function assertEventAfter(events, laterType, earlierType) {
+	const later = eventIndex(events, laterType);
+	const earlier = eventIndex(events, earlierType);
+	assert.ok(earlier >= 0, `expected ${earlierType} event`);
+	assert.ok(later >= 0, `expected ${laterType} event`);
+	assert.ok(later > earlier, `${laterType} should be emitted after ${earlierType}`);
+}
+
 test("AgentKernel executes a native model/tool loop through AgentLoopController", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
@@ -173,7 +193,7 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
 });
 
-test("AgentLoopController creates intake and plan events for complex implementation turns", async () => {
+test("AgentLoopController emits native model-authored intake and plan only after model_response", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
@@ -183,7 +203,7 @@ test("AgentLoopController creates intake and plan events for complex implementat
 			async buildContext(input) {
 				return {
 					toolCallingMode: "native",
-					maxIterations: 1,
+					maxIterations: 2,
 					messages: [
 						{ role: "system", content: "system prompt" },
 						{ role: "user", content: input.userPrompt },
@@ -197,7 +217,27 @@ test("AgentLoopController creates intake and plan events for complex implementat
 			},
 			async requestWithTools() {
 				return {
-					assistantText: "Implemented the optimization.",
+					assistantText: runtimeEnvelope({
+						type: "response",
+						assistant: "I understand the process panel work and have a plan.",
+						intake: {
+							complexity: "complex",
+							route: "plan_and_execute",
+							statement: "I understand you want the process panel optimization implemented with regression coverage.",
+							requiresPlan: true,
+							shouldShowProcess: true,
+							shouldUseVisiblePlan: true,
+						},
+						plan: {
+							type: "plan_create",
+							visibility: "visible",
+							tasks: [
+								{ id: "scope", title: "Confirm the process panel scope", status: "in_progress" },
+								{ id: "patch", title: "实现 runtime behavior", status: "pending" },
+								{ id: "verify", title: "Run focused regression tests", status: "pending" },
+							],
+						},
+					}),
 					toolCalls: [],
 					finishReason: "stop",
 				};
@@ -224,13 +264,17 @@ test("AgentLoopController creates intake and plan events for complex implementat
 		userPrompt: "Implement the process panel optimization and update the regression tests",
 		allowedTools: ["edit"],
 		mode: "agent",
-		budget: { tool: { maxIterations: 1 } },
+		budget: { tool: { maxIterations: 2 } },
 	});
 
 	assert.equal(result.status, "completed");
+	assertEventAfter(result.events, "intake_decision", "model_response");
+	assertEventAfter(result.events, "plan_create", "model_response");
 	const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
 	assert.equal(intakePayload?.complexity, "complex");
 	assert.equal(intakePayload?.requiresPlan, true);
+	assert.equal(intakePayload?.source, "model");
+	assert.equal(intakePayload?.statement, "I understand you want the process panel optimization implemented with regression coverage.");
 	assert.match(intakePayload?.statement ?? "", /^我理解你希望|^I understand/);
 	const planCreatePayload = result.events.find((event) => event.type === "plan_create")?.payload;
 	assert.equal(planCreatePayload?.state?.visibility, "task_bar");
@@ -241,6 +285,684 @@ test("AgentLoopController creates intake and plan events for complex implementat
 	assert.equal(planTitles.some((title) => /实现|修复|修改|验证|测试/.test(title)), true);
 	const planCompletePayload = result.events.find((event) => event.type === "plan_complete")?.payload;
 	assert.equal(planCompletePayload?.state?.status, "completed");
+});
+
+test("AgentLoopController emits prompt model-authored intake and plan only after model_response", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I understand the regression and will use the model-authored plan.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand you want the prompt runtime path covered.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "prompt-scope", title: "Confirm prompt runtime scope", status: "in_progress" },
+							{ id: "prompt-test", title: "Add prompt regression coverage", status: "pending" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("prompt path test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("prompt path test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-prompt-model-plan",
+		taskId: "task-prompt-model-plan",
+		traceId: "trace-prompt-model-plan",
+		conversationId: "conversation-prompt-model-plan",
+		agentId: "agent-prompt-model-plan",
+		conversation: [],
+		userPrompt: "Debug the prompt runtime plan projection and update the focused tests",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assertEventAfter(result.events, "intake_decision", "model_response");
+	assertEventAfter(result.events, "plan_create", "model_response");
+	const modelResponseIndex = eventIndex(result.events, "model_response");
+	assert.equal(result.events.slice(0, modelResponseIndex).some((event) => event.type === "intake_decision" || event.type === "plan_create"), false);
+	assert.equal(result.events.find((event) => event.type === "intake_decision")?.payload?.source, "model");
+	assert.deepEqual(
+		result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks?.map((task) => task.title),
+		["Confirm prompt runtime scope", "Add prompt regression coverage"],
+	);
+});
+
+test("AgentLoopController does not duplicate initial model-authored intake and plan after native fallback to prompt", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input, _context, options) {
+				return {
+					toolCallingMode: options.channel === "prompt" ? "prompt" : "auto",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: `${options.channel} system prompt` },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "Prompt fallback completed without replaying the initial process.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "This duplicate prompt intake must be ignored.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "duplicate", title: "Duplicate prompt plan must be ignored", status: "in_progress" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				return {
+					assistantText: runtimeEnvelope({
+						type: "tool_call",
+						assistant: "I understand the native path needs an initial plan before tool execution.",
+						intake: {
+							complexity: "complex",
+							route: "plan_and_execute",
+							statement: "I understand you want the native plan preserved across fallback.",
+							requiresPlan: true,
+							shouldShowProcess: true,
+							shouldUseVisiblePlan: true,
+						},
+						plan: {
+							type: "plan_create",
+							visibility: "visible",
+							tasks: [
+								{ id: "native-scope", title: "Preserve native-authored intake and plan", status: "in_progress" },
+								{ id: "native-finish", title: "Finish through prompt fallback", status: "pending" },
+							],
+						},
+					}),
+					toolCalls: [{ id: "native-call-1", name: "read", args: { path: "src/parser.ts" } }],
+					finishReason: "tool_calls",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool() {
+				throw new Error("unsupported tool schema for native mode");
+			},
+		},
+		fallbackPolicy: {
+			isRetryableTransportFailure: () => false,
+			shouldFallbackToPrompt: (message) => /unsupported tool schema/i.test(message),
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-native-fallback-no-duplicate",
+		taskId: "task-native-fallback-no-duplicate",
+		traceId: "trace-native-fallback-no-duplicate",
+		conversationId: "conversation-native-fallback-no-duplicate",
+		agentId: "agent-native-fallback-no-duplicate",
+		conversation: [],
+		userPrompt: "Fix the native tool fallback behavior and verify the plan replay",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.events.filter((event) => event.type === "intake_decision").length, 1);
+	assert.equal(result.events.filter((event) => event.type === "plan_create").length, 1);
+	assertEventAfter(result.events, "intake_decision", "model_response");
+	assertEventAfter(result.events, "plan_create", "model_response");
+	assert.equal(result.events.find((event) => event.type === "intake_decision")?.payload?.statement, "I understand you want the native plan preserved across fallback.");
+	assert.deepEqual(
+		result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks?.map((task) => task.title),
+		["Preserve native-authored intake and plan", "Finish through prompt fallback"],
+	);
+	assert.equal(result.events.some((event) => event.type === "fallback"), true);
+});
+
+test("AgentLoopController does not upgrade malformed internal plan_create into a visible plan", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "Finished the read-only review.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand this needs a private note, not a visible plan.",
+						requiresPlan: false,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: false,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "internal",
+						tasks: "malformed-private-plan",
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("prompt malformed internal plan test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("prompt malformed internal plan test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-malformed-internal-plan-create",
+		taskId: "task-malformed-internal-plan-create",
+		traceId: "trace-malformed-internal-plan-create",
+		conversationId: "conversation-malformed-internal-plan-create",
+		agentId: "agent-malformed-internal-plan-create",
+		conversation: [],
+		userPrompt: "Analyze this implementation and give me a read-only summary",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	const visiblePlanEvents = result.events.filter((event) =>
+		event.type === "plan_create" &&
+		["task_bar", "visible"].includes(event.payload?.state?.visibility)
+	);
+	assert.equal(visiblePlanEvents.length, 0);
+});
+
+test("AgentLoopController safely falls back when visible plan_create has malformed tasks", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I will proceed with a safe fallback plan.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand you want the malformed visible plan handled safely.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						reason: "The model selected a visible plan but malformed the task list.",
+						tasks: "not-an-array",
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("prompt malformed visible plan test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("prompt malformed visible plan test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-malformed-visible-plan-create",
+		taskId: "task-malformed-visible-plan-create",
+		traceId: "trace-malformed-visible-plan-create",
+		conversationId: "conversation-malformed-visible-plan-create",
+		agentId: "agent-malformed-visible-plan-create",
+		conversation: [],
+		userPrompt: "Implement the parser fix and verify it",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	const planCreate = result.events.find((event) => event.type === "plan_create");
+	assert.ok(planCreate, "visible malformed plan_create should produce a safe fallback plan");
+	assertEventAfter(result.events, "plan_create", "model_response");
+	assert.equal(planCreate.payload?.state?.visibility, "task_bar");
+	assert.ok((planCreate.payload?.state?.tasks?.length ?? 0) > 0);
+	assert.equal(planCreate.payload?.fallback, true);
+});
+
+test("AgentLoopController downgrades mutation-shaped plan tasks for explicit read-only requests", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I will keep this review read-only.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand you want a read-only review with no changes.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "edit", title: "Edit src/parser.ts to fix the issue", status: "in_progress" },
+							{ id: "summarize", title: "Summarize findings without modifying files", status: "pending" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("read-only plan downgrade test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("read-only plan downgrade test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-read-only-plan-downgrade",
+		taskId: "task-read-only-plan-downgrade",
+		traceId: "trace-read-only-plan-downgrade",
+		conversationId: "conversation-read-only-plan-downgrade",
+		agentId: "agent-read-only-plan-downgrade",
+		conversation: [],
+		userPrompt: "Read-only review only: no modifications, no changes. Analyze src/parser.ts.",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	const tasks = result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks ?? [];
+	assert.equal(tasks.some((task) => /^Edit\b/i.test(task.title) && task.status !== "blocked"), false);
+	assert.equal(tasks.find((task) => task.id === "edit")?.status, "blocked");
+	assert.match(tasks.find((task) => task.id === "edit")?.title ?? "", /Read-only/);
+});
+
+test("AgentLoopController preserves read-only blocked mutation plan tasks through finalization", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I will keep this read-only and report findings only.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand this is read-only with no modifications.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "edit", title: "Edit src/parser.ts to fix the issue", status: "in_progress" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("read-only blocked finalization test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("read-only blocked finalization test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-read-only-blocked-finalization",
+		taskId: "task-read-only-blocked-finalization",
+		traceId: "trace-read-only-blocked-finalization",
+		conversationId: "conversation-read-only-blocked-finalization",
+		agentId: "agent-read-only-blocked-finalization",
+		conversation: [],
+		userPrompt: "Read-only review only: no modifications, no changes. Analyze src/parser.ts.",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	const planEvents = result.events.filter((event) => event.type.startsWith("plan_"));
+	const statusByEvent = planEvents.map((event) => [
+		event.type,
+		event.payload?.state?.tasks?.find((task) => task.id === "edit")?.status,
+	]);
+	assert.equal(result.status, "completed");
+	assert.equal(result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks?.[0]?.status, "blocked");
+	assert.equal(statusByEvent.some(([, status]) => status === "completed"), false, JSON.stringify(statusByEvent));
+	assert.equal(result.events.find((event) => event.type === "plan_complete")?.payload?.state?.tasks?.[0]?.status, "blocked");
+});
+
+test("AgentLoopController preserves read-only blocked mutation plan tasks through plan_revise status changes", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText(input) {
+				if (input.step === 1) {
+					return runtimeEnvelope({
+						type: "tool_call",
+						assistant: "I will keep this read-only and inspect evidence first.",
+						intake: {
+							complexity: "complex",
+							route: "plan_and_execute",
+							statement: "I understand this is read-only with no modifications.",
+							requiresPlan: true,
+							shouldShowProcess: true,
+							shouldUseVisiblePlan: true,
+						},
+						plan: {
+							type: "plan_create",
+							visibility: "visible",
+							tasks: [
+								{ id: "edit", title: "Edit src/parser.ts to fix the issue", status: "in_progress" },
+							],
+						},
+						tool: { name: "read", args: { path: "src/parser.ts" } },
+					});
+				}
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I kept the work read-only and found no safe mutation to apply.",
+					plan: {
+						type: "plan_revise",
+						reason: "The model attempted to mark the blocked mutation as complete.",
+						changes: [
+							{ type: "status", taskId: "edit", status: "completed" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("read-only blocked plan_revise test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-only-blocked-revise",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read parser evidence",
+					},
+					payload: { ok: true, tool: "read", data: { path: "src/parser.ts", content: "parser" } },
+					modelResultText: "TOOL_RESULT parser evidence",
+				};
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-read-only-blocked-plan-revise",
+		taskId: "task-read-only-blocked-plan-revise",
+		traceId: "trace-read-only-blocked-plan-revise",
+		conversationId: "conversation-read-only-blocked-plan-revise",
+		agentId: "agent-read-only-blocked-plan-revise",
+		conversation: [],
+		userPrompt: "Read-only review only: no modifications, no changes. Analyze src/parser.ts.",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	const planEvents = result.events.filter((event) => event.type.startsWith("plan_"));
+	const statusByEvent = planEvents.map((event) => [
+		event.type,
+		event.payload?.state?.tasks?.find((task) => task.id === "edit")?.status,
+	]);
+	assert.equal(result.status, "completed");
+	assert.equal(result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks?.[0]?.status, "blocked");
+	assert.equal(result.events.find((event) => event.type === "plan_revise")?.payload?.state?.tasks?.[0]?.status, "blocked");
+	assert.equal(result.events.find((event) => event.type === "plan_complete")?.payload?.state?.tasks?.[0]?.status, "blocked");
+	assert.equal(statusByEvent.some(([, status]) => status === "completed"), false, JSON.stringify(statusByEvent));
+});
+
+test("AgentLoopController does not treat address-the-PR-comments requests as read-only", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "I will address the PR comments.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I understand you want the PR comments addressed.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "address", title: "Edit files to address PR comments", status: "in_progress" },
+							{ id: "verify", title: "Run focused tests", status: "pending" },
+						],
+					},
+				});
+			},
+			async requestWithTools() {
+				throw new Error("PR comments plan test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("PR comments plan test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-address-pr-comments",
+		taskId: "task-address-pr-comments",
+		traceId: "trace-address-pr-comments",
+		conversationId: "conversation-address-pr-comments",
+		agentId: "agent-address-pr-comments",
+		conversation: [],
+		userPrompt: "Review the PR comments and address them",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	const tasks = result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks ?? [];
+	assert.equal(tasks.find((task) => task.id === "address")?.title, "Edit files to address PR comments");
+	assert.equal(tasks.find((task) => task.id === "address")?.status, "in_progress");
 });
 
 test("AgentLoopController skips visible intake and plan for simple rewrite turns", async () => {
@@ -263,7 +985,25 @@ test("AgentLoopController skips visible intake and plan for simple rewrite turns
 		},
 		modelDriver: {
 			async requestText() {
-				return "Please send the final report today.";
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "Please send the final report today.",
+					intake: {
+						complexity: "complex",
+						route: "plan_and_execute",
+						statement: "I should not be shown for a simple rewrite.",
+						requiresPlan: true,
+						shouldShowProcess: true,
+						shouldUseVisiblePlan: true,
+					},
+					plan: {
+						type: "plan_create",
+						visibility: "visible",
+						tasks: [
+							{ id: "simple-plan", title: "Do not show this visible plan", status: "in_progress" },
+						],
+					},
+				});
 			},
 			async requestWithTools() {
 				throw new Error("simple rewrite should not use native tools");
@@ -367,6 +1107,88 @@ test("AgentLoopController treats one-step run verify review and read requests as
 	}
 });
 
+test("AgentLoopController suppresses model-authored visible plans for one-step light tasks", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const prompts = [
+		"Run npm test once",
+		"只运行一次测试并告诉我结果",
+	];
+
+	for (const [index, userPrompt] of prompts.entries()) {
+		const controller = new AgentLoopController({
+			contextEngine: {
+				async buildContext(input) {
+					return {
+						toolCallingMode: "prompt",
+						maxIterations: 1,
+						messages: [
+							{ role: "system", content: "system prompt" },
+							{ role: "user", content: input.userPrompt },
+						],
+					};
+				},
+			},
+			modelDriver: {
+				async requestText() {
+					return runtimeEnvelope({
+						type: "response",
+						assistant: "Ran the requested one-step check.",
+						intake: {
+							complexity: "complex",
+							route: "plan_and_execute",
+							statement: "This model-authored intake should be suppressed for light work.",
+							requiresPlan: true,
+							shouldShowProcess: true,
+							shouldUseVisiblePlan: true,
+						},
+						plan: {
+							type: "plan_create",
+							visibility: "visible",
+							tasks: [
+								{ id: "run-once", title: "Run the test command once", status: "in_progress" },
+								{ id: "report", title: "Report the result", status: "pending" },
+							],
+						},
+					});
+				},
+				async requestWithTools() {
+					throw new Error("light task prompt path should not use native tools");
+				},
+			},
+			toolExecution: {
+				async listNativeTools() {
+					return [];
+				},
+				async executeTool() {
+					throw new Error("light task process suppression test should not execute tools");
+				},
+			},
+		});
+		const kernel = new AgentKernel(controller);
+
+		const result = await kernel.runTurn({
+			turnId: `turn-light-visible-plan-suppressed-${index}`,
+			taskId: `task-light-visible-plan-suppressed-${index}`,
+			traceId: `trace-light-visible-plan-suppressed-${index}`,
+			conversationId: `conversation-light-visible-plan-suppressed-${index}`,
+			agentId: "agent-light-visible-plan-suppressed",
+			conversation: [],
+			userPrompt,
+			allowedTools: ["read"],
+			mode: "agent",
+			budget: { tool: { maxIterations: 1 } },
+		});
+
+		assert.equal(result.status, "completed", userPrompt);
+		assert.equal(result.events.some((event) => event.type === "intake_decision"), false, userPrompt);
+		assert.equal(result.events.some((event) => event.type === "plan_create"), false, userPrompt);
+		assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false, userPrompt);
+	}
+});
+
 test("AgentLoopController keeps explicit debug and analysis scopes complex enough for visible plans", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
@@ -397,7 +1219,26 @@ test("AgentLoopController keeps explicit debug and analysis scopes complex enoug
 				},
 				async requestWithTools() {
 					return {
-						assistantText: "Completed the scoped investigation.",
+						assistantText: runtimeEnvelope({
+							type: "response",
+							assistant: "Completed the scoped investigation.",
+							intake: {
+								complexity: "complex",
+								route: "plan_and_execute",
+								statement: `I understand the scoped work: ${userPrompt}.`,
+								requiresPlan: true,
+								shouldShowProcess: true,
+								shouldUseVisiblePlan: true,
+							},
+							plan: {
+								type: "plan_create",
+								visibility: "visible",
+								tasks: [
+									{ id: `scope-${index}-1`, title: "Confirm evidence", status: "in_progress" },
+									{ id: `scope-${index}-2`, title: "Report findings", status: "pending" },
+								],
+							},
+						}),
 						toolCalls: [],
 						finishReason: "stop",
 					};
@@ -428,8 +1269,11 @@ test("AgentLoopController keeps explicit debug and analysis scopes complex enoug
 		});
 
 		assert.equal(result.status, "completed", userPrompt);
+		assertEventAfter(result.events, "intake_decision", "model_response");
+		assertEventAfter(result.events, "plan_create", "model_response");
 		const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
 		assert.equal(intakePayload?.complexity, "complex", userPrompt);
+		assert.equal(intakePayload?.source, "model", userPrompt);
 		assert.equal(result.events.some((event) => event.type === "plan_create"), true, userPrompt);
 	}
 });
@@ -465,7 +1309,27 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 			async requestWithTools(input) {
 				if (input.step === 1) {
 					return {
-						assistantText: "",
+						assistantText: runtimeEnvelope({
+							type: "tool_call",
+							assistant: "I understand this parser fix needs a short plan before reading evidence.",
+							intake: {
+								complexity: "complex",
+								route: "plan_and_execute",
+								statement: "I understand you want the parser bug fixed with regression coverage.",
+								requiresPlan: true,
+								shouldShowProcess: true,
+								shouldUseVisiblePlan: true,
+							},
+							plan: {
+								type: "plan_create",
+								visibility: "visible",
+								tasks: [
+									{ id: "evidence", title: "Read parser evidence", status: "in_progress" },
+									{ id: "fix", title: "Patch parser behavior", status: "pending" },
+									{ id: "verify", title: "Run focused parser test", status: "pending" },
+								],
+							},
+						}),
 						toolCalls: [{ id: "call-1", name: "read", args: { path: "src/parser.ts" } }],
 						finishReason: "tool_calls",
 					};
@@ -519,6 +1383,8 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 	});
 
 	assert.equal(result.status, "completed");
+	assertEventAfter(result.events, "intake_decision", "model_response");
+	assertEventAfter(result.events, "plan_create", "model_response");
 	const planEvents = result.events.filter((event) => event.type.startsWith("plan_"));
 	assert.deepEqual(planEvents.map((event) => event.type), [
 		"plan_create",
@@ -552,6 +1418,298 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 	const completePayload = planEvents.at(-1)?.payload;
 	assert.equal(completePayload?.state?.status, "completed");
 	assert.deepEqual(completePayload?.state?.tasks?.map((task) => task.status), ["completed", "completed", "completed"]);
+});
+
+test("AgentLoopController applies runtime plan_revise instructions from prompt envelopes", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText(input) {
+				if (input.step === 1) {
+					return runtimeEnvelope({
+						type: "tool_call",
+						assistant: "I understand the parser bug needs evidence before revising the plan.",
+						intake: {
+							complexity: "complex",
+							route: "plan_and_execute",
+							statement: "I understand you want the parser bug fixed with regression coverage.",
+							requiresPlan: true,
+							shouldShowProcess: true,
+							shouldUseVisiblePlan: true,
+						},
+						plan: {
+							type: "plan_create",
+							visibility: "visible",
+							tasks: [
+								{ id: "plan-turn-plan-revise-1", title: "Read parser evidence", status: "in_progress" },
+								{ id: "plan-turn-plan-revise-2", title: "Patch parser behavior", status: "pending" },
+								{ id: "plan-turn-plan-revise-3", title: "Run parser regression", status: "pending" },
+							],
+						},
+						tool: { name: "read", args: { path: "src/parser.ts" } },
+					});
+				}
+				return runtimeEnvelope({
+						type: "response",
+						assistant: "Adjusted the plan and finished.",
+						plan: {
+							type: "plan_revise",
+							reason: "Parser scope changed after the first check.",
+							changes: [
+								{ type: "rename", taskId: "plan-turn-plan-revise-1", title: "Confirm parser scope" },
+								{ type: "add", taskId: "plan-turn-plan-revise-4", title: "Run focused replay", status: "pending" },
+							],
+						},
+					});
+			},
+			async requestWithTools() {
+				throw new Error("prompt plan revise test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-plan-revise",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read parser evidence",
+					},
+					payload: { ok: true, tool: "read", data: { path: "src/parser.ts", content: "parser" } },
+					modelResultText: "TOOL_RESULT parser evidence",
+				};
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-plan-revise",
+		taskId: "task-plan-revise",
+		traceId: "trace-plan-revise",
+		conversationId: "conversation-plan-revise",
+		agentId: "agent-plan-revise",
+		conversation: [],
+		userPrompt: "Fix the parser bug and update the regression test",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	const reviseEvent = result.events.find((event) => event.type === "plan_revise");
+	assert.ok(reviseEvent, "runtime envelope should emit plan_revise");
+	assert.equal(reviseEvent.payload?.reason, "Parser scope changed after the first check.");
+	assert.equal(reviseEvent.payload?.changes?.length, 2);
+	assert.equal(reviseEvent.payload?.state?.tasks?.[0]?.title, "Confirm parser scope");
+	assert.equal(reviseEvent.payload?.state?.tasks?.some((task) => task.id === "plan-turn-plan-revise-4"), true);
+	assert.equal(result.events.filter((event) => event.type === "plan_complete").length, 1);
+});
+
+test("AgentLoopController ignores malformed runtime plan_revise changes without failing the turn", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return [
+					"```friday-runtime",
+					JSON.stringify({
+						type: "response",
+						assistant: "Finished without applying the malformed revision.",
+						plan: {
+							type: "plan_revise",
+							reason: "Malformed model revision should be ignored.",
+							changes: "not-an-array",
+						},
+					}),
+					"```",
+				].join("\n");
+			},
+			async requestWithTools() {
+				throw new Error("prompt malformed plan revise test should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("prompt malformed plan revise test should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-malformed-plan-revise",
+		taskId: "task-malformed-plan-revise",
+		traceId: "trace-malformed-plan-revise",
+		conversationId: "conversation-malformed-plan-revise",
+		agentId: "agent-malformed-plan-revise",
+		conversation: [],
+		userPrompt: "Fix the parser bug and update the regression test",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Finished without applying the malformed revision.");
+	assert.equal(result.events.some((event) => event.type === "turn_failed"), false);
+	const reviseEvent = result.events.find((event) => event.type === "plan_revise");
+	assert.equal(Array.isArray(reviseEvent?.payload?.changes), false);
+});
+
+test("AgentLoopController applies runtime plan_skip instructions without completing the skipped plan", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("native plan skip test should not use prompt mode");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: runtimeEnvelope({
+							type: "tool_call",
+							assistant: "I understand this may need a plan, then I will check evidence.",
+							intake: {
+								complexity: "complex",
+								route: "plan_and_execute",
+								statement: "I understand you want the parser bug checked before deciding whether to proceed.",
+								requiresPlan: true,
+								shouldShowProcess: true,
+								shouldUseVisiblePlan: true,
+							},
+							plan: {
+								type: "plan_create",
+								visibility: "visible",
+								tasks: [
+									{ id: "skip-check", title: "Check whether the plan is still needed", status: "in_progress" },
+									{ id: "skip-followup", title: "Continue only if evidence requires it", status: "pending" },
+								],
+							},
+						}),
+						toolCalls: [{ id: "call-skip-1", name: "read", args: { path: "src/parser.ts" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: runtimeEnvelope({
+							type: "response",
+							assistant: "This no longer needs a visible plan.",
+							plan: {
+								type: "plan_skip",
+								reason: "The task resolved as a direct answer.",
+							},
+						}),
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-plan-skip",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read parser evidence",
+					},
+					payload: { ok: true, tool: "read", data: { path: "src/parser.ts", content: "parser" } },
+					modelResultText: "TOOL_RESULT parser evidence",
+				};
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-plan-skip",
+		taskId: "task-plan-skip",
+		traceId: "trace-plan-skip",
+		conversationId: "conversation-plan-skip",
+		agentId: "agent-plan-skip",
+		conversation: [],
+		userPrompt: "Fix the parser bug and update the regression test",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	const planEvents = result.events.filter((event) => event.type.startsWith("plan_"));
+	assert.ok(planEvents.some((event) => event.type === "plan_skip"), "runtime envelope should emit plan_skip");
+	assert.equal(planEvents.at(-1)?.type, "plan_skip");
+	assert.equal(planEvents.at(-1)?.payload?.reason, "The task resolved as a direct answer.");
+	assert.equal(planEvents.at(-1)?.payload?.state?.status, "skipped");
 });
 
 test("AgentLoopController does not create intake plan events for simple answer turns", async () => {
@@ -605,6 +1763,125 @@ test("AgentLoopController does not create intake plan events for simple answer t
 
 	assert.equal(result.status, "completed");
 	assert.equal(result.assistantText, "北京时间是 10 点。");
+	assert.equal(result.events.some((event) => event.type === "intake_decision"), false);
+	assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false);
+	assert.equal(result.events.some((event) => event.type === "narration"), false);
+});
+
+test("AgentLoopController keeps explicit no-analysis direct-answer prompts simple", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const prompts = [
+		"Don't analyze, just give the final conclusion",
+		"不要分析，直接给出最终结论",
+	];
+
+	for (const [index, userPrompt] of prompts.entries()) {
+		const controller = new AgentLoopController({
+			contextEngine: {
+				async buildContext(input) {
+					return {
+						toolCallingMode: "prompt",
+						maxIterations: 1,
+						messages: [
+							{ role: "system", content: "system prompt" },
+							{ role: "user", content: input.userPrompt },
+						],
+					};
+				},
+			},
+			modelDriver: {
+				async requestText() {
+					return "The final conclusion is ready.";
+				},
+				async requestWithTools() {
+					throw new Error("direct no-analysis answer should not use native tools");
+				},
+			},
+			toolExecution: {
+				async listNativeTools() {
+					return [];
+				},
+				async executeTool() {
+					throw new Error("direct no-analysis answer should not execute tools");
+				},
+			},
+		});
+		const kernel = new AgentKernel(controller);
+
+		const result = await kernel.runTurn({
+			turnId: `turn-simple-no-analysis-${index}`,
+			taskId: `task-simple-no-analysis-${index}`,
+			traceId: `trace-simple-no-analysis-${index}`,
+			conversationId: `conversation-simple-no-analysis-${index}`,
+			agentId: "agent-simple-no-analysis",
+			conversation: [],
+			userPrompt,
+			mode: "ask",
+			budget: { tool: { maxIterations: 1 } },
+		});
+
+		assert.equal(result.status, "completed", userPrompt);
+		assert.equal(result.assistantText, "The final conclusion is ready.", userPrompt);
+		assert.equal(result.events.some((event) => event.type === "intake_decision"), false, userPrompt);
+		assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false, userPrompt);
+		assert.equal(result.events.some((event) => event.type === "narration"), false, userPrompt);
+	}
+});
+
+test("AgentLoopController keeps direct Chinese one-sentence answers simple even when negating file and plan work", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				return "4";
+			},
+			async requestWithTools() {
+				throw new Error("direct answer should not use native tools");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [];
+			},
+			async executeTool() {
+				throw new Error("direct answer should not execute tools");
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-simple-chinese-direct",
+		taskId: "task-simple-chinese-direct",
+		traceId: "trace-simple-chinese-direct",
+		conversationId: "conversation-simple-chinese-direct",
+		agentId: "agent-simple-chinese-direct",
+		conversation: [],
+		userPrompt: "一句话回答：2+2 等于几？不要读取文件，不要制定计划。",
+		mode: "ask",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "4");
 	assert.equal(result.events.some((event) => event.type === "intake_decision"), false);
 	assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false);
 	assert.equal(result.events.some((event) => event.type === "narration"), false);

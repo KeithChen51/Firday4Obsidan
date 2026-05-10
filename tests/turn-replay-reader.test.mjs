@@ -274,6 +274,89 @@ test("TurnReplayReader restores intake decisions and plan state timeline", async
 	]);
 });
 
+test("TurnReplayReader restores visible/internal plan revise and skip payloads", async () => {
+	const { TurnEventLog, TurnReplayReader } = await loadModules();
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-plan-protocol-"));
+	const resolvePath = resolveTurnPath(root);
+	const log = new TurnEventLog({ resolveTurnPath: resolvePath });
+	const reader = new TurnReplayReader({ resolveTurnPath: resolvePath });
+	const ref = { conversationId: "agent", turnId: "turn-plan-protocol" };
+
+	await log.appendMany(ref, [
+		{ type: "turn_started", payload: { summary: "Runtime started" } },
+		{
+			type: "plan_create",
+			payload: {
+				type: "plan_create",
+				reason: "Complex task.",
+				state: {
+					planId: "plan-protocol",
+					visibility: "visible",
+					status: "running",
+					currentTaskId: "plan-protocol-1",
+					tasks: [
+						{ id: "plan-protocol-1", title: "Gather evidence", status: "in_progress" },
+						{ id: "plan-protocol-2", title: "Patch runtime", status: "pending" },
+					],
+				},
+			},
+		},
+		{
+			type: "plan_revise",
+			payload: {
+				type: "plan_revise",
+				reason: "Scope changed.",
+				changes: [
+					{ type: "rename", taskId: "plan-protocol-1", title: "Confirm evidence" },
+					{ type: "status", taskId: "plan-protocol-2", status: "blocked" },
+				],
+				state: {
+					planId: "plan-protocol",
+					visibility: "visible",
+					status: "running",
+					currentTaskId: "plan-protocol-1",
+					tasks: [
+						{ id: "plan-protocol-1", title: "Confirm evidence", status: "in_progress" },
+						{ id: "plan-protocol-2", title: "Patch runtime", status: "blocked" },
+					],
+				},
+			},
+		},
+		{
+			type: "plan_skip",
+			payload: {
+				type: "plan_skip",
+				reason: "Resolved without a visible plan.",
+				state: {
+					planId: "plan-protocol",
+					visibility: "internal",
+					status: "skipped",
+					currentTaskId: "plan-protocol-1",
+					tasks: [
+						{ id: "plan-protocol-1", title: "Confirm evidence", status: "skipped" },
+						{ id: "plan-protocol-2", title: "Patch runtime", status: "blocked" },
+					],
+				},
+			},
+		},
+		{ type: "turn_completed", payload: { status: "completed" } },
+	]);
+
+	const summary = reader.summarize(await reader.readTurn(ref));
+
+	assert.deepEqual(summary.planTimeline.map((item) => item.type), ["plan_create", "plan_revise", "plan_skip"]);
+	assert.equal(summary.planTimeline[0]?.state.visibility, "visible");
+	assert.equal(summary.planTimeline[1]?.reason, "Scope changed.");
+	assert.deepEqual(summary.planTimeline[1]?.changes, [
+		{ type: "rename", taskId: "plan-protocol-1", title: "Confirm evidence" },
+		{ type: "status", taskId: "plan-protocol-2", status: "blocked" },
+	]);
+	assert.equal(summary.planTimeline[1]?.state.tasks[1]?.status, "blocked");
+	assert.equal(summary.planTimeline[2]?.reason, "Resolved without a visible plan.");
+	assert.equal(summary.planTimeline[2]?.state.visibility, "internal");
+	assert.equal(summary.planTimeline[2]?.state.status, "skipped");
+});
+
 test("TurnReplayReader reports sequence gaps and late events after a terminal event", async () => {
 	const { TurnReplayReader } = await loadModules();
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-turn-replay-"));

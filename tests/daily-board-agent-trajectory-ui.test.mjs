@@ -64,7 +64,7 @@ test("DailyBoard completed process disclosure is rebuilt from replay summary whe
 	assert.match(source, /private rememberCompletedTrajectorySnapshot\(/);
 	assert.match(source, /const summary = await this\.plugin\.agentRuntimeService\.readTurnReplaySummary/);
 	assert.match(source, /const replaySnapshot = projectReplaySummary\(summary\)/);
-	assert.match(source, /return this\.isSnapshotOwnedByCurrentSession\(replaySnapshot\) \? replaySnapshot : null/);
+	assert.match(source, /return this\.isSnapshotOwnedBySession\(replaySnapshot, normalizedTargetConversationId\) \? replaySnapshot : null/);
 	assert.match(source, /this\.rememberCompletedTrajectorySnapshot\(completedSnapshot\)/);
 });
 
@@ -113,7 +113,7 @@ test("DailyBoard does not attach global completed replay to unrelated restored m
 	assert.match(source, /private getTrajectorySnapshotKey\(/);
 	assert.match(source, /message\.uiMeta\?\.turnId/);
 	assert.match(getSnapshotBlock, /this\.aiProcessSnapshotsByKey\.get/);
-	assert.doesNotMatch(getSnapshotBlock, /index === lastAssistantIndex/);
+	assert.doesNotMatch(getSnapshotBlock, /lastAssistantIndex/);
 	assert.doesNotMatch(source, /private aiCompletedReplayExpanded = false/);
 	assert.doesNotMatch(getSnapshotBlock, /return this\.aiLastCompletedTrajectorySnapshot/);
 
@@ -208,6 +208,47 @@ test("DailyBoard syncAiLiveChatShell refreshes the saved composer task bar host"
 	]);
 });
 
+test("DailyBoard keeps local intake preview through runtime preflight and clears on visible work", async () => {
+	const preflightSnapshot = makeSnapshot({
+		status: "running",
+		time: { startedAt: "2026-05-08T00:00:00.000Z", updatedAt: "2026-05-08T00:00:01.000Z", durationMs: 1000 },
+		items: [
+			makeItem({ id: "live:start", kind: "system", title: "Runtime started", detail: "Runtime started.", status: "running", rawEventType: "start" }),
+			makeItem({ id: "live:context:instructions", kind: "context", title: "Context: instructions", detail: "加载项目规则与 Soul 设定", status: "running", rawEventType: "context" }),
+			makeItem({ id: "live:model:1", kind: "model", title: "Model step 1", detail: "Model request started.", status: "running", rawEventType: "model_request" }),
+		],
+	});
+	const visibleSnapshot = makeSnapshot({
+		status: "running",
+		time: { startedAt: "2026-05-08T00:00:00.000Z", updatedAt: "2026-05-08T00:00:02.000Z", durationMs: 2000 },
+		items: [
+			makeItem({ id: "read", kind: "tool", title: "Read Notes/Today.md", detail: "Reading note.", status: "running", tool: "read", targetPath: "Notes/Today.md" }),
+		],
+	});
+	const snapshots = [preflightSnapshot, visibleSnapshot];
+	const view = await createDailyBoardHarness({
+		aiLocalIntakePreview: "FRIDAY 正在理解你的请求",
+		aiRuntimeTrajectoryStore: {
+			appendProgress: () => snapshots.shift(),
+			completeFromProgress: () => visibleSnapshot,
+			refreshElapsed: () => null,
+		},
+		bindRuntimeSnapshotToLatestUserMessage: () => {},
+		syncAiRuntimeShell: () => {},
+		syncBackgroundAgentStatus: () => {},
+	});
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({ phase: "start", message: "Runtime started." });
+	});
+	assert.equal(view.aiLocalIntakePreview, "FRIDAY 正在理解你的请求");
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({ phase: "tool_call", message: "Reading note." });
+	});
+	assert.equal(view.aiLocalIntakePreview, "");
+});
+
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
 	const root = new FakeElement("div");
 	const view = await createDailyBoardHarness({
@@ -279,18 +320,869 @@ test("DailyBoard lets users navigate while an agent continues in the background"
 	assert.match(source, /friday-background-agent-status/);
 });
 
-test("DailyBoard keeps the completed background agent entry reachable after the live snapshot is cleared", () => {
-	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
-	const backgroundMatch = source.match(/private renderBackgroundAgentStatus\([\s\S]*?\n\t\}/);
-	assert.ok(backgroundMatch, "background status renderer should exist");
-	const backgroundBlock = backgroundMatch[0] ?? "";
+test("DailyBoard completes an in-flight turn into the starting session after switching session and project", async () => {
+	const savedSessions = [];
+	const syncSnapshots = [];
+	let executeOptions;
+	let resolveExecute;
+	let executeStarted;
+	const executeStartedPromise = new Promise((resolve) => {
+		executeStarted = resolve;
+	});
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-original", taskId: "task-original", traceId: "trace-original", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Original task finished",
+	});
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-1";
+	plugin.settings.projects = [
+		{ projectId: "project-1", projectName: "Project One", boundaryPath: "ProjectOne" },
+		{ projectId: "project-2", projectName: "Project Two", boundaryPath: "ProjectTwo" },
+	];
+	plugin.settings.llm = { enableStreaming: true };
+	plugin.conversationService = {
+		createSessionId: () => "created-session",
+		saveSession: async (input) => {
+			const saved = {
+				...input,
+				messages: input.messages.map((message) => ({
+					...message,
+					...(message.uiMeta ? { uiMeta: { ...message.uiMeta } } : {}),
+				})),
+			};
+			savedSessions.push(saved);
+			return {
+				sessionId: input.sessionId,
+				soulId: input.soulId,
+				projectId: input.projectId,
+				updatedAt: "2026-05-08T00:00:00.000Z",
+				filePath: `${input.sessionId}.jsonl`,
+				messages: saved.messages,
+			};
+		},
+	};
+	plugin.executionPlanner = {
+		plan: async () => ({
+			mode: "runtime",
+			runtimePrompt: "Original prompt",
+			allowedTools: [],
+			allowedModels: [],
+		}),
+	};
+	plugin.executionOrchestrator = {
+		execute: async (_decision, options) => {
+			executeOptions = options;
+			executeStarted();
+			return new Promise((resolve) => {
+				resolveExecute = () => resolve({
+					assistantText: "Assistant answer for original session.",
+					turnId: "turn-original",
+					conversationId: "conversation-1",
+					taskId: "task-original",
+					task: {
+						id: "task-original",
+						conversationId: "conversation-1",
+						turnId: "turn-original",
+						status: "completed",
+						title: "Original task",
+						summary: "Original task finished.",
+						availableActions: [],
+						pendingMutationCount: 0,
+						changedFileCount: 0,
+					},
+					traces: [],
+				});
+			});
+		},
+	};
+	plugin.agentRuntimeService = {
+		readTurnReplaySummary: async () => ({ totalEvents: 0 }),
+	};
+	plugin.skillCommandService = {
+		parseSlashCommand: () => ({ type: "none" }),
+	};
+	plugin.slashCommandService = {
+		expand: () => ({ type: "none" }),
+	};
+	const view = await createDailyBoardHarness({
+		plugin,
+		aiSessionId: "conversation-1",
+		aiConversation: [{ role: "user", content: "Existing original message" }],
+		aiRuntimeTrajectoryStore: {
+			reset: () => {},
+			getCompletedSnapshot: () => completedSnapshot,
+			refreshElapsed: () => null,
+		},
+		aiComposerSnapshot: { doc: null, text: "", tokens: [] },
+		aiDraft: "",
+		composer: { replaceSnapshot: () => {}, hasFocus: () => false },
+		mentionResolver: { resolve: async () => ({ errors: [], entries: [] }) },
+		app: {
+			workspace: { getActiveFile: () => null },
+			vault: {
+				getAbstractFileByPath: () => null,
+				cachedRead: async () => "",
+			},
+		},
+		syncAiLiveChatShell: () => {
+			syncSnapshots.push({
+				sessionId: view.aiSessionId,
+				streamingPreview: view.aiStreamingPreview,
+				messages: view.aiConversation.map((message) => message.content),
+			});
+		},
+		syncBackgroundAgentStatus: () => {},
+		flushQueuedAiPrompt: async () => {},
+	});
 
-	assert.match(source, /private getCompletedBackgroundAgentStatusSnapshot\(/);
-	assert.match(backgroundBlock, /const completedSnapshot = this\.getCompletedBackgroundAgentStatusSnapshot\(\)/);
-	assert.match(backgroundBlock, /!this\.aiBusy && !this\.aiRuntimeTrajectorySnapshot && !completedSnapshot && !this\.aiLastError/);
-	assert.match(backgroundBlock, /const isRunning = this\.aiBusy \|\| Boolean\(this\.aiRuntimeTrajectorySnapshot\)/);
-	assert.match(backgroundBlock, /FRIDAY 任务完成/);
-	assert.match(source, /snapshot\.status === "completed"/);
+	const originalWindow = globalThis.window;
+	globalThis.window = {
+		setTimeout: (callback) => {
+			callback();
+			return 1;
+		},
+		clearTimeout: () => {},
+	};
+
+	try {
+		const submitPromise = view.submitAiPrompt({ doc: null, text: "Original prompt", tokens: [] });
+		await executeStartedPromise;
+
+		assert.equal(executeOptions.conversationId, "conversation-1");
+		assert.deepEqual(executeOptions.conversation.map((message) => message.content), ["Existing original message"]);
+
+		view.aiSessionId = "conversation-2";
+		view.aiConversation = [{ role: "user", content: "Other session message" }];
+		plugin.settings.activeProjectId = "project-2";
+		resolveExecute();
+		await submitPromise;
+	} finally {
+		if (originalWindow === undefined) {
+			delete globalThis.window;
+		} else {
+			globalThis.window = originalWindow;
+		}
+	}
+
+	assert.equal(savedSessions.length, 1);
+	assert.equal(savedSessions[0].sessionId, "conversation-1");
+	assert.equal(savedSessions[0].projectId, "project-1");
+	assert.deepEqual(savedSessions[0].messages.map((message) => message.content), [
+		"Existing original message",
+		"Original prompt",
+		"Assistant answer for original session.",
+	]);
+	assert.equal(view.aiSessionId, "conversation-2");
+	assert.deepEqual(view.aiConversation.map((message) => message.content), ["Other session message"]);
+	assert.equal(view.aiProcessSnapshotsByKey.get(view.getTrajectorySnapshotKey(completedSnapshot)), completedSnapshot);
+	assert.equal(
+		syncSnapshots.some((snapshot) =>
+			snapshot.sessionId === "conversation-2" &&
+			snapshot.streamingPreview.includes("Assistant answer for original session.")
+		),
+		false,
+	);
+});
+
+test("DailyBoard does not append a final answer to the current UI array after only switching project", async () => {
+	const savedSessions = [];
+	const syncSnapshots = [];
+	let executeOptions;
+	let resolveExecute;
+	let executeStarted;
+	const executeStartedPromise = new Promise((resolve) => {
+		executeStarted = resolve;
+	});
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-project", taskId: "task-project", traceId: "trace-project", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Original project finished",
+	});
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-1";
+	plugin.settings.projects = [
+		{ projectId: "project-1", projectName: "Project One", boundaryPath: "ProjectOne" },
+		{ projectId: "project-2", projectName: "Project Two", boundaryPath: "ProjectTwo" },
+	];
+	plugin.settings.llm = { enableStreaming: true };
+	plugin.conversationService = {
+		createSessionId: () => "created-session",
+		saveSession: async (input) => {
+			const saved = {
+				...input,
+				messages: input.messages.map((message) => ({
+					...message,
+					...(message.uiMeta ? { uiMeta: { ...message.uiMeta } } : {}),
+				})),
+			};
+			savedSessions.push(saved);
+			return {
+				sessionId: input.sessionId,
+				soulId: input.soulId,
+				projectId: input.projectId,
+				updatedAt: "2026-05-08T00:00:00.000Z",
+				filePath: `${input.sessionId}.jsonl`,
+				messages: saved.messages,
+			};
+		},
+	};
+	plugin.executionPlanner = {
+		plan: async () => ({
+			mode: "runtime",
+			runtimePrompt: "Original prompt",
+			allowedTools: [],
+			allowedModels: [],
+		}),
+	};
+	plugin.executionOrchestrator = {
+		execute: async (_decision, options) => {
+			executeOptions = options;
+			executeStarted();
+			return new Promise((resolve) => {
+				resolveExecute = () => resolve({
+					assistantText: "Assistant answer for original project.",
+					turnId: "turn-project",
+					conversationId: "conversation-1",
+					taskId: "task-project",
+					task: {
+						id: "task-project",
+						conversationId: "conversation-1",
+						turnId: "turn-project",
+						status: "completed",
+						title: "Original project task",
+						summary: "Original project task finished.",
+						availableActions: [],
+						pendingMutationCount: 0,
+						changedFileCount: 0,
+					},
+					traces: [],
+				});
+			});
+		},
+	};
+	plugin.agentRuntimeService = {
+		readTurnReplaySummary: async () => ({ totalEvents: 0 }),
+	};
+	plugin.skillCommandService = {
+		parseSlashCommand: () => ({ type: "none" }),
+	};
+	plugin.slashCommandService = {
+		expand: () => ({ type: "none" }),
+	};
+	const originalConversationArray = [{ role: "user", content: "Existing original message" }];
+	const view = await createDailyBoardHarness({
+		plugin,
+		aiSessionId: "conversation-1",
+		aiConversation: originalConversationArray,
+		aiRuntimeTrajectoryStore: {
+			reset: () => {},
+			getCompletedSnapshot: () => completedSnapshot,
+			refreshElapsed: () => null,
+		},
+		aiComposerSnapshot: { doc: null, text: "", tokens: [] },
+		aiDraft: "",
+		composer: { replaceSnapshot: () => {}, hasFocus: () => false },
+		mentionResolver: { resolve: async () => ({ errors: [], entries: [] }) },
+		app: {
+			workspace: { getActiveFile: () => null },
+			vault: {
+				getAbstractFileByPath: () => null,
+				cachedRead: async () => "",
+			},
+		},
+		syncAiLiveChatShell: () => {
+			syncSnapshots.push({
+				projectId: plugin.settings.activeProjectId,
+				sessionId: view.aiSessionId,
+				streamingPreview: view.aiStreamingPreview,
+				messages: view.aiConversation.map((message) => message.content),
+			});
+		},
+		syncBackgroundAgentStatus: () => {},
+		flushQueuedAiPrompt: async () => {},
+	});
+
+	const originalWindow = globalThis.window;
+	globalThis.window = {
+		setTimeout: (callback) => {
+			callback();
+			return 1;
+		},
+		clearTimeout: () => {},
+	};
+
+	try {
+		const submitPromise = view.submitAiPrompt({ doc: null, text: "Original prompt", tokens: [] });
+		await executeStartedPromise;
+
+		assert.equal(executeOptions.conversationId, "conversation-1");
+		assert.deepEqual(executeOptions.conversation.map((message) => message.content), ["Existing original message"]);
+		assert.equal(view.aiSessionId, "conversation-1");
+
+		plugin.settings.activeProjectId = "project-2";
+		resolveExecute();
+		await submitPromise;
+	} finally {
+		if (originalWindow === undefined) {
+			delete globalThis.window;
+		} else {
+			globalThis.window = originalWindow;
+		}
+	}
+
+	assert.equal(savedSessions.length, 1);
+	assert.equal(savedSessions[0].sessionId, "conversation-1");
+	assert.equal(savedSessions[0].projectId, "project-1");
+	assert.deepEqual(savedSessions[0].messages.map((message) => message.content), [
+		"Existing original message",
+		"Original prompt",
+		"Assistant answer for original project.",
+	]);
+	assert.equal(view.aiSessionId, "conversation-1");
+	assert.equal(plugin.settings.activeProjectId, "project-2");
+	assert.equal(
+		view.aiConversation.some((message) => message.role === "assistant" && message.content.includes("original project")),
+		false,
+	);
+	assert.equal(
+		syncSnapshots.some((snapshot) =>
+			snapshot.projectId === "project-2" &&
+			snapshot.messages.some((content) => content.includes("Assistant answer for original project."))
+		),
+		false,
+	);
+});
+
+test("DailyBoard does not replay an origin project completed snapshot after only switching project", async () => {
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-2";
+	plugin.settings.projects = [
+		{ projectId: "project-1", projectName: "Project One", boundaryPath: "ProjectOne" },
+		{ projectId: "project-2", projectName: "Project Two", boundaryPath: "ProjectTwo" },
+	];
+	const originSnapshot = makeSnapshot({
+		identity: { turnId: "turn-shared", taskId: "task-shared", traceId: "trace-shared", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Origin project completed",
+		items: [
+			makeItem({ id: "origin-final", kind: "final", title: "Final response", detail: "Origin project replay.", status: "ok" }),
+		],
+	});
+	const view = await createDailyBoardHarness({
+		plugin,
+		aiSessionId: "conversation-1",
+		aiConversation: [
+			{ role: "user", content: "Current project prompt", uiMeta: { turnId: "turn-shared", taskId: "task-shared", conversationId: "conversation-1" } },
+			{ role: "assistant", content: "Current project answer", uiMeta: { turnId: "turn-shared", taskId: "task-shared", conversationId: "conversation-1" } },
+		],
+		approvalQueue: { list: () => [] },
+	});
+	view.renderAiMessageContent = (containerEl, message) => {
+		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.resolveUserDisplayName = () => "User";
+	view.rememberCompletedTrajectorySnapshotForSession(originSnapshot, "conversation-1", "project-1");
+	const root = new FakeElement("div");
+
+	view.renderAiMessageList(root);
+
+	const assistantRow = root
+		.findAllByClass("friday-ai-message-row")
+		.find((row) => row.classes.has("is-assistant") && row.textContent.includes("Current project answer"));
+	assert.ok(assistantRow, "current project assistant row should render");
+	assert.equal(assistantRow.countByClass("friday-agent-process-shell"), 0);
+	assert.doesNotMatch(assistantRow.textContent, /Origin project replay/);
+});
+
+test("DailyBoard shows background status for non-current turn targets and restores them on click", async () => {
+	const runningPlugin = makePluginStub();
+	runningPlugin.settings.activeProjectId = "project-2";
+	runningPlugin.setActiveProject = async (projectId) => {
+		runningPlugin.settings.activeProjectId = projectId;
+	};
+	const runningTarget = {
+		sessionId: "conversation-1",
+		projectId: "project-1",
+		conversation: [{ role: "user", content: "Origin running prompt" }],
+	};
+	const runningHost = new FakeElement("div");
+	let runningRenderCalls = 0;
+	const runningView = await createDailyBoardHarness({
+		activePage: "chat",
+		plugin: runningPlugin,
+		aiBusy: true,
+		aiSessionId: "conversation-2",
+		aiConversation: [{ role: "user", content: "Current chat prompt" }],
+		aiActiveTurnTarget: runningTarget,
+		aiBackgroundTurnTarget: runningTarget,
+		renderBoard: () => {
+			runningRenderCalls += 1;
+		},
+	});
+
+	runningView.renderBackgroundAgentStatus(runningHost);
+
+	const runningButton = runningHost.findByClass("friday-background-agent-status");
+	assert.ok(runningButton, "running background status should render on chat when its target is not current");
+	assert.equal(runningButton.classes.has("is-running"), true);
+	await runningButton.onclick?.();
+	assert.equal(runningPlugin.settings.activeProjectId, "project-1");
+	assert.equal(runningView.aiSessionId, "conversation-1");
+	assert.deepEqual(runningView.aiConversation.map((message) => message.content), ["Origin running prompt"]);
+	assert.equal(runningView.activePage, "chat");
+	assert.equal(runningRenderCalls, 1);
+
+	const completedPlugin = makePluginStub();
+	completedPlugin.settings.activeProjectId = "project-2";
+	completedPlugin.setActiveProject = async (projectId) => {
+		completedPlugin.settings.activeProjectId = projectId;
+	};
+	const completedTarget = {
+		sessionId: "conversation-1",
+		projectId: "project-1",
+		conversation: [
+			{ role: "user", content: "Origin completed prompt" },
+			{ role: "assistant", content: "Origin completed answer" },
+		],
+	};
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-completed", taskId: "task-completed", traceId: "trace-completed", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Origin turn completed",
+	});
+	const completedHost = new FakeElement("div");
+	let completedRenderCalls = 0;
+	const completedView = await createDailyBoardHarness({
+		activePage: "chat",
+		plugin: completedPlugin,
+		aiBusy: false,
+		aiSessionId: "conversation-2",
+		aiConversation: [{ role: "user", content: "Current chat prompt" }],
+		aiBackgroundTurnTarget: completedTarget,
+		renderBoard: () => {
+			completedRenderCalls += 1;
+		},
+	});
+	completedView.rememberCompletedTrajectorySnapshotForSession(completedSnapshot, "conversation-1", "project-1");
+
+	completedView.renderBackgroundAgentStatus(completedHost);
+
+	const completedButton = completedHost.findByClass("friday-background-agent-status");
+	assert.ok(completedButton, "completed background status should render on chat when its target is not current");
+	assert.equal(completedButton.classes.has("is-completed"), true);
+	await completedButton.onclick?.();
+	assert.equal(completedPlugin.settings.activeProjectId, "project-1");
+	assert.equal(completedView.aiSessionId, "conversation-1");
+	assert.deepEqual(completedView.aiConversation.map((message) => message.content), [
+		"Origin completed prompt",
+		"Origin completed answer",
+	]);
+	assert.equal(completedView.activePage, "chat");
+	assert.equal(completedRenderCalls, 1);
+});
+
+test("DailyBoard keeps background turn failures out of the current chat error and binds failed status to its target", async () => {
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-1";
+	plugin.settings.projects = [
+		{ projectId: "project-1", projectName: "Project One", boundaryPath: "ProjectOne" },
+		{ projectId: "project-2", projectName: "Project Two", boundaryPath: "ProjectTwo" },
+	];
+	plugin.setActiveProject = async (projectId) => {
+		plugin.settings.activeProjectId = projectId;
+	};
+	plugin.conversationService = {
+		createSessionId: () => "created-session",
+		saveSession: async (input) => ({
+			sessionId: input.sessionId,
+			soulId: input.soulId,
+			projectId: input.projectId,
+			updatedAt: "2026-05-08T00:00:00.000Z",
+			filePath: `${input.sessionId}.jsonl`,
+			messages: input.messages,
+		}),
+	};
+	let rejectExecute;
+	let executeStarted;
+	const executeStartedPromise = new Promise((resolve) => {
+		executeStarted = resolve;
+	});
+	plugin.executionPlanner = {
+		plan: async () => ({
+			mode: "runtime",
+			runtimePrompt: "Original prompt",
+			allowedTools: [],
+			allowedModels: [],
+		}),
+	};
+	plugin.executionOrchestrator = {
+		execute: async () => {
+			executeStarted();
+			return new Promise((_resolve, reject) => {
+				rejectExecute = () => reject(new Error("background boom"));
+			});
+		},
+	};
+	plugin.skillCommandService = { parseSlashCommand: () => ({ type: "none" }) };
+	plugin.slashCommandService = { expand: () => ({ type: "none" }) };
+	const statusHost = new FakeElement("div");
+	const errorHost = new FakeElement("div");
+	const view = await createDailyBoardHarness({
+		activePage: "chat",
+		plugin,
+		aiSessionId: "conversation-1",
+		aiConversation: [{ role: "user", content: "Origin existing prompt" }],
+		aiBackgroundAgentStatusHostEl: statusHost,
+		aiErrorEl: errorHost,
+		aiRuntimeTrajectoryStore: {
+			reset: () => {},
+			refreshElapsed: () => null,
+		},
+		aiComposerSnapshot: { doc: null, text: "", tokens: [] },
+		aiDraft: "",
+		composer: { replaceSnapshot: () => {}, hasFocus: () => false },
+		mentionResolver: { resolve: async () => ({ errors: [], entries: [] }) },
+		app: {
+			workspace: { getActiveFile: () => null },
+			vault: {
+				getAbstractFileByPath: () => null,
+				cachedRead: async () => "",
+			},
+		},
+		flushQueuedAiPrompt: async () => {},
+		renderBoard: () => {},
+	});
+
+	const submitPromise = view.submitAiPrompt({ doc: null, text: "Original prompt", tokens: [] });
+	await executeStartedPromise;
+	view.aiSessionId = "conversation-2";
+	view.aiConversation = [{ role: "user", content: "Current project prompt" }];
+	plugin.settings.activeProjectId = "project-2";
+	rejectExecute();
+	await submitPromise;
+
+	assert.equal(view.aiLastError, "");
+	view.syncAiErrorRegion();
+	assert.equal(errorHost.countByClass("friday-ai-error"), 0);
+	view.renderBackgroundAgentStatus(statusHost);
+	const failedButton = statusHost.findByClass("friday-background-agent-status");
+	assert.ok(failedButton, "failed background status should render for the origin turn");
+	assert.equal(failedButton.classes.has("is-failed"), true);
+	await failedButton.onclick?.();
+	assert.equal(plugin.settings.activeProjectId, "project-1");
+	assert.equal(view.aiSessionId, "conversation-1");
+	assert.deepEqual(view.aiConversation.map((message) => message.content), [
+		"Origin existing prompt",
+		"Original prompt",
+	]);
+});
+
+test("DailyBoard refreshes a chat-page non-current background status after it completes", async () => {
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-2";
+	const target = {
+		sessionId: "conversation-1",
+		projectId: "project-1",
+		conversation: [{ role: "user", content: "Origin prompt" }],
+	};
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-background", taskId: "task-background", traceId: "trace-background", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Background completed",
+	});
+	const statusHost = new FakeElement("div");
+	const view = await createDailyBoardHarness({
+		activePage: "chat",
+		plugin,
+		aiBusy: true,
+		aiSessionId: "conversation-2",
+		aiConversation: [{ role: "user", content: "Current prompt" }],
+		aiActiveTurnTarget: target,
+		aiBackgroundTurnTarget: target,
+		aiBackgroundAgentStatusHostEl: statusHost,
+	});
+	view.renderBackgroundAgentStatus(statusHost);
+	assert.equal(statusHost.findByClass("friday-background-agent-status")?.classes.has("is-running"), true);
+
+	view.aiBusy = false;
+	view.aiActiveTurnTarget = null;
+	view.aiRuntimeTrajectorySnapshot = null;
+	view.rememberCompletedTrajectorySnapshotForSession(completedSnapshot, "conversation-1", "project-1");
+	view.syncBackgroundAgentStatus();
+
+	assert.equal(statusHost.findByClass("friday-background-agent-status")?.classes.has("is-running"), false);
+	assert.equal(statusHost.findByClass("friday-background-agent-status")?.classes.has("is-completed"), true);
+});
+
+test("DailyBoard opens background targets through session hydration and clears stale derived state", async () => {
+	const plugin = makePluginStub();
+	plugin.settings.activeProjectId = "project-2";
+	plugin.setActiveProject = async (projectId) => {
+		plugin.settings.activeProjectId = projectId;
+	};
+	let renderCalls = 0;
+	let hydrateTaskCalls = 0;
+	let hydrateSnapshotCalls = 0;
+	let clearedToolPolicyCalls = 0;
+	let clearedApprovalRuleCalls = 0;
+	plugin.agentRuntimeService.clearAllSessionToolPolicyOverrides = () => {
+		clearedToolPolicyCalls += 1;
+	};
+	plugin.toolApprovalService.clearSessionRules = () => {
+		clearedApprovalRuleCalls += 1;
+	};
+	const persistedMessages = [
+		{ role: "user", content: "Hydrated persisted prompt" },
+		{ role: "assistant", content: "Hydrated persisted answer" },
+	];
+	const view = await createDailyBoardHarness({
+		plugin,
+		aiSessionId: "conversation-2",
+		aiConversation: [{ role: "user", content: "Current prompt" }],
+		aiSessions: [
+			{
+				sessionId: "conversation-1",
+				soulId: "soul-1",
+				projectId: "project-1",
+				updatedAt: "2026-05-08T00:00:00.000Z",
+				filePath: "conversation-1.jsonl",
+				messages: persistedMessages,
+			},
+		],
+		aiLastError: "stale error",
+		aiLocalIntakePreview: "stale intake",
+		aiStreamingPreview: "stale stream",
+		aiStreamingTrajectorySnapshot: makeSnapshot(),
+		aiRuntimeTrajectorySnapshot: makeTaskBarSnapshot(),
+		aiQueuedPrompts: [{ doc: null, text: "queued", tokens: [] }],
+		aiAgentTasks: [{ id: "stale-task", conversationId: "conversation-2", status: "running", title: "Stale", summary: "", availableActions: [], pendingMutationCount: 0, changedFileCount: 0 }],
+		renderBoard: () => {
+			renderCalls += 1;
+		},
+	});
+	view.hydrateAgentTasksForCurrentSession = async () => {
+		hydrateTaskCalls += 1;
+		view.aiAgentTasks = [];
+	};
+	view.hydrateCompletedTrajectorySnapshotsForCurrentSession = async () => {
+		hydrateSnapshotCalls += 1;
+	};
+
+	await view.openBackgroundAgentStatusTarget({
+		sessionId: "conversation-1",
+		projectId: "project-1",
+		conversation: [{ role: "user", content: "Stale target prompt" }],
+	});
+
+	assert.equal(plugin.settings.activeProjectId, "project-1");
+	assert.equal(view.aiSessionId, "conversation-1");
+	assert.deepEqual(view.aiConversation.map((message) => message.content), [
+		"Hydrated persisted prompt",
+		"Hydrated persisted answer",
+	]);
+	assert.equal(view.aiLastError, "");
+	assert.equal(view.aiLocalIntakePreview, "");
+	assert.equal(view.aiStreamingPreview, "");
+	assert.equal(view.aiStreamingTrajectorySnapshot, null);
+	assert.equal(view.aiRuntimeTrajectorySnapshot, null);
+	assert.deepEqual(view.aiQueuedPrompts, []);
+	assert.equal(hydrateTaskCalls, 1);
+	assert.equal(hydrateSnapshotCalls, 1);
+	assert.equal(clearedToolPolicyCalls, 1);
+	assert.equal(clearedApprovalRuleCalls, 1);
+	assert.equal(renderCalls, 1);
+});
+
+test("DailyBoard does not claim task-only snapshots for non-current sessions without proof", async () => {
+	const view = await createDailyBoardHarness({
+		aiSessionId: "conversation-1",
+		aiAgentTasks: [{ id: "task-only", conversationId: "conversation-1", status: "running", title: "Task", summary: "", availableActions: [], pendingMutationCount: 0, changedFileCount: 0 }],
+		aiSessions: [
+			{
+				sessionId: "conversation-2",
+				soulId: "soul-1",
+				projectId: "project-2",
+				updatedAt: "2026-05-08T00:00:00.000Z",
+				filePath: "conversation-2.jsonl",
+				messages: [{ role: "assistant", content: "Other answer", uiMeta: { turnId: "turn-other", taskId: "task-other" } }],
+			},
+		],
+	});
+	const taskOnlySnapshot = makeSnapshot({
+		identity: { turnId: "turn-only", taskId: "task-only", traceId: "trace-only" },
+	});
+
+	assert.equal(view.isSnapshotOwnedBySession(taskOnlySnapshot, "conversation-2"), false);
+});
+
+test("DailyBoard shows a new busy background task as running before a live snapshot exists", async () => {
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-completed", taskId: "task-completed", traceId: "trace-completed", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Previous task finished",
+	});
+	const statusHost = new FakeElement("div");
+	const view = await createDailyBoardHarness({
+		activePage: "sync",
+		aiBusy: true,
+		aiRuntimeTrajectorySnapshot: null,
+		aiBackgroundAgentStatusHostEl: statusHost,
+	});
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(completedSnapshot), completedSnapshot);
+
+	view.renderBackgroundAgentStatus(statusHost);
+
+	const statusEl = statusHost.findByClass("friday-background-agent-status");
+	assert.ok(statusEl, "background status should render outside chat");
+	assert.equal(statusEl.classes.has("is-running"), true);
+	assert.equal(statusEl.classes.has("is-completed"), false);
+	assert.match(statusHost.textContent, /FRIDAY 正在运行/);
+	assert.doesNotMatch(statusHost.textContent, /FRIDAY 任务完成/);
+});
+
+test("DailyBoard keeps completed, failed, and chat-hidden background status behavior", async () => {
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-completed", taskId: "task-completed", traceId: "trace-completed", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Previous task finished",
+	});
+	const completedHost = new FakeElement("div");
+	const completedView = await createDailyBoardHarness({
+		activePage: "sync",
+		aiBusy: false,
+		aiRuntimeTrajectorySnapshot: null,
+		aiBackgroundAgentStatusHostEl: completedHost,
+	});
+	completedView.aiProcessSnapshotsByKey.set(completedView.getTrajectorySnapshotKey(completedSnapshot), completedSnapshot);
+
+	completedView.renderBackgroundAgentStatus(completedHost);
+
+	assert.equal(completedHost.findByClass("friday-background-agent-status")?.classes.has("is-completed"), true);
+	assert.match(completedHost.textContent, /FRIDAY 任务完成/);
+
+	const failedHost = new FakeElement("div");
+	const failedView = await createDailyBoardHarness({
+		activePage: "tools",
+		aiBusy: false,
+		aiLastError: "Runtime failed",
+		aiBackgroundAgentStatusHostEl: failedHost,
+	});
+
+	failedView.renderBackgroundAgentStatus(failedHost);
+
+	assert.equal(failedHost.findByClass("friday-background-agent-status")?.classes.has("is-failed"), true);
+	assert.match(failedHost.textContent, /FRIDAY 运行异常/);
+
+	const chatHost = new FakeElement("div");
+	const chatView = await createDailyBoardHarness({
+		activePage: "chat",
+		aiBusy: true,
+		aiRuntimeTrajectorySnapshot: makeTaskBarSnapshot(),
+		aiBackgroundAgentStatusHostEl: chatHost,
+	});
+
+	chatView.renderBackgroundAgentStatus(chatHost);
+
+	assert.equal(chatHost.countByClass("friday-background-agent-status"), 0);
+});
+
+test("DailyBoard syncs non-chat runtime progress without rebuilding the page", async () => {
+	const runningSnapshot = makeTaskBarSnapshot({
+		identity: { turnId: "turn-running", taskId: "task-running", traceId: "trace-running", conversationId: "conversation-1" },
+		status: "running",
+		headline: "Agent running",
+	});
+	const completedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-running", taskId: "task-running", traceId: "trace-running", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Agent finished",
+	});
+	const statusHost = new FakeElement("div");
+	let renderBoardCalls = 0;
+	let liveChatShellCalls = 0;
+	let backgroundSyncCalls = 0;
+	const plugin = makePluginStub();
+	plugin.agentRuntimeService = {
+		getAgentTask: async () => ({
+			id: "task-running",
+			conversationId: "conversation-1",
+			turnId: "turn-running",
+			status: "running",
+			title: "Runtime task",
+			summary: "Runtime task is running.",
+			availableActions: [],
+			pendingMutationCount: 0,
+			changedFileCount: 0,
+		}),
+	};
+	const view = await createDailyBoardHarness({
+		activePage: "sync",
+		aiBusy: true,
+		aiRuntimeTrajectorySnapshot: runningSnapshot,
+		aiBackgroundAgentStatusHostEl: statusHost,
+		plugin,
+		aiRuntimeTrajectoryStore: {
+			appendProgress: (event) => event.phase === "done" ? completedSnapshot : runningSnapshot,
+			completeFromProgress: () => completedSnapshot,
+			refreshElapsed: () => null,
+		},
+		renderBoard: () => {
+			renderBoardCalls += 1;
+		},
+		syncAiLiveChatShell: () => {
+			liveChatShellCalls += 1;
+		},
+	});
+	const originalBackgroundSync = view.syncBackgroundAgentStatus;
+	view.syncBackgroundAgentStatus = function syncBackgroundAgentStatusSpy() {
+		backgroundSyncCalls += 1;
+		return originalBackgroundSync.call(this);
+	};
+	view.renderBackgroundAgentStatus(statusHost);
+
+	assert.match(statusHost.textContent, /FRIDAY 正在运行/);
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({
+			phase: "tool_call",
+			message: "Reading context",
+			taskId: "task-running",
+			turnId: "turn-running",
+			traceId: "trace-running",
+			conversationId: "conversation-1",
+		});
+	});
+	await Promise.resolve();
+
+	assert.equal(renderBoardCalls, 0);
+	assert.equal(liveChatShellCalls, 0);
+	assert.equal(backgroundSyncCalls >= 1, true);
+	assert.match(statusHost.textContent, /FRIDAY 正在运行/);
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({
+			phase: "done",
+			message: "Done",
+			taskId: "task-running",
+			turnId: "turn-running",
+			traceId: "trace-running",
+			conversationId: "conversation-1",
+		});
+	});
+	await Promise.resolve();
+
+	assert.equal(renderBoardCalls, 0);
+	assert.equal(liveChatShellCalls, 0);
+	assert.match(statusHost.textContent, /FRIDAY 正在运行/);
+
+	view.aiBusy = false;
+	view.syncBackgroundAgentStatus();
+
+	assert.equal(renderBoardCalls, 0);
+	assert.equal(liveChatShellCalls, 0);
+	assert.doesNotMatch(statusHost.textContent, /FRIDAY 正在运行/);
+	assert.match(statusHost.textContent, /FRIDAY 任务完成/);
 });
 
 test("DailyBoard attaches running trajectory snapshots to historical user messages before completion", async () => {
@@ -308,9 +1200,8 @@ test("DailyBoard attaches running trajectory snapshots to historical user messag
 	assert.ok(key, "historical user message should receive a stable trajectory key");
 	assert.equal(view.aiProcessSnapshotsByKey.get(key), snapshot);
 	assert.equal(view.isLiveRuntimeSnapshotAttachedToMessage(), true);
-	assert.equal(view.getCompletedTrajectorySnapshotForMessage(userMessage, 0, 1), null);
-	assert.equal(view.getCompletedTrajectorySnapshotForMessage(userMessage, 1, 0), snapshot);
-	assert.equal(view.getCompletedTrajectorySnapshotForMessage(assistantMessage, 1, 1), null);
+	assert.equal(view.getCompletedTrajectorySnapshotForMessage(userMessage), snapshot);
+	assert.equal(view.getCompletedTrajectorySnapshotForMessage(assistantMessage), null);
 });
 
 test("DailyBoard rebinds refreshed elapsed snapshots and syncs task bar from the timer", async () => {
@@ -384,6 +1275,123 @@ test("DailyBoard renders completed composer task bar ahead of a stale same-turn 
 	});
 });
 
+test("DailyBoard syncs completed composer task bar from visible replay plan snapshots", async () => {
+	const visibleSnapshot = makeTaskBarSnapshot({
+		identity: { turnId: "turn-visible", taskId: "task-visible", traceId: "trace-visible", conversationId: "conversation-1" },
+		status: "completed",
+		plan: makeTaskBarPlan({
+			visibility: "visible",
+			status: "completed",
+			currentTaskId: "visible-2",
+			tasks: [
+				{ id: "visible-1", title: "Collect replay context", status: "completed" },
+				{ id: "visible-2", title: "Run visible replay tests", status: "completed" },
+			],
+		}),
+		privacy: { redacted: true, source: "replay" },
+	});
+	const internalSnapshot = makeTaskBarSnapshot({
+		identity: { turnId: "turn-internal", taskId: "task-internal", traceId: "trace-internal", conversationId: "conversation-1" },
+		status: "completed",
+		plan: makeTaskBarPlan({
+			visibility: "internal",
+			status: "completed",
+			currentTaskId: "internal-1",
+			tasks: [
+				{ id: "internal-1", title: "Internal replay plan", status: "completed" },
+			],
+		}),
+		privacy: { redacted: true, source: "replay" },
+	});
+	const view = await createDailyBoardHarness();
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(visibleSnapshot), visibleSnapshot);
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(internalSnapshot), internalSnapshot);
+	const host = new FakeElement("div");
+	view.aiComposerTaskBarHostEl = host;
+
+	assert.equal(view.selectComposerTaskBarSnapshot(), visibleSnapshot);
+	assert.equal(view.getComposerTaskBarView()?.collapsed.taskTitle, "Run visible replay tests");
+
+	view.syncComposerTaskBar();
+
+	assert.equal(host.countByClass("friday-composer-task-bar"), 1);
+	assert.match(host.textContent, /2\/2/);
+	assert.match(host.textContent, /Run visible replay tests/);
+	assert.doesNotMatch(host.textContent, /Internal replay plan/);
+});
+
+test("DailyBoard clears stale completed composer task bar for a later simple no-plan answer", async () => {
+	const completedPlanSnapshot = makeTaskBarSnapshot({
+		identity: { turnId: "turn-plan", taskId: "task-plan", traceId: "trace-plan", conversationId: "conversation-1" },
+		status: "completed",
+		plan: makeTaskBarPlan({
+			visibility: "visible",
+			status: "completed",
+			currentTaskId: "task-3",
+			tasks: [
+				{ id: "task-1", title: "确认旧复杂任务", status: "completed" },
+				{ id: "task-2", title: "执行旧复杂任务", status: "completed" },
+				{ id: "task-3", title: "整理结论和建议", status: "completed" },
+			],
+		}),
+		privacy: { redacted: true, source: "replay" },
+	});
+	const simpleSnapshot = makeSnapshot({
+		identity: { turnId: "turn-simple", taskId: "task-simple", traceId: "trace-simple", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Answer finished",
+		summary: "2+2 等于 4。",
+		privacy: { redacted: true, source: "replay" },
+		items: [
+			makeItem({ id: "model", kind: "model", title: "Model response", detail: "2+2 等于 4。", status: "ok" }),
+			makeItem({ id: "final", kind: "final", title: "Final response", detail: "2+2 等于 4。", status: "ok" }),
+		],
+	});
+	const view = await createDailyBoardHarness({
+		aiConversation: [
+			{ role: "user", content: "旧复杂任务", uiMeta: completedPlanSnapshot.identity },
+			{ role: "assistant", content: "旧复杂任务完成。", uiMeta: completedPlanSnapshot.identity },
+		],
+		approvalQueue: { list: () => [] },
+	});
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(completedPlanSnapshot), completedPlanSnapshot);
+	const host = new FakeElement("div");
+	view.aiComposerTaskBarHostEl = host;
+
+	view.aiLocalIntakePreview = "FRIDAY 正在理解你的请求";
+	view.syncComposerTaskBar();
+
+	assert.equal(host.countByClass("friday-composer-task-bar"), 0);
+
+	view.aiLocalIntakePreview = "";
+	view.aiConversation.push(
+		{ role: "user", content: "一句话回答：2+2 等于几？不要读取文件，不要制定计划。", uiMeta: simpleSnapshot.identity },
+		{ role: "assistant", content: "2+2 等于 4。", uiMeta: simpleSnapshot.identity },
+	);
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(simpleSnapshot), simpleSnapshot);
+	view.syncComposerTaskBar();
+
+	assert.equal(view.selectComposerTaskBarSnapshot(), null);
+	assert.equal(host.countByClass("friday-composer-task-bar"), 0);
+	assert.doesNotMatch(host.textContent, /整理结论和建议/);
+
+	const root = new FakeElement("div");
+	view.renderAiMessageContent = (containerEl, message) => {
+		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.resolveUserDisplayName = () => "User";
+	view.renderAiMessageList(root);
+
+	const assistantRows = root
+		.findAllByClass("friday-ai-message-row")
+		.filter((row) => row.classes.has("is-assistant"));
+	const latestAssistantRow = assistantRows.at(-1);
+	assert.ok(latestAssistantRow, "latest simple assistant answer should render");
+	assert.match(latestAssistantRow.textContent, /FRIDAY 已思考/);
+	assert.match(latestAssistantRow.textContent, /2\+2 等于 4。/);
+	assert.equal(latestAssistantRow.countByClass("friday-composer-task-bar"), 0);
+});
+
 test("renderComposerTaskBar renders collapsed and expanded plan task states only", async () => {
 	const { renderComposerTaskBar } = await loadRenderer();
 
@@ -403,6 +1411,7 @@ test("renderComposerTaskBar renders collapsed and expanded plan task states only
 				{ id: "task-3", title: "补充验收", status: "pending", index: 3 },
 				{ id: "task-4", title: "跳过发布", status: "skipped", index: 4 },
 				{ id: "task-5", title: "最终审查", status: "failed", index: 5 },
+				{ id: "task-6", title: "等待外部确认", status: "blocked", index: 6 },
 			],
 			actionSlot: null,
 		},
@@ -412,6 +1421,8 @@ test("renderComposerTaskBar renders collapsed and expanded plan task states only
 
 	assert.equal(collapsedRoot.countByClass("friday-composer-task-bar"), 1);
 	assert.equal(collapsedRoot.countByClass("friday-composer-task-bar-list"), 0);
+	assert.equal(collapsedRoot.countByClass("friday-composer-task-bar-item-marker"), 0);
+	assert.equal(collapsedRoot.countByClass("friday-composer-task-bar-item-progress"), 0);
 	assert.match(collapsedRoot.textContent, /正在执行/);
 	assert.match(collapsedRoot.textContent, /2\/4/);
 	assert.match(collapsedRoot.textContent, /实现 Composer Task Bar/);
@@ -434,6 +1445,7 @@ test("renderComposerTaskBar renders collapsed and expanded plan task states only
 				{ id: "task-3", title: "补充验收", status: "pending", index: 3 },
 				{ id: "task-4", title: "跳过发布", status: "skipped", index: 4 },
 				{ id: "task-5", title: "最终审查", status: "failed", index: 5 },
+				{ id: "task-6", title: "等待外部确认", status: "blocked", index: 6 },
 			],
 			actionSlot: null,
 		},
@@ -442,10 +1454,19 @@ test("renderComposerTaskBar renders collapsed and expanded plan task states only
 	});
 
 	assert.equal(expandedRoot.countByClass("friday-composer-task-bar-list"), 1);
-	assert.equal(expandedRoot.countByClass("friday-composer-task-bar-item"), 5);
+	assert.equal(expandedRoot.countByClass("friday-composer-task-bar-item"), 6);
+	assert.equal(expandedRoot.countByClass("friday-composer-task-bar-item-index"), 0);
+	const markerEls = expandedRoot.findAllByClass("friday-composer-task-bar-item-marker");
+	assert.equal(markerEls.length, 6);
+	for (const status of ["completed", "in_progress", "pending", "skipped", "failed", "blocked"]) {
+		assert.equal(markerEls.some((markerEl) => markerEl.classes.has(`is-${status}`)), true);
+	}
+	const progressEls = expandedRoot.findAllByClass("friday-composer-task-bar-item-progress");
+	assert.equal(progressEls.length, 6);
+	assert.deepEqual(progressEls.map((progressEl) => progressEl.textContent), ["1/6", "2/6", "3/6", "4/6", "5/6", "6/6"]);
 	const statusEls = expandedRoot.findAllByClass("friday-composer-task-bar-item-status");
-	assert.equal(statusEls.length, 5);
-	for (const status of ["completed", "in_progress", "pending", "skipped", "failed"]) {
+	assert.equal(statusEls.length, 6);
+	for (const status of ["completed", "in_progress", "pending", "skipped", "failed", "blocked"]) {
 		assert.equal(statusEls.some((statusEl) => statusEl.classes.has(`is-${status}`)), true);
 	}
 	assert.match(expandedRoot.textContent, /已完成/);
@@ -453,11 +1474,12 @@ test("renderComposerTaskBar renders collapsed and expanded plan task states only
 	assert.match(expandedRoot.textContent, /未开始/);
 	assert.match(expandedRoot.textContent, /已跳过/);
 	assert.match(expandedRoot.textContent, /未完成\/失败/);
+	assert.match(expandedRoot.textContent, /受阻/);
 	assert.equal(expandedRoot.countByClass("friday-composer-task-bar-action-slot"), 0);
 	assert.doesNotMatch(expandedRoot.textContent, /当前：|刚刚完成：|接下来：|做了什么|正在做什么/);
 });
 
-test("renderAgentTrajectoryCard uses lightweight thinking for simple live answers", async () => {
+test("renderAgentTrajectoryCard hides simple live model-only snapshots", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -478,12 +1500,45 @@ test("renderAgentTrajectoryCard uses lightweight thinking for simple live answer
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-header"), 1);
-	assert.equal(root.countByClass("avatar"), 1);
+	assert.equal(root.countByClass("friday-agent-process-shell"), 0);
+	assert.equal(root.countByClass("friday-agent-process-header"), 0);
+	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
+	assert.equal(root.countByClass("avatar"), 0);
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
-	assert.match(root.textContent, /FRIDAY 思考中/);
+	assert.equal(root.textContent, "");
+});
+
+test("renderAgentTrajectoryCard hides live preflight-only context snapshots", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "Loading instructions",
+			summary: "加载项目规则与 Soul 设定",
+			time: { startedAt: "2026-05-08T00:00:00.000Z", updatedAt: "2026-05-08T00:00:01.000Z", durationMs: 1000 },
+			items: [
+				makeItem({ id: "live:context:instructions", kind: "context", title: "Context: instructions", detail: "加载项目规则与 Soul 设定", status: "running", rawEventType: "context" }),
+				makeItem({ id: "live:context:skills", kind: "context", title: "Context: skills", detail: "匹配相关技能与命令约束", status: "running", rawEventType: "context" }),
+				makeItem({ id: "live:context:memory", kind: "context", title: "Context: memory", detail: "加载长期记忆与项目偏好", status: "running", rawEventType: "context" }),
+				makeItem({ id: "live:context:compact", kind: "context", title: "Context: compact", detail: "压缩上下文并生成提示包", status: "running", rawEventType: "context" }),
+				makeItem({ id: "checkpoint", kind: "system", title: "Checkpoint saved", detail: "Context package built before native model request. (context_ready)", status: "ok", rawEventType: "checkpoint_saved" }),
+			],
+		}),
+		variant: "live",
+		expanded: false,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-shell"), 0);
+	assert.equal(root.countByClass("friday-agent-process-disclosure"), 0);
+	assert.equal(root.textContent, "");
 });
 
 test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-process disclosure", async () => {
@@ -531,7 +1586,7 @@ test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-proces
 	assert.deepEqual(calls, ["toggle"]);
 });
 
-test("renderAgentTrajectoryCard suppresses simple completed answer replay", async () => {
+test("renderAgentTrajectoryCard renders simple completed answer replay as compact thought strip", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -553,7 +1608,11 @@ test("renderAgentTrajectoryCard suppresses simple completed answer replay", asyn
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.children.length, 0);
+	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
+	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
+	assert.match(root.textContent, /FRIDAY 已思考/);
+	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 });
 
 test("renderAgentTrajectoryCard keeps completed file read replay as expandable work process", async () => {
@@ -582,7 +1641,8 @@ test("renderAgentTrajectoryCard keeps completed file read replay as expandable w
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.match(root.textContent, /已处理 4s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作/);
+	assert.doesNotMatch(root.textContent, /已处理 4s/);
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 	assert.doesNotMatch(root.textContent, /Read Notes\/Today\.md|Current|Evidence|Timeline/i);
@@ -741,7 +1801,8 @@ test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw rea
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.match(root.textContent, /已处理 8s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作/);
+	assert.doesNotMatch(root.textContent, /已处理 8s/);
 	assert.match(root.textContent, /整理方案/);
 	assert.match(root.textContent, /Checked the request and current workspace/);
 	assert.equal(root.textContent.includes(rawCot), false);
@@ -961,7 +2022,8 @@ test("renderAgentTrajectoryCard renders complex completed replay as collapsed pr
 
 	assert.equal(root.countByClass("friday-agent-process"), 1);
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.match(root.textContent, /已处理 5s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作/);
+	assert.doesNotMatch(root.textContent, /已处理 5s/);
 	assert.doesNotMatch(root.textContent, />/);
 	assert.doesNotMatch(root.textContent, /Created a sourced answer/);
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
@@ -1077,7 +2139,7 @@ test("renderAgentAnswerFlow renders assistant answer as document flow with resul
 	assert.deepEqual(opened, ["Notes/Updated.md", "Maps/Project.canvas"]);
 });
 
-test("renderAgentAnswerFlow places process disclosure before answer body and artifacts after it", async () => {
+test("renderAgentAnswerFlow places process disclosure before answer body and keeps artifacts below the answer", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1106,14 +2168,17 @@ test("renderAgentAnswerFlow places process disclosure before answer body and art
 	assert.ok(directChildIndex(flow, "friday-agent-artifacts") >= 0, "artifacts should be a direct flow child");
 	assert.ok(
 		directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"),
-		"process disclosure belongs before the answer body",
+		"process disclosure should render before answer body",
 	);
 	assert.ok(
 		directChildIndex(flow, "friday-agent-artifacts") > directChildIndex(flow, "friday-ai-answer-content"),
 		"artifacts belong after the answer body",
 	);
+	assert.ok(
+		directChildIndex(flow, "friday-agent-artifacts") > directChildIndex(flow, "friday-agent-process-shell"),
+		"result artifacts should remain below the process disclosure in the final answer flow",
+	);
 	assert.equal(flow.findByClass("friday-agent-process-timeline")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
-	assert.equal(flow.children.slice(directChildIndex(flow, "friday-ai-answer-content") + 1).some((child) => child.hasClassInTree("friday-agent-process-header")), false);
 });
 
 test("renderAgentAnswerFlow opens markdown and canvas artifacts from the result area", async () => {
@@ -1152,7 +2217,7 @@ test("renderAgentAnswerFlow opens markdown and canvas artifacts from the result 
 	assert.deepEqual(opened, ["Notes/A.md", "Maps/A.canvas"]);
 });
 
-test("renderAgentAnswerFlow inserts expanded process panel between header and answer body", async () => {
+test("renderAgentAnswerFlow inserts expanded process panel above the answer body", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1227,7 +2292,7 @@ test("renderAgentAnswerFlow toggles process disclosure from the title row and ch
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
 });
 
-test("renderAgentAnswerFlow uses identity header without process disclosure for simple completed answers", async () => {
+test("renderAgentAnswerFlow uses compact thought strip without toggle for simple completed answers", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1249,11 +2314,112 @@ test("renderAgentAnswerFlow uses identity header without process disclosure for 
 	});
 
 	assert.match(root.textContent, /FRIDAY/);
+	assert.match(root.textContent, /FRIDAY 已思考/);
 	assert.doesNotMatch(root.textContent, /FRIDAY 的思路/);
 	assert.doesNotMatch(root.textContent, /FRIDAY 的工作过程/);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 0);
+	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
 	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	const flow = root.findByClass("friday-ai-answer-flow");
+	assert.ok(flow, "answer flow should render");
+	assert.ok(directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"));
+});
+
+test("renderAgentAnswerFlow compacts simple completed replay with generic lifecycle narration", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			headline: "Agent finished",
+			summary: "2+2 等于 4。",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-08T00:00:00.000Z", completedAt: "2026-05-08T00:00:04.000Z", durationMs: 4000 },
+			items: [
+				makeItem({ id: "task-created", kind: "task", title: "Task created", detail: "Task created.", status: "ok", rawEventType: "task_created" }),
+				makeItem({ id: "task-running", kind: "task", title: "Task running", detail: "Runtime started.", status: "ok", rawEventType: "task_running" }),
+				makeItem({
+					id: "receipt",
+					kind: "narration",
+					title: "收到任务",
+					detail: "FRIDAY 已收到任务，开始按当前上下文处理。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "task_acknowledged",
+					narrationSource: "fallback",
+				}),
+				makeItem({
+					id: "reasoning",
+					kind: "reasoning",
+					title: "FRIDAY 的思路",
+					detail: "received model reasoning",
+					status: "ok",
+					rawEventType: "model_response",
+				}),
+				makeItem({
+					id: "context-ready",
+					kind: "system",
+					title: "Checkpoint saved",
+					detail: "Context package built before native model request. (context_ready)",
+					status: "ok",
+					rawEventType: "checkpoint_saved",
+				}),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "2+2 等于 4。", status: "ok", rawEventType: "assistant_final" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "2+2 等于 4。" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.match(root.textContent, /FRIDAY/);
+	assert.match(root.textContent, /FRIDAY 已思考 · 4s/);
+	assert.match(root.textContent, /2\+2 等于 4。/);
+	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
+	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
+	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
+	assert.doesNotMatch(root.textContent, /已处理 4s|完成：本次工作已结束|收到任务|FRIDAY 已收到任务|整理方案|执行|已整理上下文/);
+});
+
+test("renderAgentAnswerFlow compacts completed preflight-only replay with elapsed thinking strip", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			headline: "Agent finished",
+			summary: "3+3 等于 6。",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-08T00:00:00.000Z", completedAt: "2026-05-08T00:00:03.000Z", durationMs: 3000 },
+			items: [
+				makeItem({ id: "live:context:instructions", kind: "context", title: "Context: instructions", detail: "加载项目规则与 Soul 设定", status: "ok", rawEventType: "context" }),
+				makeItem({ id: "live:context:skills", kind: "context", title: "Context: skills", detail: "匹配相关技能与命令约束", status: "ok", rawEventType: "context" }),
+				makeItem({ id: "live:context:memory", kind: "context", title: "Context: memory", detail: "加载长期记忆与项目偏好", status: "ok", rawEventType: "context" }),
+				makeItem({ id: "live:context:compact", kind: "context", title: "Context: compact", detail: "压缩上下文并生成提示包", status: "ok", rawEventType: "context" }),
+				makeItem({ id: "checkpoint", kind: "system", title: "Checkpoint saved", detail: "Context package built before native model request. (context_ready)", status: "ok", rawEventType: "checkpoint_saved" }),
+				makeItem({ id: "model", kind: "model", title: "Model response", detail: "3+3 等于 6。", status: "ok", rawEventType: "model_response" }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "3+3 等于 6。", status: "ok", rawEventType: "assistant_final" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "3+3 等于 6。" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.match(root.textContent, /FRIDAY 已思考 · 3s/);
+	assert.match(root.textContent, /3\+3 等于 6。/);
+	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
+	assert.doesNotMatch(root.textContent, /加载项目规则|匹配相关技能|加载长期记忆|压缩上下文|context_ready|读取项目现状/);
 });
 
 test("renderAgentAnswerFlow keeps simple workspace read completed process collapsed", async () => {
@@ -1280,14 +2446,45 @@ test("renderAgentAnswerFlow keeps simple workspace read completed process collap
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /已处理 4s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作 · 4s/);
+	assert.doesNotMatch(root.textContent, /已处理 4s/);
+	assert.doesNotMatch(root.textContent, /完成：本次工作已结束/);
 	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
 	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 	assert.doesNotMatch(root.textContent, /Read Notes\/Today\.md|Evidence|Timeline/i);
 });
 
-test("renderAgentAnswerFlow expands completed workspace read process between header and answer", async () => {
+test("renderAgentAnswerFlow pads completed process elapsed seconds after one minute", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			headline: "Answer finished",
+			summary: "Answered from the current note.",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-05T00:00:00.000Z", completedAt: "2026-05-05T00:01:04.000Z", durationMs: 64000 },
+			items: [
+				makeItem({ id: "read", kind: "tool", title: "Read Notes/Today.md", detail: "Read current note.", status: "ok", tool: "read", targetPath: "Notes/Today.md" }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Answered from the current note.", status: "ok" }),
+			],
+		}),
+		expanded: false,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Current note answer." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.match(root.textContent, /FRIDAY 已完成工作 · 1m 04s/);
+	assert.doesNotMatch(root.textContent, /1m 4s|完成：本次工作已结束/);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
+});
+
+test("renderAgentAnswerFlow expands completed workspace read process above the answer", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1362,7 +2559,7 @@ test("renderAgentTrajectoryCard and completed answer flow reuse the same process
 		snapshot: makeSnapshot({
 			status: "running",
 			items: [
-				makeItem({ id: "model", kind: "model", title: "Model step 1", detail: "Thinking.", status: "running" }),
+				makeItem({ id: "read", kind: "tool", title: "Read Notes/A.md", detail: "Reading note.", status: "running", tool: "read", targetPath: "Notes/A.md" }),
 			],
 		}),
 		variant: "live",
@@ -1393,7 +2590,19 @@ test("renderAgentTrajectoryCard and completed answer flow reuse the same process
 	assert.equal(completedRoot.countByClass("friday-agent-process-header"), 1);
 });
 
-test("DailyBoard embeds completed replay in the matching assistant answer row", async () => {
+test("DailyBoard embeds completed replay in every matching assistant answer row", async () => {
+	const oldCompletedSnapshot = makeSnapshot({
+		identity: { turnId: "turn-old", taskId: "task-old", traceId: "trace-old", conversationId: "conversation-1" },
+		status: "completed",
+		headline: "Older task completed",
+		summary: "Older answer replay.",
+		privacy: { redacted: true, source: "replay" },
+		time: { startedAt: "2026-05-06T00:00:00.000Z", completedAt: "2026-05-06T00:00:08.000Z", durationMs: 8000 },
+		items: [
+			makeItem({ id: "old-read", kind: "tool", title: "Read Notes/Old.md", detail: "Read old note.", status: "ok", tool: "read", targetPath: "Notes/Old.md" }),
+			makeItem({ id: "old-final", kind: "final", title: "Final response", detail: "Older answer replay.", status: "ok" }),
+		],
+	});
 	const completedSnapshot = makeSnapshot({
 		identity: { turnId: "turn-current", taskId: "task-current", traceId: "trace-current", conversationId: "conversation-1" },
 		status: "completed",
@@ -1419,6 +2628,7 @@ test("DailyBoard embeds completed replay in the matching assistant answer row", 
 		containerEl.createDiv({ cls: "test-message-body", text: message.content });
 	};
 	view.resolveUserDisplayName = () => "User";
+	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(oldCompletedSnapshot), oldCompletedSnapshot);
 	view.aiProcessSnapshotsByKey.set(view.getTrajectorySnapshotKey(completedSnapshot), completedSnapshot);
 	const root = new FakeElement("div");
 
@@ -1432,7 +2642,7 @@ test("DailyBoard embeds completed replay in the matching assistant answer row", 
 
 	assert.ok(previousAssistantRow, "previous assistant answer should render");
 	assert.ok(matchingAssistantRow, "matching assistant answer should render");
-	assert.equal(previousAssistantRow.countByClass("friday-agent-process-shell"), 0);
+	assert.equal(previousAssistantRow.countByClass("friday-agent-process-shell"), 1);
 	assert.equal(matchingAssistantRow.countByClass("friday-agent-process-shell"), 1);
 	assert.equal(matchingAssistantRow.countByClass("friday-agent-process-disclosure"), 1);
 	assert.equal(matchingAssistantRow.countByClass("friday-ai-answer-content"), 1);
@@ -1443,7 +2653,7 @@ test("DailyBoard embeds completed replay in the matching assistant answer row", 
 	const answerIndex = directChildIndex(matchingFlow, "friday-ai-answer-content");
 	assert.ok(processIndex >= 0, "process disclosure should be a direct child of the matching answer flow");
 	assert.ok(answerIndex >= 0, "answer content should be a direct child of the matching answer flow");
-	assert.ok(processIndex < answerIndex, "process disclosure should render before answer content in the matching row");
+	assert.ok(processIndex < answerIndex, "process disclosure should render above answer content in the matching row");
 	assert.equal(root.children.some((child) => child.classes.has("friday-agent-process-shell")), false);
 });
 
@@ -1625,11 +2835,12 @@ async function createDailyBoardHarness(overrides = {}) {
 		aiSessionId: "conversation-1",
 		aiRuntimeTrajectorySnapshot: null,
 		aiRuntimeElapsedTimer: null,
-		aiRuntimeTrajectoryStore: { refreshElapsed: () => null },
+		aiRuntimeTrajectoryStore: { reset: () => {}, refreshElapsed: () => null },
 		aiRuntimeProgressTaskIds: new Set(),
 		aiRuntimeLastRenderAt: 0,
 		aiForceScrollToBottomOnce: false,
 		aiProcessSnapshotsByKey: new Map(),
+		aiProcessSnapshotProjectIds: new WeakMap(),
 		aiProcessExpandedKeys: new Set(),
 		aiProcessCollapsedKeys: new Set(),
 		aiComposerTaskBarExpanded: false,
@@ -1643,7 +2854,9 @@ async function createDailyBoardHarness(overrides = {}) {
 		aiConversation: [],
 		aiAgentTasks: [],
 		aiSessions: [],
+		aiSessionSelection: new Set(),
 		aiBusy: false,
+		aiBackgroundTurnFailure: null,
 		aiQueuedPrompts: [],
 		aiLastError: "",
 		plugin: makePluginStub(),
@@ -1670,6 +2883,11 @@ function makePluginStub() {
 		t: (key) => key,
 		saveSettings: async () => {},
 		workbenchStateStore: { getEditPlans: () => [] },
+		agentRuntimeService: {
+			clearAllSessionToolPolicyOverrides: () => {},
+			listAgentTasksByConversationId: async () => [],
+		},
+		toolApprovalService: { clearSessionRules: () => {} },
 	};
 }
 

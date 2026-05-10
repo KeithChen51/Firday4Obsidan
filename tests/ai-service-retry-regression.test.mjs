@@ -11,6 +11,8 @@ import { createJiti } from "jiti";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const aiServicePath = path.join(projectRoot, "src/services/AIService.ts");
+const projectorPath = path.join(projectRoot, "src/core/trajectory/AgentTrajectoryProjector.ts");
+const FIRST_RETRY_RECOVERY_COPY = "网络波动，正在恢复请求（第 1/5 次）";
 
 function readAiServiceSource() {
 	return fs.readFileSync(aiServicePath, "utf8");
@@ -56,6 +58,24 @@ function createSettings(overrides = {}) {
 	};
 }
 
+async function projectVisibleTransportCopy(transport) {
+	const jiti = createJiti(import.meta.url);
+	const { projectRuntimeProgress } = await jiti.import(projectorPath);
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "model_retry",
+			step: 1,
+			message: transport.message || "",
+			transport,
+		},
+	]);
+	return {
+		summary: snapshot.summary,
+		detail: snapshot.items.at(-1)?.detail,
+		rawEventType: snapshot.items.at(-1)?.rawEventType,
+	};
+}
+
 test("ai service uses shared llm transport policy for headers and retries", () => {
 	const source = readAiServiceSource();
 	assert.match(source, /buildLlmHeaders/);
@@ -75,7 +95,7 @@ test("ai service retry budget allows five retries after the first request", () =
 	assert.match(source, /return AIService\.MAX_RETRY_ATTEMPTS \+ 1/);
 });
 
-test("chatWithTools emits retry scheduled telemetry before retrying a 504", async () => {
+test("chatWithTools emits retry telemetry with user-visible retry attempt semantics", async () => {
 	let calls = 0;
 	const { AIService, cleanup } = await loadAiServiceWithRequestUrl(async () => {
 		calls += 1;
@@ -117,8 +137,19 @@ test("chatWithTools emits retry scheduled telemetry before retrying a 504", asyn
 		assert.equal(events[1].delayMs, 700);
 		assert.equal(events[1].httpStatus, 504);
 		assert.equal(events[1].retryable, true);
-		assert.equal(events[2].attempt, 2);
+		assert.equal(events[2].attempt, 1);
 		assert.equal(events[2].maxAttempts, 6);
+
+		assert.deepEqual(await projectVisibleTransportCopy(events[1]), {
+			summary: FIRST_RETRY_RECOVERY_COPY,
+			detail: FIRST_RETRY_RECOVERY_COPY,
+			rawEventType: "retry_scheduled",
+		});
+		assert.deepEqual(await projectVisibleTransportCopy(events[2]), {
+			summary: FIRST_RETRY_RECOVERY_COPY,
+			detail: FIRST_RETRY_RECOVERY_COPY,
+			rawEventType: "retry_started",
+		});
 	} finally {
 		cleanup();
 	}

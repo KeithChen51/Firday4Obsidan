@@ -3,6 +3,7 @@ import type {
 	AgentTrajectoryItem,
 	AgentTrajectoryItemStatus,
 	AgentTrajectoryMutation,
+	AgentTrajectoryPlanTaskStatus,
 	AgentTrajectorySnapshot,
 	AgentTrajectoryStatus,
 } from "../core/trajectory/AgentTrajectory";
@@ -214,7 +215,7 @@ export interface AgentComposerTaskBarTaskView {
 	id: string;
 	index: number;
 	title: string;
-	status: "pending" | "in_progress" | "completed" | "skipped" | "failed";
+	status: AgentTrajectoryPlanTaskStatus;
 }
 
 export interface AgentComposerTaskBarView {
@@ -409,6 +410,9 @@ function resolveMode(snapshot: AgentTrajectorySnapshot, visibleSteps: AgentProce
 }
 
 function isLifecycleOnlyItem(item: AgentTrajectoryItem): boolean {
+	if (item.rawEventType === "start" && !item.targetPath && !item.evidenceRef) {
+		return true;
+	}
 	return item.kind === "task" &&
 		(item.rawEventType === "task_created" ||
 			item.rawEventType === "task_running" ||
@@ -416,7 +420,27 @@ function isLifecycleOnlyItem(item: AgentTrajectoryItem): boolean {
 }
 
 function isRenderableTrajectoryItem(item: AgentTrajectoryItem): boolean {
-	return !isLifecycleOnlyItem(item) && !(item.kind === "plan" && item.rawEventType === "plan_create");
+	return !isLifecycleOnlyItem(item) &&
+		!(item.kind === "plan" && item.rawEventType === "plan_create") &&
+		!isInternalPreflightItem(item);
+}
+
+function isInternalPreflightItem(item: AgentTrajectoryItem): boolean {
+	return isInternalPreflightContextItem(item) || isContextReadyCheckpointItem(item);
+}
+
+function isInternalPreflightContextItem(item: AgentTrajectoryItem): boolean {
+	if (item.kind !== "context" || item.rawEventType !== "context") {
+		return false;
+	}
+	return /(?:^|:)context:(instructions|skills|memory|compact)$/i.test(item.id) ||
+		/^Context:\s*(instructions|skills|memory|compact)$/i.test(cleanText(item.title));
+}
+
+function isContextReadyCheckpointItem(item: AgentTrajectoryItem): boolean {
+	return item.kind === "system" &&
+		item.rawEventType === "checkpoint_saved" &&
+		/Context package built before|context_ready|native model request/i.test(lifecycleItemText(item));
 }
 
 function resolveSurface(
@@ -425,7 +449,7 @@ function resolveSurface(
 	triggerReason: AgentProcessTriggerReason | null,
 ): AgentProcessSurface {
 	if (mode === "simple_thinking") {
-		return snapshot.status === "running" ? "inline_thinking" : "hidden";
+		return snapshot.status === "completed" ? "inline_thinking" : "hidden";
 	}
 	if (snapshot.status === "waiting_for_approval" || snapshot.status === "waiting_for_user" || triggerReason === "mutation_review") {
 		return "action_required";
@@ -566,7 +590,10 @@ function headerHeadline(
 	durationSeconds: number,
 ): string {
 	if (mode === "simple_thinking") {
-		return snapshot.status === "running" ? "FRIDAY 思考中" : `FRIDAY 的思路 ${durationSeconds}s`;
+		return snapshot.status === "running" ? "FRIDAY 思考中" : "FRIDAY 已思考";
+	}
+	if (snapshot.status === "completed") {
+		return "FRIDAY 已完成工作";
 	}
 	const label = triggerReason === "context_activity" || triggerReason === "memory_activity"
 		? "FRIDAY 的思路"
@@ -611,6 +638,20 @@ function buildTimelineView(
 		return null;
 	}
 	const status = timelineStatus(snapshot, context);
+	if (context.mode === "simple_thinking" && snapshot.status === "completed") {
+		return {
+			title: completedTimelineTitle("FRIDAY 已思考", context.durationSeconds),
+			status,
+			defaultExpanded: false,
+			canExpand: false,
+			statusBar: null,
+			groups: [],
+			items: [],
+			actions: [],
+			finalArtifacts: context.resultArtifacts,
+			diffSummary: context.diffSummary,
+		};
+	}
 	if (status === "thinking") {
 		return {
 			title: "FRIDAY 思考中",
@@ -649,7 +690,7 @@ function buildComposerTaskBar(
 	durationSeconds: number,
 ): AgentComposerTaskBarView | null {
 	const plan = snapshot.plan;
-	if (!plan || plan.visibility !== "task_bar" || plan.tasks.length === 0) {
+	if (!plan || !isTaskBarPlanVisibility(plan.visibility) || plan.tasks.length === 0) {
 		return null;
 	}
 	const currentTask = plan.tasks.find((task) => task.id === plan.currentTaskId) ??
@@ -674,6 +715,10 @@ function buildComposerTaskBar(
 		})),
 		actionSlot: null,
 	};
+}
+
+function isTaskBarPlanVisibility(visibility: NonNullable<AgentTrajectorySnapshot["plan"]>["visibility"]): boolean {
+	return visibility === "task_bar" || visibility === "visible";
 }
 
 function composerTaskBarStatusLabel(
@@ -731,7 +776,7 @@ function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: numb
 		case "recovering":
 			return `执行遇到问题，正在换一种方式继续 · ${duration}`;
 		case "completed":
-			return `已处理 ${duration}`;
+			return completedTimelineTitle("FRIDAY 已完成工作", durationSeconds);
 		case "waiting":
 			return "等待确认";
 		case "retrying":
@@ -766,13 +811,13 @@ function collapsedTimelineSummary(
 		return sanitizeTimelineSummary(context.recovery?.summary || snapshot.failure?.message || snapshot.summary || "运行遇到问题，可以重试。");
 	}
 	if (status === "completed") {
-		const changedCount = context.resultArtifacts.length;
-		if (changedCount > 0) {
-			return `完成：已更新 ${changedCount} 个文件`;
-		}
-		return "完成：本次工作已结束。";
+		return "";
 	}
 	return sanitizeTimelineSummary(items.find((item) => item.status === "running")?.summary || snapshot.summary || items.at(-1)?.summary || "");
+}
+
+function completedTimelineTitle(label: string, durationSeconds: number): string {
+	return durationSeconds > 0 ? `${label} · ${formatDuration(durationSeconds)}` : label;
 }
 
 function retrySummaryFromItems(items: AgentProcessTimelineItemView[]): string {
@@ -1452,6 +1497,9 @@ function buildVisibleSteps(
 	actions: AgentProcessActionView[],
 	recovery: AgentProcessRecoveryView | null,
 ): AgentProcessStepView[] {
+	if (isSimpleCompletedLifecycleReplay(snapshot, visibleItems)) {
+		return [];
+	}
 	if (!hasVisibleProcessTrigger(snapshot, visibleItems)) {
 		return [];
 	}
@@ -1512,7 +1560,11 @@ function hasVisibleProcessTrigger(
 	if (snapshot.failure || snapshot.mutations.length > 0) {
 		return true;
 	}
-	return visibleItems.some((item) =>
+	return visibleItems.some(isVisibleProcessTriggerItem);
+}
+
+function isVisibleProcessTriggerItem(item: AgentTrajectoryItem): boolean {
+	return (
 		item.kind === "intake" ||
 		item.kind === "context" ||
 		item.kind === "reasoning" ||
@@ -1527,6 +1579,86 @@ function hasVisibleProcessTrigger(
 		Boolean(item.evidenceRef) ||
 		item.rawEventType === "memory"
 	);
+}
+
+function isSimpleCompletedLifecycleReplay(
+	snapshot: AgentTrajectorySnapshot,
+	visibleItems: AgentTrajectoryItem[],
+): boolean {
+	if (snapshot.status !== "completed" || snapshot.failure || snapshot.mutations.length > 0) {
+		return false;
+	}
+	if (snapshot.actions.some((action) => action.id !== "view_replay")) {
+		return false;
+	}
+	if (snapshot.plan && isTaskBarPlanVisibility(snapshot.plan.visibility) && snapshot.plan.tasks.length > 0) {
+		return false;
+	}
+	const processItems = visibleItems.filter((item) => item.kind !== "final" && isVisibleProcessTriggerItem(item));
+	return processItems.length > 0 && processItems.every(isGenericCompletedLifecycleItem);
+}
+
+function isGenericCompletedLifecycleItem(item: AgentTrajectoryItem): boolean {
+	if (item.kind === "narration") {
+		return isGenericLifecycleNarration(item);
+	}
+	if (item.kind === "reasoning") {
+		return isGenericLifecycleReasoning(item);
+	}
+	if (item.kind === "context" || item.kind === "system") {
+		return isGenericLifecycleContext(item);
+	}
+	if (item.kind === "intake") {
+		return isGenericLifecycleReceiptText(lifecycleItemText(item));
+	}
+	return false;
+}
+
+function isGenericLifecycleNarration(item: AgentTrajectoryItem): boolean {
+	const text = lifecycleItemText(item);
+	if (item.narrationKind === "task_acknowledged") {
+		return isGenericLifecycleReceiptText(text);
+	}
+	if (item.narrationKind === "plan_declared") {
+		return isGenericLifecycleReasoningText(text);
+	}
+	if (item.narrationKind === "stage_report") {
+		return isGenericLifecycleContextText(text);
+	}
+	return isGenericLifecycleReceiptText(text) ||
+		isGenericLifecycleReasoningText(text) ||
+		isGenericLifecycleContextText(text);
+}
+
+function isGenericLifecycleReceiptText(text: string): boolean {
+	return /FRIDAY\s*已收到任务/.test(text) ||
+		/开始按当前上下文处理/.test(text) ||
+		/^收到任务[。.!?]?$/.test(text);
+}
+
+function isGenericLifecycleReasoning(item: AgentTrajectoryItem): boolean {
+	if (Boolean(item.reasoningProvider) || Boolean(item.reasoningRawFormat)) {
+		return true;
+	}
+	return isGenericLifecycleReasoningText(lifecycleItemText(item));
+}
+
+function isGenericLifecycleReasoningText(text: string): boolean {
+	return /received model reasoning/i.test(text) ||
+		/FRIDAY\s*已整理当前判断/.test(text);
+}
+
+function isGenericLifecycleContext(item: AgentTrajectoryItem): boolean {
+	return isGenericLifecycleContextText(lifecycleItemText(item));
+}
+
+function isGenericLifecycleContextText(text: string): boolean {
+	return /Context package built before|context_ready|native model request/i.test(text) ||
+		/已整理上下文，准备进入下一步/.test(text);
+}
+
+function lifecycleItemText(item: AgentTrajectoryItem): string {
+	return cleanText(`${item.title || ""} ${item.detail || ""}`).replace(/\s+/g, " ");
 }
 
 interface StepBuilder {
@@ -2166,7 +2298,7 @@ function formatDuration(seconds: number): string {
 	}
 	const minutes = Math.floor(safeSeconds / 60);
 	const remainingSeconds = safeSeconds % 60;
-	return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
+	return remainingSeconds > 0 ? `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s` : `${minutes}m`;
 }
 
 function resolveNow(nowOption?: Date | (() => Date)): Date {

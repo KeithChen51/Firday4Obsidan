@@ -58,7 +58,7 @@ import {
 } from "../core/tools/ToolRegistry";
 import type { ToolResultFailureClass, ToolResultPayload, ToolResultRecovery } from "../core/tools/ToolResultContract";
 import { DEFAULT_MAX_MODEL_RESULT_CHARS, formatForModel, summarizeForTrace } from "../core/tools/ToolResultFormatter";
-import { ToolPathResolver, type ToolPathIntent } from "../core/tools/ToolPathResolver";
+import { ToolPathResolver, type ToolPathIntent, type ToolPathResolution } from "../core/tools/ToolPathResolver";
 import { TurnEventLog, type TurnEventInput } from "../core/runtime/TurnEventLog";
 import { TurnReplayReader, type TurnReplaySummary } from "../core/runtime/TurnReplayReader";
 import {
@@ -2570,6 +2570,14 @@ export class AgentRuntimeService {
 		};
 	}
 
+	private formatToolPathResolutionError(resolution: ToolPathResolution): string {
+		const reason = resolution.reason || `Tool path could not be resolved: ${resolution.inputPath}`;
+		if (resolution.candidates.length === 0) {
+			return reason;
+		}
+		return `${reason} Candidates: ${resolution.candidates.join(", ")}`;
+	}
+
 	private buildToolFailureRecovery(
 		message: string,
 		args: Record<string, unknown>,
@@ -2604,6 +2612,20 @@ export class AgentRuntimeService {
 					message,
 					candidatePaths: suggestedPath ? [suggestedPath] : undefined,
 					suggestedArgs: suggestedPath ? { path: suggestedPath } : undefined,
+				},
+			};
+		}
+
+		if (/active project boundary/i.test(message)) {
+			const boundaryCandidates = this.parseCandidatesAfterLabel(message);
+			return {
+				failureClass: "invalid_input",
+				recovery: {
+					recoverable: boundaryCandidates.length > 0,
+					retryable: false,
+					code: "project_boundary_mismatch",
+					message,
+					candidatePaths: boundaryCandidates.length > 0 ? boundaryCandidates : undefined,
 				},
 			};
 		}
@@ -2647,10 +2669,24 @@ export class AgentRuntimeService {
 			.filter(Boolean);
 	}
 
+	private parseCandidatesAfterLabel(message: string): string[] {
+		const match = message.match(/Candidates:\s*(.+)$/i);
+		if (!match) {
+			return [];
+		}
+		return String(match[1] ?? "")
+			.split(",")
+			.map((item) => normalizePath(item.trim()))
+			.filter(Boolean);
+	}
+
 	private buildRawWorkspaceSuggestion(targetPath: string): string {
 		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		const normalizedPath = normalizePath(targetPath || "");
 		const root = activeProjectRoot && activeProjectRoot !== "/" ? normalizePath(activeProjectRoot) : "";
+		const rawTargetPath = normalizePath(targetPath || "");
+		const normalizedPath = root && (rawTargetPath === "raw" || rawTargetPath.startsWith("raw/"))
+			? normalizePath(`${root}/${rawTargetPath}`)
+			: rawTargetPath;
 		const rawPrefix = root ? `${root}/raw` : "raw";
 		const workspacePrefix = root ? `${root}/workspace` : "workspace";
 		if (normalizedPath === rawPrefix) {
@@ -3044,15 +3080,40 @@ export class AgentRuntimeService {
 	}
 
 	private resolveVaultFilePath(rawPath: string): string {
-		const resolved = this.resolveExistingVaultFilePath(rawPath);
-		if (!resolved) {
+		const resolution = this.createToolPathResolver().resolve({
+			intent: "read_file",
+			path: rawPath,
+		});
+		if (resolution.scope === "external") {
 			throw new Error(`Vault file does not exist: ${normalizePath(rawPath)}`);
+		}
+		if (!resolution.ok) {
+			throw new Error(this.formatToolPathResolutionError(resolution));
+		}
+		const resolved = this.findExistingVaultFilePath(resolution.targetPath);
+		if (!resolved) {
+			const targetPath = resolution.targetPath || rawPath;
+			throw new Error(`Vault file does not exist: ${normalizePath(targetPath)}`);
 		}
 		return resolved;
 	}
 
 	private resolveExistingVaultFilePath(rawPath: string): string | null {
-		const normalized = normalizePath(rawPath);
+		const resolution = this.createToolPathResolver().resolve({
+			intent: "read_file",
+			path: rawPath,
+		});
+		if (resolution.scope === "external") {
+			return null;
+		}
+		if (!resolution.ok) {
+			throw new Error(this.formatToolPathResolutionError(resolution));
+		}
+		return this.findExistingVaultFilePath(resolution.targetPath);
+	}
+
+	private findExistingVaultFilePath(targetPath: string): string | null {
+		const normalized = normalizePath(targetPath);
 		const direct = this.vault.getAbstractFileByPath(normalized);
 		if (direct instanceof TFile) {
 			return normalized;
@@ -3066,33 +3127,6 @@ export class AgentRuntimeService {
 			return exactCaseInsensitive.path;
 		}
 
-		if (normalized.includes("/")) {
-			return null;
-		}
-
-		const activeProject = this.projectBoundaryService.getActiveProject();
-		const activeProjectRoot = activeProject ? this.projectBoundaryService.getProjectRoot(activeProject) : "";
-		const hasExtension = normalized.includes(".");
-		const candidates = this.vault.getFiles().filter((file) => {
-			if (activeProjectRoot && !this.isPathWithin(file.path, activeProjectRoot)) {
-				return false;
-			}
-			if (hasExtension) {
-				return file.name.toLowerCase() === normalizedLower;
-			}
-			return file.basename.toLowerCase() === normalizedLower;
-		});
-
-		if (candidates.length === 1) {
-			return candidates[0]!.path;
-		}
-		if (candidates.length > 1) {
-			const sample = candidates
-				.slice(0, 5)
-				.map((item) => item.path)
-				.join(", ");
-			throw new Error(`File name is not unique: ${normalized}. Candidates: ${sample}`);
-		}
 		return null;
 	}
 
@@ -3143,6 +3177,11 @@ export class AgentRuntimeService {
 	}
 
 	private resolveToolTargetPath(name: string, args: Record<string, unknown>): string {
+		const deniedTargetPath = this.resolveDeniedToolTargetPath(name, args);
+		if (deniedTargetPath) {
+			return deniedTargetPath;
+		}
+
 		if (name === "compile_wiki") {
 			const single = this.getStringArg(args, "path");
 			if (single) {
@@ -3198,13 +3237,37 @@ export class AgentRuntimeService {
 		return "";
 	}
 
-	private resolveDefaultVaultSearchPath(rawPath: string | undefined): string {
-		const normalized = this.normalizeVaultRootSearchPath(rawPath);
-		if (normalized) {
-			return normalized;
+	private resolveDeniedToolTargetPath(name: string, args: Record<string, unknown>): string {
+		const intent = this.resolveToolPathIntent(name);
+		if (!intent) {
+			return "";
 		}
-		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
-		return this.normalizeVaultRootSearchPath(activeProjectRoot);
+		const resolution = this.createToolPathResolver().resolve({
+			intent,
+			path: this.getStringArg(args, "path"),
+		});
+		if (resolution.scope === "external" || resolution.ok || resolution.code !== "project_raw_write_denied") {
+			return "";
+		}
+		return resolution.targetPath;
+	}
+
+	private resolveDefaultVaultSearchPath(rawPath: string | undefined): string {
+		const resolution = this.createToolPathResolver().resolve({
+			intent: "search",
+			path: rawPath,
+		});
+		if (resolution.scope === "external") {
+			return rawPath ?? "";
+		}
+		if (!resolution.ok) {
+			throw new Error(this.formatToolPathResolutionError(resolution));
+		}
+		if (!resolution.targetPath) {
+			const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+			return this.normalizeVaultRootSearchPath(activeProjectRoot);
+		}
+		return this.normalizeVaultRootSearchPath(resolution.targetPath);
 	}
 
 	private normalizeVaultRootSearchPath(rawPath: string | undefined): string {
@@ -3222,6 +3285,9 @@ export class AgentRuntimeService {
 			path: this.getStringArg(args, "path"),
 		});
 		if (resolution.scope === "external") {
+			return args;
+		}
+		if (!resolution.ok) {
 			return args;
 		}
 		if (resolution.targetPath && resolution.targetPath !== this.getStringArg(args, "path")) {

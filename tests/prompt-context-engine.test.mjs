@@ -85,6 +85,27 @@ test("prompt path guidance delegates active project normalization to the tool la
 	assert.doesNotMatch(result.prompt, /prefer scoping ls\/grep\/search_text\/glob to that root/);
 });
 
+test("prompt context engine instructs model-authored intake and plan_create without read-only mutations", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		activeProjectRoot: "<projectRoot>",
+		userPrompt: "Read-only review only: no modifications. Analyze the parser.",
+		agentProfile: "agent",
+	});
+
+	assert.match(result.prompt, /Simple tasks must return only the response schema/i);
+	assert.match(result.prompt, /Complex first tool or progress responses may include model-authored intake and plan_create/i);
+	assert.match(result.prompt, /"type":"plan_create"/);
+	assert.match(result.prompt, /"blocked"/);
+	assert.match(result.prompt, /Read-only requests cannot invent mutation tasks/i);
+	assert.match(result.prompt, /no modifications|no changes|read-only|只读|不要修改/);
+});
+
 test("prompt context engine omits active file lines by default even when an editor file exists elsewhere", async () => {
 	const mod = await loadPromptContextEngineModule();
 	const engine = new mod.PromptContextEngine();

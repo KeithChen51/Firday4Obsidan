@@ -13,7 +13,8 @@ import {
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 type AgentProcessChevronIcon = "chevron-right" | "chevron-up";
-type RenderAgentProcessIcon = (containerEl: HTMLElement, icon: AgentProcessChevronIcon) => void;
+type AgentProcessStatusIcon = "check" | "loader" | "circle" | "minus" | "pause" | "x";
+type RenderAgentProcessIcon = (containerEl: HTMLElement, icon: AgentProcessChevronIcon | AgentProcessStatusIcon) => void;
 
 export interface RenderAgentTrajectoryCardOptions {
 	containerEl: HTMLElement;
@@ -79,6 +80,7 @@ export function renderComposerTaskBar(options: RenderComposerTaskBarOptions): vo
 		return;
 	}
 	const listEl = barEl.createDiv({ cls: "friday-composer-task-bar-list" });
+	const totalTasks = taskBar.expandedTasks.length;
 	for (const task of taskBar.expandedTasks) {
 		const itemEl = listEl.createDiv({
 			cls: `friday-composer-task-bar-item is-${task.status}`,
@@ -87,13 +89,69 @@ export function renderComposerTaskBar(options: RenderComposerTaskBarOptions): vo
 				"data-status": task.status,
 			},
 		});
-		itemEl.createSpan({ cls: "friday-composer-task-bar-item-index", text: String(task.index) });
+		const markerEl = itemEl.createSpan({
+			cls: `friday-composer-task-bar-item-marker is-${task.status}`,
+			attr: {
+				"aria-hidden": "true",
+			},
+		});
+		renderComposerTaskStatusIcon(markerEl, task.status, renderIcon);
+		itemEl.createSpan({ cls: "friday-composer-task-bar-item-progress", text: `${task.index}/${totalTasks}` });
 		itemEl.createSpan({ cls: "friday-composer-task-bar-item-title", text: task.title });
 		itemEl.createSpan({
 			cls: `friday-composer-task-bar-item-status is-${task.status}`,
 			text: formatComposerTaskStatus(task.status),
 		});
 	}
+}
+
+function renderComposerTaskStatusIcon(
+	containerEl: HTMLElement,
+	status: AgentComposerTaskBarTaskView["status"],
+	renderIcon?: RenderAgentProcessIcon,
+): void {
+	const icon = getComposerTaskStatusIcon(status);
+	if (renderIcon) {
+		renderIcon(containerEl, icon);
+		return;
+	}
+	containerEl.createSpan({ cls: "friday-composer-task-bar-item-marker-fallback", text: getComposerTaskStatusFallback(status) });
+}
+
+function getComposerTaskStatusIcon(status: AgentComposerTaskBarTaskView["status"]): AgentProcessStatusIcon {
+	switch (status) {
+		case "completed":
+			return "check";
+		case "in_progress":
+			return "loader";
+		case "pending":
+			return "circle";
+		case "skipped":
+			return "minus";
+		case "blocked":
+			return "pause";
+		case "failed":
+			return "x";
+	}
+	return assertUnhandledComposerTaskStatus(status);
+}
+
+function getComposerTaskStatusFallback(status: AgentComposerTaskBarTaskView["status"]): string {
+	switch (status) {
+		case "completed":
+			return "OK";
+		case "in_progress":
+			return "RUN";
+		case "pending":
+			return "TODO";
+		case "skipped":
+			return "SKIP";
+		case "blocked":
+			return "BLOCK";
+		case "failed":
+			return "ERR";
+	}
+	return assertUnhandledComposerTaskStatus(status);
 }
 
 function formatComposerTaskStatus(status: AgentComposerTaskBarTaskView["status"]): string {
@@ -106,9 +164,16 @@ function formatComposerTaskStatus(status: AgentComposerTaskBarTaskView["status"]
 			return "未开始";
 		case "skipped":
 			return "已跳过";
+		case "blocked":
+			return "受阻";
 		case "failed":
 			return "未完成/失败";
 	}
+	return assertUnhandledComposerTaskStatus(status);
+}
+
+function assertUnhandledComposerTaskStatus(status: never): never {
+	throw new Error(`Unhandled composer task status: ${status}`);
 }
 
 export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOptions): void {
@@ -406,7 +471,11 @@ export function renderAgentAnswerFlow(options: RenderAgentAnswerFlowOptions): vo
 	const view = snapshot ? buildAgentProcessPanelViewModel(snapshot) : null;
 	const rowEl = containerEl.createDiv({ cls: "friday-ai-message-row is-assistant friday-ai-answer-row" });
 	const flowEl = rowEl.createDiv({ cls: "friday-ai-answer-flow" });
-	if (view?.shouldRenderProcessPanel && view.timeline) {
+	const shouldRenderProcessPanel = Boolean(view?.shouldRenderProcessPanel && view.timeline);
+	if (!shouldRenderProcessPanel) {
+		renderAssistantIdentityHeader(flowEl, renderAssistantAvatar);
+	}
+	if (shouldRenderProcessPanel && view?.timeline) {
 		renderTimelineProcess(flowEl, view.timeline, {
 			variant: "completed",
 			expanded,
@@ -415,8 +484,6 @@ export function renderAgentAnswerFlow(options: RenderAgentAnswerFlowOptions): vo
 			renderAssistantAvatar,
 			renderIcon,
 		});
-	} else {
-		renderAssistantIdentityHeader(flowEl, renderAssistantAvatar);
 	}
 	const contentEl = flowEl.createDiv({
 		cls: `friday-ai-answer-content${isStreaming ? " is-streaming" : ""}`,

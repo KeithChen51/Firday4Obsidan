@@ -16,6 +16,9 @@ export interface ParsedRuntimeEnvelope {
 	type?: string;
 	assistant?: string;
 	tool?: ParsedRuntimeToolCall;
+	intake?: unknown;
+	plan?: unknown;
+	plan_create?: unknown;
 	mutations?: ParsedRuntimeMutationPlan[];
 	pendingMutations?: ParsedRuntimeMutationPlan[];
 }

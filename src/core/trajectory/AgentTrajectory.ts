@@ -71,7 +71,7 @@ export interface AgentTrajectoryItem {
 	narrationNext?: string;
 }
 
-export type AgentTrajectoryPlanTaskStatus = "pending" | "in_progress" | "completed" | "skipped" | "failed";
+export type AgentTrajectoryPlanTaskStatus = "pending" | "in_progress" | "completed" | "skipped" | "failed" | "blocked";
 
 export interface AgentTrajectoryPlanTask {
 	id: string;
@@ -84,7 +84,7 @@ export interface AgentTrajectoryPlanTask {
 
 export interface AgentTrajectoryPlanState {
 	planId: string;
-	visibility: "hidden" | "task_bar";
+	visibility: "hidden" | "task_bar" | "visible" | "internal";
 	status: "pending" | "running" | "completed" | "skipped" | "failed";
 	currentTaskId?: string;
 	tasks: AgentTrajectoryPlanTask[];

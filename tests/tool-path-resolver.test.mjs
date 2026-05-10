@@ -74,6 +74,66 @@ test("read resolves a unique bare filename inside the active project", async () 
 	assert.deepEqual(result.candidates, ["ProjectA/workspace/notes/unique.md"]);
 });
 
+test("read resolves Chinese canonical workspace-relative and bare filename paths inside active project", async () => {
+	const mod = await loadModule();
+	const resolver = createResolver(mod, {
+		activeProjectRoot: "123",
+		vaultFiles: [
+			"123/workspace/FRIDAY 设计理念.md",
+			"OtherProject/workspace/FRIDAY 设计理念.md",
+		],
+		vaultFolders: [
+			"123",
+			"123/workspace",
+			"OtherProject",
+			"OtherProject/workspace",
+		],
+	});
+
+	const canonical = resolver.resolve({ intent: "read_file", path: "123/workspace/FRIDAY 设计理念.md" });
+	const workspaceRelative = resolver.resolve({ intent: "read_file", path: "workspace/FRIDAY 设计理念.md" });
+	const bare = resolver.resolve({ intent: "read_file", path: "FRIDAY 设计理念.md" });
+
+	for (const result of [canonical, workspaceRelative, bare]) {
+		assert.equal(result.ok, true);
+		assert.equal(result.targetPath, "123/workspace/FRIDAY 设计理念.md");
+		assert.deepEqual(result.candidates, ["123/workspace/FRIDAY 设计理念.md"]);
+	}
+});
+
+test("read rejects paths that resolve outside the active project with boundary candidates", async () => {
+	const mod = await loadModule();
+	const resolver = createResolver(mod, {
+		activeProjectRoot: "456",
+		vaultFiles: [
+			"123/workspace/FRIDAY 设计理念.md",
+			"456/workspace/other.md",
+		],
+		vaultFolders: [
+			"123",
+			"123/workspace",
+			"456",
+			"456/workspace",
+		],
+	});
+
+	const canonical = resolver.resolve({ intent: "read_file", path: "123/workspace/FRIDAY 设计理念.md" });
+	const workspaceRelative = resolver.resolve({ intent: "read_file", path: "workspace/FRIDAY 设计理念.md" });
+	const bare = resolver.resolve({ intent: "read_file", path: "FRIDAY 设计理念.md" });
+
+	for (const result of [canonical, workspaceRelative, bare]) {
+		assert.equal(result.ok, false);
+		assert.equal(result.code, "project_boundary_mismatch");
+		assert.equal(result.projectRoot, "456");
+		assert.deepEqual(result.candidates, ["123/workspace/FRIDAY 设计理念.md"]);
+		assert.equal(result.suggestedArgs, undefined);
+		assert.match(result.reason, /active project boundary/i);
+	}
+	assert.equal(canonical.targetPath, "123/workspace/FRIDAY 设计理念.md");
+	assert.equal(workspaceRelative.targetPath, "456/workspace/FRIDAY 设计理念.md");
+	assert.equal(bare.targetPath, "FRIDAY 设计理念.md");
+});
+
 test("read rejects ambiguous bare filenames with candidate paths", async () => {
 	const mod = await loadModule();
 	const resolver = createResolver(mod);
@@ -126,6 +186,29 @@ test("writes default to project workspace and deny raw with workspace suggestion
 	assert.equal(rawResult.code, "project_raw_write_denied");
 	assert.deepEqual(rawResult.candidates, ["ProjectA/workspace/source.md"]);
 	assert.deepEqual(rawResult.suggestedArgs, { path: "ProjectA/workspace/source.md" });
+});
+
+test("write keeps active project workspace-relative target despite outside matching files", async () => {
+	const mod = await loadModule();
+	const resolver = createResolver(mod, {
+		activeProjectRoot: "456",
+		vaultFiles: [
+			"123/workspace/FRIDAY 设计理念.md",
+			"456/workspace/other.md",
+		],
+		vaultFolders: [
+			"123",
+			"123/workspace",
+			"456",
+			"456/workspace",
+		],
+	});
+
+	const result = resolver.resolve({ intent: "write_file", path: "workspace/FRIDAY 设计理念.md" });
+
+	assert.equal(result.ok, true);
+	assert.equal(result.targetPath, "456/workspace/FRIDAY 设计理念.md");
+	assert.notEqual(result.code, "project_boundary_mismatch");
 });
 
 test("whole-vault project writes still default generated paths to workspace", async () => {

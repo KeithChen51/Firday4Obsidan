@@ -61,6 +61,60 @@ test("read resolves a unique bare filename within active project", async () => {
 	assert.doesNotMatch(result.modelRequests.at(-1).sanitizedText, /other/);
 });
 
+test("read accepts Chinese paths through canonical workspace-relative and bare active project views", async () => {
+	for (const requestedPath of [
+		"123/workspace/FRIDAY 设计理念.md",
+		"workspace/FRIDAY 设计理念.md",
+		"FRIDAY 设计理念.md",
+	]) {
+		const result = await runAgentRuntimeScenario({
+			name: `read Chinese active project file via ${requestedPath}`,
+			projectRoot: "123",
+			files: {
+				"123/workspace/FRIDAY 设计理念.md": "active project philosophy",
+				"OtherProject/workspace/FRIDAY 设计理念.md": "wrong project",
+			},
+			modelSteps: [
+				{ tool: { name: "read", args: { path: requestedPath } } },
+				{ assistant: "Read the active project Chinese file." },
+			],
+		});
+
+		assert.equal(result.traces[0].status, "ok");
+		assert.equal(result.traces[0].targetPath, "123/workspace/FRIDAY 设计理念.md");
+		assert.match(result.modelRequests.at(-1).sanitizedText, /active project philosophy/);
+		assert.doesNotMatch(result.modelRequests.at(-1).sanitizedText, /wrong project/);
+	}
+});
+
+test("active project mismatch returns boundary recovery instead of reading or reporting missing file", async () => {
+	for (const requestedPath of [
+		"123/workspace/FRIDAY 设计理念.md",
+		"workspace/FRIDAY 设计理念.md",
+		"FRIDAY 设计理念.md",
+	]) {
+		const result = await runAgentRuntimeScenario({
+			name: `reject mismatched project path ${requestedPath}`,
+			projectRoot: "456",
+			files: {
+				"123/workspace/FRIDAY 设计理念.md": "must not leak across project boundary",
+				"456/workspace/other.md": "active project content",
+			},
+			modelSteps: [
+				{ tool: { name: "read", args: { path: requestedPath } } },
+				{ assistant: "The file belongs to another project." },
+			],
+		});
+
+		assert.equal(result.traces[0].status, "failed");
+		assert.match(result.traces[0].error, /active project boundary/i);
+		assert.doesNotMatch(result.modelRequests.at(-1).sanitizedText, /must not leak across project boundary/);
+		assert.doesNotMatch(result.modelRequests.at(-1).sanitizedText, /"code":"vault_file_not_found"/);
+		assert.match(result.modelRequests.at(-1).sanitizedText, /"code":"project_boundary_mismatch"/);
+		assert.match(result.modelRequests.at(-1).sanitizedText, /"candidatePaths":\["123\/workspace\/FRIDAY 设计理念\.md"\]/);
+	}
+});
+
 test("ambiguous bare filename fails with structured candidate paths", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "ambiguous bare filename",
@@ -133,6 +187,27 @@ test("write without project segment defaults to active project workspace", async
 	assert.equal(result.traces[0].status, "ok");
 	assert.equal(result.traces[0].targetPath, "ProjectA/workspace/drafts/new.md");
 	assert.equal(result.pendingMutations[0].targetPath, "ProjectA/workspace/drafts/new.md");
+});
+
+test("write workspace-relative path canonicalizes to active project despite outside matching files", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "write active project workspace path despite outside match",
+		projectRoot: "456",
+		files: {
+			"123/workspace/FRIDAY 设计理念.md": "other project content",
+			"456/workspace/other.md": "active project content",
+		},
+		modelSteps: [
+			{ tool: { name: "write", args: { path: "workspace/FRIDAY 设计理念.md", content: "active project philosophy", mode: "create" } } },
+			{ assistant: "Prepared write." },
+		],
+	});
+
+	assert.equal(result.traces[0].status, "ok");
+	assert.equal(result.traces[0].targetPath, "456/workspace/FRIDAY 设计理念.md");
+	assert.equal(result.pendingMutations[0].targetPath, "456/workspace/FRIDAY 设计理念.md");
+	assert.equal(result.storedMutations[0].targetPath, "456/workspace/FRIDAY 设计理念.md");
+	assert.doesNotMatch(result.modelRequests.at(-1).sanitizedText, /123\/workspace\/FRIDAY 设计理念\.md/);
 });
 
 test("raw write under active project is denied with workspace recovery metadata", async () => {

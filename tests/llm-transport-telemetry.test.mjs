@@ -109,7 +109,7 @@ test("one model request keeps the same transport request id across retry attempt
 		channel: "chat",
 		endpointIndex: 0,
 		endpointCount: 1,
-		attempt: 2,
+		attempt: 1,
 		maxAttempts: 6,
 		retryable: true,
 		message: "Retrying model request",

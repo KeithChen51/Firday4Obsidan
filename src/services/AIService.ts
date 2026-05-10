@@ -834,7 +834,7 @@ export class AIService {
 			channel,
 			endpointIndex,
 			endpointCount: endpoints.length,
-			attempt: attempt + 1,
+			attempt,
 			maxAttempts: this.getTransportMaxAttempts(),
 			retryable: true,
 			message: "Retrying model request",

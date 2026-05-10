@@ -98,3 +98,12 @@ test("AgentRuntimeService wires through the Obsidian tool adapter instead of own
 	assert.match(contextSource, /beforeLines: number/);
 	assert.doesNotMatch(contextSource, /added: number;\n\t\tremoved: number;\n\t\tchanged: boolean/);
 });
+
+test("Obsidian handlers keep vault path lookup behind the runtime ToolPathResolver", () => {
+	const runtimeSource = read(runtimePath);
+
+	assert.match(runtimeSource, /private resolveVaultFilePath\(rawPath: string\): string \{\s*const resolution = this\.createToolPathResolver\(\)\.resolve\(\{\s*intent: "read_file"/s);
+	assert.match(runtimeSource, /private resolveExistingVaultFilePath\(rawPath: string\): string \| null \{\s*const resolution = this\.createToolPathResolver\(\)\.resolve\(\{\s*intent: "read_file"/s);
+	assert.match(runtimeSource, /private resolveDefaultVaultSearchPath\(rawPath: string \| undefined\): string \{\s*const resolution = this\.createToolPathResolver\(\)\.resolve\(\{\s*intent: "search"/s);
+	assert.match(runtimeSource, /private normalizeToolArgs\(name: string, args: Record<string, unknown>\): Record<string, unknown> \{[\s\S]*?if \(!resolution\.ok\) \{\s*return args;\s*\}/);
+});

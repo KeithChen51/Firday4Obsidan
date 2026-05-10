@@ -2968,7 +2968,7 @@
 
 .friday-composer-task-bar-item {
 	display: grid;
-	grid-template-columns: 36px minmax(0, 1fr) max-content;
+	grid-template-columns: 18px 44px minmax(0, 1fr) max-content;
 	align-items: center;
 	gap: 8px;
 	padding: 7px 10px;
@@ -2986,8 +2986,53 @@
 	background: color-mix(in srgb, var(--interactive-accent) 7%, transparent);
 }
 
-.friday-composer-task-bar-item-index {
+.friday-composer-task-bar-item-marker {
+	width: 18px;
+	height: 18px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 50%;
+	color: var(--text-muted);
+	background: color-mix(in srgb, var(--background-secondary) 86%, transparent);
+}
+
+.friday-composer-task-bar-item-marker svg {
+	width: 13px;
+	height: 13px;
+	stroke-width: 2.25;
+}
+
+.friday-composer-task-bar-item-marker.is-completed {
+	color: var(--text-success);
+	background: color-mix(in srgb, var(--color-green) 12%, transparent);
+}
+
+.friday-composer-task-bar-item-marker.is-in_progress {
+	color: var(--text-accent);
+	background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.friday-composer-task-bar-item-marker.is-skipped {
+	color: var(--text-faint);
+}
+
+.friday-composer-task-bar-item-marker.is-failed {
+	color: var(--text-error);
+	background: color-mix(in srgb, var(--color-red) 12%, transparent);
+}
+
+.friday-composer-task-bar-item-marker-fallback {
+	font-size: 7px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.friday-composer-task-bar-item-progress {
 	font-variant-numeric: tabular-nums;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	white-space: nowrap;
 }
 
 .friday-composer-task-bar-item-title {
@@ -3035,12 +3080,13 @@
 
 @media (max-width: 520px) {
 	.friday-composer-task-bar-item {
-		grid-template-columns: 28px minmax(0, 1fr) minmax(0, max-content);
+		grid-template-columns: 18px 38px minmax(0, 1fr);
 		gap: 6px;
 		padding-inline: 8px;
 	}
 
 	.friday-composer-task-bar-item-status {
+		display: none;
 		padding-inline: 5px;
 		overflow: hidden;
 		text-overflow: ellipsis;

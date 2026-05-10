@@ -40,6 +40,7 @@ const STAGE_LABELS: Record<AgentTrajectoryStage["key"], string> = {
 };
 
 const STAGE_KEYS: AgentTrajectoryStage["key"][] = ["context", "reasoning", "tools", "review", "finalize"];
+const DEFAULT_RUNTIME_START_COPY = "FRIDAY \u6b63\u5728\u7406\u89e3\u4f60\u7684\u8bf7\u6c42";
 
 export function createEmptyTrajectorySnapshot(
 	identity: Partial<AgentTrajectoryIdentity> = {},
@@ -72,8 +73,8 @@ export function projectRuntimeProgress(events: RuntimeProgressEvent[]): AgentTra
 	const snapshot = createEmptyTrajectorySnapshot(extractRuntimeIdentity(runtimeEvents));
 	snapshot.privacy.source = "live";
 	snapshot.status = events.length > 0 ? "running" : "idle";
-	snapshot.headline = events.length > 0 ? "Agent is preparing" : "Agent is idle";
-	snapshot.summary = events.length > 0 ? safeText(events[events.length - 1]?.message ?? "") : "";
+	snapshot.headline = events.length > 0 ? DEFAULT_RUNTIME_START_COPY : "Agent is idle";
+	snapshot.summary = events.length > 0 ? DEFAULT_RUNTIME_START_COPY : "";
 
 	for (const [index, event] of runtimeEvents.entries()) {
 		mergeIdentity(snapshot.identity, event);
@@ -287,8 +288,8 @@ function applyRuntimeProgress(
 	switch (event.phase) {
 		case "start":
 			snapshot.status = "running";
-			snapshot.headline = "Agent is preparing";
-			snapshot.summary = safeText(event.message);
+			snapshot.headline = formatRuntimeStartCopy(event.message);
+			snapshot.summary = formatRuntimeStartCopy(event.message);
 			setStageStatus(snapshot, "context", "running");
 			break;
 		case "intake": {
@@ -297,6 +298,8 @@ function applyRuntimeProgress(
 				route: "answer" as const,
 				statement: event.message,
 				requiresPlan: false,
+				shouldShowProcess: false,
+				shouldUseVisiblePlan: false,
 				source: "fallback" as const,
 			};
 			projectIntake(snapshot, { ...intake, at: event.at }, `live:intake:${index}`, false);
@@ -337,8 +340,10 @@ function applyRuntimeProgress(
 		}
 		case "context":
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
-			snapshot.headline = formatContextHeadline(event.contextKey);
-			snapshot.summary = safeText(event.message);
+			if (!isInternalPreflightContext(event.contextKey)) {
+				snapshot.headline = formatContextHeadline(event.contextKey);
+				snapshot.summary = safeText(event.message);
+			}
 			upsertItem(snapshot, "context", {
 				id: `live:context:${event.contextKey ?? "general"}`,
 				kind: "context",
@@ -1158,6 +1163,19 @@ function mapTaskStatus(event: TurnReplaySummary["taskTimeline"][number]["event"]
 	}
 }
 
+function formatRuntimeStartCopy(message: string | undefined): string {
+	const text = safeText(message ?? "");
+	if (!text || isTechnicalRuntimeStartCopy(text)) {
+		return DEFAULT_RUNTIME_START_COPY;
+	}
+	return text;
+}
+
+function isTechnicalRuntimeStartCopy(text: string): boolean {
+	const normalized = text.toLowerCase().replace(/\.+$/, "");
+	return normalized === "runtime started" || normalized === ["agent", "is", "preparing"].join(" ");
+}
+
 function formatContextHeadline(contextKey: RuntimeProgressEvent["contextKey"]): string {
 	switch (contextKey) {
 		case "instructions":
@@ -1173,6 +1191,13 @@ function formatContextHeadline(contextKey: RuntimeProgressEvent["contextKey"]): 
 		default:
 			return "Preparing context";
 	}
+}
+
+function isInternalPreflightContext(contextKey: RuntimeProgressEvent["contextKey"]): boolean {
+	return contextKey === "instructions" ||
+		contextKey === "skills" ||
+		contextKey === "memory" ||
+		contextKey === "compact";
 }
 
 function formatContextTitle(contextKey: RuntimeProgressEvent["contextKey"]): string {
