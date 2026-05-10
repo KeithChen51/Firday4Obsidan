@@ -3274,16 +3274,11 @@ export class DailyBoardView extends ItemView {
 		for (const task of visibleAgentTasks) {
 			this.renderAgentTaskPanel(containerEl, task);
 		}
-		for (const item of pendingApprovals) {
-			this.renderApprovalMessage(containerEl, item);
-		}
 	}
 
 	private shouldRenderAgentTaskPanel(task: AgentTaskViewState): boolean {
 		return this.isTaskOwnedByCurrentSession(task) && Boolean(
-			task.waitingForApproval ||
 			task.waitingForUser ||
-			task.status === "waiting_for_approval" ||
 			task.status === "waiting_for_user",
 		);
 	}

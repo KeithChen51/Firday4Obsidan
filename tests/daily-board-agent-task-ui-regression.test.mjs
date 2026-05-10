@@ -220,15 +220,16 @@ test("daily board hydrates task panels only from the active conversation session
 	assert.doesNotMatch(block, /listAgentTasksByConversationId\(activeSoul\.id\)/);
 });
 
-test("daily board does not restore terminal failed or legacy unowned task panels", async () => {
+test("daily board does not restore approval terminal failed or legacy unowned task panels", async () => {
 	const source = readViewSource();
 	const shouldRenderMatch = source.match(/private shouldRenderAgentTaskPanel\([\s\S]*?\n\t\}/);
 	assert.ok(shouldRenderMatch, "task panel visibility predicate should exist");
 	const shouldRenderBlock = shouldRenderMatch[0] ?? "";
 
 	assert.match(shouldRenderBlock, /this\.isTaskOwnedByCurrentSession\(task\)/);
-	assert.match(shouldRenderBlock, /waitingForApproval/);
 	assert.match(shouldRenderBlock, /waitingForUser/);
+	assert.doesNotMatch(shouldRenderBlock, /waitingForApproval/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "waiting_for_approval"/);
 	assert.doesNotMatch(shouldRenderBlock, /pendingMutationCount/);
 	assert.doesNotMatch(shouldRenderBlock, /changedFileCount/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "failed"/);

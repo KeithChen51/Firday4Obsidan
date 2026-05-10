@@ -2747,23 +2747,27 @@ test("DailyBoard embeds completed replay in every matching assistant answer row"
 	assert.equal(root.children.some((child) => child.classes.has("friday-agent-process-shell")), false);
 });
 
-test("DailyBoard suppresses lifecycle-only completed task cards", () => {
+test("DailyBoard keeps approval task cards out of the chat flow", () => {
 	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
 	const shouldRenderMatch = source.match(/private shouldRenderAgentTaskPanel\([\s\S]*?\n\t\}/);
+	const messageListMatch = source.match(/private renderAiMessageList\([\s\S]*?\n\t\}\n\n\tprivate shouldRenderAgentTaskPanel/);
 	assert.ok(shouldRenderMatch, "task panel visibility predicate should exist");
+	assert.ok(messageListMatch, "message list renderer should exist");
 	const shouldRenderBlock = shouldRenderMatch[0] ?? "";
+	const messageListBlock = messageListMatch[0] ?? "";
 
 	assert.match(source, /private shouldRenderAgentTaskPanel\(task: AgentTaskViewState\): boolean/);
-	assert.match(shouldRenderBlock, /task\.waitingForApproval/);
 	assert.match(shouldRenderBlock, /task\.waitingForUser/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.waitingForApproval/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "waiting_for_approval"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.pendingMutationCount > 0/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.changedFileCount > 0/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "failed"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "cancelled"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "completed"/);
-	assert.match(shouldRenderBlock, /task\.status === "waiting_for_approval"/);
 	assert.match(shouldRenderBlock, /task\.status === "waiting_for_user"/);
 	assert.match(source, /private getVisibleAgentTasksForCurrentSession\(\)/);
+	assert.doesNotMatch(messageListBlock, /renderApprovalMessage/);
 });
 
 test("renderAgentTrajectoryCard renders trajectory actions without deciding availability", async () => {
