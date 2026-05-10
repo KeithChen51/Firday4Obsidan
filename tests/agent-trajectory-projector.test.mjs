@@ -635,6 +635,12 @@ test("projectReplaySummary projects tool mutation and task timelines into a comp
 	});
 	assert.ok(snapshot.items.some((item) => item.kind === "tool" && item.tool === "read" && item.status === "ok"));
 	assert.ok(snapshot.items.some((item) => item.kind === "mutation" && item.actionRef === "plan-1"));
+	const mutationTitles = snapshot.items
+		.filter((item) => item.kind === "mutation")
+		.map((item) => item.title);
+	assert.ok(mutationTitles.length > 0);
+	assert.ok(mutationTitles.every((title) => /文件修改/.test(title)));
+	assert.doesNotMatch(mutationTitles.join("\n"), /\b(edit|write|delete|create|modify|update) Notes\//i);
 	assert.ok(snapshot.items.some((item) => item.kind === "task" && item.status === "ok"));
 	assert.deepEqual(snapshot.mutations.map((mutation) => mutation.event), ["planned", "applied"]);
 });

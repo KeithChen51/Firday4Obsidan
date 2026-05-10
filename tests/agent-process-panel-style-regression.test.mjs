@@ -101,6 +101,42 @@ test("agent process panel styles cover focus responsive and reduced motion state
 	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*friday-agent-process/);
 });
 
+test("agent process motion is scoped and disabled for reduced motion", () => {
+	const styles = read(stylesPath);
+	const processBlock = extractProcessCss(styles);
+	const reducedMotionBlock = styles.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+
+	assert.match(processBlock, /@keyframes\s+friday-agent-process-pulse/);
+	assert.match(processBlock, /@keyframes\s+friday-agent-process-enter/);
+	assert.match(processBlock, /\.friday-agent-process-shell\.is-running[\s\S]*animation:\s*friday-agent-process-enter/);
+	assert.match(processBlock, /\.friday-agent-process-timeline-item\.is-running\s+\.friday-agent-process-timeline-marker[\s\S]*animation:\s*friday-agent-process-pulse/);
+	assert.doesNotMatch(processBlock, /@keyframes\s+(?!friday-agent-process-)[\w-]+/);
+	assert.match(reducedMotionBlock, /friday-agent-process[\s\S]*animation:\s*none/);
+	assert.doesNotMatch(processBlock, /transition:\s*(?:width|height|top|left|right|bottom|margin|padding)/);
+});
+
+test("composer decision panel styles are compact and flatten nested approval cards", () => {
+	const styles = read(stylesPath);
+	const decisionBlock = extractDecisionCss(styles);
+
+	for (const className of [
+		"friday-composer-decision-panel",
+		"friday-composer-decision-title",
+		"friday-composer-decision-panel .friday-approval-card",
+		"friday-composer-decision-panel .friday-approval-actions",
+		"friday-composer-decision-panel .friday-mutation-review-diff",
+	]) {
+		assert.match(styles, new RegExp(`\\.${className.replaceAll(".", "\\.")}\\b`), `${className} should be styled`);
+	}
+	assert.match(decisionBlock, /overflow-wrap:\s*anywhere/);
+	assert.match(decisionBlock, /min-width:\s*0/);
+	assert.match(decisionBlock, /box-shadow:\s*none/);
+	assert.doesNotMatch(decisionBlock, /linear-gradient|radial-gradient|backdrop-filter|blur\(/);
+	assert.doesNotMatch(decisionBlock, /border-radius:\s*(?:1[3-9]|[2-9][0-9])px/);
+	assert.match(styles, /@media\s*\(max-width:\s*520px\)[\s\S]*friday-composer-decision-panel/);
+	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*friday-composer-decision-panel[\s\S]*animation:\s*none/);
+});
+
 test("agent process disclosure only shows pointer cursor when it is clickable", () => {
 	const styles = read(stylesPath);
 	const baseBlock = styles.match(/\.friday-agent-process-disclosure\s*\{[\s\S]*?\}/)?.[0] ?? "";
@@ -146,6 +182,15 @@ function read(filePath) {
 function extractProcessCss(styles) {
 	const start = styles.indexOf("/* Agent process panel */");
 	const end = styles.indexOf("/* End agent process panel */");
+	if (start >= 0 && end > start) {
+		return styles.slice(start, end);
+	}
+	return styles;
+}
+
+function extractDecisionCss(styles) {
+	const start = styles.indexOf("/* Composer decision panel */");
+	const end = styles.indexOf("/* End composer decision panel */");
 	if (start >= 0 && end > start) {
 		return styles.slice(start, end);
 	}

@@ -199,9 +199,31 @@ test("summarizeForTrace matches current runtime summaries for existing tools", a
 	assert.equal(summarizeForTrace("search_text", { matches: [{}] }), "search_text matched 1 result(s)");
 	assert.equal(summarizeForTrace("glob", { files: ["a.md"] }), "glob matched 1 file(s)");
 	assert.equal(summarizeForTrace("memory", { summary: "Remembered" }), "Remembered");
-	assert.equal(summarizeForTrace("write", { path: "Project/a.md", status: "pending_review" }), "Write planned Project/a.md");
+	assert.equal(summarizeForTrace("write", { path: "Project/a.md", status: "pending_review" }), "Prepared file change for review: Project/a.md");
 	assert.equal(summarizeForTrace("delete", { path: "Project", deletedType: "folder" }), "Delete completed folder Project");
 	assert.equal(summarizeForTrace("edit", { path: "Project/a.md", appliedEdits: 2 }), "Edited Project/a.md (2 replacement(s))");
 	assert.equal(summarizeForTrace("exec", { exitCode: 0 }), "Exec completed (exit code 0)");
 	assert.equal(summarizeForTrace("unknown_tool", {}), "unknown_tool completed");
+});
+
+test("summarizeForTrace uses prepared language for pending file mutations", async () => {
+	const { summarizeForTrace } = await jiti.import(formatterPath);
+
+	const summaries = [
+		summarizeForTrace("write", { path: "Project/new.md", type: "create", status: "pending_review" }),
+		summarizeForTrace("write", { path: "Project/existing.md", type: "update", status: "pending_review" }),
+		summarizeForTrace("edit", { path: "Project/edit.md", appliedEdits: 2, status: "pending_review" }),
+		summarizeForTrace("delete", { path: "Project/delete.md", deletedType: "file", status: "pending_review" }),
+	];
+
+	assert.deepEqual(summaries, [
+		"Prepared file creation for review: Project/new.md",
+		"Prepared file update for review: Project/existing.md",
+		"Prepared file update for review: Project/edit.md",
+		"Prepared file deletion for review: Project/delete.md",
+	]);
+	for (const summary of summaries) {
+		assert.doesNotMatch(summary, /\b(completed|applied|created|modified|deleted)\b/i);
+		assert.doesNotMatch(summary, /已创建|已修改|已删除/);
+	}
 });

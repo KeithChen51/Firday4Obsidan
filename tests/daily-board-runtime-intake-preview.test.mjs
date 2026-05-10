@@ -35,8 +35,40 @@ test("submitAiPrompt renders a local intake preview before mention and planner s
 	assert.ok(plannerIndex > renderIndex, "planner startup must happen after the first preview render");
 	assert.match(source, /private buildLocalIntakePreview\(rawPrompt: string\): string/);
 	assert.match(listBlock, /content: this\.aiLocalIntakePreview/);
+	assert.match(previewBuilderBlock, /FRIDAY 正在响应……/);
+	assert.doesNotMatch(previewBuilderBlock, /FRIDAY 正在理解你的请求/);
 	assert.doesNotMatch(previewBuilderBlock, /aiRuntimeTrajectoryStore|rememberCompletedTrajectorySnapshot|projectReplaySummary/);
 	assert.doesNotMatch(submitBlock, /content: this\.aiLocalIntakePreview/);
+});
+
+test("runtime transport-start progress switches the local status to model understanding copy", () => {
+	const source = readViewSource();
+	const progressBlock = extractMethod(source, "handleRuntimeProgress", "buildRuntimeReply");
+
+	assert.match(progressBlock, /event\.transport\?\.type === "request_started"/);
+	assert.match(progressBlock, /ai\.intake\.preview\.modelStarted/);
+	assert.doesNotMatch(progressBlock, /event\.phase === "model_request"[\s\S]*ai\.intake\.preview\.modelStarted/);
+	assert.match(progressBlock, /ai\.intake\.preview\.retry/);
+	assert.match(progressBlock, /ai\.intake\.preview\.modelExhaustedBeforeIntake/);
+});
+
+test("runtime intake state resets at the start of each runtime invocation", () => {
+	const source = readViewSource();
+	const submitBlock = extractMethod(source, "submitAiPrompt", "compileWikiByButton");
+	const compileBlock = extractMethod(source, "compileWikiByButton", "compileWikiWithStatus");
+	const submitTrajectoryResetIndex = submitBlock.indexOf("this.aiRuntimeTrajectoryStore.reset();");
+	const submitSawResetIndex = submitBlock.indexOf("this.aiRuntimeSawIntake = false;", submitTrajectoryResetIndex);
+	const submitExecuteIndex = submitBlock.indexOf("this.plugin.executionOrchestrator.execute");
+	const compileTrajectoryResetIndex = compileBlock.indexOf("this.aiRuntimeTrajectoryStore.reset();");
+	const compileSawResetIndex = compileBlock.indexOf("this.aiRuntimeSawIntake = false;", compileTrajectoryResetIndex);
+	const compileExecuteIndex = compileBlock.indexOf("this.plugin.executionOrchestrator.execute");
+
+	assert.ok(submitTrajectoryResetIndex >= 0, "submit should reset runtime trajectory state");
+	assert.ok(submitSawResetIndex > submitTrajectoryResetIndex, "submit should reset intake-seen state with runtime state");
+	assert.ok(submitSawResetIndex < submitExecuteIndex, "submit should reset intake-seen state before runtime events can arrive");
+	assert.ok(compileTrajectoryResetIndex >= 0, "compile should reset runtime trajectory state");
+	assert.ok(compileSawResetIndex > compileTrajectoryResetIndex, "compile should reset intake-seen state with runtime state");
+	assert.ok(compileSawResetIndex < compileExecuteIndex, "compile should reset intake-seen state before runtime events can arrive");
 });
 
 test("runtime preflight progress keeps the local intake preview until visible process exists", () => {

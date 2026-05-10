@@ -39,7 +39,7 @@ test("standard review mode records a pending write mutation without changing the
 	assert.equal(result.pendingMutations[0].status, "pending");
 	assert.equal(result.pendingMutations[0].operation, "write");
 	assert.equal(result.pendingMutations[0].targetPath, "Project/workspace/a.md");
-	assert.equal(result.traces[0].summary, "Write planned Project/workspace/a.md");
+	assert.equal(result.traces[0].summary, "Prepared file update for review: Project/workspace/a.md");
 	assert.equal(result.turnEventSummary.mutations.planned, 1);
 	assert.equal(result.turnEventSummary.mutations.applied, 0);
 	assert.deepEqual(result.storedMutations.map((plan) => plan.id), [result.pendingMutations[0].planId]);
@@ -51,6 +51,7 @@ test("standard review mode records a pending write mutation without changing the
 	assert.equal(planned.payload.targetPath, "Project/workspace/a.md");
 	assert.equal(typeof planned.payload.beforeHash, "string");
 	assert.equal(typeof planned.payload.proposedHash, "string");
+	assert.equal(planned.payload.summary, "Prepared file update for review: Project/workspace/a.md");
 	assert.match(result.assistantText, /not applied/i);
 });
 
@@ -285,6 +286,117 @@ test("standard review delete creates one high-risk mutation review without a sep
 	assert.equal(result.pendingMutations[0].operation, "delete");
 	assert.equal(result.turnEventSummary.mutations.planned, 1);
 	assert.ok(!result.turnEvents.some((event) => event.type === "tool_approval_requested"));
+});
+
+test("standard review create write edit and delete summaries stay prepared until review is applied", async () => {
+	const cases = [
+		{
+			name: "create",
+			files: {},
+			tool: {
+				name: "write",
+				args: { path: "Project/workspace/new.md", content: "created", mode: "create" },
+			},
+			expected: "Prepared file creation for review: Project/workspace/new.md",
+		},
+		{
+			name: "write",
+			files: { "Project/workspace/a.md": "original" },
+			tool: {
+				name: "write",
+				args: { path: "Project/workspace/a.md", content: "changed", mode: "update" },
+			},
+			expected: "Prepared file update for review: Project/workspace/a.md",
+		},
+		{
+			name: "edit",
+			files: { "Project/workspace/edit.md": "hello old world" },
+			tool: {
+				name: "edit",
+				args: { path: "Project/workspace/edit.md", edits: [{ search: "old", replace: "new" }] },
+			},
+			expected: "Prepared file update for review: Project/workspace/edit.md",
+		},
+		{
+			name: "delete",
+			files: { "Project/workspace/delete.md": "remove me after review" },
+			tool: {
+				name: "delete",
+				args: { path: "Project/workspace/delete.md" },
+			},
+			expected: "Prepared file deletion for review: Project/workspace/delete.md",
+		},
+	];
+
+	for (const item of cases) {
+		const result = await runAgentRuntimeScenario({
+			name: `reviewable ${item.name} mutation`,
+			files: item.files,
+			settings: {
+				agentRuntime: {
+					toolPermissionMode: "standard",
+					fileMutationMode: "review",
+				},
+			},
+			modelSteps: [
+				{ tool: item.tool },
+				{ assistant: "Prepared the file change for review." },
+			],
+		});
+
+		const planned = result.turnEvents.find((event) => event.type === "mutation_planned");
+		assert.equal(result.approvalRequests.length, 0, `${item.name} should not request separate tool approval`);
+		assert.equal(result.turnEventSummary.approvals.requested, 0, `${item.name} should only use mutation review`);
+		assert.equal(result.turnEventSummary.mutations.applied, 0, `${item.name} should not count pending review as applied`);
+		assert.equal(result.traces[0].summary, item.expected);
+		assert.equal(result.storedMutations[0]?.summary, item.expected);
+		assert.equal(planned?.payload.summary, item.expected);
+		assert.equal(result.task?.waitingForApproval?.summary, item.expected);
+		for (const summary of [
+			result.traces[0].summary,
+			result.storedMutations[0]?.summary ?? "",
+			String(planned?.payload.summary ?? ""),
+			result.task?.waitingForApproval?.summary ?? "",
+		]) {
+			assert.doesNotMatch(summary, /\b(completed|applied|created|modified|deleted)\b/i, `${item.name} summary should not imply completion`);
+			assert.doesNotMatch(summary, /已创建|已修改|已删除/, `${item.name} summary should not use completed Chinese mutation language`);
+		}
+	}
+});
+
+test("high-risk non-file approval progress describes the consequence instead of raw tool names", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "exec approval wording",
+		files: {},
+		agentMode: "debug",
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "standard",
+				fileMutationMode: "review",
+				enableExecTool: true,
+			},
+		},
+		modelSteps: [
+			{
+				tool: {
+					name: "exec",
+					args: { command: "git", args: ["status"] },
+				},
+			},
+			{ assistant: "Checked the local status." },
+		],
+	});
+
+	assert.equal(result.approvalRequests.length, 1);
+	assert.match(result.approvalRequests[0].description, /run a local command/i);
+	assert.doesNotMatch(result.approvalRequests[0].description, /\bexec\b|exec\(/i);
+	const approvalEvents = result.events.filter((event) => event.type === "tool_approval_requested");
+	assert.ok(approvalEvents.length >= 1);
+	for (const event of approvalEvents) {
+		const text = String(event.message ?? event.summary ?? "");
+		assert.match(text, /local command/i);
+		assert.doesNotMatch(text, /\bexec\b|工具权限|tool approval/i);
+	}
 });
 
 test("strict protection rejects ordinary file writes without creating review work", async () => {

@@ -19,6 +19,7 @@ import type { AgentTask } from "../core/tasks/AgentTask";
 import type { AgentTaskStore } from "../core/tasks/AgentTaskStore";
 import type { MutationChangeType, MutationOperation, MutationPlan, MutationRiskLevel } from "../core/mutations/MutationPlan";
 import type { MutationPlanStore } from "../core/mutations/MutationPlanStore";
+import { formatFileMutationEventSummary } from "../core/tools/ToolResultFormatter";
 import type { EditPlanRecord, WorkbenchStateStore } from "../features/workbench/WorkbenchStateStore";
 import type { RuntimeProfile } from "../platform/runtime/RuntimeProfile";
 
@@ -244,7 +245,7 @@ export class ObsidianAgentStateAdapter {
 			id: plan.id,
 			operation: plan.tool,
 			targetPath: firstItem?.path ?? "",
-			summary: firstItem?.summary ?? `${plan.tool} ${firstItem?.path ?? ""}`.trim(),
+			summary: this.formatMutationSummary(plan.tool, firstItem?.path ?? "", firstItem?.changeType, "planned"),
 			status: "pending",
 			source: "tool",
 			taskId: plan.originTaskId,
@@ -258,7 +259,7 @@ export class ObsidianAgentStateAdapter {
 			id: plan.id,
 			operation: plan.operation,
 			targetPath: plan.targetPath,
-			summary: plan.summary,
+			summary: this.formatMutationSummary(plan.operation, plan.targetPath, plan.items[0]?.changeType, plan.status === "pending" ? "planned" : plan.status),
 			status: plan.status,
 			source,
 			taskId: plan.taskId,
@@ -304,9 +305,7 @@ export class ObsidianAgentStateAdapter {
 			? plan.id.trim()
 			: `mutation-plan-${context.turnId}-${index + 1}`;
 		const status = typeof plan.status === "string" && plan.status.trim() ? plan.status.trim() : "pending";
-		const summary = typeof plan.summary === "string" && plan.summary.trim()
-			? this.truncate(plan.summary.trim(), 240)
-			: `${operation || "mutation"} ${targetPath}`.trim();
+		const summary = this.formatMutationSummary(operation, targetPath, plan.changeType, status === "pending" ? "planned" : status);
 		return {
 			...plan,
 			id,
@@ -348,6 +347,20 @@ export class ObsidianAgentStateAdapter {
 		return value === "standard" || value === "high" ? value : undefined;
 	}
 
+	private formatMutationSummary(
+		operation: string | undefined,
+		targetPath: string | undefined,
+		changeType: string | undefined,
+		status: string | undefined,
+	): string {
+		return formatFileMutationEventSummary({
+			operation,
+			targetPath,
+			changeType,
+			status,
+		});
+	}
+
 	private normalizeTargetPath(value: string): string {
 		return value.trim().replace(/\\/g, "/").replace(/^\/+/, "");
 	}
@@ -357,7 +370,7 @@ export class ObsidianAgentStateAdapter {
 		if (pendingCount === 0) {
 			return result;
 		}
-		const notice = `Pending file review: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
+		const notice = `Pending file changes: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
 		if (result.assistantText.includes(notice)) {
 			return result;
 		}

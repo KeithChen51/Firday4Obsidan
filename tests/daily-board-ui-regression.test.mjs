@@ -213,6 +213,62 @@ test("tools page is dedicated to tool and skill management only", async () => {
 	assert.doesNotMatch(block, /friday-ai-chat-panel/);
 });
 
+test("pending approvals occupy the composer body instead of only a transcript card", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
+	assert.ok(renderMatch, "renderAiPage block should exist");
+	const renderBlock = renderMatch[1] ?? "";
+	const composerIndex = renderBlock.indexOf('const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });');
+	const decisionIndex = renderBlock.indexOf("this.renderComposerDecisionPanel(composerEl");
+	const mentionComposerIndex = renderBlock.indexOf("this.composer = new MentionComposer");
+	const toolbarIndex = renderBlock.indexOf('const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });');
+
+	assert.ok(composerIndex >= 0, "composer body should still be created");
+	assert.ok(decisionIndex > composerIndex, "approval decision panel should render inside the composer body");
+	assert.ok(mentionComposerIndex > decisionIndex, "normal composer should be the fallback after the decision branch");
+	assert.ok(toolbarIndex > mentionComposerIndex, "composer chrome should remain after the body branch");
+	assert.doesNotMatch(renderBlock, /this\.renderEditPlanReviewPanel\(chatShellEl\)/);
+});
+
+test("composer approval body keeps model permission skill and context chrome available", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
+	assert.ok(renderMatch, "renderAiPage block should exist");
+	const renderBlock = renderMatch[1] ?? "";
+
+	assert.match(renderBlock, /this\.renderComposerDecisionPanel\(composerEl/);
+	assert.match(renderBlock, /const modelSelect = toolbarEl\.createEl\("select"/);
+	assert.match(renderBlock, /const permissionSelect = toolbarEl\.createEl\("select"/);
+	assert.match(renderBlock, /text: this\.t\("ai\.skill\.button", "\+Skill"\)/);
+	assert.match(renderBlock, /text: "@"/);
+});
+
+test("ordinary approval cards expose only user-level allow or reject decisions", async () => {
+	const source = readViewSource();
+	const cardMatch = source.match(/private renderApprovalCard\(containerEl: HTMLElement, item: PendingApproval\): void \{([\s\S]*?)\n\t\}\n\n\tprivate addApprovalDecisionButton/);
+	assert.ok(cardMatch, "renderApprovalCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+
+	assert.match(cardBlock, /approval\.allowExecute/);
+	assert.match(cardBlock, /approval\.reject/);
+	assert.doesNotMatch(cardBlock, /approval\.allowSession|approval\.allowAlways|approval\.allowOnce/);
+	assert.doesNotMatch(cardBlock, /\$\{item\.request\.tool\}/);
+});
+
+test("mutation review uses pending-language buttons and notices", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+
+	assert.match(itemBlock, /mutation\.review\.applyChanges/);
+	assert.match(itemBlock, /mutation\.review\.doNotApply/);
+	assert.match(itemBlock, /mutation\.review\.applied/);
+	assert.match(itemBlock, /mutation\.review\.rejected/);
+	assert.doesNotMatch(itemBlock, /"Apply"/);
+	assert.doesNotMatch(itemBlock, /"Reject"/);
+});
+
 test("sync actions stay on sync page instead of jumping to tools page", async () => {
 	const source = readViewSource();
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);

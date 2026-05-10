@@ -13,6 +13,7 @@ const jiti = createJiti(import.meta.url);
 
 const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
 const loopPath = path.join(projectRoot, "src/core/agent-kernel/AgentLoopController.ts");
+const runtimeProtocolPath = path.join(projectRoot, "src/core/agent-kernel/RuntimeProtocol.ts");
 const projectorPath = path.join(projectRoot, "src/core/trajectory/AgentTrajectoryProjector.ts");
 const viewModelPath = path.join(projectRoot, "src/views/agentProcessPanelViewModel.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
@@ -48,6 +49,107 @@ function assertEventAfter(events, laterType, earlierType) {
 	assert.ok(later >= 0, `expected ${laterType} event`);
 	assert.ok(later > earlier, `${laterType} should be emitted after ${earlierType}`);
 }
+
+test("RuntimeProtocol normalizes canonical interaction routes and legacy intake routes", async () => {
+	const { parseKernelRuntimeEnvelope } = await jiti.import(runtimeProtocolPath);
+	const cases = [
+		{
+			name: "direct_answer",
+			intake: { interactionRoute: "direct_answer", statement: "Direct answer." },
+			expected: {
+				interactionRoute: "direct_answer",
+				complexity: "simple",
+				route: "answer",
+				requiresPlan: false,
+				shouldShowProcess: false,
+				shouldUseVisiblePlan: false,
+			},
+		},
+		{
+			name: "clarify",
+			intake: { interactionRoute: "clarify", statement: "Which note should I use?" },
+			expected: {
+				interactionRoute: "clarify",
+				complexity: "unclear",
+				route: "clarify",
+				requiresPlan: false,
+				shouldShowProcess: false,
+				shouldUseVisiblePlan: false,
+			},
+		},
+		{
+			name: "light_task",
+			intake: { interactionRoute: "light_task", statement: "I will check this once." },
+			expected: {
+				interactionRoute: "light_task",
+				complexity: "light",
+				route: "answer",
+				requiresPlan: false,
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: false,
+			},
+		},
+		{
+			name: "task_with_process",
+			intake: { interactionRoute: "task_with_process", statement: "I will handle this with a visible process." },
+			expected: {
+				interactionRoute: "task_with_process",
+				complexity: "complex",
+				route: "plan_and_execute",
+				requiresPlan: true,
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: true,
+			},
+		},
+		{
+			name: "legacy_light",
+			intake: {
+				complexity: "light",
+				route: "answer",
+				statement: "Legacy light task.",
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: false,
+			},
+			expected: {
+				interactionRoute: "light_task",
+				complexity: "light",
+				route: "answer",
+				requiresPlan: false,
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: false,
+			},
+		},
+		{
+			name: "legacy_process",
+			intake: {
+				complexity: "complex",
+				route: "plan_and_execute",
+				statement: "Legacy visible process task.",
+			},
+			expected: {
+				interactionRoute: "task_with_process",
+				complexity: "complex",
+				route: "plan_and_execute",
+				requiresPlan: true,
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: true,
+			},
+		},
+	];
+
+	for (const testCase of cases) {
+		const parsed = parseKernelRuntimeEnvelope(runtimeEnvelope({
+			type: "response",
+			assistant: `${testCase.name} response`,
+			intake: testCase.intake,
+		}));
+		assert.ok(parsed?.intake, `expected normalized intake for ${testCase.name}`);
+		assert.equal(parsed.intake.source, "model", testCase.name);
+		for (const [key, value] of Object.entries(testCase.expected)) {
+			assert.equal(parsed.intake[key], value, `${testCase.name} ${key}`);
+		}
+	}
+});
 
 test("AgentKernel executes a native model/tool loop through AgentLoopController", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
@@ -366,6 +468,242 @@ test("AgentLoopController emits prompt model-authored intake and plan only after
 		result.events.find((event) => event.type === "plan_create")?.payload?.state?.tasks?.map((task) => task.title),
 		["Confirm prompt runtime scope", "Add prompt regression coverage"],
 	);
+});
+
+test("AgentLoopController emits canonical model-authored interaction routes and gates visible plans by route", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const cases = [
+		{
+			interactionRoute: "direct_answer",
+			userPrompt: "What is 2+2?",
+			statement: "I can answer directly.",
+			assistant: "4",
+			expectedLegacyRoute: "answer",
+			expectedComplexity: "simple",
+			expectedRequiresPlan: false,
+			expectedShowProcess: false,
+			expectedVisiblePlan: false,
+			plan: undefined,
+			shouldEmitPlan: false,
+		},
+		{
+			interactionRoute: "clarify",
+			userPrompt: "Update the note",
+			statement: "I need to know which note to update.",
+			assistant: "Which note should I update?",
+			expectedLegacyRoute: "clarify",
+			expectedComplexity: "unclear",
+			expectedRequiresPlan: false,
+			expectedShowProcess: false,
+			expectedVisiblePlan: false,
+			plan: undefined,
+			shouldEmitPlan: false,
+		},
+		{
+			interactionRoute: "light_task",
+			userPrompt: "Run npm test once",
+			statement: "I will run one lightweight check.",
+			assistant: "I ran the requested check.",
+			expectedLegacyRoute: "answer",
+			expectedComplexity: "light",
+			expectedRequiresPlan: false,
+			expectedShowProcess: true,
+			expectedVisiblePlan: false,
+			plan: {
+				type: "plan_create",
+				visibility: "visible",
+				tasks: [
+					{ id: "heavy-plan", title: "Do not surface a heavy plan for light work", status: "in_progress" },
+				],
+			},
+			shouldEmitPlan: false,
+		},
+		{
+			interactionRoute: "task_with_process",
+			userPrompt: "Rewrite this sentence to be clearer: send report today",
+			statement: "I will handle this with a visible process.",
+			assistant: "Please send the final report today.",
+			expectedLegacyRoute: "plan_and_execute",
+			expectedComplexity: "complex",
+			expectedRequiresPlan: true,
+			expectedShowProcess: true,
+			expectedVisiblePlan: true,
+			plan: {
+				type: "plan_create",
+				visibility: "visible",
+				tasks: [
+					{ id: "rewrite", title: "Rewrite the sentence", status: "in_progress" },
+					{ id: "verify", title: "Check the final wording", status: "pending" },
+				],
+			},
+			shouldEmitPlan: true,
+		},
+	];
+
+	for (const [index, testCase] of cases.entries()) {
+		const controller = new AgentLoopController({
+			contextEngine: {
+				async buildContext(input) {
+					return {
+						toolCallingMode: "prompt",
+						maxIterations: 1,
+						messages: [
+							{ role: "system", content: "system prompt" },
+							{ role: "user", content: input.userPrompt },
+						],
+					};
+				},
+			},
+			modelDriver: {
+				async requestText() {
+					return runtimeEnvelope({
+						type: "response",
+						assistant: testCase.assistant,
+						intake: {
+							interactionRoute: testCase.interactionRoute,
+							statement: testCase.statement,
+						},
+						...(testCase.plan ? { plan: testCase.plan } : {}),
+					});
+				},
+				async requestWithTools() {
+					throw new Error("canonical interaction route test should not use native tools");
+				},
+			},
+			toolExecution: {
+				async listNativeTools() {
+					return [];
+				},
+				async executeTool() {
+					throw new Error("canonical interaction route test should not execute tools");
+				},
+			},
+		});
+		const kernel = new AgentKernel(controller);
+
+		const result = await kernel.runTurn({
+			turnId: `turn-canonical-route-${index}`,
+			taskId: `task-canonical-route-${index}`,
+			traceId: `trace-canonical-route-${index}`,
+			conversationId: `conversation-canonical-route-${index}`,
+			agentId: "agent-canonical-route",
+			conversation: [],
+			userPrompt: testCase.userPrompt,
+			allowedTools: ["read"],
+			mode: "agent",
+			budget: { tool: { maxIterations: 1 } },
+		});
+
+		assert.equal(result.status, "completed", testCase.interactionRoute);
+		assertEventAfter(result.events, "intake_decision", "model_response");
+		const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
+		assert.equal(intakePayload?.source, "model", testCase.interactionRoute);
+		assert.equal(intakePayload?.interactionRoute, testCase.interactionRoute, testCase.interactionRoute);
+		assert.equal(intakePayload?.route, testCase.expectedLegacyRoute, testCase.interactionRoute);
+		assert.equal(intakePayload?.complexity, testCase.expectedComplexity, testCase.interactionRoute);
+		assert.equal(intakePayload?.requiresPlan, testCase.expectedRequiresPlan, testCase.interactionRoute);
+		assert.equal(intakePayload?.shouldShowProcess, testCase.expectedShowProcess, testCase.interactionRoute);
+		assert.equal(intakePayload?.shouldUseVisiblePlan, testCase.expectedVisiblePlan, testCase.interactionRoute);
+		assert.equal(result.events.some((event) => event.type === "plan_create"), testCase.shouldEmitPlan, testCase.interactionRoute);
+		if (testCase.shouldEmitPlan) {
+			assertEventAfter(result.events, "plan_create", "model_response");
+		}
+	}
+});
+
+test("AgentLoopController emits fallback interaction routes only when model intake is missing or invalid", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const cases = [
+		{
+			name: "missing-direct",
+			envelope: {
+				type: "response",
+				assistant: "Here is the direct answer.",
+			},
+			expectedRoute: "direct_answer",
+			shouldEmitPlan: false,
+		},
+		{
+			name: "invalid-with-visible-plan",
+			envelope: {
+				type: "response",
+				assistant: "I will use the fallback visible process.",
+				intake: {
+					interactionRoute: "heavy_task",
+					statement: "Invalid route should not be trusted.",
+				},
+				plan: {
+					type: "plan_create",
+					visibility: "visible",
+					tasks: [
+						{ id: "fallback-plan", title: "Use the visible fallback plan", status: "in_progress" },
+					],
+				},
+			},
+			expectedRoute: "task_with_process",
+			shouldEmitPlan: true,
+		},
+	];
+
+	for (const testCase of cases) {
+		const controller = new AgentLoopController({
+			contextEngine: {
+				async buildContext(input) {
+					return {
+						toolCallingMode: "prompt",
+						maxIterations: 1,
+						messages: [
+							{ role: "system", content: "system prompt" },
+							{ role: "user", content: input.userPrompt },
+						],
+					};
+				},
+			},
+			modelDriver: {
+				async requestText() {
+					return runtimeEnvelope(testCase.envelope);
+				},
+				async requestWithTools() {
+					throw new Error("fallback intake test should not use native tools");
+				},
+			},
+			toolExecution: {
+				async listNativeTools() {
+					return [];
+				},
+				async executeTool() {
+					throw new Error("fallback intake test should not execute tools");
+				},
+			},
+		});
+		const kernel = new AgentKernel(controller);
+
+		const result = await kernel.runTurn({
+			turnId: `turn-fallback-${testCase.name}`,
+			taskId: `task-fallback-${testCase.name}`,
+			traceId: `trace-fallback-${testCase.name}`,
+			conversationId: `conversation-fallback-${testCase.name}`,
+			agentId: "agent-fallback-intake",
+			conversation: [],
+			userPrompt: "Handle this with the safest available route",
+			mode: "agent",
+			budget: { tool: { maxIterations: 1 } },
+		});
+
+		assert.equal(result.status, "completed", testCase.name);
+		assertEventAfter(result.events, "intake_decision", "model_response");
+		const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
+		assert.equal(intakePayload?.source, "fallback", testCase.name);
+		assert.equal(intakePayload?.interactionRoute, testCase.expectedRoute, testCase.name);
+		assert.notEqual(intakePayload?.statement, "Invalid route should not be trusted.", testCase.name);
+		assert.equal(result.events.some((event) => event.type === "plan_create"), testCase.shouldEmitPlan, testCase.name);
+	}
 });
 
 test("AgentLoopController does not duplicate initial model-authored intake and plan after native fallback to prompt", async () => {
@@ -965,7 +1303,7 @@ test("AgentLoopController does not treat address-the-PR-comments requests as rea
 	assert.equal(tasks.find((task) => task.id === "address")?.status, "in_progress");
 });
 
-test("AgentLoopController skips visible intake and plan for simple rewrite turns", async () => {
+test("AgentLoopController does not suppress a valid model-authored task_with_process for a simple-looking prompt", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
@@ -991,7 +1329,7 @@ test("AgentLoopController skips visible intake and plan for simple rewrite turns
 					intake: {
 						complexity: "complex",
 						route: "plan_and_execute",
-						statement: "I should not be shown for a simple rewrite.",
+						statement: "I understand the model chose a visible process for this rewrite.",
 						requiresPlan: true,
 						shouldShowProcess: true,
 						shouldUseVisiblePlan: true,
@@ -1000,7 +1338,7 @@ test("AgentLoopController skips visible intake and plan for simple rewrite turns
 						type: "plan_create",
 						visibility: "visible",
 						tasks: [
-							{ id: "simple-plan", title: "Do not show this visible plan", status: "in_progress" },
+							{ id: "simple-plan", title: "Apply the model-authored rewrite process", status: "in_progress" },
 						],
 					},
 				});
@@ -1034,8 +1372,10 @@ test("AgentLoopController skips visible intake and plan for simple rewrite turns
 
 	assert.equal(result.status, "completed");
 	assert.equal(result.assistantText, "Please send the final report today.");
-	assert.equal(result.events.some((event) => event.type === "intake_decision"), false);
-	assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false);
+	const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
+	assert.equal(intakePayload?.source, "model");
+	assert.equal(intakePayload?.interactionRoute, "task_with_process");
+	assert.equal(result.events.some((event) => event.type === "plan_create"), true);
 	assert.equal(result.events.some((event) => event.type === "narration"), false);
 });
 
@@ -1107,7 +1447,7 @@ test("AgentLoopController treats one-step run verify review and read requests as
 	}
 });
 
-test("AgentLoopController suppresses model-authored visible plans for one-step light tasks", async () => {
+test("AgentLoopController emits model-authored light_task intake while suppressing heavy visible plans", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
@@ -1137,12 +1477,8 @@ test("AgentLoopController suppresses model-authored visible plans for one-step l
 						type: "response",
 						assistant: "Ran the requested one-step check.",
 						intake: {
-							complexity: "complex",
-							route: "plan_and_execute",
-							statement: "This model-authored intake should be suppressed for light work.",
-							requiresPlan: true,
-							shouldShowProcess: true,
-							shouldUseVisiblePlan: true,
+							interactionRoute: "light_task",
+							statement: "This lightweight model-authored intake should stay visible without a heavy plan.",
 						},
 						plan: {
 							type: "plan_create",
@@ -1183,7 +1519,11 @@ test("AgentLoopController suppresses model-authored visible plans for one-step l
 		});
 
 		assert.equal(result.status, "completed", userPrompt);
-		assert.equal(result.events.some((event) => event.type === "intake_decision"), false, userPrompt);
+		const intakePayload = result.events.find((event) => event.type === "intake_decision")?.payload;
+		assert.equal(intakePayload?.source, "model", userPrompt);
+		assert.equal(intakePayload?.interactionRoute, "light_task", userPrompt);
+		assert.equal(intakePayload?.shouldShowProcess, true, userPrompt);
+		assert.equal(intakePayload?.shouldUseVisiblePlan, false, userPrompt);
 		assert.equal(result.events.some((event) => event.type === "plan_create"), false, userPrompt);
 		assert.equal(result.events.some((event) => event.type.startsWith("plan_")), false, userPrompt);
 	}

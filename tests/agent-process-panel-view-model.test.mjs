@@ -10,9 +10,14 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const jiti = createJiti(import.meta.url);
 const viewModelPath = path.join(projectRoot, "src/views/agentProcessPanelViewModel.ts");
+const projectorPath = path.join(projectRoot, "src/core/trajectory/AgentTrajectoryProjector.ts");
 
 async function loadViewModel() {
 	return jiti.import(viewModelPath);
+}
+
+async function loadProjector() {
+	return jiti.import(projectorPath);
 }
 
 test("buildAgentProcessPanelViewModel hides simple live model-only answers from process surfaces", async () => {
@@ -45,6 +50,217 @@ test("buildAgentProcessPanelViewModel hides simple live model-only answers from 
 	assert.equal(view.evidence.length, 0);
 	assert.equal(view.mutations.length, 0);
 	assert.equal(view.recovery, null);
+});
+
+test("buildAgentProcessPanelViewModel hides completed direct-answer and clarify intake routes", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	for (const interactionRoute of ["direct_answer", "clarify"]) {
+		const view = buildAgentProcessPanelViewModel(makeSnapshot({
+			status: "completed",
+			summary: interactionRoute === "clarify" ? "你想整理哪一篇笔记？" : "2+2 等于 4。",
+			items: [
+				makeItem({
+					id: `intake-${interactionRoute}`,
+					kind: "intake",
+					title: interactionRoute === "clarify" ? "你想整理哪一篇笔记？" : "我会直接回答这个问题。",
+					detail: interactionRoute === "clarify" ? "你想整理哪一篇笔记？" : "我会直接回答这个问题。",
+					status: "ok",
+					rawEventType: "intake_decision",
+					intakeInteractionRoute: interactionRoute,
+					intakeShouldShowProcess: false,
+					intakeShouldUseVisiblePlan: false,
+				}),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Done.", status: "ok" }),
+			],
+		}));
+
+		assert.equal(view.mode, "simple_thinking", interactionRoute);
+		assert.equal(view.surface, "hidden", interactionRoute);
+		assert.equal(view.shouldRenderProcessPanel, false, interactionRoute);
+		assert.equal(view.timeline, null, interactionRoute);
+		assert.deepEqual(view.visibleSteps, [], interactionRoute);
+	}
+});
+
+test("buildAgentProcessPanelViewModel keeps light tasks compact while task_with_process expands", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const lightView = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		time: {
+			startedAt: "2026-05-10T00:00:00.000Z",
+			updatedAt: "2026-05-10T00:00:02.000Z",
+		},
+		items: [
+			makeItem({
+				id: "intake-light",
+				kind: "intake",
+				title: "我会快速检查当前笔记。",
+				detail: "我会快速检查当前笔记。",
+				status: "running",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "light_task",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: false,
+			}),
+		],
+	}), { now: new Date("2026-05-10T00:00:03.000Z") });
+	const processView = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		time: {
+			startedAt: "2026-05-10T00:00:00.000Z",
+			updatedAt: "2026-05-10T00:00:02.000Z",
+		},
+		plan: {
+			planId: "plan-visible",
+			visibility: "visible",
+			status: "running",
+			currentTaskId: "task-1",
+			tasks: [
+				{ id: "task-1", title: "整理上下文", status: "in_progress" },
+				{ id: "task-2", title: "输出结果", status: "pending" },
+			],
+		},
+		items: [
+			makeItem({
+				id: "intake-process",
+				kind: "intake",
+				title: "我会按步骤整理这批内容。",
+				detail: "我会按步骤整理这批内容。",
+				status: "running",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "task_with_process",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: true,
+			}),
+		],
+	}), { now: new Date("2026-05-10T00:00:03.000Z") });
+
+	assert.equal(lightView.surface, "compact_live_process");
+	assert.equal(lightView.timeline?.status, "running");
+	assert.equal(lightView.timeline?.defaultExpanded, false);
+	assert.equal(lightView.composerTaskBar, null);
+	assert.equal(processView.surface, "expanded_live_process");
+	assert.equal(processView.timeline?.defaultExpanded, true);
+	assert.ok(processView.composerTaskBar);
+});
+
+test("buildAgentProcessPanelViewModel keeps completed task_with_process folded after final answer", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		time: {
+			startedAt: "2026-05-10T00:00:00.000Z",
+			completedAt: "2026-05-10T00:00:07.000Z",
+			durationMs: 7000,
+		},
+		plan: {
+			planId: "plan-visible",
+			visibility: "visible",
+			status: "completed",
+			currentTaskId: "task-2",
+			tasks: [
+				{ id: "task-1", title: "整理上下文", status: "completed" },
+				{ id: "task-2", title: "输出结果", status: "completed" },
+			],
+		},
+		items: [
+			makeItem({
+				id: "intake-process",
+				kind: "intake",
+				title: "我会按步骤整理这批内容。",
+				detail: "我会按步骤整理这批内容。",
+				status: "ok",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "task_with_process",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: true,
+			}),
+			makeItem({ id: "tool", kind: "tool", title: "Read Notes/A.md", detail: "Read note.", status: "ok", tool: "read", targetPath: "Notes/A.md" }),
+			makeItem({ id: "final", kind: "final", title: "Final response", detail: "Done.", status: "ok" }),
+		],
+	}));
+
+	assert.equal(view.surface, "collapsed_completed_replay");
+	assert.equal(view.timeline?.status, "completed");
+	assert.equal(view.timeline?.defaultExpanded, false);
+	assert.equal(view.timeline?.canExpand, true);
+});
+
+test("projected intake routes drive process panel surfaces", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const directSnapshot = projectRuntimeProgress([
+		{
+			phase: "intake",
+			message: "我会直接回答。",
+			intake: {
+				interactionRoute: "direct_answer",
+				complexity: "simple",
+				route: "answer",
+				statement: "我会直接回答。",
+				requiresPlan: false,
+				shouldShowProcess: false,
+				shouldUseVisiblePlan: false,
+				source: "model",
+			},
+		},
+		{ phase: "done", message: "Done." },
+	]);
+	const lightSnapshot = projectRuntimeProgress([
+		{
+			phase: "intake",
+			message: "我会快速检查一次。",
+			intake: {
+				interactionRoute: "light_task",
+				complexity: "light",
+				route: "answer",
+				statement: "我会快速检查一次。",
+				requiresPlan: false,
+				shouldShowProcess: true,
+				shouldUseVisiblePlan: false,
+				source: "model",
+			},
+		},
+	]);
+
+	assert.equal(buildAgentProcessPanelViewModel(directSnapshot).shouldRenderProcessPanel, false);
+	assert.equal(buildAgentProcessPanelViewModel(lightSnapshot).timeline?.defaultExpanded, false);
+});
+
+test("projected retry and approval states use human-facing process labels", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const retryView = buildAgentProcessPanelViewModel(projectRuntimeProgress([
+		{
+			phase: "model_retry",
+			message: "Model request retry scheduled after HTTP 504; attempt 1/4; backoff 700ms",
+			step: 1,
+			transport: {
+				type: "retry_scheduled",
+				requestId: "request-1",
+				attempt: 1,
+				maxAttempts: 4,
+			},
+		},
+	]));
+	const approvalView = buildAgentProcessPanelViewModel(projectRuntimeProgress([
+		{
+			phase: "tool_approval",
+			message: "Tool approval required for exec",
+			step: 2,
+			tool: "exec",
+		},
+	]));
+	const rendered = JSON.stringify({ retryView, approvalView });
+
+	assert.match(rendered, /恢复请求|确认后继续|确认操作/);
+	assert.doesNotMatch(rendered, /Model transport|Tool approval|Approval required|HTTP 504|backoff|allow_once|deny/);
 });
 
 test("buildAgentProcessPanelViewModel keeps internal preflight progress out of live process surfaces", async () => {
@@ -174,7 +390,7 @@ test("buildAgentProcessPanelViewModel exposes a running timeline view from the s
 	assert.ok(view.timeline, "task work should expose timeline view");
 	assert.equal(view.timeline.status, "running");
 	assert.equal(view.timeline.title, "正在处理 11s");
-	assert.equal(view.timeline.defaultExpanded, true);
+	assert.equal(view.timeline.defaultExpanded, false);
 	assert.equal(view.timeline.canExpand, true);
 	assert.deepEqual(view.timeline.items.map((item) => item.kind), ["receipt", "context"]);
 	assert.deepEqual(view.timeline.items.map((item) => item.title), ["收到任务", "读取项目现状"]);
@@ -505,12 +721,11 @@ test("buildAgentProcessPanelViewModel prioritizes waiting approval state and act
 	assert.equal(view.surface, "action_required");
 	assert.equal(view.status.key, "waiting_for_approval");
 	assert.equal(view.status.tone, "waiting");
-	assert.equal(view.visibleSteps.at(-1)?.title, "等待确认文件修改");
+	assert.equal(view.visibleSteps.at(-1)?.title, "等待确认");
 	assert.equal(view.visibleSteps.at(-1)?.status, "waiting_for_approval");
 	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.label), [
-		"查看改动",
-		"Approve",
-		"Reject",
+		"允许执行",
+		"拒绝",
 	]);
 	assert.equal(view.actions[0]?.reason, "Use the approval controls.");
 });
@@ -749,6 +964,22 @@ test("buildAgentProcessPanelViewModel exposes completed replay summary and evide
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), ["创建/修改文件"]);
 });
 
+test("buildAgentProcessPanelViewModel labels synthetic mutation steps with product copy", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		items: [],
+		mutations: [
+			{ id: "m1", event: "applied", operation: "edit", targetPath: "Notes/A.md", status: "applied", summary: "Updated note.", reason: "" },
+		],
+	}));
+
+	const actionLabels = view.visibleSteps.flatMap((step) => step.actions.map((action) => action.label));
+	assert.ok(actionLabels.some((label) => /文件修改/.test(label)));
+	assert.doesNotMatch(actionLabels.join("\n"), /\b(edit|write|delete|create|modify|update) Notes\//i);
+});
+
 test("buildAgentProcessPanelViewModel exposes result artifacts and excludes pending or read-only files", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -864,7 +1095,7 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assert.equal("stepGroups" in view, false);
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), [
 		"读取上下文",
-		"等待确认文件修改",
+		"等待确认",
 	]);
 	assert.equal(view.visibleSteps[0]?.status, "completed");
 	assert.equal(view.visibleSteps[1]?.status, "waiting_for_approval");
@@ -1060,15 +1291,15 @@ test("buildAgentProcessPanelViewModel creates file write steps before approval s
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), [
 		"读取上下文",
 		"创建/修改文件",
-		"等待确认文件修改",
+		"等待确认",
 	]);
 	assert.equal(view.visibleSteps[1]?.summary, "Wrote draft content.");
-	assert.equal(view.visibleSteps[2]?.summary, "1 个文件改动待审核");
-	assert.deepEqual(view.visibleSteps[2]?.actions.map((action) => action.label), ["查看改动", "应用", "拒绝"]);
+	assert.equal(view.visibleSteps[2]?.summary, "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。");
+	assert.deepEqual(view.visibleSteps[2]?.actions.map((action) => action.label), ["查看改动", "应用修改", "不应用"]);
 	assert.ok(view.timeline);
 	assert.equal(view.timeline.status, "waiting");
 	assert.equal(view.timeline.title, "等待确认");
-	assert.match(view.timeline.collapsedSummary ?? "", /需要你确认/);
+	assert.match(view.timeline.collapsedSummary ?? "", /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
 	assert.deepEqual(view.timeline.actions.map((action) => action.id), ["view_changes", "apply", "reject"]);
 	assert.equal(view.timeline.items.at(-1)?.kind, "approval");
 	assert.equal(view.timeline.items.at(-1)?.status, "waiting");

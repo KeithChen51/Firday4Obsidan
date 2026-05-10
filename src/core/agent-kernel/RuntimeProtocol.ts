@@ -9,6 +9,11 @@ import type {
 	RuntimePlanInstruction,
 	RuntimePlanTaskInstruction,
 } from "./PlanState";
+import {
+	getIntakeRouteDefaults,
+	inferInteractionRouteFromLegacy,
+	isIntakeInteractionRoute,
+} from "./PlanState";
 import type { RuntimeMutationPlan } from "./contracts";
 
 export interface RuntimeToolCallEnvelope {
@@ -85,10 +90,22 @@ function normalizeRuntimeIntakeDecision(value: unknown): IntakeDecision | undefi
 		return undefined;
 	}
 	const complexity = normalizeIntakeComplexity(value.complexity);
-	if (!complexity) {
+	const route = normalizeIntakeRoute(value.route);
+	const interactionRoute = isIntakeInteractionRoute(value.interactionRoute)
+		? value.interactionRoute
+		: complexity || route
+			? inferInteractionRouteFromLegacy({
+				...(complexity ? { complexity } : {}),
+				...(route ? { route } : {}),
+				requiresPlan: typeof value.requiresPlan === "boolean" ? value.requiresPlan : undefined,
+				shouldShowProcess: typeof value.shouldShowProcess === "boolean" ? value.shouldShowProcess : undefined,
+				shouldUseVisiblePlan: typeof value.shouldUseVisiblePlan === "boolean" ? value.shouldUseVisiblePlan : undefined,
+			})
+			: undefined;
+	if (!interactionRoute) {
 		return undefined;
 	}
-	const route = normalizeIntakeRoute(value.route) ?? (complexity === "complex" ? "plan_and_execute" : complexity === "unclear" ? "clarify" : "answer");
+	const defaults = getIntakeRouteDefaults(interactionRoute);
 	const statement = typeof value.statement === "string" && value.statement.trim()
 		? value.statement.trim()
 		: typeof value.understanding === "string" && value.understanding.trim()
@@ -97,16 +114,16 @@ function normalizeRuntimeIntakeDecision(value: unknown): IntakeDecision | undefi
 	if (!statement) {
 		return undefined;
 	}
-	const shouldUseVisiblePlan = typeof value.shouldUseVisiblePlan === "boolean"
-		? value.shouldUseVisiblePlan
-		: complexity === "complex";
 	return {
-		complexity,
-		route,
+		complexity: defaults.complexity,
+		route: defaults.route,
+		interactionRoute,
 		statement,
-		requiresPlan: typeof value.requiresPlan === "boolean" ? value.requiresPlan : route === "plan_and_execute",
-		shouldShowProcess: typeof value.shouldShowProcess === "boolean" ? value.shouldShowProcess : complexity === "complex",
-		shouldUseVisiblePlan,
+		requiresPlan: defaults.requiresPlan,
+		shouldShowProcess: interactionRoute === "light_task" && typeof value.shouldShowProcess === "boolean"
+			? value.shouldShowProcess
+			: defaults.shouldShowProcess,
+		shouldUseVisiblePlan: defaults.shouldUseVisiblePlan,
 		source: "model",
 	};
 }

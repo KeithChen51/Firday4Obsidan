@@ -42,10 +42,13 @@ import {
 	completePlanTask,
 	completePlanState,
 	createPlanState,
+	getIntakeRouteDefaults,
+	inferInteractionRouteFromLegacy,
 	revisePlanState,
 	skipPlanState,
 	type IntakeDecision,
 	type IntakeComplexity,
+	type IntakeInteractionRoute,
 	type PlanRevisionChange,
 	type PlanState,
 	type RuntimePlanCreateInstruction,
@@ -819,6 +822,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const payload: Record<string, unknown> = {
 			complexity: intake.complexity,
 			route: intake.route,
+			interactionRoute: intake.interactionRoute,
 			statement: intake.statement,
 			requiresPlan: intake.requiresPlan,
 			shouldShowProcess: intake.shouldShowProcess,
@@ -1173,15 +1177,23 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		envelope: RuntimeEnvelope,
 		activePlan?: ActivePlanState,
 	): void {
-		if (!activePlan || this.shouldSuppressModelAuthoredProcess(input, envelope)) {
+		if (!activePlan || input.metadata?.suppressVisibleNarration === true) {
 			return;
 		}
+		const intake = envelope.intake ?? (!activePlan.intakeEmitted ? this.buildFallbackIntakeDecision(input, envelope) : undefined);
 		if (envelope.intake && !activePlan.intakeEmitted) {
 			this.emitIntakeDecision(input, context, {
-				...envelope.intake,
-				source: "model",
+				...intake!,
+				source: envelope.intake.source,
 			});
 			activePlan.intakeEmitted = true;
+		}
+		if (!envelope.intake && intake && !activePlan.intakeEmitted) {
+			this.emitIntakeDecision(input, context, intake);
+			activePlan.intakeEmitted = true;
+		}
+		if (this.shouldSuppressModelAuthoredProcess(input, envelope, intake)) {
+			return;
 		}
 		this.applyRuntimePlanInstruction(input, context, envelope.plan, activePlan);
 	}
@@ -1368,14 +1380,16 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return intake.shouldShowProcess && intake.shouldUseVisiblePlan;
 	}
 
-	private shouldSuppressModelAuthoredProcess(input: AgentTurnInput, envelope?: RuntimeEnvelope): boolean {
+	private shouldSuppressModelAuthoredProcess(
+		input: AgentTurnInput,
+		envelope?: RuntimeEnvelope,
+		intake?: IntakeDecision,
+	): boolean {
 		if (input.metadata?.suppressVisibleNarration === true) {
 			return true;
 		}
-		if (!this.shouldEmitVisibleNarration(input, this.buildIntakeDecision(input))) {
-			return true;
-		}
-		if (envelope?.intake && !this.shouldEmitVisibleNarration(input, envelope.intake)) {
+		const effectiveIntake = intake ?? envelope?.intake;
+		if (effectiveIntake && !this.shouldEmitVisibleNarration(input, effectiveIntake)) {
 			return true;
 		}
 		return envelope?.plan?.type === "plan_create" && (
@@ -1400,20 +1414,50 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 	private buildIntakeDecision(input: AgentTurnInput): IntakeDecision {
 		const complexity = this.classifyIntakeComplexity(input);
-		const route = complexity === "unclear"
-			? "clarify"
-			: complexity === "complex"
-				? "plan_and_execute"
-				: "answer";
+		const interactionRoute = inferInteractionRouteFromLegacy({ complexity });
+		const defaults = getIntakeRouteDefaults(interactionRoute);
 		return {
-			complexity,
-			route,
+			complexity: defaults.complexity,
+			route: defaults.route,
+			interactionRoute,
 			statement: this.buildTaskUnderstanding(input.userPrompt),
-			requiresPlan: complexity === "complex",
-			shouldShowProcess: complexity === "complex",
-			shouldUseVisiblePlan: complexity === "complex",
+			requiresPlan: defaults.requiresPlan,
+			shouldShowProcess: defaults.shouldShowProcess,
+			shouldUseVisiblePlan: defaults.shouldUseVisiblePlan,
 			source: "runtime",
 		};
+	}
+
+	private buildFallbackIntakeDecision(input: AgentTurnInput, envelope: RuntimeEnvelope): IntakeDecision {
+		const interactionRoute = this.resolveFallbackInteractionRoute(envelope);
+		const defaults = getIntakeRouteDefaults(interactionRoute);
+		return {
+			...defaults,
+			interactionRoute,
+			statement: this.buildTaskUnderstanding(input.userPrompt),
+			source: "fallback",
+		};
+	}
+
+	private resolveFallbackInteractionRoute(envelope: RuntimeEnvelope): IntakeInteractionRoute {
+		if (this.hasVisiblePlanCreate(envelope)) {
+			return "task_with_process";
+		}
+		if (envelope.type === "tool_call" || envelope.tool || hasMutationPlans(envelope)) {
+			return "light_task";
+		}
+		if (typeof envelope.assistant === "string" && envelope.assistant.trim()) {
+			return "direct_answer";
+		}
+		return "clarify";
+	}
+
+	private hasVisiblePlanCreate(envelope: RuntimeEnvelope): boolean {
+		return envelope.plan?.type === "plan_create" && (
+			envelope.plan.visibility === "visible" ||
+			envelope.plan.visibility === "task_bar" ||
+			envelope.plan.visibility === undefined
+		);
 	}
 
 	private classifyIntakeComplexity(input: AgentTurnInput): IntakeComplexity {

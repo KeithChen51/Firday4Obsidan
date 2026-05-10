@@ -265,6 +265,7 @@ test("TurnReplayReader restores intake decisions and plan state timeline", async
 	assert.deepEqual(summary.intakeTimeline.map((item) => item.statement), [
 		"我理解你希望优化 FRIDAY 的过程展示。",
 	]);
+	assert.equal(summary.intakeTimeline[0]?.interactionRoute, "task_with_process");
 	assert.equal(summary.intakeTimeline[0]?.requiresPlan, true);
 	assert.deepEqual(summary.planTimeline.map((item) => item.type), ["plan_create", "plan_complete"]);
 	assert.equal(summary.planTimeline.at(-1)?.state.status, "completed");

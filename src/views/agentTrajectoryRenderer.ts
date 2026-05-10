@@ -222,7 +222,7 @@ function renderTimelineProcess(
 	const { variant, expanded, onToggle, onAction, renderAssistantAvatar, renderIcon } = options;
 	const canToggle = timeline.canExpand;
 	const shellEl = containerEl.createDiv({
-		cls: `friday-agent-process friday-agent-process-shell is-${timeline.status} is-${variant}`,
+		cls: `friday-agent-process friday-agent-process-shell is-${timeline.status} is-${variant} is-${expanded ? "expanded" : "collapsed"}`,
 		attr: {
 			"data-status": timeline.status,
 			"data-expanded": expanded ? "true" : "false",

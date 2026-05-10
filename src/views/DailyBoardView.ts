@@ -154,6 +154,7 @@ export class DailyBoardView extends ItemView {
 	private aiBackgroundTurnTarget: AiTurnTarget | null = null;
 	private aiBackgroundTurnFailure: AiTurnFailureStatus | null = null;
 	private aiLocalIntakePreview = "";
+	private aiRuntimeSawIntake = false;
 	private aiStreamingPreview = "";
 	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
@@ -584,21 +585,29 @@ export class DailyBoardView extends ItemView {
 		const card = containerEl.createDiv({ cls: "friday-approval-card" });
 		card.createDiv({
 			cls: "friday-approval-header",
-			text: this.t("approval.title", "Tool approval required"),
+			text: this.t("approval.title", "需要你确认"),
 		});
 		card.createDiv({
 			cls: "friday-approval-detail",
-			text: `${item.request.tool} · ${item.request.targetPath || this.t("approval.noTarget", "(no target)")}`,
-		});
-		card.createDiv({
-			cls: "friday-approval-detail",
-			text: item.request.description,
+			text: this.describeApprovalRequest(item),
 		});
 		const actions = card.createDiv({ cls: "friday-approval-actions" });
-		this.addApprovalDecisionButton(actions, this.t("approval.allowOnce", "Allow once"), item.id, "allow_once", "is-allow");
-		this.addApprovalDecisionButton(actions, this.t("approval.allowSession", "Allow session"), item.id, "allow_session", "is-session");
-		this.addApprovalDecisionButton(actions, this.t("approval.allowAlways", "Allow always"), item.id, "allow_always", "is-always");
-		this.addApprovalDecisionButton(actions, this.t("approval.deny", "Deny"), item.id, "deny", "is-deny");
+		this.addApprovalDecisionButton(actions, this.t("approval.allowExecute", "允许执行"), item.id, "allow_once", "is-allow");
+		this.addApprovalDecisionButton(actions, this.t("approval.reject", "拒绝"), item.id, "deny", "is-deny");
+	}
+
+	private describeApprovalRequest(item: PendingApproval): string {
+		const tool = item.request.tool.trim().toLowerCase();
+		if (tool === "exec") {
+			return this.t("approval.description.exec", "FRIDAY 需要运行一个本地命令来检查结果。");
+		}
+		if (item.request.scope === "external") {
+			return this.t("approval.description.external", "FRIDAY 需要访问当前 Obsidian 范围之外的位置。");
+		}
+		if (tool === "compile_wiki") {
+			return this.t("approval.description.compile", "FRIDAY 需要执行一次会更新资料的整理操作。");
+		}
+		return this.t("approval.description.generic", "FRIDAY 需要执行一个高风险操作，确认后才会继续。");
 	}
 
 	private addApprovalDecisionButton(
@@ -1433,31 +1442,37 @@ export class DailyBoardView extends ItemView {
 		this.syncAiQueueHint();
 
 		this.renderAiOverrideBar(chatShellEl);
-		this.renderEditPlanReviewPanel(chatShellEl);
 
 		const composerWrap = chatShellEl.createDiv({ cls: "friday-ai-composer-wrap" });
 		const taskBarHostEl = composerWrap.createDiv({ cls: "friday-ai-composer-task-bar-host" });
 		this.aiComposerTaskBarHostEl = taskBarHostEl;
 		const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });
 		this.syncComposerTaskBar();
-		this.composer = new MentionComposer({
-			parent: composerEl,
-			placeholder: this.t(
-				"ai.input.placeholder.rich",
-				"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
-			),
-			initialSnapshot: this.getComposerSnapshot(),
-			disabled: false,
-			onChange: (snapshot) => {
-				this.aiComposerSnapshot = snapshot;
-				this.aiDraft = snapshot.text;
-				this.syncAiSendButtonState();
-			},
-			onSubmit: () => {
-				void this.submitAiPrompt();
-			},
-			getSuggestions: async (query) => this.buildComposerSuggestions(query),
-		});
+		const pendingApprovals = this.approvalQueue.list();
+		const pendingEditPlans = this.getPendingEditPlans();
+		if (pendingApprovals.length > 0 || pendingEditPlans.length > 0) {
+			this.composer = null;
+			this.renderComposerDecisionPanel(composerEl, pendingApprovals, pendingEditPlans);
+		} else {
+			this.composer = new MentionComposer({
+				parent: composerEl,
+				placeholder: this.t(
+					"ai.input.placeholder.rich",
+					"输入消息，支持 @ 文件引用与 / 命令。Enter 发送，Shift+Enter 换行",
+				),
+				initialSnapshot: this.getComposerSnapshot(),
+				disabled: false,
+				onChange: (snapshot) => {
+					this.aiComposerSnapshot = snapshot;
+					this.aiDraft = snapshot.text;
+					this.syncAiSendButtonState();
+				},
+				onSubmit: () => {
+					void this.submitAiPrompt();
+				},
+				getSuggestions: async (query) => this.buildComposerSuggestions(query),
+			});
+		}
 
 		const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });
 		const modelOptions = this.buildModelOptions(activeSoulDefinition);
@@ -1629,20 +1644,60 @@ export class DailyBoardView extends ItemView {
 			snapshot.plan?.status === "completed";
 	}
 
-	private renderEditPlanReviewPanel(containerEl: HTMLElement): void {
-		const plans = this.plugin.workbenchStateStore
+	private getPendingEditPlans(): EditPlanRecord[] {
+		return this.plugin.workbenchStateStore
 			.getEditPlans()
 			.filter((plan) => plan.items.some((item) => item.status === "pending" || item.status === "conflicted"));
+	}
+
+	private hasPendingComposerDecision(): boolean {
+		return this.approvalQueue.list().length > 0 || this.getPendingEditPlans().length > 0;
+	}
+
+	private renderComposerDecisionPanel(
+		containerEl: HTMLElement,
+		pendingApprovals: PendingApproval[],
+		pendingEditPlans: EditPlanRecord[],
+	): void {
+		const panel = containerEl.createDiv({ cls: "friday-composer-decision-panel" });
+		panel.createDiv({
+			cls: "friday-composer-decision-title",
+			text: this.t("approval.composerTitle", "需要你确认后继续"),
+		});
+		if (pendingEditPlans.length > 0) {
+			panel.createDiv({
+				cls: "friday-approval-detail",
+				text: this.t("mutation.review.pendingComposer", "已准备好 {count} 个待应用的文件修改，确认后才会写入 Obsidian。", {
+					count: pendingEditPlans.reduce((total, plan) => total + plan.items.filter((item) => item.status === "pending").length, 0),
+				}),
+			});
+			for (const plan of pendingEditPlans) {
+				this.renderEditPlanReviewItem(panel, plan);
+			}
+		}
+		if (pendingApprovals.length > 0) {
+			panel.createDiv({
+				cls: "friday-approval-detail",
+				text: this.t("approval.composerDesc", "FRIDAY 暂停在一个需要你决定的动作上。"),
+			});
+			for (const item of pendingApprovals) {
+				this.renderApprovalCard(panel, item);
+			}
+		}
+	}
+
+	private renderEditPlanReviewPanel(containerEl: HTMLElement): void {
+		const plans = this.getPendingEditPlans();
 		if (plans.length === 0) {
 			return;
 		}
 
 		const panel = containerEl.createDiv({ cls: "friday-mutation-review-panel" });
 		const header = panel.createDiv({ cls: "friday-control-center-header" });
-		header.createEl("h5", { text: this.t("mutation.review.title", "Review file changes") });
+		header.createEl("h5", { text: this.t("mutation.review.title", "确认文件修改") });
 		header.createSpan({
 			cls: "friday-control-center-hint",
-			text: this.t("mutation.review.count", "{count} pending", { count: plans.length }),
+			text: this.t("mutation.review.count", "{count} 个待应用", { count: plans.length }),
 		});
 
 		for (const plan of plans) {
@@ -1655,7 +1710,7 @@ export class DailyBoardView extends ItemView {
 		const itemEl = containerEl.createDiv({ cls: "friday-approval-card friday-mutation-review-item" });
 		itemEl.createDiv({
 			cls: "friday-approval-header",
-			text: firstItem?.summary ?? `${plan.tool} ${firstItem?.changeType ?? ""}`.trim(),
+			text: this.formatEditPlanReviewTitle(plan),
 		});
 		itemEl.createDiv({
 			cls: "friday-approval-detail",
@@ -1670,18 +1725,29 @@ export class DailyBoardView extends ItemView {
 		}
 		const actions = itemEl.createDiv({ cls: "friday-approval-actions" });
 		const canApply = plan.items.some((item) => item.status === "pending");
-		this.addMutationReviewButton(actions, this.t("mutation.review.apply", "Apply"), !canApply || this.aiBusy, async () => {
+		this.addMutationReviewButton(actions, this.t("mutation.review.applyChanges", "应用修改"), !canApply || this.aiBusy, async () => {
 			await this.plugin.agentRuntimeService.acceptEditPlan(plan.id);
-			new Notice(this.t("mutation.review.applied", "Change applied."), 3000);
+			new Notice(this.t("mutation.review.applied", "已应用修改。"), 3000);
 			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
 		});
-		this.addMutationReviewButton(actions, this.t("mutation.review.reject", "Reject"), this.aiBusy, async () => {
+		this.addMutationReviewButton(actions, this.t("mutation.review.doNotApply", "不应用"), this.aiBusy, async () => {
 			await this.plugin.agentRuntimeService.rejectEditPlan(plan.id);
-			new Notice(this.t("mutation.review.rejected", "Change rejected."), 3000);
+			new Notice(this.t("mutation.review.rejected", "已取消，未写入任何文件。"), 3000);
 			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
 		});
+	}
+
+	private formatEditPlanReviewTitle(plan: EditPlanRecord): string {
+		const pendingCount = plan.items.filter((item) => item.status === "pending").length;
+		if (pendingCount > 0) {
+			return this.t("mutation.review.itemTitle", "准备应用 {count} 个文件修改", { count: pendingCount });
+		}
+		if (plan.items.some((item) => item.status === "conflicted")) {
+			return this.t("mutation.review.itemConflictedTitle", "文件修改需要重新确认");
+		}
+		return this.t("mutation.review.itemEmptyTitle", "文件修改");
 	}
 
 	private renderEditPlanDiffPreview(containerEl: HTMLElement, before: string, after: string): void {
@@ -1740,9 +1806,8 @@ export class DailyBoardView extends ItemView {
 		if (plan.items.some((item) => item.status === "conflicted")) {
 			return this.t("mutation.review.conflicted", "Conflict: file changed after the plan was created.");
 		}
-		return this.t("mutation.review.summary", "{operation} · {status}", {
-			operation: firstItem.changeType,
-			status: firstItem.status,
+		return this.t("mutation.review.summary", "{count} 个修改待确认，确认后才会写入 Obsidian。", {
+			count: plan.items.filter((item) => item.status === "pending").length || plan.items.length,
 		});
 	}
 
@@ -2485,6 +2550,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiRuntimeSawIntake = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiAgentTasks = [];
 		this.aiProcessSnapshotsByKey.clear();
@@ -2537,6 +2603,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiRuntimeSawIntake = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
@@ -3306,7 +3373,7 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 		this.aiSendButtonEl.textContent = this.getSendButtonLabel();
-		this.aiSendButtonEl.disabled = this.isComposerDraftEmpty();
+		this.aiSendButtonEl.disabled = this.hasPendingComposerDecision() || this.isComposerDraftEmpty();
 	}
 
 	private handleSendButtonClick(event: MouseEvent): void {
@@ -3622,20 +3689,12 @@ export class DailyBoardView extends ItemView {
 		});
 		contentEl.createDiv({
 			cls: "friday-ai-approval-summary",
-			text: this.t("approval.chatSummary", "FRIDAY 想要执行 {tool}：{target}", {
-				tool: item.request.tool,
-				target: item.request.targetPath || this.t("approval.noTarget", "(no target)"),
-			}),
+			text: this.t("approval.chatSummary", "FRIDAY 正在等待你在输入区确认是否继续。"),
 		});
 		contentEl.createDiv({
 			cls: "friday-ai-approval-detail-text",
-			text: item.request.description,
+			text: this.describeApprovalRequest(item),
 		});
-		const actions = contentEl.createDiv({ cls: "friday-approval-actions friday-ai-approval-actions" });
-		this.addApprovalDecisionButton(actions, this.t("approval.allowOnce", "Allow once"), item.id, "allow_once", "is-allow");
-		this.addApprovalDecisionButton(actions, this.t("approval.allowSession", "Allow session"), item.id, "allow_session", "is-session");
-		this.addApprovalDecisionButton(actions, this.t("approval.allowAlways", "Allow always"), item.id, "allow_always", "is-always");
-		this.addApprovalDecisionButton(actions, this.t("approval.deny", "Deny"), item.id, "deny", "is-deny");
 	}
 
 	private renderRuntimeExecutionPreview(containerEl: HTMLElement): void {
@@ -3875,6 +3934,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiRuntimeSawIntake = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
@@ -4035,6 +4095,7 @@ export class DailyBoardView extends ItemView {
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiRuntimeSawIntake = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiForceScrollToBottomOnce = true;
 		this.renderBoard();
@@ -4178,7 +4239,7 @@ export class DailyBoardView extends ItemView {
 		if (!prompt) {
 			return "";
 		}
-		return this.t("ai.intake.preview.local", "FRIDAY 正在理解你的请求");
+		return this.t("ai.intake.preview.local", "FRIDAY 正在响应……");
 	}
 
 	private async streamAssistantText(text: string): Promise<void> {
@@ -4241,6 +4302,7 @@ export class DailyBoardView extends ItemView {
 			render: () => this.syncAiRuntimeShell(),
 		});
 		this.aiStreamingTrajectorySnapshot = null;
+		this.updateLocalIntakePreviewForRuntimeProgress(event);
 		const nextSnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
 		const nextView = buildAgentProcessPanelViewModel(nextSnapshot);
 		if (nextView.shouldRenderProcessPanel) {
@@ -4264,6 +4326,29 @@ export class DailyBoardView extends ItemView {
 			this.aiRuntimeLastRenderAt = now;
 			this.aiForceScrollToBottomOnce = true;
 			this.syncAiRuntimeShell();
+		}
+	}
+
+	private updateLocalIntakePreviewForRuntimeProgress(event: RuntimeProgressEvent): void {
+		if (event.phase === "intake") {
+			this.aiRuntimeSawIntake = true;
+			return;
+		}
+		if (event.phase !== "model_retry") {
+			return;
+		}
+		if (event.transport?.type === "request_started") {
+			this.aiLocalIntakePreview = this.t("ai.intake.preview.modelStarted", "FRIDAY 正在理解你的请求……");
+			return;
+		}
+		if (event.transport?.type === "request_exhausted" && !this.aiRuntimeSawIntake) {
+			const message = this.t("ai.intake.preview.modelExhaustedBeforeIntake", "暂时没能连接到模型。你的消息已保留，但 FRIDAY 还没有开始处理。");
+			this.aiLocalIntakePreview = message;
+			this.aiLastError = message;
+			return;
+		}
+		if (event.transport?.type === "retry_scheduled" || event.transport?.type === "retry_started") {
+			this.aiLocalIntakePreview = this.t("ai.intake.preview.retry", "模型连接不稳定，FRIDAY 正在重试。");
 		}
 	}
 
@@ -4431,6 +4516,9 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private getSendButtonLabel(): string {
+		if (this.hasPendingComposerDecision()) {
+			return this.t("ai.waitingDecision", "等待确认");
+		}
 		if (!this.aiBusy) {
 			return this.plugin.t("ai.send");
 		}

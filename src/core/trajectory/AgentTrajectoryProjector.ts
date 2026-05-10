@@ -13,7 +13,13 @@ import type {
 	AgentTrajectoryStage,
 	AgentTrajectoryStatus,
 } from "./AgentTrajectory";
-import type { IntakeDecision, PlanState, RuntimePlanProgress } from "../agent-kernel/PlanState";
+import {
+	inferInteractionRouteFromLegacy,
+	type IntakeDecision,
+	type IntakeInteractionRoute,
+	type PlanState,
+	type RuntimePlanProgress,
+} from "../agent-kernel/PlanState";
 
 type RuntimeProgressIdentity = Partial<AgentTrajectoryIdentity>;
 type RuntimeProgressWithIdentity = RuntimeProgressEvent & RuntimeProgressIdentity & {
@@ -30,6 +36,11 @@ type ProjectableNarration =
 	| TurnReplaySummary["narrationTimeline"][number];
 type ProjectableIntake = IntakeDecision & { at?: string };
 type ProjectablePlan = RuntimePlanProgress & { at?: string };
+type AgentTrajectoryIntakeItem = AgentTrajectoryItem & {
+	intakeInteractionRoute?: IntakeInteractionRoute;
+	intakeShouldShowProcess?: boolean;
+	intakeShouldUseVisiblePlan?: boolean;
+};
 
 const STAGE_LABELS: Record<AgentTrajectoryStage["key"], string> = {
 	context: "Context",
@@ -170,7 +181,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		upsertItem(snapshot, "reasoning", {
 			id: `replay:transport:${transport.step}:${index}:${transport.type}`,
 			kind: "transport",
-			title: "Model transport",
+			title: formatTransportTitle(transport.type),
 			detail: formatReplayTransportDetail(transport),
 			status: mapReplayTransportStatus(transport.type, snapshot.status),
 			step: transport.step,
@@ -198,10 +209,10 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		upsertItem(snapshot, "review", {
 			id: "replay:approval:summary",
 			kind: "approval",
-			title: "Tool approval",
+			title: "等待确认操作",
 			detail: waiting
-				? `${replaySummary.approvals.requested - replaySummary.approvals.resolved} approval request(s) waiting.`
-				: `${replaySummary.approvals.resolved} approval request(s) resolved.`,
+				? `${replaySummary.approvals.requested - replaySummary.approvals.resolved} 个操作等待你确认。`
+				: `${replaySummary.approvals.resolved} 个操作已处理。`,
 			status: waiting ? "waiting" : replaySummary.approvals.denied > 0 ? "denied" : "ok",
 			at: replaySummary.completedAt ?? replaySummary.updatedAt,
 			rawEventType: "tool_approval",
@@ -410,7 +421,7 @@ function applyRuntimeProgress(
 			upsertItem(snapshot, "reasoning", {
 				id: `live:transport:${transport?.requestId ?? "unknown"}:${step}`,
 				kind: "transport",
-				title: "Model transport",
+				title: formatTransportTitle(transport?.type),
 				detail: snapshot.summary,
 				status: itemStatus,
 				step,
@@ -454,14 +465,14 @@ function applyRuntimeProgress(
 		}
 		case "tool_approval":
 			snapshot.status = "waiting_for_approval";
-			snapshot.headline = "Waiting for approval";
-			snapshot.summary = safeText(event.message);
+			snapshot.headline = "等待确认";
+			snapshot.summary = formatApprovalDetail(event);
 			setStageStatus(snapshot, "review", "waiting");
 			upsertItem(snapshot, "review", {
 				id: `live:approval:${step}:${event.tool ?? "tool"}:${event.targetPath ?? ""}`,
 				kind: "approval",
-				title: "Approval required",
-				detail: safeText(event.message),
+				title: "需要确认操作",
+				detail: snapshot.summary,
 				status: "waiting",
 				step,
 				tool: event.tool,
@@ -578,10 +589,11 @@ function projectIntake(
 	if (!statement) {
 		return;
 	}
+	const interactionRoute = intake.interactionRoute ?? inferInteractionRouteFromLegacy(intake);
 	snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
 	snapshot.headline = statement;
 	snapshot.summary = statement;
-	upsertItem(snapshot, "context", {
+	const item: AgentTrajectoryIntakeItem = {
 		id,
 		kind: "intake",
 		title: statement,
@@ -589,7 +601,11 @@ function projectIntake(
 		status: completed ? "ok" : "running",
 		at: intake.at,
 		rawEventType: "intake_decision",
-	});
+		intakeInteractionRoute: interactionRoute,
+		intakeShouldShowProcess: intake.shouldShowProcess,
+		intakeShouldUseVisiblePlan: intake.shouldUseVisiblePlan,
+	};
+	upsertItem(snapshot, "context", item);
 }
 
 function projectPlan(
@@ -792,16 +808,16 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 		actions.push(
 			{
 				id: "approve",
-				label: "Approve",
+				label: "允许执行",
 				enabled: false,
-				reason: "Use the approval controls in the conversation.",
+				reason: "请在确认面板中处理。",
 				targetId: approvalTarget,
 			},
 			{
 				id: "reject",
-				label: "Reject",
+				label: "拒绝",
 				enabled: false,
-				reason: "Use the approval controls in the conversation.",
+				reason: "请在确认面板中处理。",
 				targetId: approvalTarget,
 			},
 		);
@@ -816,13 +832,13 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 		actions.push(
 			{
 				id: "apply",
-				label: "Apply",
+				label: "应用修改",
 				enabled: true,
 				targetId: mutation.id,
 			},
 			{
 				id: "reject",
-				label: "Reject",
+				label: "不应用",
 				enabled: true,
 				targetId: mutation.id,
 			},
@@ -1109,6 +1125,24 @@ function formatRuntimeTransportDetail(event: RuntimeProgressEvent): string {
 	return formatRecoveryAttempt(transport.attempt, transport.maxAttempts);
 }
 
+function formatTransportTitle(type: string | undefined): string {
+	if (type === "request_exhausted") {
+		return "请求恢复失败";
+	}
+	return "恢复请求";
+}
+
+function formatApprovalDetail(event: RuntimeProgressEvent): string {
+	const tool = event.tool?.trim().toLowerCase();
+	if (tool === "exec") {
+		return "FRIDAY 需要运行一个本地命令，确认后才会继续。";
+	}
+	if (event.targetPath) {
+		return "FRIDAY 已准备好需要确认的操作，确认后才会继续。";
+	}
+	return "FRIDAY 暂停在一个需要你确认的操作上。";
+}
+
 function formatReplayTransportDetail(transport: TurnReplaySummary["transportTimeline"][number]): string {
 	if (transport.type === "request_exhausted") {
 		return "请求多次未成功，请稍后重试。";
@@ -1211,8 +1245,25 @@ function formatToolTitle(tool: string | undefined, targetPath: string | undefine
 }
 
 function formatMutationTitle(mutation: AgentTrajectoryMutation): string {
-	const operation = mutation.operation || "mutation";
-	return mutation.targetPath ? `${operation} ${mutation.targetPath}` : operation;
+	const label = formatMutationLabel(mutation);
+	return mutation.targetPath ? `${label}：${mutation.targetPath}` : label;
+}
+
+function formatMutationLabel(mutation: AgentTrajectoryMutation): string {
+	switch (mutation.event) {
+		case "planned":
+			return "准备文件修改";
+		case "applied":
+			return "已应用文件修改";
+		case "rejected":
+			return "已取消文件修改";
+		case "conflicted":
+			return "文件修改需要重新确认";
+		case "apply_failed":
+			return "文件修改未能应用";
+		default:
+			return "文件修改";
+	}
 }
 
 function formatTaskTitle(event: TurnReplaySummary["taskTimeline"][number]["event"]): string {

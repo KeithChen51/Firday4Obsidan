@@ -62,6 +62,13 @@ type AgentProcessStepKey =
 	| "failure"
 	| "internal";
 
+type AgentProcessInteractionRoute = "direct_answer" | "clarify" | "light_task" | "task_with_process";
+type AgentTrajectoryIntakeSurfaceItem = AgentTrajectoryItem & {
+	intakeInteractionRoute?: AgentProcessInteractionRoute;
+	intakeShouldShowProcess?: boolean;
+	intakeShouldUseVisiblePlan?: boolean;
+};
+
 const USER_VISIBLE_RETRY_LIMIT = 5;
 const RETRY_RECOVERY_COPY_PREFIX = "网络波动，正在恢复请求";
 const REQUEST_EXHAUSTED_COPY = "请求多次未成功，请稍后重试。";
@@ -308,11 +315,12 @@ export function buildAgentProcessPanelViewModel(
 	const actions = buildActionViews(snapshot);
 	const mutations = buildMutations(snapshot);
 	const recovery = buildRecovery(snapshot, mutations);
-	const visibleSteps = buildVisibleSteps(snapshot, visibleItems, actions, recovery);
+	const interactionRoute = resolveInteractionRoute(snapshot);
+	const visibleSteps = buildVisibleSteps(snapshot, visibleItems, actions, recovery, interactionRoute);
 	const mode = resolveMode(snapshot, visibleSteps);
 	const durationSeconds = calculateDurationSeconds(snapshot, options.now);
 	const triggerReason = resolveTriggerReason(snapshot, visibleItems, mutations);
-	const surface = resolveSurface(snapshot, mode, triggerReason);
+	const surface = resolveSurface(snapshot, mode, triggerReason, interactionRoute, visibleItems);
 	const status = buildStatus(snapshot, visibleSteps);
 	const evidence = buildEvidence(visibleItems);
 	const resultArtifacts = buildResultArtifacts(snapshot);
@@ -329,6 +337,7 @@ export function buildAgentProcessPanelViewModel(
 		resultArtifacts,
 		diffSummary,
 		recovery,
+		interactionRoute,
 	});
 	const composerTaskBarDurationSeconds = snapshot.status === "running"
 		? durationSeconds
@@ -447,11 +456,20 @@ function resolveSurface(
 	snapshot: AgentTrajectorySnapshot,
 	mode: AgentProcessPanelMode,
 	triggerReason: AgentProcessTriggerReason | null,
+	interactionRoute: AgentProcessInteractionRoute | null,
+	visibleItems: AgentTrajectoryItem[],
 ): AgentProcessSurface {
+	if (
+		isQuietInteractionRoute(interactionRoute) &&
+		!hasNontrivialProcessEvidence(snapshot, visibleItems) &&
+		!isActionRequiredStatus(snapshot.status)
+	) {
+		return "hidden";
+	}
 	if (mode === "simple_thinking") {
 		return snapshot.status === "completed" ? "inline_thinking" : "hidden";
 	}
-	if (snapshot.status === "waiting_for_approval" || snapshot.status === "waiting_for_user" || triggerReason === "mutation_review") {
+	if (isActionRequiredStatus(snapshot.status) || triggerReason === "mutation_review") {
 		return "action_required";
 	}
 	if (snapshot.status === "failed" || snapshot.status === "cancelled" || snapshot.status === "safe_stopped" || triggerReason === "failure_recovery") {
@@ -459,6 +477,9 @@ function resolveSurface(
 	}
 	if (mode === "completed_replay") {
 		return "collapsed_completed_replay";
+	}
+	if (snapshot.status === "running" && interactionRoute === "task_with_process") {
+		return "expanded_live_process";
 	}
 	return "compact_live_process";
 }
@@ -471,6 +492,55 @@ function resolveHasExpandableContent(
 		return false;
 	}
 	return visibleSteps.length > 0;
+}
+
+function resolveInteractionRoute(snapshot: AgentTrajectorySnapshot): AgentProcessInteractionRoute | null {
+	for (let index = snapshot.items.length - 1; index >= 0; index -= 1) {
+		const item = snapshot.items[index];
+		if (!item || item.kind !== "intake") {
+			continue;
+		}
+		const route = (item as AgentTrajectoryIntakeSurfaceItem).intakeInteractionRoute;
+		if (isInteractionRoute(route)) {
+			return route;
+		}
+	}
+	return null;
+}
+
+function isInteractionRoute(value: unknown): value is AgentProcessInteractionRoute {
+	return value === "direct_answer" ||
+		value === "clarify" ||
+		value === "light_task" ||
+		value === "task_with_process";
+}
+
+function isQuietInteractionRoute(route: AgentProcessInteractionRoute | null): boolean {
+	return route === "direct_answer" || route === "clarify";
+}
+
+function isActionRequiredStatus(status: AgentTrajectoryStatus): boolean {
+	return status === "waiting_for_approval" || status === "waiting_for_user";
+}
+
+function hasNontrivialProcessEvidence(
+	snapshot: AgentTrajectorySnapshot,
+	visibleItems: AgentTrajectoryItem[],
+): boolean {
+	if (snapshot.failure || snapshot.mutations.length > 0 || isActionRequiredStatus(snapshot.status)) {
+		return true;
+	}
+	if (snapshot.plan && snapshot.plan.visibility === "visible" && snapshot.plan.tasks.length > 0) {
+		return true;
+	}
+	return visibleItems.some((item) =>
+		item.kind === "tool" ||
+		item.kind === "approval" ||
+		item.kind === "mutation" ||
+		item.kind === "transport" ||
+		Boolean(item.targetPath) ||
+		Boolean(item.evidenceRef)
+	);
 }
 
 function resolveTriggerReason(
@@ -558,21 +628,21 @@ function statusLabel(status: AgentTrajectoryStatus, tone: AgentProcessTone): str
 	}
 	switch (status) {
 		case "waiting_for_approval":
-			return "Waiting for approval";
+			return "等待确认";
 		case "waiting_for_user":
-			return "Waiting for user";
+			return "等待回复";
 		case "failed":
-			return "Failed";
+			return "运行遇到问题";
 		case "cancelled":
-			return "Cancelled";
+			return "已取消";
 		case "safe_stopped":
-			return "Stopped safely";
+			return "已安全停止";
 		case "completed":
-			return "Completed";
+			return "已完成";
 		case "running":
-			return "Working";
+			return "执行中";
 		default:
-			return "Idle";
+			return "空闲";
 	}
 }
 
@@ -621,6 +691,7 @@ interface TimelineBuildContext {
 	mode: AgentProcessPanelMode;
 	surface: AgentProcessSurface;
 	triggerReason: AgentProcessTriggerReason | null;
+	interactionRoute: AgentProcessInteractionRoute | null;
 	durationSeconds: number;
 	visibleSteps: AgentProcessStepView[];
 	actions: AgentProcessActionView[];
@@ -673,7 +744,7 @@ function buildTimelineView(
 	return {
 		title: timelineTitle(status, context.durationSeconds),
 		status,
-		defaultExpanded: status === "running" || status === "retrying" || status === "recovering" || status === "waiting",
+		defaultExpanded: timelineDefaultExpanded(status, context.interactionRoute),
 		canExpand: items.length > 0,
 		collapsedSummary: collapsedTimelineSummary(snapshot, context, status, items),
 		statusBar: buildTimelineStatusBar(groups, status, context.durationSeconds),
@@ -792,6 +863,16 @@ function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: numb
 	}
 }
 
+function timelineDefaultExpanded(
+	status: AgentProcessTimelineStatus,
+	interactionRoute: AgentProcessInteractionRoute | null,
+): boolean {
+	if (status === "waiting" || status === "retrying" || status === "recovering") {
+		return true;
+	}
+	return status === "running" && interactionRoute === "task_with_process";
+}
+
 function collapsedTimelineSummary(
 	snapshot: AgentTrajectorySnapshot,
 	context: TimelineBuildContext,
@@ -799,7 +880,7 @@ function collapsedTimelineSummary(
 	items: AgentProcessTimelineItemView[],
 ): string {
 	if (status === "waiting") {
-		return "FRIDAY 准备修改文件，需要你确认后继续。";
+		return pendingMutationSummary(snapshot) || "FRIDAY 需要你确认后继续。";
 	}
 	if (status === "retrying") {
 		return retrySummaryFromItems(items);
@@ -1143,10 +1224,7 @@ function timelineSummaryForStep(
 	status: AgentProcessTimelineItemStatus,
 ): string {
 	if (kind === "approval") {
-		const count = pendingMutationCountForSnapshot(snapshot);
-		return count > 0
-			? `FRIDAY 准备修改 ${count} 个文件，需要你确认后继续。`
-			: "FRIDAY 准备修改文件，需要你确认后继续。";
+		return pendingMutationSummary(snapshot) || "FRIDAY 需要你确认后继续。";
 	}
 	if (kind === "retry") {
 		return retryTimelineSummaryForStep(step);
@@ -1182,6 +1260,11 @@ function timelineSummaryForStep(
 
 function pendingMutationCountForSnapshot(snapshot: AgentTrajectorySnapshot): number {
 	return snapshot.mutations.filter((mutation) => mutation.event === "planned").length;
+}
+
+function pendingMutationSummary(snapshot: AgentTrajectorySnapshot): string {
+	const count = pendingMutationCountForSnapshot(snapshot);
+	return count > 0 ? `已准备好 ${count} 个待应用的文件修改，确认后才会写入 Obsidian。` : "";
 }
 
 function reasoningTimelineSummary(summary: string): string {
@@ -1479,11 +1562,12 @@ function buildTimelineActions(
 	if (status !== "waiting" && status !== "failed") {
 		return [];
 	}
+	const hasFileChangeDecision = actions.some((action) => action.id === "apply" || action.id === "view_changes");
 	return actions
 		.filter((action) => action.id !== "view_replay")
 		.map((action) => ({
 			id: action.id,
-			label: action.label,
+			label: timelineActionLabel(action, hasFileChangeDecision),
 			enabled: action.enabled,
 			tone: action.tone,
 			...(action.targetId ? { targetId: action.targetId } : {}),
@@ -1491,13 +1575,30 @@ function buildTimelineActions(
 		}));
 }
 
+function timelineActionLabel(action: AgentProcessActionView, hasFileChangeDecision: boolean): string {
+	if (action.id === "approve") {
+		return "允许执行";
+	}
+	if (action.id === "apply") {
+		return "应用修改";
+	}
+	if (action.id === "reject") {
+		return hasFileChangeDecision ? "不应用" : "拒绝";
+	}
+	return action.label;
+}
+
 function buildVisibleSteps(
 	snapshot: AgentTrajectorySnapshot,
 	visibleItems: AgentTrajectoryItem[],
 	actions: AgentProcessActionView[],
 	recovery: AgentProcessRecoveryView | null,
+	interactionRoute: AgentProcessInteractionRoute | null,
 ): AgentProcessStepView[] {
 	if (isSimpleCompletedLifecycleReplay(snapshot, visibleItems)) {
+		return [];
+	}
+	if (isQuietInteractionRoute(interactionRoute) && !hasNontrivialProcessEvidence(snapshot, visibleItems)) {
 		return [];
 	}
 	if (!hasVisibleProcessTrigger(snapshot, visibleItems)) {
@@ -1900,7 +2001,7 @@ function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): str
 		case "file_change":
 			return "创建/修改文件";
 		case "approval":
-			return "等待确认文件修改";
+			return "等待确认";
 		case "transport":
 			return "恢复请求";
 		case "failure":
@@ -1917,7 +2018,9 @@ function summaryForStep(
 ): string {
 	if (builder.key === "approval") {
 		const pendingCount = pendingMutationCount(snapshot, builder);
-		return pendingCount > 0 ? `${pendingCount} 个文件改动待审核` : firstMeaningfulDetail(builder.items);
+		return pendingCount > 0
+			? `已准备好 ${pendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。`
+			: "FRIDAY 需要你确认后继续。";
 	}
 	if (builder.key === "failure") {
 		return firstMeaningfulDetail(builder.items) || snapshot.failure?.message || "运行失败。";
@@ -1974,9 +2077,11 @@ function buildStepControlActions(
 			action.id === "reject" ||
 			action.id === "approve" ||
 			action.id === "view_changes" ||
-			(targetIds.size > 0 && action.targetId && targetIds.has(action.targetId))
+				(targetIds.size > 0 && action.targetId && targetIds.has(action.targetId))
 		);
-		const controls = ensureChangeApprovalControls(relevantActions, [...targetIds][0]);
+		const controls = pendingMutationIds.length > 0
+			? ensureChangeApprovalControls(relevantActions, [...targetIds][0])
+			: ensureHighRiskApprovalControls(relevantActions, [...targetIds][0]);
 		return controls.map(toStepControlAction);
 	}
 	if (builder.key === "failure") {
@@ -2010,7 +2115,33 @@ function ensureChangeApprovalControls(
 	if (!controls.some((action) => action.id === "apply" || action.id === "approve")) {
 		controls.push({
 			id: "apply",
-			label: "应用",
+			label: "应用修改",
+			enabled: true,
+			targetId,
+			tone: "primary",
+		});
+	}
+	if (!controls.some((action) => action.id === "reject")) {
+		controls.push({
+			id: "reject",
+			label: "不应用",
+			enabled: true,
+			targetId,
+			tone: "danger",
+		});
+	}
+	return controls.map(normalizeChangeApprovalControl);
+}
+
+function ensureHighRiskApprovalControls(
+	actions: AgentProcessActionView[],
+	targetId: string | undefined,
+): AgentProcessActionView[] {
+	const controls = [...actions].filter((action) => action.id === "approve" || action.id === "reject");
+	if (!controls.some((action) => action.id === "approve")) {
+		controls.push({
+			id: "approve",
+			label: "允许执行",
 			enabled: true,
 			targetId,
 			tone: "primary",
@@ -2025,7 +2156,27 @@ function ensureChangeApprovalControls(
 			tone: "danger",
 		});
 	}
-	return controls;
+	return controls.map(normalizeHighRiskApprovalControl);
+}
+
+function normalizeChangeApprovalControl(action: AgentProcessActionView): AgentProcessActionView {
+	if (action.id === "apply" || action.id === "approve") {
+		return { ...action, label: "应用修改" };
+	}
+	if (action.id === "reject") {
+		return { ...action, label: "不应用" };
+	}
+	return action;
+}
+
+function normalizeHighRiskApprovalControl(action: AgentProcessActionView): AgentProcessActionView {
+	if (action.id === "approve") {
+		return { ...action, label: "允许执行", reason: action.reason || "请在确认面板中处理。" };
+	}
+	if (action.id === "reject") {
+		return { ...action, label: "拒绝", reason: action.reason || "请在确认面板中处理。" };
+	}
+	return action;
 }
 
 function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionView {
@@ -2173,7 +2324,7 @@ function buildActionViews(snapshot: AgentTrajectorySnapshot): AgentProcessAction
 		if (!actions.some((action) => (action.id === "apply" || action.id === "approve") && action.targetId === mutation.id)) {
 			actions.push(toActionView({
 				id: "apply",
-				label: "应用",
+				label: "应用修改",
 				enabled: true,
 				targetId: mutation.id,
 			}));
@@ -2181,7 +2332,7 @@ function buildActionViews(snapshot: AgentTrajectorySnapshot): AgentProcessAction
 		if (!actions.some((action) => action.id === "reject" && action.targetId === mutation.id)) {
 			actions.push(toActionView({
 				id: "reject",
-				label: "拒绝",
+				label: "不应用",
 				enabled: true,
 				targetId: mutation.id,
 			}));
@@ -2341,8 +2492,25 @@ function artifactStatusForMutation(mutation: AgentTrajectoryMutation): AgentProc
 }
 
 function formatMutationTitle(mutation: AgentTrajectoryMutation): string {
-	const operation = mutation.operation || "mutation";
-	return mutation.targetPath ? `${operation} ${mutation.targetPath}` : operation;
+	const label = formatMutationLabel(mutation);
+	return mutation.targetPath ? `${label}：${mutation.targetPath}` : label;
+}
+
+function formatMutationLabel(mutation: AgentTrajectoryMutation): string {
+	switch (mutation.event) {
+		case "planned":
+			return "准备文件修改";
+		case "applied":
+			return "已应用文件修改";
+		case "rejected":
+			return "已取消文件修改";
+		case "conflicted":
+			return "文件修改需要重新确认";
+		case "apply_failed":
+			return "文件修改未能应用";
+		default:
+			return "文件修改";
+	}
 }
 
 function firstDefined(values: Array<string | undefined>): string | undefined {

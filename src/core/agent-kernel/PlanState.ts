@@ -1,10 +1,12 @@
 export type IntakeComplexity = "simple" | "light" | "complex" | "unclear";
 export type IntakeRoute = "answer" | "clarify" | "plan_and_execute";
+export type IntakeInteractionRoute = "direct_answer" | "clarify" | "light_task" | "task_with_process";
 export type IntakeDecisionSource = "runtime" | "model" | "fallback";
 
 export interface IntakeDecision {
 	complexity: IntakeComplexity;
 	route: IntakeRoute;
+	interactionRoute?: IntakeInteractionRoute;
 	statement: string;
 	requiresPlan: boolean;
 	shouldShowProcess: boolean;
@@ -79,6 +81,85 @@ export interface RuntimePlanCreateInstruction {
 	visibility?: PlanVisibility;
 	tasks?: RuntimePlanTaskInstruction[];
 	tasksMalformed?: boolean;
+}
+
+export interface IntakeRouteDefaults {
+	complexity: IntakeComplexity;
+	route: IntakeRoute;
+	requiresPlan: boolean;
+	shouldShowProcess: boolean;
+	shouldUseVisiblePlan: boolean;
+}
+
+export function isIntakeInteractionRoute(value: unknown): value is IntakeInteractionRoute {
+	return value === "direct_answer" ||
+		value === "clarify" ||
+		value === "light_task" ||
+		value === "task_with_process";
+}
+
+export function getIntakeRouteDefaults(interactionRoute: IntakeInteractionRoute): IntakeRouteDefaults {
+	if (interactionRoute === "clarify") {
+		return {
+			complexity: "unclear",
+			route: "clarify",
+			requiresPlan: false,
+			shouldShowProcess: false,
+			shouldUseVisiblePlan: false,
+		};
+	}
+	if (interactionRoute === "light_task") {
+		return {
+			complexity: "light",
+			route: "answer",
+			requiresPlan: false,
+			shouldShowProcess: true,
+			shouldUseVisiblePlan: false,
+		};
+	}
+	if (interactionRoute === "task_with_process") {
+		return {
+			complexity: "complex",
+			route: "plan_and_execute",
+			requiresPlan: true,
+			shouldShowProcess: true,
+			shouldUseVisiblePlan: true,
+		};
+	}
+	return {
+		complexity: "simple",
+		route: "answer",
+		requiresPlan: false,
+		shouldShowProcess: false,
+		shouldUseVisiblePlan: false,
+	};
+}
+
+export function inferInteractionRouteFromLegacy(input: {
+	complexity?: IntakeComplexity;
+	route?: IntakeRoute;
+	requiresPlan?: boolean;
+	shouldShowProcess?: boolean;
+	shouldUseVisiblePlan?: boolean;
+}): IntakeInteractionRoute {
+	if (input.route === "clarify" || input.complexity === "unclear") {
+		return "clarify";
+	}
+	if (
+		input.complexity === "light" ||
+		(input.shouldShowProcess === true && input.shouldUseVisiblePlan === false)
+	) {
+		return "light_task";
+	}
+	if (
+		input.route === "plan_and_execute" ||
+		input.complexity === "complex" ||
+		input.requiresPlan === true ||
+		input.shouldUseVisiblePlan === true
+	) {
+		return "task_with_process";
+	}
+	return "direct_answer";
 }
 
 export interface RuntimePlanReviseInstruction {

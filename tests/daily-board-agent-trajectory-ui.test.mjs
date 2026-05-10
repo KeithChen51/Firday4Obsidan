@@ -1510,6 +1510,100 @@ test("renderAgentTrajectoryCard hides simple live model-only snapshots", async (
 	assert.equal(root.textContent, "");
 });
 
+test("renderAgentAnswerFlow does not keep a process panel for completed direct-answer routes", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			summary: "2+2 等于 4。",
+			items: [
+				makeItem({
+					id: "intake-direct",
+					kind: "intake",
+					title: "我会直接回答。",
+					detail: "我会直接回答。",
+					status: "ok",
+					rawEventType: "intake_decision",
+					intakeInteractionRoute: "direct_answer",
+					intakeShouldShowProcess: false,
+					intakeShouldUseVisiblePlan: false,
+				}),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "2+2 等于 4。", status: "ok" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "2+2 等于 4。" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-shell"), 0);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
+	assert.match(root.textContent, /2\+2 等于 4。/);
+	assert.doesNotMatch(root.textContent, /我会直接回答|FRIDAY 已思考|过程|正在处理/);
+});
+
+test("renderAgentTrajectoryCard adds expanded and collapsed process state classes", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const collapsedRoot = new FakeElement("div");
+	const expandedRoot = new FakeElement("div");
+	const snapshot = makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({
+				id: "intake-process",
+				kind: "intake",
+				title: "我会按步骤整理。",
+				detail: "我会按步骤整理。",
+				status: "running",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "task_with_process",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: true,
+			}),
+			makeItem({
+				id: "read-note",
+				kind: "tool",
+				title: "Read Notes/A.md",
+				detail: "Read the note before preparing the answer.",
+				status: "running",
+				tool: "read",
+				targetPath: "Notes/A.md",
+			}),
+		],
+	});
+
+	renderAgentTrajectoryCard({
+		containerEl: collapsedRoot,
+		snapshot,
+		variant: "live",
+		expanded: false,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+	renderAgentTrajectoryCard({
+		containerEl: expandedRoot,
+		snapshot,
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), true);
+	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), false);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), true);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), false);
+	assert.equal(expandedRoot.countByClass("friday-agent-process-timeline-detail"), 1);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-timeline-detail")?.attributes.open, undefined);
+});
+
 test("renderAgentTrajectoryCard hides live preflight-only context snapshots", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
@@ -1900,10 +1994,10 @@ test("renderAgentTrajectoryCard shows approval actions in collapsed timeline dis
 
 	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 0);
 	assert.match(root.textContent, /等待确认/);
-	assert.match(root.textContent, /需要你确认/);
+	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
 	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用/);
-	assert.match(root.textContent, /拒绝/);
+	assert.match(root.textContent, /应用修改/);
+	assert.match(root.textContent, /不应用/);
 	root.findByClass("is-apply")?.onclick?.();
 	root.findByClass("is-reject")?.onclick?.();
 	assert.deepEqual(calls, ["apply", "reject"]);
@@ -1983,10 +2077,10 @@ test("renderAgentTrajectoryCard renders pending mutation as the current approval
 	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /创建\/修改文件/);
 	assert.match(root.textContent, /等待确认/);
-	assert.match(root.textContent, /准备修改 1 个文件/);
+	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
 	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用/);
-	assert.match(root.textContent, /拒绝/);
+	assert.match(root.textContent, /应用修改/);
+	assert.match(root.textContent, /不应用/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 	root.findByClass("is-apply")?.onclick?.();
 	root.findByClass("is-reject")?.onclick?.();
@@ -2859,6 +2953,7 @@ async function createDailyBoardHarness(overrides = {}) {
 		aiBackgroundTurnFailure: null,
 		aiQueuedPrompts: [],
 		aiLastError: "",
+		approvalQueue: { list: () => [] },
 		plugin: makePluginStub(),
 		...overrides,
 	});
