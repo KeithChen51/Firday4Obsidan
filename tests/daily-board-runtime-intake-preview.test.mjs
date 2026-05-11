@@ -147,6 +147,17 @@ test("runtime progress refreshes an existing live process without rebuilding the
 	assert.match(progressBlock, /!terminalProgress && nextView\.shouldRenderProcessPanel && this\.syncLiveRuntimeProgressProcess\(\)/);
 });
 
+test("runtime stage reports update process state without rendering temporary assistant replies", () => {
+	const source = readViewSource();
+	const progressBlock = extractMethod(source, "handleRuntimeProgress", "buildRuntimeReply");
+	const listBlock = extractMethod(source, "renderAiMessageList", "shouldRenderAgentTaskPanel");
+
+	assert.doesNotMatch(source, /aiRuntimeStageReplies|captureRuntimeStageReply|getAiRuntimeStageReplies/);
+	assert.doesNotMatch(listBlock, /runtimeStageReplies|renderAiMessage\(.*stage/i);
+	assert.match(progressBlock, /aiRuntimeTrajectoryStore\.appendProgress\(event\)/);
+	assert.match(progressBlock, /syncLiveRuntimeProgressProcess\(\)/);
+});
+
 test("runtime progress syncs the composer decision panel when file review arrives", () => {
 	const source = readViewSource();
 	const liveShellBlock = extractMethod(source, "syncAiLiveChatShell", "syncAiRuntimeShell");

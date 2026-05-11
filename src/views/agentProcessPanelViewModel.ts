@@ -57,7 +57,6 @@ export type AgentProcessStepStatus =
 type AgentProcessStepKey =
 	| "receipt"
 	| "plan"
-	| "stage_report"
 	| "context"
 	| "reasoning"
 	| "file_change"
@@ -145,7 +144,6 @@ export type AgentProcessTimelineStatus =
 export type AgentProcessTimelineItemKind =
 	| "receipt"
 	| "plan"
-	| "stage_report"
 	| "context"
 	| "reasoning"
 	| "tool_batch"
@@ -180,6 +178,12 @@ export interface AgentProcessTimelineActionView {
 	reason?: string;
 }
 
+export interface AgentProcessTimelineNoteView {
+	id: string;
+	text: string;
+	tone: "progress" | "done" | "warning";
+}
+
 export interface AgentProcessTimelineItemView {
 	id: string;
 	kind: AgentProcessTimelineItemKind;
@@ -188,8 +192,10 @@ export interface AgentProcessTimelineItemView {
 	summary: string;
 	meta?: string;
 	detail?: AgentProcessTimelineDetailView;
+	notes?: AgentProcessTimelineNoteView[];
 	artifactRefs?: string[];
 	actionRefs?: string[];
+	sourceItemIds?: string[];
 }
 
 export interface AgentProcessTimelineStatusBarView {
@@ -957,8 +963,9 @@ function buildTimelineItems(
 	for (const step of context.visibleSteps) {
 		items.push(timelineItemFromStep(step, snapshot));
 	}
+	const annotatedItems = attachStageReportNotes(items, snapshot.items);
 	if (snapshot.status === "completed" && context.visibleSteps.length > 0) {
-		items.push({
+		annotatedItems.push({
 			id: "timeline:done",
 			kind: "done",
 			status: "done",
@@ -966,7 +973,125 @@ function buildTimelineItems(
 			summary: doneTimelineSummary(snapshot, context),
 		});
 	}
-	return items;
+	return annotatedItems;
+}
+
+function attachStageReportNotes(
+	items: AgentProcessTimelineItemView[],
+	snapshotItems: AgentTrajectoryItem[],
+): AgentProcessTimelineItemView[] {
+	const stageEntries = snapshotItems
+		.map((item, index) => ({ item, index }))
+		.filter((entry) => isStageReportNarrationItem(entry.item));
+	if (stageEntries.length === 0 || items.length === 0) {
+		return items;
+	}
+	const sourceItemById = new Map(snapshotItems.map((item) => [item.id, item]));
+	const sourceIndexById = new Map(snapshotItems.map((item, index) => [item.id, index]));
+	let result = items;
+	for (const stageEntry of stageEntries) {
+		const text = stageReportNoteText(stageEntry.item);
+		if (!text) {
+			continue;
+		}
+		const targetIndex = findStageReportNoteTargetIndex(
+			result,
+			stageEntry.item,
+			stageEntry.index,
+			sourceItemById,
+			sourceIndexById,
+		);
+		if (targetIndex < 0) {
+			continue;
+		}
+		const target = result[targetIndex];
+		if (!target) {
+			continue;
+		}
+		if (target.notes?.some((note) => note.text === text)) {
+			continue;
+		}
+		result = [...result];
+		result[targetIndex] = {
+			...target,
+			notes: [
+				...(target.notes ?? []),
+				{
+					id: `note:${stageEntry.item.id}`,
+					text,
+					tone: stageReportNoteTone(stageEntry.item.status),
+				},
+			],
+		};
+	}
+	return result;
+}
+
+function findStageReportNoteTargetIndex(
+	items: AgentProcessTimelineItemView[],
+	stageItem: AgentTrajectoryItem,
+	stageIndex: number,
+	sourceItemById: Map<string, AgentTrajectoryItem>,
+	sourceIndexById: Map<string, number>,
+): number {
+	const eligible = items
+		.map((item, index) => ({ item, index, sourceItems: timelineSourceItems(item, sourceItemById) }))
+		.filter((entry) => isStageReportNoteAnchor(entry.item));
+	if (eligible.length === 0) {
+		return -1;
+	}
+	if (stageItem.step !== undefined) {
+		const sameStep = eligible.find((entry) => entry.sourceItems.some((item) => item.step === stageItem.step));
+		if (sameStep) {
+			return sameStep.index;
+		}
+	}
+	const next = eligible.find((entry) =>
+		entry.sourceItems.some((item) => (sourceIndexById.get(item.id) ?? Number.POSITIVE_INFINITY) > stageIndex)
+	);
+	if (next) {
+		return next.index;
+	}
+	for (let index = eligible.length - 1; index >= 0; index -= 1) {
+		const entry = eligible[index];
+		if (!entry) {
+			continue;
+		}
+		if (entry.sourceItems.some((item) => (sourceIndexById.get(item.id) ?? -1) < stageIndex)) {
+			return entry.index;
+		}
+	}
+	return -1;
+}
+
+function timelineSourceItems(
+	item: AgentProcessTimelineItemView,
+	sourceItemById: Map<string, AgentTrajectoryItem>,
+): AgentTrajectoryItem[] {
+	return (item.sourceItemIds ?? [])
+		.map((id) => sourceItemById.get(id))
+		.filter((sourceItem): sourceItem is AgentTrajectoryItem => Boolean(sourceItem));
+}
+
+function isStageReportNoteAnchor(item: AgentProcessTimelineItemView): boolean {
+	return item.kind === "context" || item.kind === "tool_batch" || item.kind === "file_change";
+}
+
+function stageReportNoteText(item: AgentTrajectoryItem): string {
+	const detail = productizeRuntimeText(item.detail || "");
+	const progress = productizeRuntimeText([item.narrationJustDone, item.narrationNext].filter(Boolean).join(" "));
+	const text = detail || progress;
+	if (!text || /stage_report|narration_report|阶段性汇报/i.test(text)) {
+		return "";
+	}
+	return sanitizeTimelineSummary(text);
+}
+
+function stageReportNoteTone(status: AgentTrajectoryItemStatus): AgentProcessTimelineNoteView["tone"] {
+	if (status === "failed" || status === "denied" || status === "cancelled") {
+		return "warning";
+	}
+	return status === "ok" ? "done" : "progress";
 }
 
 function buildTimelineGroups(
@@ -1149,6 +1274,7 @@ function timelineItemFromStep(
 		summary,
 		...(meta ? { meta } : {}),
 		...(detail ? { detail } : {}),
+		sourceItemIds: step.actions.map((action) => action.id),
 		...(artifactRefs.length > 0 ? { artifactRefs } : {}),
 		...(actionRefs.length > 0 ? { actionRefs } : {}),
 	};
@@ -1166,9 +1292,6 @@ function timelineKindForStep(step: AgentProcessStepView): AgentProcessTimelineIt
 	}
 	if (step.id.includes(":plan:")) {
 		return "plan";
-	}
-	if (step.id.includes(":stage_report:")) {
-		return "stage_report";
 	}
 	if (step.id.includes(":failure:")) {
 		return "blocked";
@@ -1228,8 +1351,6 @@ function timelineTitleForStep(
 			return "读取项目现状";
 		case "plan":
 			return "整理方案";
-		case "stage_report":
-			return "阶段性汇报";
 		case "reasoning":
 			return "整理方案";
 		case "file_change":
@@ -1270,7 +1391,7 @@ function timelineSummaryForStep(
 			? ""
 			: summary;
 	}
-	if (kind === "plan" || kind === "stage_report") {
+	if (kind === "plan") {
 		return sanitizeTimelineSummary(step.summary);
 	}
 	if (kind === "reasoning") {
@@ -1573,7 +1694,22 @@ function mergeContextTimelineItem(
 	target.meta = commands > 0 ? `已运行 ${commands} 条命令` : `${batches} 批`;
 	target.artifactRefs = mergeUnique([...(target.artifactRefs ?? []), ...(item.artifactRefs ?? [])]);
 	target.actionRefs = mergeUnique([...(target.actionRefs ?? []), ...(item.actionRefs ?? [])]);
+	target.sourceItemIds = mergeUnique([...(target.sourceItemIds ?? []), ...(item.sourceItemIds ?? [])]);
+	target.notes = mergeTimelineNotes(target.notes, item.notes);
 	target.detail = mergeTimelineDetails(target.detail, item.detail);
+}
+
+function mergeTimelineNotes(
+	current: AgentProcessTimelineNoteView[] | undefined,
+	next: AgentProcessTimelineNoteView[] | undefined,
+): AgentProcessTimelineNoteView[] | undefined {
+	const notes = [...(current ?? [])];
+	for (const note of next ?? []) {
+		if (!notes.some((entry) => entry.id === note.id || entry.text === note.text)) {
+			notes.push(note);
+		}
+	}
+	return notes.length > 0 ? notes : undefined;
 }
 
 function contextCommandCount(item: AgentProcessTimelineItemView): number {
@@ -1859,7 +1995,7 @@ function createStepBuilder(key: AgentProcessStepKey, item: AgentTrajectoryItem):
 }
 
 function shouldSplitStep(previous: StepBuilder, item: AgentTrajectoryItem, key: AgentProcessStepKey): boolean {
-	if (key === "receipt" || key === "plan" || key === "stage_report") {
+	if (key === "receipt" || key === "plan") {
 		return true;
 	}
 	if (key === "approval" || key === "failure" || key === "transport") {
@@ -1963,9 +2099,9 @@ function semanticStepKey(item: AgentTrajectoryItem): AgentProcessStepKey {
 			return "plan";
 		}
 		if (item.narrationKind === "stage_report") {
-			return "stage_report";
+			return "internal";
 		}
-		return "stage_report";
+		return "context";
 	}
 	if (item.kind === "approval") {
 		return "approval";
@@ -2070,8 +2206,6 @@ function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): str
 			return "收到任务";
 		case "plan":
 			return "整理方案";
-		case "stage_report":
-			return "阶段性汇报";
 		case "context":
 			return "读取上下文";
 		case "reasoning":
@@ -2109,7 +2243,7 @@ function summaryForStep(
 	if (builder.key === "transport") {
 		return transportSummaryForItems(builder.items);
 	}
-	if (builder.key === "receipt" || builder.key === "plan" || builder.key === "stage_report") {
+	if (builder.key === "receipt" || builder.key === "plan") {
 		return firstMeaningfulDetail(builder.items);
 	}
 	if (status === "running") {

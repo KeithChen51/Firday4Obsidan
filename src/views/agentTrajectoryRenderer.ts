@@ -390,10 +390,24 @@ function renderTimelineItem(
 		titleRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
 	}
 	contentEl.createDiv({ cls: "friday-agent-process-timeline-summary", text: item.summary });
+	renderTimelineItemNotes(contentEl, item);
 	renderTimelineItemDetail(contentEl, item);
 	if (item.actionRefs && item.actionRefs.length > 0) {
 		const itemActions = actions.filter((action) => item.actionRefs?.includes(action.id));
 		renderTimelineActions(contentEl, itemActions, onAction, "friday-agent-process-timeline-actions");
+	}
+}
+
+function renderTimelineItemNotes(containerEl: HTMLElement, item: AgentProcessTimelineItemView): void {
+	if (!item.notes || item.notes.length === 0) {
+		return;
+	}
+	const notesEl = containerEl.createDiv({ cls: "friday-agent-process-timeline-notes" });
+	for (const note of item.notes) {
+		notesEl.createDiv({
+			cls: `friday-agent-process-timeline-note is-${note.tone}`,
+			text: note.text,
+		});
 	}
 }
 

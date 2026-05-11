@@ -1220,11 +1220,12 @@ test("buildAgentProcessPanelViewModel productizes pending mutation review fallba
 
 test("buildAgentProcessPanelViewModel keeps stage reports out of structured process steps", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const stageText = "已读取相关文件，接下来实现事件链路。";
 
 	const view = buildAgentProcessPanelViewModel(makeSnapshot({
 		status: "running",
 		headline: "FRIDAY 正在处理",
-		summary: "已读取相关文件，接下来实现事件链路。",
+		summary: stageText,
 		items: [
 			makeItem({
 				id: "narration-ack",
@@ -1251,7 +1252,7 @@ test("buildAgentProcessPanelViewModel keeps stage reports out of structured proc
 				id: "narration-stage",
 				kind: "narration",
 				title: "阶段性汇报",
-				detail: "已读取相关文件，接下来实现事件链路。",
+				detail: stageText,
 				status: "running",
 				rawEventType: "narration_report",
 				narrationKind: "stage_report",
@@ -1285,7 +1286,12 @@ test("buildAgentProcessPanelViewModel keeps stage reports out of structured proc
 	assert.equal(view.timeline?.items[0]?.summary, "需要把过程叙事放进线性时间线。");
 	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "读取相关代码");
 	assert.equal(view.timeline?.items.some((item) => item.kind === "stage_report"), false);
-	assert.equal(JSON.stringify(view.timeline).includes("已读取相关文件，接下来实现事件链路。"), false);
+	const contextItem = view.timeline?.items.find((item) => item.kind === "context");
+	assert.deepEqual(contextItem?.notes, [
+		{ id: "note:narration-stage", text: stageText, tone: "progress" },
+	]);
+	assert.doesNotMatch(view.timeline?.collapsedSummary ?? "", /已读取相关文件，接下来实现事件链路/);
+	assert.doesNotMatch(JSON.stringify(view.timeline), /阶段性汇报|stage_report|narration_report/);
 	assert.doesNotMatch(JSON.stringify(view.timeline), /context_ready|Context|Reasoning|Tools|Review|Finalize/);
 });
 

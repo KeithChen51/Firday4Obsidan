@@ -250,9 +250,30 @@ test("DailyBoard keeps local intake preview through runtime preflight and clears
 	assert.equal(view.aiLocalIntakePreview, "");
 });
 
-test("DailyBoard renders live stage reports as assistant replies outside the process panel", async () => {
+test("DailyBoard renders live stage reports as process notes without extra assistant headers", async () => {
 	const messageListEl = new FakeElement("div");
 	const stageText = "已读取相关文件，接下来整理结论。";
+	const stageItem = makeItem({
+		id: "narration-stage",
+		kind: "narration",
+		title: "阶段性汇报",
+		detail: stageText,
+		status: "running",
+		rawEventType: "narration_report",
+		narrationKind: "stage_report",
+		narrationJustDone: "已读取相关文件",
+		narrationNext: "接下来整理结论",
+	});
+	const readItem = makeItem({
+		id: "read-workspace-note",
+		kind: "context",
+		title: "读取 FRIDAY 介绍.md",
+		detail: "已读取 123/workspace/FRIDAY 介绍.md。",
+		status: "running",
+		rawEventType: "tool_result",
+		tool: "read_file",
+		targetPath: "123/workspace/FRIDAY 介绍.md",
+	});
 	const view = await createDailyBoardHarness({
 		activePage: "chat",
 		aiMessageListEl: messageListEl,
@@ -260,8 +281,8 @@ test("DailyBoard renders live stage reports as assistant replies outside the pro
 			appendProgress: () => makeSnapshot({
 				status: "running",
 				headline: "FRIDAY 正在处理",
-				summary: "",
-				items: [],
+				summary: "FRIDAY 正在读取相关内容。",
+				items: [stageItem, readItem],
 			}),
 			completeFromProgress: () => makeSnapshot(),
 			refreshElapsed: () => null,
@@ -276,6 +297,9 @@ test("DailyBoard renders live stage reports as assistant replies outside the pro
 	});
 	view.renderAiMessageContent = (containerEl, message) => {
 		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.renderAssistantAvatar = (containerEl) => {
+		containerEl.createDiv({ cls: "test-assistant-avatar", text: "A" });
 	};
 	view.resolveUserDisplayName = () => "User";
 
@@ -294,11 +318,17 @@ test("DailyBoard renders live stage reports as assistant replies outside the pro
 		});
 	});
 
-	const stageReply = messageListEl
-		.findAllByClass("test-message-body")
-		.find((item) => item.textContent.includes(stageText));
-	assert.ok(stageReply, "stage report should render as a normal assistant reply");
-	assert.equal(messageListEl.countByClass("friday-agent-process-timeline-item"), 0);
+	const assistantBodies = messageListEl.findAllByClass("test-message-body");
+	assert.equal(
+		assistantBodies.some((item) => item.textContent.includes(stageText)),
+		false,
+		"stage report should not render as a standalone assistant reply"
+	);
+	assert.equal(messageListEl.countByClass("test-assistant-avatar"), 1);
+	const processNotes = messageListEl.findAllByClass("friday-agent-process-timeline-note");
+	assert.equal(processNotes.length, 1, "stage report should render as an inline process note");
+	assert.match(processNotes[0]?.textContent ?? "", /已读取相关文件/);
+	assert.ok(messageListEl.countByClass("friday-agent-process-timeline-item") >= 1);
 });
 
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
@@ -2042,8 +2072,72 @@ test("renderAgentAnswerFlow keeps stage reports out of the structured process pa
 	assert.match(root.textContent, /整理方案/);
 	assert.doesNotMatch(root.textContent, /阶段性汇报/);
 	assert.doesNotMatch(root.textContent, /已读取相关文件，接下来实现事件链路。/);
+	assert.equal(root.countByClass("friday-agent-process-timeline-note"), 0);
 	assert.match(root.findByClass("friday-ai-answer-content")?.textContent ?? "", /结论已完成/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b|raw chain of thought/i);
+});
+
+test("renderAgentAnswerFlow renders stage reports as inline notes on process items", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+	const stageText = "已读取相关文件，接下来根据内容继续推进。";
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "FRIDAY 正在处理",
+			summary: "FRIDAY 正在读取相关内容。",
+			items: [
+				makeItem({
+					id: "narration-ack",
+					kind: "narration",
+					title: "收到任务",
+					detail: "FRIDAY 已收到任务，开始按当前上下文处理。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "task_acknowledged",
+				}),
+				makeItem({
+					id: "narration-stage",
+					kind: "narration",
+					title: "阶段性汇报",
+					detail: stageText,
+					status: "running",
+					rawEventType: "narration_report",
+					narrationKind: "stage_report",
+					narrationJustDone: "已读取相关文件",
+					narrationNext: "接下来根据内容继续推进",
+				}),
+				makeItem({
+					id: "read-note",
+					kind: "context",
+					title: "读取 FRIDAY 介绍.md",
+					detail: "已读取 123/workspace/FRIDAY 介绍.md。",
+					status: "running",
+					rawEventType: "tool_result",
+					tool: "read_file",
+					targetPath: "123/workspace/FRIDAY 介绍.md",
+				}),
+			],
+		}),
+		expanded: true,
+		renderContent: (containerEl) => {
+			containerEl.createDiv({ cls: "final-answer", text: "最终回答会在这里继续流式输出。" });
+		},
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+		onToggle: () => {},
+	});
+
+	const notes = root.findAllByClass("friday-agent-process-timeline-note");
+	assert.equal(notes.length, 1);
+	assert.match(notes[0]?.textContent ?? "", /已读取相关文件/);
+	assert.equal(
+		root.findAllByClass("friday-ai-answer-content").some((item) => item.textContent.includes(stageText)),
+		false,
+		"stage progress should not become answer text"
+	);
+	assert.doesNotMatch(root.textContent, /stage_report|narration_report|阶段性汇报/);
 });
 
 test("renderAgentTrajectoryCard shows approval actions in collapsed timeline disclosure", async () => {
