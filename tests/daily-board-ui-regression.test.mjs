@@ -277,12 +277,35 @@ test("mutation review uses pending-language buttons and notices", async () => {
 	assert.match(itemBlock, /mutation\.review\.applyChanges/);
 	assert.match(itemBlock, /mutation\.review\.doNotApply/);
 	assert.match(itemBlock, /mutation\.review\.applied/);
+	assert.match(itemBlock, /mutation\.review\.conflictedNotice/);
 	assert.match(itemBlock, /mutation\.review\.rejected/);
 	assert.doesNotMatch(itemBlock, /"Apply"/);
 	assert.doesNotMatch(itemBlock, /"Reject"/);
 });
 
-test("composer mutation review only blocks on current-session pending edit plans", async () => {
+test("mutation review actions stay clickable while the agent is waiting on that decision", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+	const actionGuardMatch = source.match(/private getActionablePendingEditPlan\(planId: string\): EditPlanRecord \| null \{([\s\S]*?)\n\t\}\n\n\tprivate getReviewableEditPlan/);
+	assert.ok(actionGuardMatch, "mutation review actions should re-check the current session plan before applying or rejecting");
+	const actionGuardBlock = actionGuardMatch[1] ?? "";
+	const reviewGuardMatch = source.match(/private getReviewableEditPlan\(planId: string\): EditPlanRecord \| null \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanReviewItem/);
+	assert.ok(reviewGuardMatch, "mutation review should allow conflicted plans to be dismissed");
+	const reviewGuardBlock = reviewGuardMatch[1] ?? "";
+
+	assert.match(itemBlock, /const canApply = plan\.items\.some\(\(item\) => item\.status === "pending"\)/);
+	assert.match(itemBlock, /const canDismiss = plan\.items\.some\(\(item\) => item\.status === "pending" \|\| item\.status === "conflicted"\)/);
+	assert.match(itemBlock, /getActionablePendingEditPlan\(plan\.id\)/);
+	assert.match(itemBlock, /getReviewableEditPlan\(plan\.id\)/);
+	assert.doesNotMatch(itemBlock, /this\.aiBusy/);
+	assert.match(actionGuardBlock, /this\.getPendingEditPlans\(\)\.find/);
+	assert.match(actionGuardBlock, /item\.status === "pending"/);
+	assert.match(reviewGuardBlock, /item\.status === "pending" \|\| item\.status === "conflicted"/);
+});
+
+test("composer mutation review only blocks on current-session reviewable edit plans", async () => {
 	const source = readViewSource();
 	const pendingMatch = source.match(/private getPendingEditPlans\(\): EditPlanRecord\[] \{([\s\S]*?)\n\t\}\n\n\tprivate hasPendingComposerDecision/);
 	assert.ok(pendingMatch, "getPendingEditPlans block should exist");
@@ -293,8 +316,7 @@ test("composer mutation review only blocks on current-session pending edit plans
 
 	assert.match(pendingBlock, /filter\(\(plan\) => this\.isCurrentSessionEditPlan\(plan\)\)/);
 	assert.match(pendingBlock, /item\.status === "pending"/);
-	assert.match(pendingBlock, /items: plan\.items\.filter\(\(item\) => item\.status === "pending"\)/);
-	assert.doesNotMatch(pendingBlock, /item\.status === "conflicted"/);
+	assert.match(pendingBlock, /items: plan\.items\.filter\(\(item\) => item\.status === "pending" \|\| item\.status === "conflicted"\)/);
 	assert.match(sessionBlock, /this\.aiSessionId\.trim\(\)/);
 	assert.match(sessionBlock, /plan\.originConversationId\?\.trim\(\)/);
 	assert.match(sessionBlock, /originConversationId === currentSessionId/);

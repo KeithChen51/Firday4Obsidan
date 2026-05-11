@@ -93,6 +93,10 @@ const requiredAgentUxCopy = {
 		zh: "已取消，未写入任何文件。",
 		en: "Canceled. No files were written.",
 	},
+	"mutation.review.noLongerPending": {
+		zh: "这次文件修改已经不在待确认状态。",
+		en: "This file change is no longer waiting for confirmation.",
+	},
 	"mutation.review.itemTitle": {
 		zh: "准备应用 {count} 个文件修改",
 		en: "Ready to apply {count} file change(s)",

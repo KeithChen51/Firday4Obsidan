@@ -44,12 +44,33 @@ test("submitAiPrompt renders a local intake preview before mention and planner s
 test("runtime transport-start progress switches the local status to model understanding copy", () => {
 	const source = readViewSource();
 	const progressBlock = extractMethod(source, "handleRuntimeProgress", "buildRuntimeReply");
+	const listBlock = extractMethod(source, "renderAiMessageList", "shouldRenderAgentTaskPanel");
+	const submitBlock = extractMethod(source, "submitAiPrompt", "compileWikiByButton");
+	const compileBlock = extractMethod(source, "compileWikiByButton", "compileWikiWithStatus");
 
+	assert.match(source, /private aiRuntimeModelRequestStarted = false/);
+	assert.match(submitBlock, /this\.aiRuntimeModelRequestStarted = false/);
+	assert.match(compileBlock, /this\.aiRuntimeModelRequestStarted = false/);
+	assert.match(listBlock, /const shouldRenderLiveRuntimePreview = Boolean\(/);
+	assert.match(listBlock, /this\.aiRuntimeModelRequestStarted \|\| !this\.aiLocalIntakePreview/);
 	assert.match(progressBlock, /event\.transport\?\.type === "request_started"/);
+	assert.match(progressBlock, /this\.aiRuntimeModelRequestStarted = true/);
 	assert.match(progressBlock, /ai\.intake\.preview\.modelStarted/);
 	assert.doesNotMatch(progressBlock, /event\.phase === "model_request"[\s\S]*ai\.intake\.preview\.modelStarted/);
 	assert.match(progressBlock, /ai\.intake\.preview\.retry/);
 	assert.match(progressBlock, /ai\.intake\.preview\.modelExhaustedBeforeIntake/);
+});
+
+test("before-intake runtime failures use the retained-message product copy instead of raw transport errors", () => {
+	const source = readViewSource();
+	const submitBlock = extractMethod(source, "submitAiPrompt", "compileWikiByButton");
+	const userFacingFailureBlock = extractMethod(source, "toUserFacingAiFailureMessage", "isBeforeIntakeConnectionFailure");
+	const connectionFailureBlock = extractMethod(source, "isBeforeIntakeConnectionFailure", "detachCurrentConversationFromBackgroundTurn");
+
+	assert.match(submitBlock, /toUserFacingAiFailureMessage\(message\)/);
+	assert.match(userFacingFailureBlock, /ai\.intake\.preview\.modelExhaustedBeforeIntake/);
+	assert.doesNotMatch(userFacingFailureBlock, /原始错误|Request failed|status 503|transport|request_exhausted/);
+	assert.match(connectionFailureBlock, /Request failed|status\\s\+\\d\+|模型服务|网关|request_exhausted|transport/);
 });
 
 test("runtime intake state resets at the start of each runtime invocation", () => {
@@ -77,7 +98,7 @@ test("runtime preflight progress keeps the local intake preview until visible pr
 	const streamBlock = extractMethod(source, "streamAssistantText", "sleep");
 	const appendProgressIndex = progressBlock.indexOf("const nextSnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);");
 	const viewModelIndex = progressBlock.indexOf("const nextView = buildAgentProcessPanelViewModel(nextSnapshot);");
-	const conditionalClearIndex = progressBlock.indexOf("if (nextView.shouldRenderProcessPanel) {");
+	const conditionalClearIndex = progressBlock.indexOf("if (this.aiRuntimeModelRequestStarted && nextView.shouldRenderProcessPanel) {");
 	const clearInsideConditionalIndex = progressBlock.indexOf("this.aiLocalIntakePreview = \"\";", conditionalClearIndex);
 	const streamClearIndex = streamBlock.indexOf("this.aiLocalIntakePreview = \"\";");
 	const streamPreviewIndex = streamBlock.indexOf("this.aiStreamingPreview = \"\";");

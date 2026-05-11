@@ -161,6 +161,7 @@ export class DailyBoardView extends ItemView {
 	private aiBackgroundTurnFailure: AiTurnFailureStatus | null = null;
 	private aiLocalIntakePreview = "";
 	private aiRuntimeSawIntake = false;
+	private aiRuntimeModelRequestStarted = false;
 	private aiStreamingPreview = "";
 	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
@@ -1643,7 +1644,7 @@ export class DailyBoardView extends ItemView {
 			.filter((plan) => this.isCurrentSessionEditPlan(plan))
 			.map((plan) => ({
 				...plan,
-				items: plan.items.filter((item) => item.status === "pending"),
+				items: plan.items.filter((item) => item.status === "pending" || item.status === "conflicted"),
 			}))
 			.filter((plan) => plan.items.length > 0);
 	}
@@ -1694,11 +1695,15 @@ export class DailyBoardView extends ItemView {
 			text: this.t("approval.composerTitle", "需要你确认后继续"),
 		});
 		if (pendingEditPlans.length > 0) {
+			const pendingMutationCount = pendingEditPlans.reduce((total, plan) =>
+				total + plan.items.filter((item) => item.status === "pending").length, 0);
 			panel.createDiv({
 				cls: "friday-approval-detail",
-				text: this.t("mutation.review.pendingComposer", "已准备好 {count} 个待应用的文件修改，确认后才会写入 Obsidian。", {
-					count: pendingEditPlans.reduce((total, plan) => total + plan.items.filter((item) => item.status === "pending").length, 0),
-				}),
+				text: pendingMutationCount > 0
+					? this.t("mutation.review.pendingComposer", "已准备好 {count} 个待应用的文件修改，确认后才会写入 Obsidian。", {
+						count: pendingMutationCount,
+					})
+					: this.t("mutation.review.conflictedComposer", "文件在计划生成后发生变化，需要重新确认后再继续。"),
 			});
 			for (const plan of pendingEditPlans) {
 				this.renderEditPlanReviewItem(panel, plan);
@@ -1734,6 +1739,30 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
+	private getActionablePendingEditPlan(planId: string): EditPlanRecord | null {
+		const normalizedPlanId = planId.trim();
+		if (!normalizedPlanId) {
+			return null;
+		}
+		const plan = this.getPendingEditPlans().find((item) => item.id === normalizedPlanId);
+		if (!plan || !this.isCurrentSessionEditPlan(plan)) {
+			return null;
+		}
+		return plan.items.some((item) => item.status === "pending") ? plan : null;
+	}
+
+	private getReviewableEditPlan(planId: string): EditPlanRecord | null {
+		const normalizedPlanId = planId.trim();
+		if (!normalizedPlanId) {
+			return null;
+		}
+		const plan = this.getPendingEditPlans().find((item) => item.id === normalizedPlanId);
+		if (!plan || !this.isCurrentSessionEditPlan(plan)) {
+			return null;
+		}
+		return plan.items.some((item) => item.status === "pending" || item.status === "conflicted") ? plan : null;
+	}
+
 	private renderEditPlanReviewItem(containerEl: HTMLElement, plan: EditPlanRecord): void {
 		const firstItem = plan.items[0];
 		const itemEl = containerEl.createDiv({ cls: "friday-approval-card friday-mutation-review-item" });
@@ -1754,14 +1783,32 @@ export class DailyBoardView extends ItemView {
 		}
 		const actions = itemEl.createDiv({ cls: "friday-approval-actions" });
 		const canApply = plan.items.some((item) => item.status === "pending");
-		this.addMutationReviewButton(actions, this.t("mutation.review.applyChanges", "应用修改"), !canApply || this.aiBusy, async () => {
-			await this.plugin.agentRuntimeService.acceptEditPlan(plan.id);
-			new Notice(this.t("mutation.review.applied", "已应用修改。"), 3000);
+		const canDismiss = plan.items.some((item) => item.status === "pending" || item.status === "conflicted");
+		this.addMutationReviewButton(actions, this.t("mutation.review.applyChanges", "应用修改"), !canApply, async () => {
+			const currentPlan = this.getActionablePendingEditPlan(plan.id);
+			if (!currentPlan) {
+				new Notice(this.t("mutation.review.noLongerPending", "这次文件修改已经不在待确认状态。"), 3000);
+				this.syncComposerDecisionPanel();
+				return;
+			}
+			const status = await this.plugin.agentRuntimeService.acceptEditPlan(currentPlan.id);
+			new Notice(
+				status === "conflicted"
+					? this.t("mutation.review.conflictedNotice", "文件已变化，需要重新确认后再继续。")
+					: this.t("mutation.review.applied", "已应用修改。"),
+				3000,
+			);
 			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
 		});
-		this.addMutationReviewButton(actions, this.t("mutation.review.doNotApply", "不应用"), this.aiBusy, async () => {
-			await this.plugin.agentRuntimeService.rejectEditPlan(plan.id);
+		this.addMutationReviewButton(actions, this.t("mutation.review.doNotApply", "不应用"), !canDismiss, async () => {
+			const currentPlan = this.getReviewableEditPlan(plan.id);
+			if (!currentPlan) {
+				new Notice(this.t("mutation.review.noLongerPending", "这次文件修改已经不在待确认状态。"), 3000);
+				this.syncComposerDecisionPanel();
+				return;
+			}
+			await this.plugin.agentRuntimeService.rejectEditPlan(currentPlan.id);
 			new Notice(this.t("mutation.review.rejected", "已取消，未写入任何文件。"), 3000);
 			await this.refreshCompletedTrajectorySnapshotsForCurrentSession();
 			this.renderBoard();
@@ -1833,7 +1880,7 @@ export class DailyBoardView extends ItemView {
 			return this.t("mutation.review.empty", "No file change.");
 		}
 		if (plan.items.some((item) => item.status === "conflicted")) {
-			return this.t("mutation.review.conflicted", "Conflict: file changed after the plan was created.");
+			return this.t("mutation.review.conflicted", "文件在计划生成后发生变化，需要重新确认。");
 		}
 		return this.t("mutation.review.summary", "{count} 个修改待确认，确认后才会写入 Obsidian。", {
 			count: plan.items.filter((item) => item.status === "pending").length || plan.items.length,
@@ -2580,6 +2627,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimeSawIntake = false;
+		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiAgentTasks = [];
 		this.aiProcessSnapshotsByKey.clear();
@@ -2633,6 +2681,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimeSawIntake = false;
+		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
@@ -3278,7 +3327,12 @@ export class DailyBoardView extends ItemView {
 			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message);
 			this.renderAiMessage(containerEl, message, false, completedSnapshotForMessage);
 		}
-		if (this.aiRuntimeTrajectorySnapshot && !this.isLiveRuntimeSnapshotAttachedToMessage()) {
+		const shouldRenderLiveRuntimePreview = Boolean(
+			this.aiRuntimeTrajectorySnapshot &&
+			(this.aiRuntimeModelRequestStarted || !this.aiLocalIntakePreview) &&
+			!this.isLiveRuntimeSnapshotAttachedToMessage(),
+		);
+		if (shouldRenderLiveRuntimePreview) {
 			this.renderRuntimeExecutionPreview(containerEl);
 		} else if (this.aiStreamingPreview) {
 			this.renderAiMessage(
@@ -3976,6 +4030,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimeSawIntake = false;
+		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
@@ -4073,7 +4128,7 @@ export class DailyBoardView extends ItemView {
 				failureMessage = this.t("ai.action.cancelled", "Action cancelled.");
 			} else {
 				const message = error instanceof Error ? error.message : String(error ?? "");
-				failureMessage = message.trim() || this.t("common.unknownError", "Unknown error");
+				failureMessage = this.toUserFacingAiFailureMessage(message);
 				new Notice(
 					this.t("ai.notice.chatFailed", "FRIDAY chat failed: {error}", { error: failureMessage }),
 					7000,
@@ -4092,6 +4147,7 @@ export class DailyBoardView extends ItemView {
 			this.aiStreamingPreview = "";
 			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
+			this.aiRuntimeModelRequestStarted = false;
 			this.clearRuntimeElapsedTimer();
 			this.aiSendAbortController = null;
 			this.aiRuntimeLastRenderAt = 0;
@@ -4103,6 +4159,18 @@ export class DailyBoardView extends ItemView {
 			}
 			await this.flushQueuedAiPrompt();
 		}
+	}
+
+	private toUserFacingAiFailureMessage(message: string): string {
+		const raw = message.trim();
+		if (!this.aiRuntimeSawIntake && this.isBeforeIntakeConnectionFailure(raw)) {
+			return this.t("ai.intake.preview.modelExhaustedBeforeIntake", "暂时没能连接到模型。你的消息已保留，但 FRIDAY 还没有开始处理。");
+		}
+		return productizeRuntimeText(raw) || raw || this.t("common.unknownError", "Unknown error");
+	}
+
+	private isBeforeIntakeConnectionFailure(message: string): boolean {
+		return /Request failed|status\s+\d+|模型服务|网关|request_exhausted|transport/i.test(message);
 	}
 
 	private detachCurrentConversationFromBackgroundTurn(target: AiTurnTarget): void {
@@ -4137,6 +4205,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
 		this.aiRuntimeSawIntake = false;
+		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
 		this.aiForceScrollToBottomOnce = true;
 		this.renderBoard();
@@ -4197,6 +4266,7 @@ export class DailyBoardView extends ItemView {
 			this.aiStreamingPreview = "";
 			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
+			this.aiRuntimeModelRequestStarted = false;
 			this.aiRuntimeLastRenderAt = 0;
 			this.aiForceScrollToBottomOnce = true;
 			this.renderBoard();
@@ -4500,7 +4570,7 @@ export class DailyBoardView extends ItemView {
 		this.updateLocalIntakePreviewForRuntimeProgress(event);
 		const nextSnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
 		const nextView = buildAgentProcessPanelViewModel(nextSnapshot);
-		if (nextView.shouldRenderProcessPanel) {
+		if (this.aiRuntimeModelRequestStarted && nextView.shouldRenderProcessPanel) {
 			this.aiLocalIntakePreview = "";
 		}
 		this.aiRuntimeTrajectorySnapshot = nextSnapshot;
@@ -4530,12 +4600,18 @@ export class DailyBoardView extends ItemView {
 	private updateLocalIntakePreviewForRuntimeProgress(event: RuntimeProgressEvent): void {
 		if (event.phase === "intake") {
 			this.aiRuntimeSawIntake = true;
+			this.aiRuntimeModelRequestStarted = true;
+			return;
+		}
+		if (event.phase === "tool_call" || event.phase === "tool_result" || event.phase === "done" || event.phase === "fallback") {
+			this.aiRuntimeModelRequestStarted = true;
 			return;
 		}
 		if (event.phase !== "model_retry") {
 			return;
 		}
 		if (event.transport?.type === "request_started") {
+			this.aiRuntimeModelRequestStarted = true;
 			this.aiLocalIntakePreview = this.t("ai.intake.preview.modelStarted", "FRIDAY 正在理解你的请求……");
 			return;
 		}
@@ -5188,13 +5264,13 @@ export class DailyBoardView extends ItemView {
 		}
 		const assistant = extractRuntimeAssistantText(trimmed);
 		if (assistant) {
-			return assistant;
+			return productizeRuntimeText(assistant) || assistant;
 		}
 		const parsed = parseRuntimeEnvelopeText(trimmed);
 		if (parsed?.type === "tool_call") {
 			return this.t("ai.runtime.toolCallFallback", "FRIDAY 正在继续调用工具。");
 		}
-		return raw;
+		return productizeRuntimeText(raw) || raw;
 	}
 
 	private isIntermediateRuntimeReply(text: string): boolean {

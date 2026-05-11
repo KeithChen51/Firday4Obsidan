@@ -1182,6 +1182,42 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "progressive visible process steps");
 });
 
+test("buildAgentProcessPanelViewModel productizes pending mutation review fallback text", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "Waiting for review of 1 pending file change(s).",
+		summary: "Waiting for review of 1 pending file change(s).",
+		items: [
+			makeItem({
+				id: "mutation-review",
+				kind: "mutation",
+				title: "Waiting for review of 1 pending file change(s).",
+				detail: "Review pending file changes.",
+				status: "waiting",
+				rawEventType: "mutation_planned",
+				targetPath: "Project/workspace/a.md",
+			}),
+		],
+		mutations: [
+			{
+				id: "m1",
+				event: "planned",
+				operation: "write",
+				targetPath: "Project/workspace/a.md",
+				status: "pending",
+				summary: "Waiting for review of 1 pending file change(s).",
+				reason: "",
+			},
+		],
+	}));
+
+	const text = ordinaryProcessText(view);
+	assert.match(text, /确认后才会写入 Obsidian|等待你确认/);
+	assertNoBannedOrdinaryTerms(text, "pending mutation review process text");
+});
+
 test("buildAgentProcessPanelViewModel shows acknowledged task, plan, and stage reports as real timeline steps", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 

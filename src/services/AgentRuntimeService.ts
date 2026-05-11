@@ -831,12 +831,12 @@ export class AgentRuntimeService {
 			const firstPlan = pendingPlans[0];
 			const firstItem = firstPlan?.items[0];
 			const task = await this.agentTaskStore.markWaitingForApproval(this.activeTaskId, {
-				summary: `Waiting for review of ${pendingMutationCount} pending file change(s).`,
+				summary: `已准备好 ${pendingMutationCount} 个待应用的文件修改，确认后才会写入 Obsidian。`,
 				waitingForApproval: {
 					kind: "mutation",
 					tool: firstPlan?.tool ?? "mutation",
 					targetPath: firstItem?.path ?? "",
-					summary: firstItem?.summary ?? "Review pending file changes.",
+					summary: firstItem?.summary ?? "已准备好文件修改，确认后才会写入 Obsidian。",
 					mutationPlanIds: pendingPlans.map((plan) => plan.id),
 				},
 				pendingMutationCount,

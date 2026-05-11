@@ -429,7 +429,7 @@ export class AIService {
 
 		if (lower.includes("500") || lower.includes("502") || lower.includes("503")) {
 			return new Error(
-				`模型服务或网关暂时不可用（${extractHttpStatus(error) ?? "5xx"}）。这通常是临时性网络/网关故障，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。原始错误：${raw}`,
+				`模型服务或网关暂时不可用（${extractHttpStatus(error) ?? "5xx"}）。这通常是临时性网络/网关故障，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。`,
 			);
 		}
 

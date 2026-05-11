@@ -53,8 +53,11 @@ test("user-facing presenter maps task states and actions to ordinary product cop
 			formatUserFacingTaskAction(action).label
 		),
 		productizeRuntimeText("Waiting for approval"),
+		productizeRuntimeText("Waiting for review of 1 pending file change(s)."),
 		productizeRuntimeText("Before snapshot mismatch for Project/a.md."),
 		productizeRuntimeText("Pending file changes: 1 change(s) prepared but not applied."),
+		productizeRuntimeText("原始错误：Error: Request failed, status 503"),
+		productizeRuntimeText("模型服务或网关暂时不可用（503）。这通常是临时性网络/网关故障，不是协议不兼容。"),
 	].join("\n");
 
 	assert.match(visibleCopy, /等待|确认|修改|重试|停止/);

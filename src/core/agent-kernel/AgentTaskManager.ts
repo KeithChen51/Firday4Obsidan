@@ -76,12 +76,12 @@ export class AgentTaskManager {
 		if (pendingMutations.length > 0) {
 			const first = pendingMutations[0] ?? {};
 			const task = await this.options.taskStore.markWaitingForApproval(taskId, {
-				summary: `Waiting for review of ${pendingMutations.length} pending file change(s).`,
+				summary: `已准备好 ${pendingMutations.length} 个待应用的文件修改，确认后才会写入 Obsidian。`,
 				waitingForApproval: {
 					kind: "mutation",
 					tool: first.operation ?? "mutation",
 					targetPath: first.targetPath ?? "",
-					summary: first.summary ?? "Review pending file changes.",
+					summary: first.summary ?? "已准备好文件修改，确认后才会写入 Obsidian。",
 					mutationPlanIds: pendingMutations.map((mutation) => mutation.id).filter(isNonEmptyString),
 				},
 				pendingMutationCount: pendingMutations.length,

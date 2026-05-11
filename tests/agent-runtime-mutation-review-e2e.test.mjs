@@ -351,11 +351,13 @@ test("standard review create write edit and delete summaries stay prepared until
 		assert.equal(result.traces[0].summary, item.expected);
 		assert.equal(result.storedMutations[0]?.summary, item.expected);
 		assert.equal(planned?.payload.summary, item.expected);
+		assert.equal(result.task?.summary, "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。");
 		assert.equal(result.task?.waitingForApproval?.summary, item.expected);
 		for (const summary of [
 			result.traces[0].summary,
 			result.storedMutations[0]?.summary ?? "",
 			String(planned?.payload.summary ?? ""),
+			result.task?.summary ?? "",
 			result.task?.waitingForApproval?.summary ?? "",
 		]) {
 			assert.doesNotMatch(summary, /\b(completed|applied|created|modified|deleted)\b/i, `${item.name} summary should not imply completion`);

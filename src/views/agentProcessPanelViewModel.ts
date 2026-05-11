@@ -1387,6 +1387,8 @@ function sanitizeTimelineSummary(value: string): string {
 
 function normalizeFileMutationStatusText(text: string): string {
 	if (
+		/Waiting for review of\s+\d+\s+pending file change\(s\)/i.test(text) ||
+		/Review pending file changes/i.test(text) ||
 		/Pending file changes/i.test(text) ||
 		/\b\d+\s+file changes?\s+pending review\b/i.test(text) ||
 		/Prepared\b.*\bfile (creation|update|deletion|change)\b.*\b(review|confirmation)/i.test(text)

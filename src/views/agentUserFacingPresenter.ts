@@ -95,8 +95,15 @@ export function productizeRuntimeText(raw: string | undefined | null): string {
 	if (/Tool approval required|Allow once|Allow session|Allow always/i.test(text)) {
 		return "需要你确认后继续";
 	}
-	if (/file change\(s\) pending review|Pending file changes|\b\d+\s+file changes?\s+pending review\b/i.test(text)) {
+	if (
+		/Waiting for review of\s+\d+\s+pending file change\(s\)/i.test(text) ||
+		/Review pending file changes/i.test(text) ||
+		/file change\(s\) pending review|Pending file changes|\b\d+\s+file changes?\s+pending review\b/i.test(text)
+	) {
 		return "已准备好待应用的文件修改，确认后才会写入 Obsidian。";
+	}
+	if (/原始错误|Request failed|status\s+\d+|request_exhausted|transport|模型服务或网关暂时不可用|兼容模式|协议不兼容|503/i.test(text)) {
+		return "暂时没能连接到模型。你的消息已保留，但 FRIDAY 还没有开始处理。";
 	}
 	if (/Applied file creation/i.test(text)) {
 		return "文件已创建。";
