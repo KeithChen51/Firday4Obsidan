@@ -458,7 +458,7 @@ function applyRuntimeProgress(
 					? "ok"
 					: "running",
 				step,
-				actionRef: checkpoint?.checkpointId,
+				actionRef: checkpoint?.canAutoResume === false ? undefined : checkpoint?.checkpointId,
 				rawEventType: checkpoint ? `checkpoint_${runtimeCheckpointToReplayEvent(checkpoint.type)}` : event.phase,
 			});
 			break;
@@ -852,13 +852,12 @@ function hasResumableCheckpoint(snapshot: AgentTrajectorySnapshot): boolean {
 		.filter((item) => item.rawEventType === "checkpoint_resume_rejected")
 		.map((item) => item.actionRef)
 		.filter((value): value is string => Boolean(value)));
-	return snapshot.items.some((item) => {
-		const actionRef = item.actionRef;
-		return item.rawEventType === "checkpoint_saved" &&
-			typeof actionRef === "string" &&
-			actionRef.length > 0 &&
-			!rejectedIds.has(actionRef);
-	});
+	const savedCheckpoints = snapshot.items.filter((item) => item.rawEventType === "checkpoint_saved");
+	const latestCheckpoint = savedCheckpoints[savedCheckpoints.length - 1];
+	const actionRef = latestCheckpoint?.actionRef;
+	return typeof actionRef === "string" &&
+		actionRef.length > 0 &&
+		!rejectedIds.has(actionRef);
 }
 
 function runtimeCheckpointToReplayEvent(

@@ -57,6 +57,7 @@ test("user-facing presenter maps task states and actions to ordinary product cop
 		productizeRuntimeText("Before snapshot mismatch for Project/a.md."),
 		productizeRuntimeText("Pending file changes: 1 change(s) prepared but not applied."),
 		productizeRuntimeText("原始错误：Error: Request failed, status 503"),
+		productizeRuntimeText("Error: net::ERR_CONNECTION_CLOSED"),
 		productizeRuntimeText("模型服务或网关暂时不可用（503）。这通常是临时性网络/网关故障，不是协议不兼容。"),
 	].join("\n");
 
@@ -123,6 +124,53 @@ test("trajectory projector ordinary text does not expose checkpoint or replay co
 	].join("\n");
 
 	assertNoBannedOrdinaryTerms(ordinaryText, "trajectory ordinary text");
+});
+
+test("trajectory projector hides resume when the latest checkpoint is not auto-resumable", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "checkpoint",
+			depth: 0,
+			message: "Checkpoint saved at context_ready.",
+			checkpoint: {
+				type: "saved",
+				checkpointId: "checkpoint-safe",
+				boundary: "context_ready",
+				canAutoResume: true,
+			},
+		},
+		{
+			phase: "checkpoint",
+			depth: 0,
+			message: "Checkpoint saved after tool result.",
+			checkpoint: {
+				type: "saved",
+				checkpointId: "checkpoint-after-tool",
+				boundary: "after_tool_result",
+				canAutoResume: false,
+			},
+		},
+		{
+			phase: "model_retry",
+			depth: 0,
+			step: 3,
+			message: "请求多次未成功，请稍后重试。",
+			transport: {
+				type: "request_exhausted",
+				requestId: "request-1",
+				attempt: 6,
+				maxAttempts: 6,
+				retryable: false,
+				channel: "chat_with_tools",
+				endpointIndex: 0,
+				endpointCount: 1,
+			},
+		},
+	]);
+
+	assert.deepEqual(snapshot.actions.map((action) => action.id), ["retry"]);
 });
 
 test("trajectory projector productizes live model-request progress", async () => {

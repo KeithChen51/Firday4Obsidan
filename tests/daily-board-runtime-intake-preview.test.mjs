@@ -70,7 +70,7 @@ test("before-intake runtime failures use the retained-message product copy inste
 	assert.match(submitBlock, /toUserFacingAiFailureMessage\(message\)/);
 	assert.match(userFacingFailureBlock, /ai\.intake\.preview\.modelExhaustedBeforeIntake/);
 	assert.doesNotMatch(userFacingFailureBlock, /原始错误|Request failed|status 503|transport|request_exhausted/);
-	assert.match(connectionFailureBlock, /Request failed|status\\s\+\\d\+|模型服务|网关|request_exhausted|transport/);
+	assert.match(connectionFailureBlock, /Request failed|status\\s\+\\d\+|模型服务|网关|request_exhausted|transport|ERR_CONNECTION_CLOSED/);
 });
 
 test("runtime intake state resets at the start of each runtime invocation", () => {
@@ -195,6 +195,8 @@ test("assistant message rendering sanitizes legacy file mutation notices", () =>
 	assert.match(renderContentBlock, /message\.role === "assistant"/);
 	assert.match(renderContentBlock, /normalizeDisplayedAssistantMessageContent/);
 	assert.match(normalizeBlock, /Pending file changes/);
+	assert.match(normalizeBlock, /productizeRuntimeText\(content\)/);
+	assert.match(normalizeBlock, /ERR_CONNECTION_CLOSED/);
 	assert.match(normalizeBlock, /确认后才会写入 Obsidian/);
 	assert.match(normalizeBlock, /Applied file/);
 	assert.doesNotMatch(renderContentBlock, /MarkdownRenderer\.renderMarkdown\(message\.content/);

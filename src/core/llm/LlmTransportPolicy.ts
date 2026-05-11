@@ -3,7 +3,9 @@ const RETRYABLE_PATTERNS: RegExp[] = [
 	/timeout/i,
 	/timed out/i,
 	/err_connection_reset/i,
+	/err_connection_closed/i,
 	/econnreset/i,
+	/econnclosed/i,
 	/socket hang up/i,
 	/fetch failed/i,
 	/network error/i,
@@ -11,6 +13,7 @@ const RETRYABLE_PATTERNS: RegExp[] = [
 	/service unavailable/i,
 	/temporarily unavailable/i,
 	/connection reset/i,
+	/connection closed/i,
 ];
 
 function hasHeader(headers: Record<string, string>, expectedName: string): boolean {

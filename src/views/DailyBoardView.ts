@@ -2993,6 +2993,12 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private normalizeDisplayedAssistantMessageContent(content: string): string {
+		if (/ERR_CONNECTION_CLOSED|ECONNCLOSED|Request failed|status\s+\d+|request_exhausted|transport|原始错误/i.test(content)) {
+			const productizedContent = productizeRuntimeText(content);
+			if (productizedContent) {
+				return productizedContent;
+			}
+		}
 		return content
 			.replace(
 				/Pending file changes:\s*(\d+)\s*change\(s\)\s*prepared but not applied\.\s*Review and apply or reject them in FRIDAY\./gi,
@@ -4170,7 +4176,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private isBeforeIntakeConnectionFailure(message: string): boolean {
-		return /Request failed|status\s+\d+|模型服务|网关|request_exhausted|transport/i.test(message);
+		return /Request failed|status\s+\d+|模型服务|网关|request_exhausted|transport|ERR_CONNECTION_CLOSED/i.test(message);
 	}
 
 	private detachCurrentConversationFromBackgroundTurn(target: AiTurnTarget): void {

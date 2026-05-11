@@ -102,6 +102,9 @@ export function productizeRuntimeText(raw: string | undefined | null): string {
 	) {
 		return "已准备好待应用的文件修改，确认后才会写入 Obsidian。";
 	}
+	if (/ERR_CONNECTION_CLOSED|ECONNCLOSED|connection closed/i.test(text)) {
+		return "模型连接中断，FRIDAY 没能完成这次处理。可以稍后重试。";
+	}
 	if (/原始错误|Request failed|status\s+\d+|request_exhausted|transport|模型服务或网关暂时不可用|兼容模式|协议不兼容|503/i.test(text)) {
 		return "暂时没能连接到模型。你的消息已保留，但 FRIDAY 还没有开始处理。";
 	}

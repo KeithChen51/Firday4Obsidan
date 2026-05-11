@@ -383,6 +383,12 @@ export class AIService {
 			);
 		}
 
+		if (lower.includes("err_connection_closed") || lower.includes("econnclosed") || lower.includes("connection closed")) {
+			return new Error(
+				`连接已中断（ERR_CONNECTION_CLOSED）。这通常是网络、代理、VPN 或上游网关提前关闭连接，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
+			);
+		}
+
 		if (lower.includes("504") || lower.includes("gateway timeout")) {
 			return new Error(
 				`网关超时（504）。这通常是网关或上游模型排队超时，不是协议不兼容。当前请求未拿到完整结果；若重试，需要重新发送本次模型请求。已尝试地址：${triedText}`,
