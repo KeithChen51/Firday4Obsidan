@@ -128,6 +128,9 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 	}
 
 	for (const [index, narration] of (replaySummary.narrationTimeline ?? []).entries()) {
+		if (narration.kind === "stage_report") {
+			continue;
+		}
 		upsertItem(snapshot, stageForNarration(narration.kind), {
 			id: `replay:narration:${narration.kind}:${index}`,
 			kind: "narration",
@@ -328,6 +331,10 @@ function applyRuntimeProgress(
 				summary: event.message,
 				source: "fallback" as const,
 			};
+			if (narration.kind === "stage_report") {
+				snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
+				break;
+			}
 			const itemStatus = mapNarrationStatus(narration.status, false);
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
 			snapshot.headline = formatNarrationTitle(narration.kind);

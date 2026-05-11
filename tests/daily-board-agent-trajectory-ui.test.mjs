@@ -250,6 +250,57 @@ test("DailyBoard keeps local intake preview through runtime preflight and clears
 	assert.equal(view.aiLocalIntakePreview, "");
 });
 
+test("DailyBoard renders live stage reports as assistant replies outside the process panel", async () => {
+	const messageListEl = new FakeElement("div");
+	const stageText = "已读取相关文件，接下来整理结论。";
+	const view = await createDailyBoardHarness({
+		activePage: "chat",
+		aiMessageListEl: messageListEl,
+		aiRuntimeTrajectoryStore: {
+			appendProgress: () => makeSnapshot({
+				status: "running",
+				headline: "FRIDAY 正在处理",
+				summary: "",
+				items: [],
+			}),
+			completeFromProgress: () => makeSnapshot(),
+			refreshElapsed: () => null,
+		},
+		bindRuntimeSnapshotToLatestUserMessage: () => {},
+		syncLiveRuntimeProgressProcess: () => false,
+		syncAiRuntimeShell: () => {
+			messageListEl.empty();
+			view.renderAiMessageList(messageListEl);
+		},
+		syncBackgroundAgentStatus: () => {},
+	});
+	view.renderAiMessageContent = (containerEl, message) => {
+		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.resolveUserDisplayName = () => "User";
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({
+			phase: "narration",
+			depth: 0,
+			message: stageText,
+			narration: {
+				kind: "stage_report",
+				summary: stageText,
+				justDone: "已读取相关文件",
+				next: "接下来整理结论",
+				source: "model",
+			},
+		});
+	});
+
+	const stageReply = messageListEl
+		.findAllByClass("test-message-body")
+		.find((item) => item.textContent.includes(stageText));
+	assert.ok(stageReply, "stage report should render as a normal assistant reply");
+	assert.equal(messageListEl.countByClass("friday-agent-process-timeline-item"), 0);
+});
+
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
 	const root = new FakeElement("div");
 	const view = await createDailyBoardHarness({
@@ -1935,7 +1986,7 @@ test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw rea
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
-test("renderAgentAnswerFlow renders visible narration in process and keeps final answer separate", async () => {
+test("renderAgentAnswerFlow keeps stage reports out of the structured process panel", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1985,11 +2036,12 @@ test("renderAgentAnswerFlow renders visible narration in process and keeps final
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 4);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
 	assert.match(root.textContent, /收到任务/);
 	assert.match(root.textContent, /整理方案/);
-	assert.match(root.textContent, /阶段性汇报/);
+	assert.doesNotMatch(root.textContent, /阶段性汇报/);
+	assert.doesNotMatch(root.textContent, /已读取相关文件，接下来实现事件链路。/);
 	assert.match(root.findByClass("friday-ai-answer-content")?.textContent ?? "", /结论已完成/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b|raw chain of thought/i);
 });

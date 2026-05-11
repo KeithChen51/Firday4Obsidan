@@ -163,6 +163,7 @@ export class DailyBoardView extends ItemView {
 	private aiRuntimeSawIntake = false;
 	private aiRuntimeModelRequestStarted = false;
 	private aiStreamingPreview = "";
+	private aiRuntimeStageReplies: string[] = [];
 	private aiRuntimeTrajectoryStore = new LiveTrajectoryStore();
 	private aiRuntimeTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
 	private aiStreamingTrajectorySnapshot: AgentTrajectorySnapshot | null = null;
@@ -2623,6 +2624,7 @@ export class DailyBoardView extends ItemView {
 		this.aiLastError = "";
 		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiRuntimeStageReplies = [];
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
@@ -2677,6 +2679,7 @@ export class DailyBoardView extends ItemView {
 		this.aiLastError = "";
 		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiRuntimeStageReplies = [];
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
@@ -3317,10 +3320,12 @@ export class DailyBoardView extends ItemView {
 		containerEl.empty();
 		const pendingApprovals = this.approvalQueue.list();
 		const visibleAgentTasks = this.getVisibleAgentTasksForCurrentSession();
+		const runtimeStageReplies = this.getAiRuntimeStageReplies();
 		if (
 			this.aiConversation.length === 0 &&
 			!this.aiLocalIntakePreview &&
 			!this.aiStreamingPreview &&
+			runtimeStageReplies.length === 0 &&
 			!this.aiRuntimeTrajectorySnapshot &&
 			pendingApprovals.length === 0 &&
 			visibleAgentTasks.length === 0
@@ -3332,6 +3337,9 @@ export class DailyBoardView extends ItemView {
 		for (const message of this.aiConversation) {
 			const completedSnapshotForMessage = this.getCompletedTrajectorySnapshotForMessage(message);
 			this.renderAiMessage(containerEl, message, false, completedSnapshotForMessage);
+		}
+		for (const reply of runtimeStageReplies) {
+			this.renderAiMessage(containerEl, { role: "assistant", content: reply }, true);
 		}
 		const shouldRenderLiveRuntimePreview = Boolean(
 			this.aiRuntimeTrajectorySnapshot &&
@@ -4032,6 +4040,7 @@ export class DailyBoardView extends ItemView {
 		this.composer?.replaceSnapshot(this.aiComposerSnapshot);
 		this.aiLastError = "";
 		this.aiStreamingPreview = "";
+		this.aiRuntimeStageReplies = [];
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
@@ -4103,7 +4112,7 @@ export class DailyBoardView extends ItemView {
 				? await this.buildCompletedTrajectorySnapshot(runtimeResult, turnTarget.sessionId)
 				: null;
 			this.rememberCompletedTrajectorySnapshotForSession(completedSnapshot, turnTarget.sessionId, turnTarget.projectId);
-			if (shouldStreamFinalText && this.plugin.settings.llm.enableStreaming && this.isCurrentAiTurnTarget(turnTarget)) {
+			if (shouldStreamFinalText && this.isCurrentAiTurnTarget(turnTarget)) {
 				this.aiStreamingTrajectorySnapshot = completedSnapshot;
 				await this.streamAssistantText(normalizedAssistantText);
 			}
@@ -4151,6 +4160,7 @@ export class DailyBoardView extends ItemView {
 			this.aiActiveTurnTarget = null;
 			this.aiLocalIntakePreview = "";
 			this.aiStreamingPreview = "";
+			this.aiRuntimeStageReplies = [];
 			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
 			this.aiRuntimeModelRequestStarted = false;
@@ -4207,6 +4217,7 @@ export class DailyBoardView extends ItemView {
 		this.aiLastError = "";
 		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiRuntimeStageReplies = [];
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiRuntimeTrajectoryStore.reset();
 		this.aiRuntimeTrajectorySnapshot = null;
@@ -4236,9 +4247,7 @@ export class DailyBoardView extends ItemView {
 				},
 			});
 			const reply = this.buildRuntimeReply(runtimeResult);
-			if (this.plugin.settings.llm.enableStreaming) {
-				await this.streamAssistantText(reply);
-			}
+			await this.streamAssistantText(reply);
 			const completedSnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
 			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
 			const assistantUiMeta = this.buildAssistantMessageUiMeta(runtimeResult, runtimeResult.task);
@@ -4270,6 +4279,7 @@ export class DailyBoardView extends ItemView {
 			this.aiBusy = false;
 			this.aiLocalIntakePreview = "";
 			this.aiStreamingPreview = "";
+			this.aiRuntimeStageReplies = [];
 			this.aiStreamingTrajectorySnapshot = null;
 			this.aiRuntimeTrajectorySnapshot = null;
 			this.aiRuntimeModelRequestStarted = false;
@@ -4567,12 +4577,42 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeElapsedTimer = null;
 	}
 
+	private getAiRuntimeStageReplies(): string[] {
+		if (!Array.isArray(this.aiRuntimeStageReplies)) {
+			this.aiRuntimeStageReplies = [];
+		}
+		return this.aiRuntimeStageReplies;
+	}
+
+	private captureRuntimeStageReply(event: RuntimeProgressEvent): boolean {
+		if (event.phase !== "narration" || event.narration?.kind !== "stage_report") {
+			return false;
+		}
+		const raw = [
+			event.narration.summary,
+			event.narration.justDone,
+			event.narration.next,
+			event.message,
+		].find((item) => typeof item === "string" && item.trim().length > 0);
+		const reply = productizeRuntimeText(raw) || String(raw ?? "").trim();
+		if (!reply) {
+			return false;
+		}
+		const stageReplies = this.getAiRuntimeStageReplies();
+		if (stageReplies[stageReplies.length - 1] === reply) {
+			return false;
+		}
+		stageReplies.push(reply);
+		return true;
+	}
+
 	private handleRuntimeProgress(event: RuntimeProgressEvent): void {
 		void recordTaskFromRuntimeProgress(event, this.plugin.agentRuntimeService, this.aiRuntimeProgressTaskIds, {
 			recordAgentTask: (task) => this.recordAgentTask(task),
 			render: () => this.syncAiRuntimeShell(),
 		});
 		this.aiStreamingTrajectorySnapshot = null;
+		const stageReplyAdded = this.captureRuntimeStageReply(event);
 		this.updateLocalIntakePreviewForRuntimeProgress(event);
 		const nextSnapshot = this.aiRuntimeTrajectoryStore.appendProgress(event);
 		const nextView = buildAgentProcessPanelViewModel(nextSnapshot);
@@ -4591,12 +4631,12 @@ export class DailyBoardView extends ItemView {
 		} else {
 			this.scheduleRuntimeElapsedTimer();
 		}
-		const forceRender = event.phase === "tool_call" || event.phase === "tool_result" || terminalProgress;
+		const forceRender = stageReplyAdded || event.phase === "tool_call" || event.phase === "tool_result" || terminalProgress;
 		const now = Date.now();
 		if (forceRender || now - this.aiRuntimeLastRenderAt >= 120) {
 			this.aiRuntimeLastRenderAt = now;
 			this.aiForceScrollToBottomOnce = true;
-			if (!terminalProgress && nextView.shouldRenderProcessPanel && this.syncLiveRuntimeProgressProcess()) {
+			if (!stageReplyAdded && !terminalProgress && nextView.shouldRenderProcessPanel && this.syncLiveRuntimeProgressProcess()) {
 				return;
 			}
 			this.syncAiRuntimeShell();
@@ -5331,6 +5371,7 @@ export class DailyBoardView extends ItemView {
 			this.aiAgentTasks = [];
 			this.aiLocalIntakePreview = "";
 			this.aiStreamingPreview = "";
+			this.aiRuntimeStageReplies = [];
 			this.aiStreamingTrajectorySnapshot = null;
 			this.aiProcessSnapshotsByKey.clear();
 			return;
@@ -5348,6 +5389,7 @@ export class DailyBoardView extends ItemView {
 				this.aiConversation = [...matched.messages];
 				await this.hydrateAgentTasksForCurrentSession();
 				await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
+				this.aiRuntimeStageReplies = [];
 				return;
 			}
 		}
@@ -5358,6 +5400,7 @@ export class DailyBoardView extends ItemView {
 			this.aiConversation = [...latest.messages];
 			await this.hydrateAgentTasksForCurrentSession();
 			await this.hydrateCompletedTrajectorySnapshotsForCurrentSession();
+			this.aiRuntimeStageReplies = [];
 			return;
 		}
 
@@ -5366,6 +5409,7 @@ export class DailyBoardView extends ItemView {
 		this.aiAgentTasks = [];
 		this.aiLocalIntakePreview = "";
 		this.aiStreamingPreview = "";
+		this.aiRuntimeStageReplies = [];
 		this.aiStreamingTrajectorySnapshot = null;
 		this.aiProcessSnapshotsByKey.clear();
 	}

@@ -315,7 +315,9 @@ export function buildAgentProcessPanelViewModel(
 		return createEmptyViewModel();
 	}
 
-	const visibleItems = snapshot.items.filter(isRenderableTrajectoryItem);
+	const visibleItems = snapshot.items.filter((item) =>
+		isRenderableTrajectoryItem(item) && !isStageReportNarrationItem(item)
+	);
 	const actions = buildActionViews(snapshot);
 	const mutations = buildMutations(snapshot);
 	const recovery = buildRecovery(snapshot, mutations);
@@ -684,11 +686,39 @@ function headerSummary(snapshot: AgentTrajectorySnapshot, visibleSteps: AgentPro
 	if (latestTransportStep) {
 		return retryTimelineSummaryForStep(latestTransportStep);
 	}
-	const summary = snapshot.summary || visibleSteps.at(-1)?.summary || "";
+	const summary = snapshotProcessSummary(snapshot) || visibleSteps.at(-1)?.summary || "";
 	if (snapshot.status === "failed") {
 		return shortText(sanitizeFailedRequestSummary(summary));
 	}
 	return shortText(sanitizeTimelineSummary(summary));
+}
+
+function snapshotProcessHeadline(snapshot: AgentTrajectorySnapshot): string {
+	const headline = sanitizeTimelineSummary(snapshot.headline || "");
+	return isStageReportSnapshotText(snapshot, headline) ? "" : headline;
+}
+
+function snapshotProcessSummary(snapshot: AgentTrajectorySnapshot): string {
+	const summary = sanitizeTimelineSummary(snapshot.summary || "");
+	return isStageReportSnapshotText(snapshot, summary) ? "" : summary;
+}
+
+function isStageReportSnapshotText(snapshot: AgentTrajectorySnapshot, value: string): boolean {
+	const normalizedValue = normalizeTimelineDedupeText(value);
+	if (!normalizedValue) {
+		return false;
+	}
+	return snapshot.items
+		.filter(isStageReportNarrationItem)
+		.flatMap((item) => [
+			item.title,
+			item.detail,
+			item.narrationJustDone,
+			item.narrationNext,
+		])
+		.map((text) => normalizeTimelineDedupeText(text ?? ""))
+		.filter(Boolean)
+		.some((text) => text === normalizedValue || text.includes(normalizedValue) || normalizedValue.includes(text));
 }
 
 interface TimelineBuildContext {
@@ -733,7 +763,7 @@ function buildTimelineView(
 			status,
 			defaultExpanded: false,
 			canExpand: false,
-			collapsedSummary: shortText(snapshot.summary || "正在整理回答。"),
+			collapsedSummary: shortText(snapshotProcessSummary(snapshot) || "正在整理回答。"),
 			statusBar: null,
 			groups: [],
 			items: [],
@@ -893,12 +923,12 @@ function collapsedTimelineSummary(
 		return "执行遇到问题，正在换一种方式继续。";
 	}
 	if (status === "failed") {
-		return sanitizeTimelineSummary(context.recovery?.summary || snapshot.failure?.message || snapshot.summary || "运行遇到问题，可以重试。");
+		return sanitizeTimelineSummary(context.recovery?.summary || snapshot.failure?.message || snapshotProcessSummary(snapshot) || "运行遇到问题，可以重试。");
 	}
 	if (status === "completed") {
 		return "";
 	}
-	return sanitizeTimelineSummary(items.find((item) => item.status === "running")?.summary || snapshot.summary || items.at(-1)?.summary || "");
+	return sanitizeTimelineSummary(items.find((item) => item.status === "running")?.summary || snapshotProcessSummary(snapshot) || items.at(-1)?.summary || "");
 }
 
 function completedTimelineTitle(label: string, durationSeconds: number): string {
@@ -1079,7 +1109,7 @@ function shouldAddReceiptItem(context: TimelineBuildContext): boolean {
 }
 
 function receiptSummary(snapshot: AgentTrajectorySnapshot): string {
-	const summary = sanitizeTimelineSummary(snapshot.headline || snapshot.summary || "");
+	const summary = sanitizeTimelineSummary(snapshotProcessHeadline(snapshot) || snapshotProcessSummary(snapshot) || "");
 	if (!summary || /^Agent\b/i.test(summary)) {
 		return "FRIDAY 已收到任务，开始按当前上下文处理。";
 	}
@@ -1696,6 +1726,10 @@ function coalesceReceiptItems(items: AgentTrajectoryItem[]): AgentTrajectoryItem
 
 function isTaskAcknowledgementItem(item: AgentTrajectoryItem): boolean {
 	return item.kind === "narration" && item.narrationKind === "task_acknowledged";
+}
+
+function isStageReportNarrationItem(item: AgentTrajectoryItem): boolean {
+	return item.kind === "narration" && item.narrationKind === "stage_report";
 }
 
 function hasVisibleProcessTrigger(

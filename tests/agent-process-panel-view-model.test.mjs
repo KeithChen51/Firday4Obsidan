@@ -1218,7 +1218,7 @@ test("buildAgentProcessPanelViewModel productizes pending mutation review fallba
 	assertNoBannedOrdinaryTerms(text, "pending mutation review process text");
 });
 
-test("buildAgentProcessPanelViewModel shows acknowledged task, plan, and stage reports as real timeline steps", async () => {
+test("buildAgentProcessPanelViewModel keeps stage reports out of structured process steps", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
 	const view = buildAgentProcessPanelViewModel(makeSnapshot({
@@ -1275,18 +1275,17 @@ test("buildAgentProcessPanelViewModel shows acknowledged task, plan, and stage r
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), [
 		"收到任务",
 		"整理方案",
-		"阶段性汇报",
 		"读取上下文",
 	]);
 	assert.deepEqual(view.timeline?.items.map((item) => item.title), [
 		"收到任务",
 		"整理方案",
-		"阶段性汇报",
 		"读取项目现状",
 	]);
 	assert.equal(view.timeline?.items[0]?.summary, "需要把过程叙事放进线性时间线。");
 	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "读取相关代码");
-	assert.equal(view.timeline?.items[2]?.summary, "已读取相关文件，接下来实现事件链路。");
+	assert.equal(view.timeline?.items.some((item) => item.kind === "stage_report"), false);
+	assert.equal(JSON.stringify(view.timeline).includes("已读取相关文件，接下来实现事件链路。"), false);
 	assert.doesNotMatch(JSON.stringify(view.timeline), /context_ready|Context|Reasoning|Tools|Review|Finalize/);
 });
 
@@ -1676,9 +1675,9 @@ test("buildAgentProcessPanelViewModel compacts repeated context timeline items w
 		],
 	}));
 
-	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context", "stage_report", "context", "file_change", "context"]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context", "file_change", "context"]);
 	const contexts = view.timeline?.items.filter((item) => item.kind === "context") ?? [];
-	assert.equal(contexts.length, 3);
+	assert.equal(contexts.length, 2);
 	const lastContext = view.timeline?.items.at(-1);
 	assert.equal(lastContext?.kind, "context", "file changes should stop context compaction");
 	assert.doesNotMatch(lastContext?.summary ?? "", /4 批|4 batch/);

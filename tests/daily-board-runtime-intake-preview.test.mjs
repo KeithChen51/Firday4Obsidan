@@ -228,3 +228,16 @@ test("streaming final answer renders with the completed snapshot process strip",
 	assert.ok(streamSnapshotIndex > rememberIndex, "submit should bind the completed snapshot to streaming preview");
 	assert.ok(streamIndex > streamSnapshotIndex, "submit should stream final text after snapshot binding");
 });
+
+test("final answer typewriter is independent from model transport streaming setting", () => {
+	const source = readViewSource();
+	const submitBlock = extractMethod(source, "submitAiPrompt", "compileWikiByButton");
+	const streamIndex = submitBlock.indexOf("await this.streamAssistantText(normalizedAssistantText);");
+	const streamGuardStart = submitBlock.lastIndexOf("if (", streamIndex);
+	const streamGuard = submitBlock.slice(streamGuardStart, streamIndex);
+
+	assert.ok(streamIndex >= 0, "submit should stream the visible final answer");
+	assert.doesNotMatch(streamGuard, /settings\.llm\.enableStreaming/);
+	assert.match(streamGuard, /shouldStreamFinalText/);
+	assert.match(streamGuard, /isCurrentAiTurnTarget\(turnTarget\)/);
+});

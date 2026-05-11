@@ -285,6 +285,19 @@ test("projectRuntimeProgress maps narration events into ordered visible process 
 			at: "2026-05-06T00:00:02.000Z",
 		},
 		{
+			phase: "narration",
+			depth: 0,
+			message: "已读取相关文件，接下来整理结论。",
+			narration: {
+				kind: "stage_report",
+				summary: "已读取相关文件，接下来整理结论。",
+				justDone: "已读取相关文件",
+				next: "接下来整理结论",
+				source: "model",
+			},
+			at: "2026-05-06T00:00:02.500Z",
+		},
+		{
 			phase: "tool_call",
 			depth: 0,
 			step: 1,
@@ -298,6 +311,8 @@ test("projectRuntimeProgress maps narration events into ordered visible process 
 	assert.equal(snapshot.status, "running");
 	assert.deepEqual(snapshot.items.map((item) => item.kind), ["narration", "narration", "tool"]);
 	assert.deepEqual(snapshot.items.slice(0, 2).map((item) => item.title), ["收到任务", "整理方案"]);
+	assert.equal(snapshot.items.some((item) => item.narrationKind === "stage_report"), false);
+	assert.equal(JSON.stringify(snapshot.items).includes("已读取相关文件，接下来整理结论。"), false);
 	assert.equal(snapshot.items[0]?.detail, "需要把过程叙事放进线性时间线。");
 	assert.deepEqual(snapshot.items[1]?.narrationPlan, ["读取相关代码", "补测试", "实现事件链路"]);
 	assert.equal(snapshot.items[1]?.rawEventType, "narration_report");
@@ -695,9 +710,9 @@ test("projectReplaySummary restores narration timeline before tools without fixe
 	}));
 
 	const narrationItems = snapshot.items.filter((item) => item.kind === "narration");
-	assert.deepEqual(narrationItems.map((item) => item.title), ["收到任务", "阶段性汇报"]);
-	assert.equal(narrationItems[1]?.narrationJustDone, "已读取相关文件");
-	assert.equal(narrationItems[1]?.narrationNext, "接下来实现事件链路");
+	assert.deepEqual(narrationItems.map((item) => item.title), ["收到任务"]);
+	assert.equal(snapshot.items.some((item) => item.narrationKind === "stage_report"), false);
+	assert.equal(JSON.stringify(snapshot.items).includes("已读取相关文件，接下来实现事件链路。"), false);
 	assert.ok(snapshot.items.findIndex((item) => item.kind === "narration") < snapshot.items.findIndex((item) => item.kind === "tool"));
 	assert.doesNotMatch(JSON.stringify(snapshot.items), /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
