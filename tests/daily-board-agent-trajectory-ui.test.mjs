@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createJiti } from "jiti";
+import { assertNoBannedOrdinaryTerms } from "./helpers/ordinarySurfaceContract.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
@@ -1677,6 +1678,38 @@ test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-proces
 	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-right");
 	root.findByClass("friday-agent-process-toggle")?.onclick?.();
 	assert.deepEqual(calls, ["toggle"]);
+});
+
+test("renderAgentTrajectoryCard expanded ordinary process hides internal runtime terms", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "waiting_for_approval",
+			headline: "Waiting for approval",
+			summary: "Before snapshot mismatch for Project/workspace/a.md.",
+			time: { startedAt: "2026-05-05T00:00:00.000Z", updatedAt: "2026-05-05T00:00:03.000Z", durationMs: 3000 },
+			items: [
+				makeItem({ id: "checkpoint", kind: "system", title: "Checkpoint saved", detail: "Context package built before native model request. (context_ready)", status: "ok", rawEventType: "checkpoint_saved" }),
+				makeItem({ id: "model", kind: "model", title: "Model request", detail: "model_request started", status: "running", rawEventType: "model_request" }),
+				makeItem({ id: "approval", kind: "approval", title: "Waiting for approval", detail: "1 file change(s) pending review.", status: "waiting", rawEventType: "tool_approval" }),
+			],
+			actions: [
+				{ id: "cancel", label: "Cancel", enabled: true, targetId: "task-1" },
+				{ id: "view_replay", label: "View replay", enabled: true, targetId: "turn-1" },
+			],
+		}),
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		onAction: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assertNoBannedOrdinaryTerms(root.textContent, "expanded process DOM text");
 });
 
 test("renderAgentTrajectoryCard renders simple completed answer replay as compact thought strip", async () => {

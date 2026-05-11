@@ -843,7 +843,8 @@ test("projectReplaySummary exposes checkpoint resume before retry for resumable 
 	const checkpointItem = snapshot.items.find((item) => item.rawEventType === "checkpoint_saved");
 	assert.equal(checkpointItem?.kind, "system");
 	assert.equal(checkpointItem?.status, "ok");
-	assert.match(checkpointItem?.detail ?? "", /Stable tool result checkpoint/);
+	assert.match(checkpointItem?.detail ?? "", /FRIDAY 已保存当前进度/);
+	assert.doesNotMatch(checkpointItem?.detail ?? "", /Stable tool result checkpoint|checkpoint/i);
 });
 
 test("projectReplaySummary does not expose resume for saved checkpoints marked unsafe", async () => {
@@ -1001,5 +1002,5 @@ test("projector derives trajectory actions from running failed approval mutation
 	]);
 
 	const completed = projectReplaySummary(makeReplaySummary());
-	assert.deepEqual(completed.actions.map((action) => action.id), ["view_replay"]);
+	assert.deepEqual(completed.actions.map((action) => action.id), []);
 });

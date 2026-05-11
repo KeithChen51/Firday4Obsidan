@@ -441,19 +441,19 @@ function applyRuntimeProgress(
 			const checkpoint = event.checkpoint;
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
 			snapshot.headline = checkpoint?.type === "resume_started"
-				? "Resuming from checkpoint"
+				? "FRIDAY 正在恢复进度"
 				: checkpoint?.type === "resume_rejected"
-					? "Checkpoint resume skipped"
+					? "这次恢复已跳过，FRIDAY 会重新检查后继续"
 					: checkpoint?.type === "resume_completed"
-						? "Checkpoint resume completed"
-						: "Checkpoint saved";
-			snapshot.summary = safeText(event.message);
+						? "FRIDAY 已恢复进度"
+						: "FRIDAY 已保存当前进度";
+			snapshot.summary = formatCheckpointRuntimeDetail(event.message, checkpoint?.type);
 			setStageStatus(snapshot, "reasoning", checkpoint?.type === "resume_rejected" ? "ok" : "running");
 			upsertItem(snapshot, "reasoning", {
 				id: `live:checkpoint:${checkpoint?.checkpointId ?? index}:${checkpoint?.type ?? "event"}`,
 				kind: "system",
-				title: checkpoint ? formatCheckpointTitle(runtimeCheckpointToReplayEvent(checkpoint.type)) : "Checkpoint",
-				detail: safeText(event.message || checkpoint?.reason || ""),
+				title: checkpoint ? formatCheckpointTitle(runtimeCheckpointToReplayEvent(checkpoint.type)) : "FRIDAY 已保存当前进度",
+				detail: formatCheckpointRuntimeDetail(event.message || checkpoint?.reason || "", checkpoint?.type),
 				status: checkpoint?.type === "resume_completed" || checkpoint?.type === "saved" || checkpoint?.type === "resume_rejected"
 					? "ok"
 					: "running",
@@ -773,7 +773,7 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 	if (snapshot.status === "running") {
 		actions.push({
 			id: "cancel",
-			label: "Cancel",
+			label: "停止",
 			enabled: true,
 			targetId: snapshot.identity.taskId,
 		});
@@ -782,14 +782,14 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 		if (hasResumableCheckpoint(snapshot)) {
 			actions.push({
 				id: "resume",
-				label: "Resume",
+				label: "恢复",
 				enabled: true,
 				targetId: snapshot.identity.taskId,
 			});
 		}
 		actions.push({
 			id: "retry",
-			label: "Retry",
+			label: "重试",
 			enabled: true,
 			targetId: snapshot.identity.taskId,
 		});
@@ -797,7 +797,7 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 	if (snapshot.status === "waiting_for_user") {
 		actions.push({
 			id: "continue",
-			label: "Continue",
+			label: "继续",
 			enabled: true,
 			targetId: snapshot.identity.taskId,
 		});
@@ -843,14 +843,6 @@ function deriveActions(snapshot: AgentTrajectorySnapshot): AgentTrajectoryAction
 				targetId: mutation.id,
 			},
 		);
-	}
-	if ((snapshot.status === "completed" || snapshot.status === "safe_stopped") && snapshot.privacy.source === "replay") {
-		actions.push({
-			id: "view_replay",
-			label: "View replay",
-			enabled: true,
-			targetId: snapshot.identity.turnId,
-		});
 	}
 	return actions;
 }
@@ -917,21 +909,21 @@ function resolveReplayStatus(summary: ReplaySummaryWithIdentity): AgentTrajector
 function replayHeadline(status: AgentTrajectoryStatus): string {
 	switch (status) {
 		case "waiting_for_approval":
-			return "Waiting for approval";
+			return "等待你确认后继续";
 		case "waiting_for_user":
-			return "Waiting for user";
+			return "等待你的补充";
 		case "failed":
-			return "Agent failed";
+			return "执行遇到问题";
 		case "cancelled":
-			return "Agent cancelled";
+			return "FRIDAY 已停止";
 		case "safe_stopped":
-			return "Agent stopped safely";
+			return "FRIDAY 已安全停止";
 		case "completed":
-			return "Agent finished";
+			return "FRIDAY 已完成工作";
 		case "running":
-			return "Agent run is open";
+			return "FRIDAY 正在处理";
 		default:
-			return "Agent trajectory";
+			return "FRIDAY 工作过程";
 	}
 }
 
@@ -1267,30 +1259,62 @@ function formatMutationLabel(mutation: AgentTrajectoryMutation): string {
 }
 
 function formatTaskTitle(event: TurnReplaySummary["taskTimeline"][number]["event"]): string {
-	return `Task ${event.replace(/_/g, " ")}`;
+	switch (event) {
+		case "waiting_for_approval":
+			return "等待你确认后继续";
+		case "waiting_for_user":
+			return "等待你的补充";
+		case "failed":
+			return "执行遇到问题";
+		case "cancelled":
+			return "FRIDAY 已停止";
+		case "completed":
+			return "FRIDAY 已完成工作";
+		case "running":
+			return "FRIDAY 正在处理";
+		case "created":
+		default:
+			return "FRIDAY 已收到任务";
+	}
 }
 
 function formatCheckpointTitle(event: TurnReplaySummary["checkpointTimeline"][number]["event"]): string {
 	switch (event) {
 		case "resume_started":
-			return "Checkpoint resume";
+			return "FRIDAY 正在恢复进度";
 		case "resume_completed":
-			return "Checkpoint resume completed";
+			return "FRIDAY 已恢复进度";
 		case "resume_rejected":
-			return "Checkpoint resume skipped";
+			return "这次恢复已跳过，FRIDAY 会重新检查后继续";
 		case "saved":
 		default:
-			return "Checkpoint saved";
+			return "FRIDAY 已保存当前进度";
 	}
 }
 
 function formatCheckpointDetail(checkpoint: TurnReplaySummary["checkpointTimeline"][number]): string {
-	const boundary = checkpoint.boundary ? ` (${checkpoint.boundary})` : "";
 	const reason = safeText(checkpoint.reason);
 	if (reason) {
-		return `${reason}${boundary}`;
+		return formatCheckpointRuntimeDetail(reason, checkpoint.event);
 	}
-	return `${formatCheckpointTitle(checkpoint.event)}${boundary}`.trim();
+	return formatCheckpointTitle(checkpoint.event);
+}
+
+function formatCheckpointRuntimeDetail(
+	value: string | undefined,
+	event: TurnReplaySummary["checkpointTimeline"][number]["event"] | NonNullable<RuntimeProgressEvent["checkpoint"]>["type"] | undefined,
+): string {
+	const text = safeText(value ?? "");
+	if (/resume_rejected|skipped/i.test(String(event)) || /rejected|skipped/i.test(text)) {
+		return "这次恢复已跳过，FRIDAY 会重新检查后继续。";
+	}
+	if (/resume_started|resume_completed/i.test(String(event)) || /resume/i.test(text)) {
+		return "FRIDAY 正在恢复进度。";
+	}
+	if (!text || /checkpoint|context_ready|native model request|model_request/i.test(text)) {
+		return "FRIDAY 已保存当前进度。";
+	}
+	return text;
 }
 
 function safeText(value: string, maxLength = 220): string {

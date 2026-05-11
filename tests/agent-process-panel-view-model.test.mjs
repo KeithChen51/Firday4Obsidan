@@ -5,6 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createJiti } from "jiti";
+import { assertNoBannedOrdinaryTerms } from "./helpers/ordinarySurfaceContract.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
@@ -18,6 +19,36 @@ async function loadViewModel() {
 
 async function loadProjector() {
 	return jiti.import(projectorPath);
+}
+
+function ordinaryProcessText(view) {
+	return [
+		view.title,
+		view.header?.label,
+		view.header?.headline,
+		view.header?.summary,
+		view.status?.label,
+		view.recovery?.title,
+		view.recovery?.summary,
+		...(view.actions ?? []).flatMap((action) => [action.label, action.reason]),
+		...(view.visibleSteps ?? []).flatMap((step) => [
+			step.title,
+			step.summary,
+			...step.actions.flatMap((action) => [action.label, action.detail, action.action?.label, action.action?.reason]),
+		]),
+		...(view.timeline?.items ?? []).flatMap((item) => [
+			item.title,
+			item.summary,
+			item.meta,
+			item.detail?.title,
+			...(item.detail?.lines ?? []),
+		]),
+		...(view.timeline?.actions ?? []).flatMap((action) => [action.label, action.reason]),
+		view.timeline?.title,
+		view.timeline?.collapsedSummary,
+		view.timeline?.statusBar?.phase,
+		view.timeline?.statusBar?.action,
+	].filter(Boolean).join("\n");
 }
 
 test("buildAgentProcessPanelViewModel hides simple live model-only answers from process surfaces", async () => {
@@ -724,7 +755,7 @@ test("buildAgentProcessPanelViewModel prioritizes waiting approval state and act
 	assert.equal(view.visibleSteps.at(-1)?.title, "等待确认");
 	assert.equal(view.visibleSteps.at(-1)?.status, "waiting_for_approval");
 	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.kind), ["event"]);
-	assert.equal(view.actions[0]?.reason, "Use the approval controls.");
+	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "waiting approval process view");
 });
 
 test("buildAgentProcessPanelViewModel exposes retryable failure recovery", async () => {
@@ -750,7 +781,7 @@ test("buildAgentProcessPanelViewModel exposes retryable failure recovery", async
 
 	assert.equal(view.status.tone, "failed");
 	assert.equal(view.surface, "compact_recovery");
-	assert.equal(view.recovery?.title, "Recovery available");
+	assert.equal(view.recovery?.title, "可以恢复");
 	assert.match(view.recovery?.summary ?? "", /grep failed/);
 	assert.equal(view.recovery?.retryable, true);
 	assert.equal(view.actions[0]?.id, "retry");
@@ -791,7 +822,50 @@ test("buildAgentProcessPanelViewModel exposes checkpoint resume recovery before 
 	assert.equal(view.surface, "compact_recovery");
 	assert.deepEqual(view.actions.map((action) => action.id), ["resume", "retry"]);
 	assert.deepEqual(view.visibleSteps.at(-1)?.actions.map((action) => action.action?.id), ["resume", "retry"]);
-	assert.match(JSON.stringify(view), /Stable tool result checkpoint/);
+	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "checkpoint recovery process view");
+});
+
+test("buildAgentProcessPanelViewModel keeps ordinary process text free of internal runtime terms", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "waiting_for_user",
+		headline: "Waiting for user",
+		summary: "Before snapshot mismatch for Project/workspace/a.md.",
+		items: [
+			makeItem({
+				id: "checkpoint",
+				kind: "system",
+				title: "Checkpoint saved",
+				detail: "Context package built before native model request. (context_ready)",
+				status: "ok",
+				rawEventType: "checkpoint_saved",
+			}),
+			makeItem({
+				id: "model",
+				kind: "model",
+				title: "Model request",
+				detail: "model_request started",
+				status: "running",
+				rawEventType: "model_request",
+			}),
+			makeItem({
+				id: "approval",
+				kind: "approval",
+				title: "Waiting for approval",
+				detail: "1 file change(s) pending review.",
+				status: "waiting",
+				rawEventType: "tool_approval",
+			}),
+		],
+		actions: [
+			{ id: "continue", label: "Continue", enabled: true, targetId: "task-1" },
+			{ id: "reject", label: "Reject", enabled: false, reason: "Waiting for approval", targetId: "approval" },
+		],
+	}));
+
+	assert.equal(view.surface, "action_required");
+	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "ordinary process view");
 });
 
 test("buildAgentProcessPanelViewModel renders transport retry without checkpoint resume claims", async () => {

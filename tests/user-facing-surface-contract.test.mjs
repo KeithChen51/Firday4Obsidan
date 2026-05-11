@@ -1,0 +1,137 @@
+/* eslint-env node */
+import assert from "node:assert/strict";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { createJiti } from "jiti";
+
+import {
+	assertNoBannedOrdinaryTerms,
+	collectLeafTextMatches,
+} from "./helpers/ordinarySurfaceContract.mjs";
+
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(testDir, "..");
+const jiti = createJiti(import.meta.url);
+const presenterPath = path.join(projectRoot, "src/views/agentUserFacingPresenter.ts");
+const planPath = path.join(projectRoot, "src/core/mutations/MutationPlan.ts");
+const applierPath = path.join(projectRoot, "src/core/mutations/MutationApplier.ts");
+const projectorPath = path.join(projectRoot, "src/core/trajectory/AgentTrajectoryProjector.ts");
+
+async function loadPresenter() {
+	return jiti.import(presenterPath);
+}
+
+async function loadMutationModules() {
+	const [planModule, applierModule] = await Promise.all([
+		jiti.import(planPath),
+		jiti.import(applierPath),
+	]);
+	return {
+		createMutationPlan: planModule.createMutationPlan,
+		MutationApplier: applierModule.MutationApplier,
+	};
+}
+
+async function loadProjector() {
+	return jiti.import(projectorPath);
+}
+
+test("user-facing presenter maps task states and actions to ordinary product copy", async () => {
+	const {
+		formatUserFacingTaskStatus,
+		formatUserFacingTaskAction,
+		productizeRuntimeText,
+	} = await loadPresenter();
+
+	const visibleCopy = [
+		formatUserFacingTaskStatus("waiting_for_approval"),
+		formatUserFacingTaskStatus("waiting_for_user"),
+		formatUserFacingTaskStatus("failed"),
+		...["cancel", "continue", "apply", "reject", "resume", "retry"].map((action) =>
+			formatUserFacingTaskAction(action).label
+		),
+		productizeRuntimeText("Waiting for approval"),
+		productizeRuntimeText("Before snapshot mismatch for Project/a.md."),
+		productizeRuntimeText("Pending file changes: 1 change(s) prepared but not applied."),
+	].join("\n");
+
+	assert.match(visibleCopy, /等待|确认|修改|重试|停止/);
+	assertNoBannedOrdinaryTerms(visibleCopy, "presenter output");
+});
+
+test("MutationApplier exposes structured reason codes before user-facing copy is rendered", async () => {
+	const { createMutationPlan, MutationApplier } = await loadMutationModules();
+	const files = new Map([["Project/workspace/a.md", "old"]]);
+	const applier = new MutationApplier({
+		async read(filePath) {
+			return files.get(filePath) ?? null;
+		},
+		async write(filePath, content) {
+			files.set(filePath, content);
+		},
+		async delete(filePath) {
+			files.delete(filePath);
+		},
+	});
+	const plan = createMutationPlan({
+		id: "plan-conflict",
+		agentId: "agent",
+		operation: "write",
+		targetPath: "Project/workspace/a.md",
+		before: "old",
+		after: "new",
+		summary: "Write review",
+	});
+
+	files.set("Project/workspace/a.md", "external change");
+	const result = await applier.apply(plan);
+
+	assert.equal(result.status, "conflicted");
+	assert.equal(result.reasonCode, "before_snapshot_mismatch");
+	assert.deepEqual(result.reasonDetail, {
+		code: "before_snapshot_mismatch",
+		path: "Project/workspace/a.md",
+	});
+	assertNoBannedOrdinaryTerms(result.reason ?? "", "mutation compatibility reason");
+});
+
+test("trajectory projector ordinary text does not expose checkpoint or replay controls", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "checkpoint",
+			depth: 0,
+			message: "Checkpoint saved at context_ready.",
+			checkpoint: {
+				type: "saved",
+				checkpointId: "checkpoint-1",
+				boundary: "context_ready",
+			},
+		},
+	]);
+	const ordinaryText = [
+		snapshot.headline,
+		snapshot.summary,
+		...snapshot.items.flatMap((item) => [item.title, item.detail]),
+		...snapshot.actions.map((action) => action.label),
+	].join("\n");
+
+	assertNoBannedOrdinaryTerms(ordinaryText, "trajectory ordinary text");
+});
+
+test("leaf-node scanner reports only visible leaf text matches", () => {
+	const child = { textContent: "Waiting for approval", children: [], tagName: "SPAN", className: "leaf" };
+	const parent = { textContent: "Wrapper Waiting for approval", children: [child], tagName: "DIV", className: "parent" };
+	const root = {
+		querySelectorAll() {
+			return [parent, child];
+		},
+	};
+
+	assert.deepEqual(collectLeafTextMatches(root), [
+		{ tag: "SPAN", className: "leaf", text: "Waiting for approval" },
+	]);
+});

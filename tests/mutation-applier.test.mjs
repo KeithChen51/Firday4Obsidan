@@ -113,7 +113,12 @@ test("MutationApplier marks before snapshot mismatches as conflicted and leaves 
 
 	assert.equal(result.status, "conflicted");
 	assert.equal(result.plan.status, "conflicted");
-	assert.match(result.reason, /snapshot/i);
+	assert.equal(result.reasonCode, "before_snapshot_mismatch");
+	assert.deepEqual(result.reasonDetail, {
+		code: "before_snapshot_mismatch",
+		path: "Project/workspace/a.md",
+	});
+	assert.doesNotMatch(result.reason ?? "", /Before snapshot mismatch/i);
 	assert.equal(vault.files.get("Project/workspace/a.md"), "external change");
 });
 
@@ -144,9 +149,9 @@ test("MutationApplier rejects path traversal and absolute paths before writing",
 	const absolute = await applier.apply(absolutePlan);
 
 	assert.equal(traversal.status, "failed");
-	assert.match(traversal.reason, /invalid path/i);
+	assert.equal(traversal.reasonCode, "invalid_path");
 	assert.equal(absolute.status, "failed");
-	assert.match(absolute.reason, /invalid path/i);
+	assert.equal(absolute.reasonCode, "invalid_path");
 	assert.equal(vault.files.size, 0);
 });
 
@@ -169,7 +174,8 @@ test("MutationApplier supports caller path policy and keeps rejected paths uncha
 	const result = await applier.apply(plan);
 
 	assert.equal(result.status, "failed");
-	assert.equal(result.reason, "Outside workspace");
+	assert.equal(result.reasonCode, "invalid_path");
+	assert.equal(result.reasonDetail?.detail, "Outside workspace");
 	assert.equal(vault.files.has("Project/raw/a.md"), false);
 });
 
@@ -192,7 +198,7 @@ test("MutationApplier prevents duplicate apply attempts", async () => {
 
 	assert.equal(applied.status, "applied");
 	assert.equal(duplicate.status, "failed");
-	assert.match(duplicate.reason, /not pending/i);
+	assert.equal(duplicate.reasonCode, "not_pending");
 	assert.equal(vault.files.get("Project/workspace/a.md"), "new");
 });
 
@@ -215,7 +221,8 @@ test("MutationApplier returns structured apply failures without marking the plan
 
 	assert.equal(result.status, "failed");
 	assert.equal(result.plan.status, "pending");
-	assert.match(result.reason, /Synthetic write failure/);
+	assert.equal(result.reasonCode, "apply_exception");
+	assert.match(result.reasonDetail?.detail ?? "", /Synthetic write failure/);
 	assert.equal(vault.files.get("Project/workspace/a.md"), "old");
 });
 

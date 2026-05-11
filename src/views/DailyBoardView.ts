@@ -85,6 +85,12 @@ import {
 	type AgentComposerTaskBarView,
 } from "./agentProcessPanelViewModel";
 import { renderAgentAnswerFlow, renderAgentTrajectoryCard, renderComposerTaskBar } from "./agentTrajectoryRenderer";
+import {
+	buildUserFacingTaskView,
+	formatUserFacingTaskAction,
+	formatUserFacingTaskStatus,
+	productizeRuntimeText,
+} from "./agentUserFacingPresenter";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
@@ -3300,10 +3306,13 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private shouldRenderAgentTaskPanel(task: AgentTaskViewState): boolean {
-		return this.isTaskOwnedByCurrentSession(task) && Boolean(
-			task.waitingForUser ||
-			task.status === "waiting_for_user",
-		);
+		if (!this.isTaskOwnedByCurrentSession(task) || this.hasPendingComposerDecision()) {
+			return false;
+		}
+		if (task.status === "waiting_for_user") {
+			return Boolean(productizeRuntimeText(task.waitingForUser?.prompt || task.waitingForUser?.summary || task.summary));
+		}
+		return false;
 	}
 
 	private getVisibleAgentTasksForCurrentSession(): AgentTaskViewState[] {
@@ -3624,47 +3633,16 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private formatAgentTaskStatus(status: AgentTaskStatus): string {
-		switch (status) {
-			case "created":
-				return this.t("ai.task.status.created", "Created");
-			case "running":
-				return this.t("ai.task.status.running", "Running");
-			case "waiting_for_approval":
-				return this.t("ai.task.status.waitingApproval", "Waiting for approval");
-			case "waiting_for_user":
-				return this.t("ai.task.status.waitingUser", "Waiting for you");
-			case "failed":
-				return this.t("ai.task.status.failed", "Failed");
-			case "cancelled":
-				return this.t("ai.task.status.cancelled", "Cancelled");
-			case "completed":
-				return this.t("ai.task.status.completed", "Completed");
-			default:
-				return status;
-		}
+		return formatUserFacingTaskStatus(status);
 	}
 
 	private formatAgentTaskAction(action: AgentTask["availableActions"][number]): string {
-		switch (action) {
-			case "resume":
-				return this.t("ai.task.action.resume", "Resume");
-			case "retry":
-				return this.t("ai.task.action.retry", "Retry");
-			case "cancel":
-				return this.t("ai.task.action.cancel", "Cancel");
-			case "continue":
-				return this.t("ai.task.action.continue", "Continue");
-			case "apply":
-				return this.t("ai.task.action.apply", "Apply");
-			case "reject":
-				return this.t("ai.task.action.reject", "Reject");
-			default:
-				return action;
-		}
+		return formatUserFacingTaskAction(action).label;
 	}
 
 	private renderAgentTaskPanel(containerEl: HTMLElement, task: AgentTaskViewState): void {
 		const taskActions = this.createAgentTaskPanelActionHandlers(task.id);
+		const taskView = buildUserFacingTaskView(task);
 		const rowEl = containerEl.createDiv({ cls: "friday-ai-message-row is-assistant" });
 		const panelEl = rowEl.createDiv({
 			cls: `friday-ai-message is-assistant friday-agent-task-panel is-${task.status}`,
@@ -3672,34 +3650,32 @@ export class DailyBoardView extends ItemView {
 		const headerEl = panelEl.createDiv({ cls: "friday-agent-task-header" });
 		headerEl.createDiv({
 			cls: "friday-agent-task-title",
-			text: task.title,
+			text: taskView.title,
 		});
 		headerEl.createDiv({
 			cls: "friday-agent-task-status",
-			text: this.formatAgentTaskStatus(task.status),
+			text: taskView.statusLabel,
 		});
 		panelEl.createDiv({
 			cls: "friday-agent-task-summary",
-			text: task.failureReason || task.summary,
+			text: taskView.summary,
 		});
 		if (task.waitingForApproval) {
 			panelEl.createDiv({
 				cls: "friday-agent-task-waiting",
-				text: task.waitingForApproval.summary || this.t("ai.task.waitingApproval", "Waiting for approval."),
+				text: taskView.waitingText || "等待你确认后继续。",
 			});
 		}
 		if (task.waitingForUser) {
 			panelEl.createDiv({
 				cls: "friday-agent-task-waiting",
-				text: task.waitingForUser.prompt,
+				text: taskView.waitingText || "等待你的补充。",
 			});
 		}
 		if (task.pendingMutationCount > 0) {
 			panelEl.createDiv({
 				cls: "friday-agent-task-mutations",
-				text: this.t("ai.task.mutations", "{count} file change(s) pending review.", {
-					count: task.pendingMutationCount,
-				}),
+				text: taskView.mutationText,
 			});
 		}
 		const actionsEl = panelEl.createDiv({ cls: "friday-agent-task-actions" });

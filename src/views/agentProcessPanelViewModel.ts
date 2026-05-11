@@ -7,6 +7,10 @@ import type {
 	AgentTrajectorySnapshot,
 	AgentTrajectoryStatus,
 } from "../core/trajectory/AgentTrajectory";
+import {
+	productizeActionLabel,
+	productizeRuntimeText,
+} from "./agentUserFacingPresenter";
 
 export type AgentProcessPanelMode = "simple_thinking" | "stepped_process" | "completed_replay";
 
@@ -684,7 +688,7 @@ function headerSummary(snapshot: AgentTrajectorySnapshot, visibleSteps: AgentPro
 	if (snapshot.status === "failed") {
 		return shortText(sanitizeFailedRequestSummary(summary));
 	}
-	return shortText(summary);
+	return shortText(sanitizeTimelineSummary(summary));
 }
 
 interface TimelineBuildContext {
@@ -1346,6 +1350,13 @@ function sanitizeTimelineSummary(value: string): string {
 	if (!text) {
 		return "";
 	}
+	const productText = productizeRuntimeText(text);
+	if (productText && productText !== text) {
+		return productText;
+	}
+	if (!productText && /checkpoint|model_request|model request|replay|debug/i.test(text)) {
+		return "FRIDAY 正在整理当前进度。";
+	}
 	if (/Context package built before|context_ready/i.test(text)) {
 		return "已整理上下文，准备进入下一步。";
 	}
@@ -1616,8 +1627,8 @@ function timelineActionLabel(action: AgentProcessActionView, hasFileChangeDecisi
 	if (action.id === "reject") {
 		return hasFileChangeDecision ? "不应用" : "拒绝";
 	}
-	return action.label;
-}
+		return productizeActionLabel(action.id, action.label);
+	}
 
 function buildVisibleSteps(
 	snapshot: AgentTrajectorySnapshot,
@@ -2082,12 +2093,19 @@ function pendingMutationCount(snapshot: AgentTrajectorySnapshot, builder: StepBu
 
 function firstMeaningfulDetail(items: AgentTrajectoryItem[]): string {
 	for (const item of [...items].reverse()) {
-		const detail = cleanText(item.detail);
+		const detail = sanitizeTimelineSummary(firstMeaningfulLine(item.detail));
 		if (detail) {
 			return detail;
 		}
 	}
-	return cleanText(items.at(-1)?.title || "");
+	return sanitizeTimelineSummary(firstMeaningfulLine(items.at(-1)?.title || ""));
+}
+
+function firstMeaningfulLine(value: string | undefined): string {
+	return String(value ?? "")
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.find(Boolean) ?? "";
 }
 
 function buildStepControlActions(
@@ -2120,8 +2138,10 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 			: cleanText(item.detail);
 	return {
 		id: item.id,
-		label: item.title,
-		detail: narrationDetail,
+		label: sanitizeTimelineSummary(item.title) || "FRIDAY 正在处理",
+		detail: item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
+			? item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n")
+			: sanitizeTimelineSummary(narrationDetail),
 		kind: "event",
 		tone: itemTone(item.status),
 		status: item.status,
@@ -2134,8 +2154,8 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 function toStepControlAction(action: AgentProcessActionView): AgentProcessStepActionView {
 	return {
 		id: `control:${action.id}:${action.targetId || ""}`,
-		label: action.label,
-		detail: action.reason || "",
+		label: productizeActionLabel(action.id, action.label),
+		detail: sanitizeTimelineSummary(action.reason || ""),
 		kind: "control",
 		tone: action.tone,
 		action,
@@ -2152,7 +2172,7 @@ function buildEvidence(items: AgentTrajectoryItem[]): AgentProcessEvidenceView[]
 					id,
 					label: item.targetPath,
 					source: "file",
-					detail: item.tool || item.title,
+					detail: sanitizeTimelineSummary(item.tool || item.title),
 				});
 			}
 		} else if (item.evidenceRef) {
@@ -2162,7 +2182,7 @@ function buildEvidence(items: AgentTrajectoryItem[]): AgentProcessEvidenceView[]
 					id,
 					label: item.evidenceRef,
 					source: "event",
-					detail: item.title,
+					detail: sanitizeTimelineSummary(item.title),
 				});
 			}
 		}
@@ -2203,7 +2223,7 @@ function buildResultArtifacts(snapshot: AgentTrajectorySnapshot): AgentProcessAr
 
 function mutationDisplaySummary(value: string | undefined): string {
 	const text = cleanText(value);
-	return normalizeFileMutationStatusText(text) || text;
+	return normalizeFileMutationStatusText(text) || sanitizeTimelineSummary(text);
 }
 
 function buildDiffSummary(artifacts: AgentProcessArtifactView[]): AgentProcessDiffSummaryView | null {
@@ -2227,8 +2247,8 @@ function buildRecovery(
 	const failedMutation = mutations.find((mutation) => mutation.event === "conflicted" || mutation.event === "apply_failed");
 	if (snapshot.failure) {
 		return {
-			title: snapshot.failure.recoverable ? "Recovery available" : "Run stopped",
-			summary: cleanText(snapshot.failure.message),
+			title: snapshot.failure.recoverable ? "可以恢复" : "运行已停止",
+			summary: sanitizeTimelineSummary(snapshot.failure.message),
 			retryable: snapshot.failure.retryable,
 			recoverable: snapshot.failure.recoverable,
 		};
@@ -2236,7 +2256,7 @@ function buildRecovery(
 	if (failedMutation) {
 		return {
 			title: "文件改动需要处理",
-			summary: failedMutation.reason || failedMutation.summary || "A pending change needs review.",
+			summary: sanitizeTimelineSummary(failedMutation.reason || failedMutation.summary || "A pending change needs review."),
 			retryable: failedMutation.event === "apply_failed",
 			recoverable: true,
 		};
@@ -2245,7 +2265,9 @@ function buildRecovery(
 }
 
 function buildActionViews(snapshot: AgentTrajectorySnapshot): AgentProcessActionView[] {
-	const explicitActions = snapshot.actions.map(toActionView);
+	const explicitActions = snapshot.actions
+		.filter((action) => action.id !== "view_replay")
+		.map(toActionView);
 	const actions = [...explicitActions];
 	for (const mutation of snapshot.mutations) {
 		if (mutation.event !== "planned") {
@@ -2282,6 +2304,8 @@ function buildActionViews(snapshot: AgentTrajectorySnapshot): AgentProcessAction
 function toActionView(action: AgentTrajectoryAction): AgentProcessActionView {
 	return {
 		...action,
+		label: productizeActionLabel(action.id, action.label),
+		...(action.reason ? { reason: sanitizeTimelineSummary(action.reason) } : {}),
 		tone: action.id === "retry" || action.id === "continue" || action.id === "approve" || action.id === "apply"
 			? "primary"
 			: action.id === "reject"
