@@ -33,6 +33,7 @@ test("tool governor detects native fallback candidates", async () => {
 	assert.equal(governor.shouldFallbackToPrompt("400 unsupported tool schema"), true);
 	assert.equal(governor.shouldFallbackToPrompt("504 Gateway Timeout"), false);
 	assert.equal(governor.shouldFallbackToPrompt("ERR_CONNECTION_RESET"), false);
+	assert.equal(governor.shouldFallbackToPrompt("net::ERR_CONNECTION_CLOSED"), false);
 	assert.equal(governor.shouldFallbackToPrompt("normal runtime error"), false);
 });
 
@@ -41,5 +42,6 @@ test("tool governor detects retryable transport failures separately", async () =
 	const governor = new mod.ToolGovernor();
 	assert.equal(governor.isRetryableTransportFailure("504 Gateway Timeout"), true);
 	assert.equal(governor.isRetryableTransportFailure("ERR_CONNECTION_RESET"), true);
+	assert.equal(governor.isRetryableTransportFailure("Error: net::ERR_CONNECTION_CLOSED"), true);
 	assert.equal(governor.isRetryableTransportFailure("400 unsupported tool schema"), false);
 });

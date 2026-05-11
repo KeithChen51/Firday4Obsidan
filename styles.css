@@ -1577,6 +1577,22 @@
 	color: var(--text-muted);
 }
 
+.friday-mutation-review-full-toggle {
+	margin-top: 8px;
+}
+
+.friday-mutation-review-full[hidden] {
+	display: none;
+}
+
+.friday-mutation-review-full {
+	margin-top: 8px;
+}
+
+.friday-mutation-review-full-diff {
+	max-height: min(52vh, 520px);
+}
+
 /* ========== Exec Output ========== */
 .friday-exec-output {
 	font-family: var(--font-monospace);
@@ -2009,6 +2025,38 @@
 	align-items: stretch;
 	width: 100%;
 	max-width: none;
+}
+
+@keyframes friday-agent-process-enter {
+	from {
+		opacity: 0;
+		transform: translateY(2px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes friday-agent-process-pulse {
+	0%,
+	100% {
+		transform: scale(1);
+		box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+	}
+
+	50% {
+		transform: scale(1.08);
+		box-shadow: 0 0 0 5px color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+	}
+}
+
+.friday-agent-process-shell.is-running,
+.friday-agent-process-shell.is-retrying,
+.friday-agent-process-shell.is-recovering,
+.friday-agent-process-shell.is-waiting {
+	animation: friday-agent-process-enter 160ms ease-out;
 }
 
 .friday-agent-process-avatar {
@@ -2584,6 +2632,7 @@
 .friday-agent-process-timeline-item.is-running .friday-agent-process-timeline-marker {
 	background: var(--friday-process-accent);
 	box-shadow: 0 0 0 3px color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+	animation: friday-agent-process-pulse 1800ms ease-in-out infinite;
 }
 
 .friday-agent-process-timeline-item.is-waiting .friday-agent-process-timeline-marker,
@@ -2628,6 +2677,25 @@
 	font-weight: 400;
 	line-height: 1.55;
 	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-timeline-notes {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-top: 1px;
+}
+
+.friday-agent-process-timeline-note {
+	color: var(--text-muted);
+	font-size: 0.8em;
+	font-weight: 400;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+
+.friday-agent-process-timeline-note.is-warning {
+	color: var(--text-warning);
 }
 
 .friday-agent-process-timeline-meta {
@@ -2830,9 +2898,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+	.friday-agent-process-shell,
+	.friday-agent-process-timeline-marker,
+	.friday-composer-decision-panel,
 	.friday-agent-process-toggle,
 	.friday-agent-process-action,
 	.friday-agent-artifact-open {
+		animation: none;
 		transition: none;
 	}
 }
@@ -2923,6 +2995,87 @@
 .friday-ai-composer-task-bar-host > .friday-composer-task-bar {
 	margin-bottom: 0;
 }
+
+/* Composer decision panel */
+.friday-composer-decision-panel {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: 8px;
+	min-width: 0;
+	max-width: 100%;
+	padding: 8px;
+	border: 1px solid color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+	border-radius: 8px;
+	background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary));
+	color: var(--text-normal);
+	overflow-wrap: anywhere;
+	animation: friday-agent-process-enter 160ms ease-out;
+}
+
+.friday-composer-decision-title {
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+	font-weight: 700;
+	line-height: 1.35;
+}
+
+.friday-composer-decision-panel .friday-approval-card {
+	margin: 0;
+	padding: 8px 0 0;
+	border: 0;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.friday-composer-decision-panel .friday-approval-header {
+	margin-bottom: 4px;
+	font-size: var(--font-ui-small);
+	line-height: 1.35;
+}
+
+.friday-composer-decision-panel .friday-approval-detail {
+	min-width: 0;
+	color: var(--text-muted);
+	font-family: inherit;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+	overflow-wrap: anywhere;
+}
+
+.friday-composer-decision-panel .friday-approval-actions {
+	justify-content: flex-start;
+	gap: 6px;
+	margin-top: 8px;
+}
+
+.friday-composer-decision-panel .friday-approval-btn {
+	min-width: 0;
+	min-height: 28px;
+	border-radius: 8px;
+	padding: 4px 9px;
+	white-space: normal;
+}
+
+.friday-composer-decision-panel .friday-mutation-review-diff {
+	max-height: 140px;
+	margin-top: 6px;
+	padding: 6px 8px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--background-secondary) 62%, transparent);
+	overflow: auto;
+}
+
+.friday-composer-decision-panel .friday-mutation-review-diff-line {
+	font-size: var(--font-ui-smaller);
+	line-height: 1.45;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+/* End composer decision panel */
 
 .friday-composer-task-bar {
 	margin-bottom: 8px;
@@ -3079,6 +3232,19 @@
 }
 
 @media (max-width: 520px) {
+	.friday-composer-decision-panel {
+		padding: 7px;
+	}
+
+	.friday-composer-decision-panel .friday-approval-actions {
+		flex-direction: column;
+		align-items: stretch;
+	}
+
+	.friday-composer-decision-panel .friday-approval-btn {
+		width: 100%;
+	}
+
 	.friday-composer-task-bar-item {
 		grid-template-columns: 18px 38px minmax(0, 1fr);
 		gap: 6px;

@@ -75,18 +75,38 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 		return `Wiki compile ${payload.projectId ?? ""} (requested ${payload.requested ?? 0}, processed ${payload.processed ?? 0}, success ${payload.succeeded ?? 0}, failed ${payload.failed ?? 0}, docs ${updatedDocs}, ${indexState}, ${logState})`.trim();
 	}
 	if (tool === "write") {
-		const payload = data as { path?: string; status?: string };
-		return `${payload.status === "pending_review" ? "Write planned" : "Write completed"} ${payload.path ?? ""}`.trim();
+		const payload = data as { path?: string; status?: string; type?: string; changeType?: string };
+		if (isPendingFileMutationStatus(payload.status)) {
+			return formatPendingFileMutationSummary({
+				operation: "write",
+				targetPath: payload.path,
+				changeType: payload.changeType ?? payload.type,
+			});
+		}
+		return `Write completed ${payload.path ?? ""}`.trim();
 	}
 	if (tool === "delete") {
 		const payload = data as { path?: string; deletedType?: string; status?: string };
 		const targetLabel = payload.deletedType === "folder" ? "folder" : "file";
-		return `${payload.status === "pending_review" ? "Delete planned" : "Delete completed"} ${targetLabel} ${payload.path ?? ""}`.trim();
+		if (isPendingFileMutationStatus(payload.status)) {
+			return formatPendingFileMutationSummary({
+				operation: "delete",
+				targetPath: payload.path,
+				changeType: "delete",
+			});
+		}
+		return `Delete completed ${targetLabel} ${payload.path ?? ""}`.trim();
 	}
 	if (tool === "edit") {
 		const payload = data as { path?: string; appliedEdits?: number; status?: string };
-		const verb = payload.status === "pending_review" ? "Edit planned" : "Edited";
-		return `${verb} ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
+		if (isPendingFileMutationStatus(payload.status)) {
+			return formatPendingFileMutationSummary({
+				operation: "edit",
+				targetPath: payload.path,
+				changeType: "update",
+			});
+		}
+		return `Edited ${payload.path ?? ""} (${payload.appliedEdits ?? 0} replacement(s))`.trim();
 	}
 	if (tool === "exec") {
 		const payload = data as { exitCode?: number; timedOut?: boolean; routedToDelete?: boolean; path?: string; deletedType?: string };
@@ -98,6 +118,68 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 		return `Exec completed (${status})`;
 	}
 	return `${tool} completed`;
+}
+
+export interface FileMutationSummaryInput {
+	operation?: string;
+	targetPath?: string;
+	changeType?: string;
+	status?: string;
+	itemCount?: number;
+	reason?: string;
+}
+
+export function isPendingFileMutationStatus(status: string | undefined): boolean {
+	if (status === undefined) {
+		return false;
+	}
+	const normalized = status.trim().toLowerCase();
+	return !normalized || normalized === "pending" || normalized === "pending_review" || normalized === "planned";
+}
+
+export function formatPendingFileMutationSummary(input: FileMutationSummaryInput): string {
+	return withTarget(`已准备${fileMutationLabel(input)}，确认后才会写入 Obsidian`, input.targetPath);
+}
+
+export function formatFileMutationEventSummary(input: FileMutationSummaryInput): string {
+	const normalizedStatus = (input.status ?? "pending").trim().toLowerCase();
+	if (isPendingFileMutationStatus(normalizedStatus)) {
+		return formatPendingFileMutationSummary(input);
+	}
+	const label = fileMutationLabel(input);
+	if (normalizedStatus === "applied" || normalizedStatus === "accepted") {
+		return withTarget(`已应用${label}`, input.targetPath);
+	}
+	if (normalizedStatus === "rejected") {
+		return withTarget(`已取消${label}，文件未被写入`, input.targetPath);
+	}
+	if (normalizedStatus === "conflicted") {
+		return withTarget(`${label}需要重新确认，文件已在外部变化`, input.targetPath);
+	}
+	if (normalizedStatus === "apply_failed") {
+		return withTarget(`${label}未能应用`, input.targetPath);
+	}
+	return withTarget(`已确认${label}`, input.targetPath);
+}
+
+function fileMutationLabel(input: FileMutationSummaryInput): string {
+	const operation = (input.operation ?? "").trim().toLowerCase();
+	const changeType = (input.changeType ?? "").trim().toLowerCase();
+	if (changeType === "create") {
+		return "文件创建";
+	}
+	if (changeType === "delete" || operation === "delete") {
+		return "文件删除";
+	}
+	if (changeType === "update" || operation === "edit") {
+		return "文件更新";
+	}
+	return "文件修改";
+}
+
+function withTarget(summary: string, targetPath: string | undefined): string {
+	const target = targetPath?.trim();
+	return target ? `${summary}：${target}` : summary;
 }
 
 function safeStringify(value: unknown, maxChars: number): string {

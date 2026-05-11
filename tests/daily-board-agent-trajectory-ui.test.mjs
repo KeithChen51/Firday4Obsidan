@@ -7,6 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { createJiti } from "jiti";
+import { assertNoBannedOrdinaryTerms } from "./helpers/ordinarySurfaceContract.mjs";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
@@ -247,6 +248,87 @@ test("DailyBoard keeps local intake preview through runtime preflight and clears
 		view.handleRuntimeProgress({ phase: "tool_call", message: "Reading note." });
 	});
 	assert.equal(view.aiLocalIntakePreview, "");
+});
+
+test("DailyBoard renders live stage reports as process notes without extra assistant headers", async () => {
+	const messageListEl = new FakeElement("div");
+	const stageText = "已读取相关文件，接下来整理结论。";
+	const stageItem = makeItem({
+		id: "narration-stage",
+		kind: "narration",
+		title: "阶段性汇报",
+		detail: stageText,
+		status: "running",
+		rawEventType: "narration_report",
+		narrationKind: "stage_report",
+		narrationJustDone: "已读取相关文件",
+		narrationNext: "接下来整理结论",
+	});
+	const readItem = makeItem({
+		id: "read-workspace-note",
+		kind: "context",
+		title: "读取 FRIDAY 介绍.md",
+		detail: "已读取 123/workspace/FRIDAY 介绍.md。",
+		status: "running",
+		rawEventType: "tool_result",
+		tool: "read_file",
+		targetPath: "123/workspace/FRIDAY 介绍.md",
+	});
+	const view = await createDailyBoardHarness({
+		activePage: "chat",
+		aiMessageListEl: messageListEl,
+		aiRuntimeTrajectoryStore: {
+			appendProgress: () => makeSnapshot({
+				status: "running",
+				headline: "FRIDAY 正在处理",
+				summary: "FRIDAY 正在读取相关内容。",
+				items: [stageItem, readItem],
+			}),
+			completeFromProgress: () => makeSnapshot(),
+			refreshElapsed: () => null,
+		},
+		bindRuntimeSnapshotToLatestUserMessage: () => {},
+		syncLiveRuntimeProgressProcess: () => false,
+		syncAiRuntimeShell: () => {
+			messageListEl.empty();
+			view.renderAiMessageList(messageListEl);
+		},
+		syncBackgroundAgentStatus: () => {},
+	});
+	view.renderAiMessageContent = (containerEl, message) => {
+		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.renderAssistantAvatar = (containerEl) => {
+		containerEl.createDiv({ cls: "test-assistant-avatar", text: "A" });
+	};
+	view.resolveUserDisplayName = () => "User";
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		view.handleRuntimeProgress({
+			phase: "narration",
+			depth: 0,
+			message: stageText,
+			narration: {
+				kind: "stage_report",
+				summary: stageText,
+				justDone: "已读取相关文件",
+				next: "接下来整理结论",
+				source: "model",
+			},
+		});
+	});
+
+	const assistantBodies = messageListEl.findAllByClass("test-message-body");
+	assert.equal(
+		assistantBodies.some((item) => item.textContent.includes(stageText)),
+		false,
+		"stage report should not render as a standalone assistant reply"
+	);
+	assert.equal(messageListEl.countByClass("test-assistant-avatar"), 1);
+	const processNotes = messageListEl.findAllByClass("friday-agent-process-timeline-note");
+	assert.equal(processNotes.length, 1, "stage report should render as an inline process note");
+	assert.match(processNotes[0]?.textContent ?? "", /已读取相关文件/);
+	assert.ok(messageListEl.countByClass("friday-agent-process-timeline-item") >= 1);
 });
 
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
@@ -1237,7 +1319,6 @@ test("DailyBoard rebinds refreshed elapsed snapshots and syncs task bar from the
 	assert.deepEqual(calls, [
 		["bind", refreshedSnapshot],
 		["task-bar"],
-		["live-shell"],
 	]);
 	assert.equal(timerCallbacks.length, 2, "timer should schedule the next elapsed refresh while still running");
 });
@@ -1510,6 +1591,100 @@ test("renderAgentTrajectoryCard hides simple live model-only snapshots", async (
 	assert.equal(root.textContent, "");
 });
 
+test("renderAgentAnswerFlow does not keep a process panel for completed direct-answer routes", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			summary: "2+2 等于 4。",
+			items: [
+				makeItem({
+					id: "intake-direct",
+					kind: "intake",
+					title: "我会直接回答。",
+					detail: "我会直接回答。",
+					status: "ok",
+					rawEventType: "intake_decision",
+					intakeInteractionRoute: "direct_answer",
+					intakeShouldShowProcess: false,
+					intakeShouldUseVisiblePlan: false,
+				}),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "2+2 等于 4。", status: "ok" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "2+2 等于 4。" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("friday-agent-process-shell"), 0);
+	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
+	assert.match(root.textContent, /2\+2 等于 4。/);
+	assert.doesNotMatch(root.textContent, /我会直接回答|FRIDAY 已思考|过程|正在处理/);
+});
+
+test("renderAgentTrajectoryCard adds expanded and collapsed process state classes", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const collapsedRoot = new FakeElement("div");
+	const expandedRoot = new FakeElement("div");
+	const snapshot = makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({
+				id: "intake-process",
+				kind: "intake",
+				title: "我会按步骤整理。",
+				detail: "我会按步骤整理。",
+				status: "running",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "task_with_process",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: true,
+			}),
+			makeItem({
+				id: "read-note",
+				kind: "tool",
+				title: "Read Notes/A.md",
+				detail: "Read the note before preparing the answer.",
+				status: "running",
+				tool: "read",
+				targetPath: "Notes/A.md",
+			}),
+		],
+	});
+
+	renderAgentTrajectoryCard({
+		containerEl: collapsedRoot,
+		snapshot,
+		variant: "live",
+		expanded: false,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+	renderAgentTrajectoryCard({
+		containerEl: expandedRoot,
+		snapshot,
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), true);
+	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), false);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), true);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), false);
+	assert.equal(expandedRoot.countByClass("friday-agent-process-timeline-detail"), 1);
+	assert.equal(expandedRoot.findByClass("friday-agent-process-timeline-detail")?.attributes.open, undefined);
+});
+
 test("renderAgentTrajectoryCard hides live preflight-only context snapshots", async () => {
 	const { renderAgentTrajectoryCard } = await loadRenderer();
 	const root = new FakeElement("div");
@@ -1584,6 +1759,38 @@ test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-proces
 	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-right");
 	root.findByClass("friday-agent-process-toggle")?.onclick?.();
 	assert.deepEqual(calls, ["toggle"]);
+});
+
+test("renderAgentTrajectoryCard expanded ordinary process hides internal runtime terms", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "waiting_for_approval",
+			headline: "Waiting for approval",
+			summary: "Before snapshot mismatch for Project/workspace/a.md.",
+			time: { startedAt: "2026-05-05T00:00:00.000Z", updatedAt: "2026-05-05T00:00:03.000Z", durationMs: 3000 },
+			items: [
+				makeItem({ id: "checkpoint", kind: "system", title: "Checkpoint saved", detail: "Context package built before native model request. (context_ready)", status: "ok", rawEventType: "checkpoint_saved" }),
+				makeItem({ id: "model", kind: "model", title: "Model request", detail: "model_request started", status: "running", rawEventType: "model_request" }),
+				makeItem({ id: "approval", kind: "approval", title: "Waiting for approval", detail: "1 file change(s) pending review.", status: "waiting", rawEventType: "tool_approval" }),
+			],
+			actions: [
+				{ id: "cancel", label: "Cancel", enabled: true, targetId: "task-1" },
+				{ id: "view_replay", label: "View replay", enabled: true, targetId: "turn-1" },
+			],
+		}),
+		variant: "live",
+		expanded: true,
+		onToggle: () => {},
+		onAction: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assertNoBannedOrdinaryTerms(root.textContent, "expanded process DOM text");
 });
 
 test("renderAgentTrajectoryCard renders simple completed answer replay as compact thought strip", async () => {
@@ -1809,7 +2016,7 @@ test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw rea
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
-test("renderAgentAnswerFlow renders visible narration in process and keeps final answer separate", async () => {
+test("renderAgentAnswerFlow keeps stage reports out of the structured process panel", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
 
@@ -1859,13 +2066,78 @@ test("renderAgentAnswerFlow renders visible narration in process and keeps final
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 4);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
 	assert.match(root.textContent, /收到任务/);
 	assert.match(root.textContent, /整理方案/);
-	assert.match(root.textContent, /阶段性汇报/);
+	assert.doesNotMatch(root.textContent, /阶段性汇报/);
+	assert.doesNotMatch(root.textContent, /已读取相关文件，接下来实现事件链路。/);
+	assert.equal(root.countByClass("friday-agent-process-timeline-note"), 0);
 	assert.match(root.findByClass("friday-ai-answer-content")?.textContent ?? "", /结论已完成/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b|raw chain of thought/i);
+});
+
+test("renderAgentAnswerFlow renders stage reports as inline notes on process items", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+	const stageText = "已读取相关文件，接下来根据内容继续推进。";
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "FRIDAY 正在处理",
+			summary: "FRIDAY 正在读取相关内容。",
+			items: [
+				makeItem({
+					id: "narration-ack",
+					kind: "narration",
+					title: "收到任务",
+					detail: "FRIDAY 已收到任务，开始按当前上下文处理。",
+					status: "ok",
+					rawEventType: "narration_report",
+					narrationKind: "task_acknowledged",
+				}),
+				makeItem({
+					id: "narration-stage",
+					kind: "narration",
+					title: "阶段性汇报",
+					detail: stageText,
+					status: "running",
+					rawEventType: "narration_report",
+					narrationKind: "stage_report",
+					narrationJustDone: "已读取相关文件",
+					narrationNext: "接下来根据内容继续推进",
+				}),
+				makeItem({
+					id: "read-note",
+					kind: "context",
+					title: "读取 FRIDAY 介绍.md",
+					detail: "已读取 123/workspace/FRIDAY 介绍.md。",
+					status: "running",
+					rawEventType: "tool_result",
+					tool: "read_file",
+					targetPath: "123/workspace/FRIDAY 介绍.md",
+				}),
+			],
+		}),
+		expanded: true,
+		renderContent: (containerEl) => {
+			containerEl.createDiv({ cls: "final-answer", text: "最终回答会在这里继续流式输出。" });
+		},
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+		onToggle: () => {},
+	});
+
+	const notes = root.findAllByClass("friday-agent-process-timeline-note");
+	assert.equal(notes.length, 1);
+	assert.match(notes[0]?.textContent ?? "", /已读取相关文件/);
+	assert.equal(
+		root.findAllByClass("friday-ai-answer-content").some((item) => item.textContent.includes(stageText)),
+		false,
+		"stage progress should not become answer text"
+	);
+	assert.doesNotMatch(root.textContent, /stage_report|narration_report|阶段性汇报/);
 });
 
 test("renderAgentTrajectoryCard shows approval actions in collapsed timeline disclosure", async () => {
@@ -1900,13 +2172,11 @@ test("renderAgentTrajectoryCard shows approval actions in collapsed timeline dis
 
 	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 0);
 	assert.match(root.textContent, /等待确认/);
-	assert.match(root.textContent, /需要你确认/);
-	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用/);
-	assert.match(root.textContent, /拒绝/);
-	root.findByClass("is-apply")?.onclick?.();
-	root.findByClass("is-reject")?.onclick?.();
-	assert.deepEqual(calls, ["apply", "reject"]);
+	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
+	assert.equal(root.countByClass("friday-agent-process-action"), 0);
+	assert.equal(root.findByClass("is-apply"), null);
+	assert.equal(root.findByClass("is-reject"), null);
+	assert.deepEqual(calls, []);
 });
 
 test("renderAgentTrajectoryCard renders Batch M.1 transport retry as reconnecting without checkpoint claims", async () => {
@@ -1983,14 +2253,13 @@ test("renderAgentTrajectoryCard renders pending mutation as the current approval
 	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /创建\/修改文件/);
 	assert.match(root.textContent, /等待确认/);
-	assert.match(root.textContent, /准备修改 1 个文件/);
-	assert.match(root.textContent, /查看改动/);
-	assert.match(root.textContent, /应用/);
-	assert.match(root.textContent, /拒绝/);
+	assert.match(root.textContent, /已准备好 1 个待应用的文件修改|确认后才会写入 Obsidian/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
-	root.findByClass("is-apply")?.onclick?.();
-	root.findByClass("is-reject")?.onclick?.();
-	assert.deepEqual(calls, ["apply", "reject"]);
+	assert.doesNotMatch(root.textContent, /1 file change pending review|Pending file changes|Applied file/);
+	assert.equal(root.countByClass("friday-agent-process-action"), 0);
+	assert.equal(root.findByClass("is-apply"), null);
+	assert.equal(root.findByClass("is-reject"), null);
+	assert.deepEqual(calls, []);
 });
 
 test("renderAgentTrajectoryCard renders complex completed replay as collapsed process disclosure", async () => {
@@ -2657,23 +2926,27 @@ test("DailyBoard embeds completed replay in every matching assistant answer row"
 	assert.equal(root.children.some((child) => child.classes.has("friday-agent-process-shell")), false);
 });
 
-test("DailyBoard suppresses lifecycle-only completed task cards", () => {
+test("DailyBoard keeps approval task cards out of the chat flow", () => {
 	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
 	const shouldRenderMatch = source.match(/private shouldRenderAgentTaskPanel\([\s\S]*?\n\t\}/);
+	const messageListMatch = source.match(/private renderAiMessageList\([\s\S]*?\n\t\}\n\n\tprivate shouldRenderAgentTaskPanel/);
 	assert.ok(shouldRenderMatch, "task panel visibility predicate should exist");
+	assert.ok(messageListMatch, "message list renderer should exist");
 	const shouldRenderBlock = shouldRenderMatch[0] ?? "";
+	const messageListBlock = messageListMatch[0] ?? "";
 
 	assert.match(source, /private shouldRenderAgentTaskPanel\(task: AgentTaskViewState\): boolean/);
-	assert.match(shouldRenderBlock, /task\.waitingForApproval/);
 	assert.match(shouldRenderBlock, /task\.waitingForUser/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.waitingForApproval/);
+	assert.doesNotMatch(shouldRenderBlock, /task\.status === "waiting_for_approval"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.pendingMutationCount > 0/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.changedFileCount > 0/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "failed"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "cancelled"/);
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "completed"/);
-	assert.match(shouldRenderBlock, /task\.status === "waiting_for_approval"/);
 	assert.match(shouldRenderBlock, /task\.status === "waiting_for_user"/);
 	assert.match(source, /private getVisibleAgentTasksForCurrentSession\(\)/);
+	assert.doesNotMatch(messageListBlock, /renderApprovalMessage/);
 });
 
 test("renderAgentTrajectoryCard renders trajectory actions without deciding availability", async () => {
@@ -2702,12 +2975,10 @@ test("renderAgentTrajectoryCard renders trajectory actions without deciding avai
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-action"), 2);
+	assert.equal(root.countByClass("friday-agent-process-action"), 1);
 	assert.equal(root.findByClass("is-retry")?.disabled, false);
-	assert.equal(root.findByClass("is-apply")?.disabled, true);
-	assert.equal(root.findByClass("is-apply")?.attributes.title, "No pending mutation.");
+	assert.equal(root.findByClass("is-apply"), null);
 	root.findByClass("is-retry")?.onclick?.();
-	root.findByClass("is-apply")?.onclick?.();
 	assert.deepEqual(calls, ["retry"]);
 });
 
@@ -2859,6 +3130,7 @@ async function createDailyBoardHarness(overrides = {}) {
 		aiBackgroundTurnFailure: null,
 		aiQueuedPrompts: [],
 		aiLastError: "",
+		approvalQueue: { list: () => [] },
 		plugin: makePluginStub(),
 		...overrides,
 	});

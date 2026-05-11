@@ -85,7 +85,7 @@ test("prompt path guidance delegates active project normalization to the tool la
 	assert.doesNotMatch(result.prompt, /prefer scoping ls\/grep\/search_text\/glob to that root/);
 });
 
-test("prompt context engine instructs model-authored intake and plan_create without read-only mutations", async () => {
+test("prompt context engine instructs canonical interaction routes and plan_create without read-only mutations", async () => {
 	const mod = await loadPromptContextEngineModule();
 	const engine = new mod.PromptContextEngine();
 	const result = engine.build({
@@ -98,8 +98,12 @@ test("prompt context engine instructs model-authored intake and plan_create with
 		agentProfile: "agent",
 	});
 
-	assert.match(result.prompt, /Simple tasks must return only the response schema/i);
-	assert.match(result.prompt, /Complex first tool or progress responses may include model-authored intake and plan_create/i);
+	assert.match(result.prompt, /"interactionRoute":"direct_answer\|clarify\|light_task\|task_with_process"/);
+	assert.match(result.prompt, /direct_answer: no visible process, no visible plan, direct answer only/i);
+	assert.match(result.prompt, /clarify: ask one necessary question/i);
+	assert.match(result.prompt, /light_task: may show lightweight running status/i);
+	assert.match(result.prompt, /task_with_process: use visible process and visible plan/i);
+	assert.doesNotMatch(result.prompt, /Simple tasks must return only the response schema/i);
 	assert.match(result.prompt, /"type":"plan_create"/);
 	assert.match(result.prompt, /"blocked"/);
 	assert.match(result.prompt, /Read-only requests cannot invent mutation tasks/i);

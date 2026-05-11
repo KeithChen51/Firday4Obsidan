@@ -3,6 +3,11 @@ import { readFile } from "fs/promises";
 import type { TurnEventRecord, TurnEventRef } from "./TurnEventLog";
 import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { IntakeDecision, PlanState, RuntimePlanProgress } from "../agent-kernel/PlanState";
+import {
+	getIntakeRouteDefaults,
+	inferInteractionRouteFromLegacy,
+	isIntakeInteractionRoute,
+} from "../agent-kernel/PlanState";
 
 export interface TurnReplayReaderOptions {
 	resolveTurnPath: (ref: TurnEventRef) => string;
@@ -392,17 +397,29 @@ export class TurnReplayReader {
 			if (!statement) {
 				continue;
 			}
+			const legacyComplexity = this.toOptionalIntakeComplexity(this.getPayloadText(event, "complexity"));
+			const legacyRoute = this.toOptionalIntakeRoute(this.getPayloadText(event, "route"));
+			const interactionRoute = this.toOptionalIntakeInteractionRoute(this.getPayloadText(event, "interactionRoute")) ??
+				inferInteractionRouteFromLegacy({
+					...(legacyComplexity ? { complexity: legacyComplexity } : {}),
+					...(legacyRoute ? { route: legacyRoute } : {}),
+					requiresPlan: this.getPayloadOptionalBoolean(event, "requiresPlan"),
+					shouldShowProcess: this.getPayloadOptionalBoolean(event, "shouldShowProcess"),
+					shouldUseVisiblePlan: this.getPayloadOptionalBoolean(event, "shouldUseVisiblePlan"),
+				});
+			const defaults = getIntakeRouteDefaults(interactionRoute);
 			timeline.push({
-				complexity: this.toIntakeComplexity(this.getPayloadText(event, "complexity")),
-				route: this.toIntakeRoute(this.getPayloadText(event, "route")),
+				complexity: legacyComplexity ?? defaults.complexity,
+				route: legacyRoute ?? defaults.route,
+				interactionRoute,
 				statement,
-				requiresPlan: this.getPayloadOptionalBoolean(event, "requiresPlan") ?? false,
+				requiresPlan: this.getPayloadOptionalBoolean(event, "requiresPlan") ?? defaults.requiresPlan,
 				shouldShowProcess: this.getPayloadOptionalBoolean(event, "shouldShowProcess") ??
 					this.getPayloadOptionalBoolean(event, "requiresPlan") ??
-					false,
+					defaults.shouldShowProcess,
 				shouldUseVisiblePlan: this.getPayloadOptionalBoolean(event, "shouldUseVisiblePlan") ??
 					this.getPayloadOptionalBoolean(event, "requiresPlan") ??
-					false,
+					defaults.shouldUseVisiblePlan,
 				source: this.toIntakeSource(this.getPayloadText(event, "source")),
 				at: event.at,
 			});
@@ -434,17 +451,29 @@ export class TurnReplayReader {
 	}
 
 	private toIntakeComplexity(value: string): IntakeDecision["complexity"] {
-		if (value === "simple" || value === "light" || value === "complex" || value === "unclear") {
-			return value;
-		}
-		return "unclear";
+		return this.toOptionalIntakeComplexity(value) ?? "unclear";
 	}
 
 	private toIntakeRoute(value: string): IntakeDecision["route"] {
+		return this.toOptionalIntakeRoute(value) ?? "answer";
+	}
+
+	private toOptionalIntakeComplexity(value: string): IntakeDecision["complexity"] | undefined {
+		if (value === "simple" || value === "light" || value === "complex" || value === "unclear") {
+			return value;
+		}
+		return undefined;
+	}
+
+	private toOptionalIntakeRoute(value: string): IntakeDecision["route"] | undefined {
 		if (value === "answer" || value === "clarify" || value === "plan_and_execute") {
 			return value;
 		}
-		return "answer";
+		return undefined;
+	}
+
+	private toOptionalIntakeInteractionRoute(value: string): IntakeDecision["interactionRoute"] | undefined {
+		return isIntakeInteractionRoute(value) ? value : undefined;
 	}
 
 	private toIntakeSource(value: string): IntakeDecision["source"] {

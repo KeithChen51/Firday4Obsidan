@@ -28,9 +28,12 @@ const TRANSPORT_PATTERNS: RegExp[] = [
 	/gateway/i,
 	/econnreset/i,
 	/err_connection_reset/i,
+	/econnclosed/i,
+	/err_connection_closed/i,
 	/fetch failed/i,
 	/network/i,
 	/socket hang up/i,
+	/connection closed/i,
 ];
 
 const INVALID_INPUT_PATTERNS: RegExp[] = [

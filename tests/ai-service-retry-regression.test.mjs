@@ -230,3 +230,44 @@ test("chat emits request succeeded telemetry after a successful retry", async ()
 		cleanup();
 	}
 });
+
+test("chat retries closed connection transport failures", async () => {
+	let calls = 0;
+	const { AIService, cleanup } = await loadAiServiceWithRequestUrl(async () => {
+		calls += 1;
+		if (calls === 1) {
+			throw new Error("Error: net::ERR_CONNECTION_CLOSED");
+		}
+		return {
+			json: {
+				choices: [
+					{
+						message: { content: "Recovered after connection closed" },
+					},
+				],
+			},
+		};
+	});
+	try {
+		const events = [];
+		const service = new AIService(() => createSettings());
+		service.delay = async () => {};
+
+		const result = await service.chat(
+			[{ role: "user", content: "hello" }],
+			{ onTransportEvent: (event) => events.push(event) },
+		);
+
+		assert.equal(result, "Recovered after connection closed");
+		assert.equal(calls, 2);
+		assert.deepEqual(events.map((event) => event.type), [
+			"request_started",
+			"retry_scheduled",
+			"retry_started",
+			"request_succeeded",
+		]);
+		assert.equal(events[1].retryable, true);
+	} finally {
+		cleanup();
+	}
+});

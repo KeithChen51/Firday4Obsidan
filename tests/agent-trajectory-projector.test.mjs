@@ -285,6 +285,19 @@ test("projectRuntimeProgress maps narration events into ordered visible process 
 			at: "2026-05-06T00:00:02.000Z",
 		},
 		{
+			phase: "narration",
+			depth: 0,
+			message: "已读取相关文件，接下来整理结论。",
+			narration: {
+				kind: "stage_report",
+				summary: "已读取相关文件，接下来整理结论。",
+				justDone: "已读取相关文件",
+				next: "接下来整理结论",
+				source: "model",
+			},
+			at: "2026-05-06T00:00:02.500Z",
+		},
+		{
 			phase: "tool_call",
 			depth: 0,
 			step: 1,
@@ -296,8 +309,12 @@ test("projectRuntimeProgress maps narration events into ordered visible process 
 	]);
 
 	assert.equal(snapshot.status, "running");
-	assert.deepEqual(snapshot.items.map((item) => item.kind), ["narration", "narration", "tool"]);
-	assert.deepEqual(snapshot.items.slice(0, 2).map((item) => item.title), ["收到任务", "整理方案"]);
+	assert.deepEqual(snapshot.items.map((item) => item.kind), ["narration", "narration", "narration", "tool"]);
+	assert.deepEqual(snapshot.items.slice(0, 3).map((item) => item.title), ["收到任务", "整理方案", "阶段性汇报"]);
+	const stageItem = snapshot.items.find((item) => item.narrationKind === "stage_report");
+	assert.equal(stageItem?.detail, "已读取相关文件，接下来整理结论。");
+	assert.equal(stageItem?.rawEventType, "narration_report");
+	assert.doesNotMatch(`${snapshot.headline} ${snapshot.summary}`, /已读取相关文件，接下来整理结论。/);
 	assert.equal(snapshot.items[0]?.detail, "需要把过程叙事放进线性时间线。");
 	assert.deepEqual(snapshot.items[1]?.narrationPlan, ["读取相关代码", "补测试", "实现事件链路"]);
 	assert.equal(snapshot.items[1]?.rawEventType, "narration_report");
@@ -635,6 +652,12 @@ test("projectReplaySummary projects tool mutation and task timelines into a comp
 	});
 	assert.ok(snapshot.items.some((item) => item.kind === "tool" && item.tool === "read" && item.status === "ok"));
 	assert.ok(snapshot.items.some((item) => item.kind === "mutation" && item.actionRef === "plan-1"));
+	const mutationTitles = snapshot.items
+		.filter((item) => item.kind === "mutation")
+		.map((item) => item.title);
+	assert.ok(mutationTitles.length > 0);
+	assert.ok(mutationTitles.every((title) => /文件修改/.test(title)));
+	assert.doesNotMatch(mutationTitles.join("\n"), /\b(edit|write|delete|create|modify|update) Notes\//i);
 	assert.ok(snapshot.items.some((item) => item.kind === "task" && item.status === "ok"));
 	assert.deepEqual(snapshot.mutations.map((mutation) => mutation.event), ["planned", "applied"]);
 });
@@ -690,10 +713,51 @@ test("projectReplaySummary restores narration timeline before tools without fixe
 
 	const narrationItems = snapshot.items.filter((item) => item.kind === "narration");
 	assert.deepEqual(narrationItems.map((item) => item.title), ["收到任务", "阶段性汇报"]);
-	assert.equal(narrationItems[1]?.narrationJustDone, "已读取相关文件");
-	assert.equal(narrationItems[1]?.narrationNext, "接下来实现事件链路");
+	const stageItem = snapshot.items.find((item) => item.narrationKind === "stage_report");
+	assert.equal(stageItem?.detail, "已读取相关文件，接下来实现事件链路。");
+	assert.doesNotMatch(`${snapshot.headline} ${snapshot.summary}`, /已读取相关文件，接下来实现事件链路。/);
 	assert.ok(snapshot.items.findIndex((item) => item.kind === "narration") < snapshot.items.findIndex((item) => item.kind === "tool"));
 	assert.doesNotMatch(JSON.stringify(snapshot.items), /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
+});
+
+test("projectReplaySummary treats completed mutation review as resolved", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		taskTimeline: [
+			{ taskId: "task-replay", event: "created", status: "created", summary: "Task created.", reason: "", at: "2026-05-05T00:00:00.000Z" },
+			{ taskId: "task-replay", event: "waiting_for_approval", status: "waiting_for_approval", summary: "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。", reason: "", at: "2026-05-05T00:00:04.000Z" },
+			{ taskId: "task-replay", event: "completed", status: "completed", summary: "文件修改已应用。", reason: "", at: "2026-05-05T00:00:08.000Z" },
+		],
+		mutationTimeline: [
+			{
+				id: "plan-1",
+				event: "planned",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "pending_review",
+				summary: "已准备好文件创建。",
+				reason: "",
+				at: "2026-05-05T00:00:03.000Z",
+			},
+			{
+				id: "plan-1",
+				event: "applied",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "applied",
+				summary: "已应用文件创建。",
+				reason: "Approved by user.",
+				at: "2026-05-05T00:00:06.000Z",
+			},
+		],
+	}));
+
+	assert.equal(snapshot.status, "completed");
+	assert.deepEqual(snapshot.actions.map((action) => action.id), []);
+	assert.equal(snapshot.mutations.filter((mutation) => mutation.event === "planned").length, 1);
+	assert.equal(snapshot.items.find((item) => item.rawEventType === "mutation_planned")?.status, "ok");
+	assert.equal(snapshot.items.find((item) => item.rawEventType === "task_completed")?.status, "ok");
 });
 
 test("projectReplaySummary surfaces mutation conflict and apply failure directly", async () => {
@@ -837,7 +901,8 @@ test("projectReplaySummary exposes checkpoint resume before retry for resumable 
 	const checkpointItem = snapshot.items.find((item) => item.rawEventType === "checkpoint_saved");
 	assert.equal(checkpointItem?.kind, "system");
 	assert.equal(checkpointItem?.status, "ok");
-	assert.match(checkpointItem?.detail ?? "", /Stable tool result checkpoint/);
+	assert.match(checkpointItem?.detail ?? "", /FRIDAY 已保存当前进度/);
+	assert.doesNotMatch(checkpointItem?.detail ?? "", /Stable tool result checkpoint|checkpoint/i);
 });
 
 test("projectReplaySummary does not expose resume for saved checkpoints marked unsafe", async () => {
@@ -995,5 +1060,5 @@ test("projector derives trajectory actions from running failed approval mutation
 	]);
 
 	const completed = projectReplaySummary(makeReplaySummary());
-	assert.deepEqual(completed.actions.map((action) => action.id), ["view_replay"]);
+	assert.deepEqual(completed.actions.map((action) => action.id), []);
 });

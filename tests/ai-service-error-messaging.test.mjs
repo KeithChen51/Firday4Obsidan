@@ -50,3 +50,42 @@ test("ai service explains response schema incompatibility clearly", async () => 
 	assert.match(error.message, /返回体字段/);
 	assert.match(error.message, /不兼容/);
 });
+
+test("ai service does not append raw gateway exceptions to user-facing 5xx errors", async () => {
+	const mod = await loadAIService();
+	const service = new mod.AIService(() => ({
+		mode: "group",
+		apiUrl: "https://example.com/v1",
+		apiKey: "secret",
+		model: "glm-5",
+		extraHeaders: {},
+	}));
+	const error = service.normalizeError(
+		"Error: Request failed, status 503",
+		"https://example.com/v1/chat/completions",
+		["https://example.com/v1/chat/completions"],
+	);
+
+	assert.match(error.message, /模型服务或网关暂时不可用/);
+	assert.doesNotMatch(error.message, /原始错误|Request failed/);
+});
+
+test("ai service productizes closed connection errors before they reach ordinary UI", async () => {
+	const mod = await loadAIService();
+	const service = new mod.AIService(() => ({
+		mode: "group",
+		apiUrl: "https://example.com/v1",
+		apiKey: "secret",
+		model: "glm-5",
+		extraHeaders: {},
+	}));
+	const error = service.normalizeError(
+		"Error: net::ERR_CONNECTION_CLOSED",
+		"https://example.com/v1/chat/completions",
+		["https://example.com/v1/chat/completions"],
+	);
+
+	assert.match(error.message, /ERR_CONNECTION_CLOSED/);
+	assert.match(error.message, /连接/);
+	assert.doesNotMatch(error.message, /Error: net::ERR_CONNECTION_CLOSED/);
+});

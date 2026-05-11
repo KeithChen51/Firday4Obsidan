@@ -37,8 +37,10 @@ test("llm transport policy retries transient gateway failures", async () => {
 	const mod = await loadPolicy();
 	assert.equal(mod.shouldRetryLlmRequest("504 Gateway Timeout", 0, 3), true);
 	assert.equal(mod.shouldRetryLlmRequest("ERR_CONNECTION_RESET", 1, 3), true);
+	assert.equal(mod.shouldRetryLlmRequest("Error: net::ERR_CONNECTION_CLOSED", 1, 3), true);
 	assert.equal(mod.shouldRetryLlmRequest("timed out while waiting for response", 2, 3), true);
 	assert.equal(mod.shouldRetryLlmRequest("400 unsupported tool schema", 0, 3), false);
 	assert.equal(mod.isRetryableLlmFailure("504 Gateway Timeout"), true);
+	assert.equal(mod.isRetryableLlmFailure("net::ERR_CONNECTION_CLOSED"), true);
 	assert.equal(mod.isRetryableLlmFailure("400 unsupported tool schema"), false);
 });

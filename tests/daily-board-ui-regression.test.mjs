@@ -213,6 +213,132 @@ test("tools page is dedicated to tool and skill management only", async () => {
 	assert.doesNotMatch(block, /friday-ai-chat-panel/);
 });
 
+test("pending approvals occupy the composer body instead of only a transcript card", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
+	assert.ok(renderMatch, "renderAiPage block should exist");
+	const renderBlock = renderMatch[1] ?? "";
+	const syncMatch = source.match(/private syncComposerDecisionPanel\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate syncAiComposerControls/);
+	assert.ok(syncMatch, "syncComposerDecisionPanel block should exist");
+	const syncBlock = syncMatch[1] ?? "";
+	const inputMatch = source.match(/private renderComposerInput\(parent: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderComposerDecisionPanel/);
+	assert.ok(inputMatch, "renderComposerInput block should exist");
+	const inputBlock = inputMatch[1] ?? "";
+	const composerIndex = renderBlock.indexOf('const composerEl = composerWrap.createDiv({ cls: "friday-ai-composer" });');
+	const bodyHostIndex = renderBlock.indexOf("this.aiComposerBodyEl = composerEl;", composerIndex);
+	const decisionSyncIndex = renderBlock.indexOf("this.syncComposerDecisionPanel();", bodyHostIndex);
+	const toolbarIndex = renderBlock.indexOf('const toolbarEl = composerWrap.createDiv({ cls: "friday-ai-composer-toolbar" });');
+
+	assert.ok(composerIndex >= 0, "composer body should still be created");
+	assert.ok(bodyHostIndex > composerIndex, "composer body should be saved as the decision host");
+	assert.ok(decisionSyncIndex > bodyHostIndex, "approval decision panel sync should run against the composer body");
+	assert.ok(toolbarIndex > decisionSyncIndex, "composer chrome should remain after the body branch");
+	assert.match(syncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
+	assert.match(syncBlock, /this\.renderComposerInput\(this\.aiComposerBodyEl\)/);
+	assert.match(inputBlock, /this\.composer = new MentionComposer/);
+	assert.doesNotMatch(renderBlock, /this\.renderEditPlanReviewPanel\(chatShellEl\)/);
+});
+
+test("composer approval body keeps model permission skill and context chrome available", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);
+	assert.ok(renderMatch, "renderAiPage block should exist");
+	const renderBlock = renderMatch[1] ?? "";
+	const syncMatch = source.match(/private syncComposerDecisionPanel\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate syncAiComposerControls/);
+	assert.ok(syncMatch, "syncComposerDecisionPanel block should exist");
+	const syncBlock = syncMatch[1] ?? "";
+
+	assert.match(renderBlock, /this\.syncComposerDecisionPanel\(\)/);
+	assert.match(syncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
+	assert.match(renderBlock, /const modelSelect = toolbarEl\.createEl\("select"/);
+	assert.match(renderBlock, /const permissionSelect = toolbarEl\.createEl\("select"/);
+	assert.match(renderBlock, /text: this\.t\("ai\.skill\.button", "\+Skill"\)/);
+	assert.match(renderBlock, /text: "@"/);
+});
+
+test("ordinary approval cards expose only user-level allow or reject decisions", async () => {
+	const source = readViewSource();
+	const cardMatch = source.match(/private renderApprovalCard\(containerEl: HTMLElement, item: PendingApproval\): void \{([\s\S]*?)\n\t\}\n\n\tprivate addApprovalDecisionButton/);
+	assert.ok(cardMatch, "renderApprovalCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+
+	assert.match(cardBlock, /approval\.allowExecute/);
+	assert.match(cardBlock, /approval\.reject/);
+	assert.doesNotMatch(cardBlock, /approval\.allowSession|approval\.allowAlways|approval\.allowOnce/);
+	assert.doesNotMatch(cardBlock, /\$\{item\.request\.tool\}/);
+});
+
+test("mutation review uses pending-language buttons and notices", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+
+	assert.match(itemBlock, /mutation\.review\.applyChanges/);
+	assert.match(itemBlock, /mutation\.review\.doNotApply/);
+	assert.match(itemBlock, /mutation\.review\.applied/);
+	assert.match(itemBlock, /mutation\.review\.conflictedNotice/);
+	assert.match(itemBlock, /mutation\.review\.rejected/);
+	assert.doesNotMatch(itemBlock, /"Apply"/);
+	assert.doesNotMatch(itemBlock, /"Reject"/);
+});
+
+test("mutation review exposes an inline full-change review instead of only truncated preview", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+	const fullDiffMatch = source.match(/private renderEditPlanFullDiff\(containerEl: HTMLElement, before: string, after: string\): void \{([\s\S]*?)\n\t\}\n\n\tprivate addMutationReviewButton/);
+	assert.ok(fullDiffMatch, "renderEditPlanFullDiff block should exist");
+	const fullDiffBlock = fullDiffMatch[1] ?? "";
+
+	assert.match(itemBlock, /mutation\.review\.viewFullChanges/);
+	assert.match(itemBlock, /mutation\.review\.hideFullChanges/);
+	assert.match(itemBlock, /renderEditPlanFullDiff\(fullReviewEl, firstItem\.before, firstItem\.after\)/);
+	assert.match(fullDiffBlock, /maxLines:\s*Number\.MAX_SAFE_INTEGER/);
+	assert.match(fullDiffBlock, /friday-mutation-review-full/);
+	assert.doesNotMatch(itemBlock, /new\s+\w+Modal|window\.confirm|window\.prompt/);
+});
+
+test("mutation review actions stay clickable while the agent is waiting on that decision", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+	const actionGuardMatch = source.match(/private getActionablePendingEditPlan\(planId: string\): EditPlanRecord \| null \{([\s\S]*?)\n\t\}\n\n\tprivate getReviewableEditPlan/);
+	assert.ok(actionGuardMatch, "mutation review actions should re-check the current session plan before applying or rejecting");
+	const actionGuardBlock = actionGuardMatch[1] ?? "";
+	const reviewGuardMatch = source.match(/private getReviewableEditPlan\(planId: string\): EditPlanRecord \| null \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanReviewItem/);
+	assert.ok(reviewGuardMatch, "mutation review should allow conflicted plans to be dismissed");
+	const reviewGuardBlock = reviewGuardMatch[1] ?? "";
+
+	assert.match(itemBlock, /const canApply = plan\.items\.some\(\(item\) => item\.status === "pending"\)/);
+	assert.match(itemBlock, /const canDismiss = plan\.items\.some\(\(item\) => item\.status === "pending" \|\| item\.status === "conflicted"\)/);
+	assert.match(itemBlock, /getActionablePendingEditPlan\(plan\.id\)/);
+	assert.match(itemBlock, /getReviewableEditPlan\(plan\.id\)/);
+	assert.doesNotMatch(itemBlock, /this\.aiBusy/);
+	assert.match(actionGuardBlock, /this\.getPendingEditPlans\(\)\.find/);
+	assert.match(actionGuardBlock, /item\.status === "pending"/);
+	assert.match(reviewGuardBlock, /item\.status === "pending" \|\| item\.status === "conflicted"/);
+});
+
+test("composer mutation review only blocks on current-session reviewable edit plans", async () => {
+	const source = readViewSource();
+	const pendingMatch = source.match(/private getPendingEditPlans\(\): EditPlanRecord\[] \{([\s\S]*?)\n\t\}\n\n\tprivate hasPendingComposerDecision/);
+	assert.ok(pendingMatch, "getPendingEditPlans block should exist");
+	const pendingBlock = pendingMatch[1] ?? "";
+	const sessionMatch = source.match(/private isCurrentSessionEditPlan\(plan: EditPlanRecord\): boolean \{([\s\S]*?)\n\t\}\n\n\tprivate getPendingEditPlans/);
+	assert.ok(sessionMatch, "isCurrentSessionEditPlan block should exist");
+	const sessionBlock = sessionMatch[1] ?? "";
+
+	assert.match(pendingBlock, /filter\(\(plan\) => this\.isCurrentSessionEditPlan\(plan\)\)/);
+	assert.match(pendingBlock, /item\.status === "pending"/);
+	assert.match(pendingBlock, /items: plan\.items\.filter\(\(item\) => item\.status === "pending" \|\| item\.status === "conflicted"\)/);
+	assert.match(sessionBlock, /this\.aiSessionId\.trim\(\)/);
+	assert.match(sessionBlock, /plan\.originConversationId\?\.trim\(\)/);
+	assert.match(sessionBlock, /originConversationId === currentSessionId/);
+});
+
 test("sync actions stay on sync page instead of jumping to tools page", async () => {
 	const source = readViewSource();
 	assert.match(source, /private async syncAllProjects\(\): Promise<void> \{[\s\S]*?this\.activePage = "sync"/);

@@ -57,7 +57,12 @@ import {
 	type AgentMode,
 } from "../core/tools/ToolRegistry";
 import type { ToolResultFailureClass, ToolResultPayload, ToolResultRecovery } from "../core/tools/ToolResultContract";
-import { DEFAULT_MAX_MODEL_RESULT_CHARS, formatForModel, summarizeForTrace } from "../core/tools/ToolResultFormatter";
+import {
+	DEFAULT_MAX_MODEL_RESULT_CHARS,
+	formatFileMutationEventSummary,
+	formatForModel,
+	summarizeForTrace,
+} from "../core/tools/ToolResultFormatter";
 import { ToolPathResolver, type ToolPathIntent, type ToolPathResolution } from "../core/tools/ToolPathResolver";
 import { TurnEventLog, type TurnEventInput } from "../core/runtime/TurnEventLog";
 import { TurnReplayReader, type TurnReplaySummary } from "../core/runtime/TurnReplayReader";
@@ -112,6 +117,7 @@ export interface RuntimeMutationPlan {
 	summary?: string;
 	status?: string;
 	source?: string;
+	changeType?: string;
 }
 
 interface RuntimeEnvelope {
@@ -825,12 +831,12 @@ export class AgentRuntimeService {
 			const firstPlan = pendingPlans[0];
 			const firstItem = firstPlan?.items[0];
 			const task = await this.agentTaskStore.markWaitingForApproval(this.activeTaskId, {
-				summary: `Waiting for review of ${pendingMutationCount} pending file change(s).`,
+				summary: `已准备好 ${pendingMutationCount} 个待应用的文件修改，确认后才会写入 Obsidian。`,
 				waitingForApproval: {
 					kind: "mutation",
 					tool: firstPlan?.tool ?? "mutation",
 					targetPath: firstItem?.path ?? "",
-					summary: firstItem?.summary ?? "Review pending file changes.",
+					summary: firstItem?.summary ?? "已准备好文件修改，确认后才会写入 Obsidian。",
 					mutationPlanIds: pendingPlans.map((plan) => plan.id),
 				},
 				pendingMutationCount,
@@ -888,6 +894,7 @@ export class AgentRuntimeService {
 	private async markActiveTaskWaitingForToolApproval(
 		tool: string,
 		targetPath: string,
+		summary?: string,
 	): Promise<void> {
 		if (this.kernelStateOwnsTaskLifecycle) {
 			return;
@@ -899,13 +906,14 @@ export class AgentRuntimeService {
 		if (current?.status !== "running") {
 			return;
 		}
+		const userSummary = summary?.trim() || this.describeToolApprovalConsequence(tool, {}, targetPath);
 		const task = await this.agentTaskStore.markWaitingForApproval(this.activeTaskId, {
-			summary: `Waiting for approval to run ${tool}.`,
+			summary: userSummary,
 			waitingForApproval: {
 				kind: "tool",
 				tool,
 				targetPath,
-				summary: `Approve ${tool}${targetPath ? ` on ${targetPath}` : ""}.`,
+				summary: userSummary,
 			},
 			pendingMutationCount: 0,
 		});
@@ -916,6 +924,7 @@ export class AgentRuntimeService {
 		tool: string,
 		approved: boolean,
 		reason: string,
+		summary?: string,
 	): Promise<void> {
 		if (this.kernelStateOwnsTaskLifecycle) {
 			return;
@@ -928,19 +937,53 @@ export class AgentRuntimeService {
 			return;
 		}
 		if (!approved) {
-			const summary = `Tool approval denied for ${tool}.`;
+			const deniedSummary = summary?.trim()
+				? `${summary.trim()} The action was rejected.`
+				: this.describeToolApprovalResolution(tool, false);
 			const task = await this.agentTaskStore.markFailed(this.activeTaskId, {
-				summary,
-				failureReason: reason || summary,
+				summary: deniedSummary,
+				failureReason: reason || deniedSummary,
 			});
 			await this.recordTaskLifecycleEvent(task);
 			return;
 		}
+		const resolvedSummary = summary?.trim()
+			? `${summary.trim()} Approved.`
+			: this.describeToolApprovalResolution(tool, true);
 		const task = await this.agentTaskStore.markRunning(this.activeTaskId, {
-			summary: `Tool approval resolved for ${tool}.`,
+			summary: resolvedSummary,
 			pendingMutationCount: 0,
 		});
 		await this.recordTaskLifecycleEvent(task);
+	}
+
+	private describeToolApprovalConsequence(
+		tool: string,
+		args: Record<string, unknown>,
+		targetPath: string,
+	): string {
+		const normalizedTool = tool.trim().toLowerCase();
+		if (normalizedTool === "exec") {
+			return "FRIDAY needs to run a local command before continuing.";
+		}
+		if (normalizedTool === "compile_wiki") {
+			return "FRIDAY needs to compile wiki content and update generated files.";
+		}
+		if (normalizedTool === "write" || normalizedTool === "edit" || normalizedTool === "delete") {
+			return formatFileMutationEventSummary({
+				operation: normalizedTool,
+				targetPath,
+				changeType: normalizedTool === "delete" ? "delete" : undefined,
+				status: "planned",
+			});
+		}
+		void args;
+		return "FRIDAY needs permission for a higher-risk action before continuing.";
+	}
+
+	private describeToolApprovalResolution(tool: string, approved: boolean): string {
+		const base = this.describeToolApprovalConsequence(tool, {}, "");
+		return approved ? `${base} Approved.` : `${base} The action was rejected.`;
 	}
 
 	private getPendingMutationRecordsForActiveTurn(): EditPlanRecord[] {
@@ -962,19 +1005,27 @@ export class AgentRuntimeService {
 		if (!taskId) {
 			return;
 		}
+		const currentTask = await this.agentTaskStore.get(taskId);
+		if (
+			currentTask?.status === "completed" ||
+			currentTask?.status === "cancelled" ||
+			currentTask?.status === "failed"
+		) {
+			return;
+		}
 		if (status === "failed") {
 			const task = await this.agentTaskStore.markFailed(taskId, {
-				summary: reason ?? "Mutation apply failed.",
-				failureReason: reason ?? "Mutation apply failed.",
+				summary: reason ?? "文件修改未能应用。",
+				failureReason: reason ?? "文件修改未能应用。",
 			});
 			await this.recordTaskLifecycleEvent(task);
 			return;
 		}
 		if (status === "conflicted") {
 			const task = await this.agentTaskStore.markWaitingForUser(taskId, {
-				summary: reason ?? "File changed before apply. Review the conflict before continuing.",
+				summary: reason ?? "文件已在外部变化，需要重新确认后再继续。",
 				waitingForUser: {
-					prompt: reason ?? "Resolve the mutation conflict.",
+					prompt: reason ?? "请确认这次文件修改冲突。",
 				},
 			});
 			await this.recordTaskLifecycleEvent(task);
@@ -983,12 +1034,12 @@ export class AgentRuntimeService {
 		const remainingPendingCount = await this.countPendingMutationPlansForTask(taskId);
 		if (remainingPendingCount > 0) {
 			const task = await this.agentTaskStore.markWaitingForApproval(taskId, {
-				summary: `Waiting for review of ${remainingPendingCount} pending file change(s).`,
+				summary: `已准备好 ${remainingPendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。`,
 				waitingForApproval: {
 					kind: "mutation",
 					tool: record.tool,
 					targetPath: record.items[0]?.path ?? "",
-					summary: "Review remaining pending file changes.",
+					summary: "还有文件修改等待确认。",
 				},
 				pendingMutationCount: remainingPendingCount,
 				changedFileCount: remainingPendingCount,
@@ -998,8 +1049,8 @@ export class AgentRuntimeService {
 		}
 		const task = await this.agentTaskStore.markCompleted(taskId, {
 			summary: status === "rejected"
-				? "Pending file changes were rejected."
-				: "Pending file changes were applied.",
+				? "待确认的文件修改已取消。"
+				: "文件修改已应用。",
 			pendingMutationCount: 0,
 			changedFileCount: 0,
 		});
@@ -1191,7 +1242,7 @@ export class AgentRuntimeService {
 		if (pendingCount === 0) {
 			return result;
 		}
-		const notice = `Pending file review: ${pendingCount} change(s) prepared but not applied. Review and apply or reject them in FRIDAY.`;
+		const notice = `已准备好 ${pendingCount} 个待应用的文件修改，确认后才会写入 Obsidian。请在 FRIDAY 中确认应用或不应用。`;
 		if (result.assistantText.includes(notice)) {
 			return result;
 		}
@@ -1664,7 +1715,10 @@ export class AgentRuntimeService {
 		const record = await this.getEditPlanRecord(planId);
 		const storedPlan = await this.mutationPlanStore.get(planId);
 		const result = await this.mutationApplier.apply(storedPlan ?? this.toMutationPlan(record));
-		await this.mutationPlanStore.replace(result.plan);
+		const resultPlan = result.status === "failed"
+			? result.plan
+			: this.withMutationPlanSummary(result.plan, result.status);
+		await this.mutationPlanStore.replace(resultPlan);
 		if (result.status === "failed") {
 			this.workbenchStateStore.replaceEditPlan(record);
 			await this.persistMutationReviewEvent(record, "mutation_apply_failed", result.reason);
@@ -1699,7 +1753,7 @@ export class AgentRuntimeService {
 		if (result.status === "failed") {
 			throw new Error(result.reason ?? `Edit plan could not be rejected: ${planId}`);
 		}
-		await this.mutationPlanStore.replace(result.plan);
+		await this.mutationPlanStore.replace(this.withMutationPlanSummary(result.plan, "rejected"));
 		const nextRecord = this.withEditPlanStatus(record, "rejected");
 		this.workbenchStateStore.replaceEditPlan(nextRecord);
 		const context = this.createMutationReviewContext(nextRecord);
@@ -1726,7 +1780,7 @@ export class AgentRuntimeService {
 			item.status = nextStatus;
 		}
 		this.workbenchStateStore.replaceEditPlan(record);
-		await this.mutationPlanStore.replace(setMutationPlanStatus(this.toMutationPlan(record), "rejected"));
+		await this.mutationPlanStore.replace(this.withMutationPlanSummary(setMutationPlanStatus(this.toMutationPlan(record), "rejected"), "rejected"));
 		await this.persistMutationReviewEvent(record, "mutation_rejected");
 		await this.updateTaskAfterMutationReview(record, "rejected");
 	}
@@ -2337,11 +2391,16 @@ export class AgentRuntimeService {
 	): RuntimeMutationPlan {
 		const operation = typeof plan.operation === "string" ? plan.operation.trim() : "";
 		const targetPath = typeof plan.targetPath === "string" ? normalizePath(plan.targetPath.trim()) : "";
-		const summary = typeof plan.summary === "string" ? this.truncateText(plan.summary.trim(), 240) : "";
 		const id = typeof plan.id === "string" && plan.id.trim()
 			? plan.id.trim()
 			: `mutation-plan-${this.activeTurnId || "turn"}-${index + 1}`;
 		const status = typeof plan.status === "string" && plan.status.trim() ? plan.status.trim() : "pending";
+		const summary = formatFileMutationEventSummary({
+			operation,
+			targetPath,
+			changeType: plan.changeType,
+			status,
+		});
 		return {
 			id,
 			operation,
@@ -2375,17 +2434,17 @@ export class AgentRuntimeService {
 		const approvalEligible = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
 		const shouldRequestToolApproval = approvalEligible && gatewayPolicy.effect === "ask";
 		const shouldReportApproval = shouldRequestToolApproval || (approvalEligible && gatewayPolicy.effect === "deny");
+		const approvalDescription = this.describeToolApprovalConsequence(name, args, targetPath);
 		if (shouldReportApproval) {
-			const target = targetPath ? `（${targetPath}）` : "";
 			if (shouldRequestToolApproval) {
-				await this.markActiveTaskWaitingForToolApproval(name, targetPath);
+				await this.markActiveTaskWaitingForToolApproval(name, targetPath, approvalDescription);
 			}
 			this.reportProgress(input, {
 				phase: "tool_approval",
 				depth,
 				step,
 				tool: name,
-				message: `正在申请工具权限：${name}${target}`,
+				message: approvalDescription,
 			});
 		}
 
@@ -2408,7 +2467,7 @@ export class AgentRuntimeService {
 				tool: name,
 				scope,
 				targetPath: scope === "vault" ? normalizePath(targetPath || "") : targetPath,
-				description: `${name}(${this.safeStringify(args, 260)})`,
+				description: approvalDescription,
 			},
 			requestApproval: gatewayPolicy.effect === "allow"
 				? async () => ({
@@ -2432,6 +2491,7 @@ export class AgentRuntimeService {
 				name,
 				Boolean(gatewayAudit.approval?.allowed ?? (gatewayAudit.policy.allow && gatewayResult.status !== "denied")),
 				gatewayApprovalReason,
+				approvalDescription,
 			);
 		}
 
@@ -2442,20 +2502,20 @@ export class AgentRuntimeService {
 					depth,
 					step,
 					tool: name,
-					message: `工具权限被拒绝：${name}`,
+					message: `${approvalDescription} The action was rejected.`,
 				});
 			} else {
 				const approvalStatus = gatewayApproval?.viaRule
-					? "命中已保存规则，自动授权"
+					? "Approved by a saved rule."
 					: gatewayApproval?.persisted
-						? "已授权并保存规则"
-						: "已授权";
+						? "Approved and remembered."
+						: "Approved.";
 				this.reportProgress(input, {
 					phase: "tool_approval",
 					depth,
 					step,
 					tool: name,
-					message: `${name} 权限${approvalStatus}`,
+					message: `${approvalDescription} ${approvalStatus}`,
 				});
 			}
 		}
@@ -2718,6 +2778,12 @@ export class AgentRuntimeService {
 	}): Promise<string> {
 		const id = `edit-plan-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 		const operation = this.resolveMutationOperation(input.tool);
+		const summary = formatFileMutationEventSummary({
+			operation,
+			targetPath: input.path,
+			changeType: input.changeType,
+			status: "planned",
+		});
 		const plan = createMutationPlan({
 			id,
 			agentId: input.agentId,
@@ -2731,7 +2797,7 @@ export class AgentRuntimeService {
 			before: input.before,
 			after: input.after,
 			changeType: input.changeType,
-			summary: `${input.tool} ${input.changeType} ${input.path}`,
+			summary,
 		});
 		const record: EditPlanRecord = {
 			id: plan.id,
@@ -2753,7 +2819,7 @@ export class AgentRuntimeService {
 					status: "pending",
 					changeType: input.changeType,
 					riskLevel: plan.riskLevel,
-					summary: plan.summary,
+					summary,
 				},
 			],
 		};
@@ -2802,6 +2868,8 @@ export class AgentRuntimeService {
 		const firstItem = items[0];
 		const riskLevel = record.items[0]?.riskLevel ??
 			(firstItem?.changeType === "delete" ? "high" : "standard");
+		const status = this.resolveEditPlanStatus(record);
+		const summaryStatus = status === "pending" ? "planned" : status;
 		return {
 			id: record.id,
 			agentId: record.agentId,
@@ -2815,8 +2883,8 @@ export class AgentRuntimeService {
 			beforeHash: firstItem?.beforeHash ?? hashMutationContent(""),
 			proposedHash: firstItem?.afterHash ?? hashMutationContent(""),
 			riskLevel,
-			summary: record.items[0]?.summary ?? `${record.tool} ${firstItem?.changeType ?? "update"} ${firstItem?.path ?? ""}`.trim(),
-			status: this.resolveEditPlanStatus(record),
+			summary: this.buildMutationSummary(record, summaryStatus),
+			status,
 			createdAt: record.recordedAt,
 			items,
 		};
@@ -2874,13 +2942,32 @@ export class AgentRuntimeService {
 	}
 
 	private withEditPlanStatus(record: EditPlanRecord, status: MutationPlanStatus): EditPlanRecord {
-		return {
+		const next = {
 			...record,
 			items: record.items.map((item) => ({
 				...item,
 				status,
 			})),
 		};
+		const summary = this.buildMutationSummary(next, status === "pending" ? "planned" : status);
+		return {
+			...next,
+			items: next.items.map((item) => ({
+				...item,
+				summary,
+			})),
+		};
+	}
+
+	private withMutationPlanSummary(plan: MutationPlan, status: MutationPlanStatus): MutationPlan {
+		const summary = formatFileMutationEventSummary({
+			operation: plan.operation,
+			targetPath: plan.targetPath,
+			changeType: plan.items[0]?.changeType,
+			status: status === "pending" ? "planned" : status,
+			itemCount: plan.items.length,
+		});
+		return { ...plan, summary };
 	}
 
 	private createMutationReviewContext(record: EditPlanRecord): AgentExecutionContext | null {
@@ -2954,6 +3041,7 @@ export class AgentRuntimeService {
 		reason?: string,
 	): Record<string, unknown> {
 		const firstItem = record.items[0];
+		const summary = reason || this.buildMutationSummary(record, status);
 		return {
 			id: record.id,
 			...(record.toolCallId ? { toolCallId: record.toolCallId } : {}),
@@ -2967,10 +3055,24 @@ export class AgentRuntimeService {
 			proposedHash: firstItem?.afterHash ?? "",
 			riskLevel: firstItem?.riskLevel ?? "standard",
 			itemCount: record.items.length,
-			summary: reason || `${record.tool} ${status} ${record.items.length} mutation(s)`,
+			summary,
 			...(reason ? { reason } : {}),
 			...(status === "apply_failed" && reason ? { error: reason } : {}),
 		};
+	}
+
+	private buildMutationSummary(
+		record: EditPlanRecord,
+		status: "planned" | "applied" | "rejected" | "conflicted" | "apply_failed",
+	): string {
+		const firstItem = record.items[0];
+		return formatFileMutationEventSummary({
+			operation: this.resolveMutationOperation(record.tool),
+			targetPath: firstItem?.path ?? "",
+			changeType: firstItem?.changeType,
+			status,
+			itemCount: record.items.length,
+		});
 	}
 
 	private async readVaultFileContentOrNull(targetPath: string): Promise<string | null> {
