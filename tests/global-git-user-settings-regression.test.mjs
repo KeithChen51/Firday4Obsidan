@@ -101,9 +101,13 @@ test("git identity inputs defer settings rerender until blur so the first keystr
 
 test("settings nav places project immediately after user", async () => {
 	const source = read(settingTabPath);
-	const match = source.match(/const items: Array<\{ id: SettingsSection; label: string \}> = \[([\s\S]*?)\n\t\t\];/);
-	assert.ok(match, "settings tab items block should exist");
-	const block = match[1] ?? "";
+	const renderTabsIndex = source.indexOf("private renderSectionTabs");
+	assert.ok(renderTabsIndex >= 0, "renderSectionTabs block should exist");
+	const itemsStart = source.indexOf("const items:", renderTabsIndex);
+	assert.ok(itemsStart >= 0, "settings tab items block should exist");
+	const itemsEnd = source.indexOf("\n\t\t];", itemsStart);
+	assert.ok(itemsEnd > itemsStart, "settings tab items block should close");
+	const block = source.slice(itemsStart, itemsEnd);
 	const userIndex = block.indexOf('{ id: "user"');
 	const projectIndex = block.indexOf('{ id: "project"');
 	const syncIndex = block.indexOf('{ id: "sync"');
