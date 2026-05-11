@@ -720,6 +720,46 @@ test("projectReplaySummary restores narration timeline before tools without fixe
 	assert.doesNotMatch(JSON.stringify(snapshot.items), /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
+test("projectReplaySummary treats completed mutation review as resolved", async () => {
+	const { projectReplaySummary } = await loadProjector();
+
+	const snapshot = projectReplaySummary(makeReplaySummary({
+		taskTimeline: [
+			{ taskId: "task-replay", event: "created", status: "created", summary: "Task created.", reason: "", at: "2026-05-05T00:00:00.000Z" },
+			{ taskId: "task-replay", event: "waiting_for_approval", status: "waiting_for_approval", summary: "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。", reason: "", at: "2026-05-05T00:00:04.000Z" },
+			{ taskId: "task-replay", event: "completed", status: "completed", summary: "文件修改已应用。", reason: "", at: "2026-05-05T00:00:08.000Z" },
+		],
+		mutationTimeline: [
+			{
+				id: "plan-1",
+				event: "planned",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "pending_review",
+				summary: "已准备好文件创建。",
+				reason: "",
+				at: "2026-05-05T00:00:03.000Z",
+			},
+			{
+				id: "plan-1",
+				event: "applied",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "applied",
+				summary: "已应用文件创建。",
+				reason: "Approved by user.",
+				at: "2026-05-05T00:00:06.000Z",
+			},
+		],
+	}));
+
+	assert.equal(snapshot.status, "completed");
+	assert.deepEqual(snapshot.actions.map((action) => action.id), []);
+	assert.equal(snapshot.mutations.filter((mutation) => mutation.event === "planned").length, 1);
+	assert.equal(snapshot.items.find((item) => item.rawEventType === "mutation_planned")?.status, "ok");
+	assert.equal(snapshot.items.find((item) => item.rawEventType === "task_completed")?.status, "ok");
+});
+
 test("projectReplaySummary surfaces mutation conflict and apply failure directly", async () => {
 	const { projectReplaySummary } = await loadProjector();
 

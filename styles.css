@@ -1577,6 +1577,22 @@
 	color: var(--text-muted);
 }
 
+.friday-mutation-review-full-toggle {
+	margin-top: 8px;
+}
+
+.friday-mutation-review-full[hidden] {
+	display: none;
+}
+
+.friday-mutation-review-full {
+	margin-top: 8px;
+}
+
+.friday-mutation-review-full-diff {
+	max-height: min(52vh, 520px);
+}
+
 /* ========== Exec Output ========== */
 .friday-exec-output {
 	font-family: var(--font-monospace);

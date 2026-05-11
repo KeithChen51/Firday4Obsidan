@@ -219,7 +219,10 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		});
 	}
 
+	const resolvedMutationPlanIds = collectResolvedMutationPlanIds(replaySummary.mutationTimeline);
 	for (const mutation of replaySummary.mutationTimeline) {
+		const resolvedPlannedMutation = mutation.event === "planned" &&
+			Boolean(mutation.id && resolvedMutationPlanIds.has(mutation.id));
 		const projectedMutation: AgentTrajectoryMutation = {
 			id: mutation.id,
 			event: mutation.event,
@@ -235,7 +238,7 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 			kind: "mutation",
 			title: formatMutationTitle(projectedMutation),
 			detail: projectedMutation.summary || projectedMutation.reason || mutation.event,
-			status: mapMutationStatus(mutation.event),
+			status: mapMutationStatus(mutation.event, resolvedPlannedMutation),
 			at: mutation.at,
 			targetPath: mutation.targetPath || undefined,
 			actionRef: mutation.id || undefined,
@@ -243,7 +246,11 @@ export function projectReplaySummary(summary: TurnReplaySummary): AgentTrajector
 		});
 	}
 
+	const latestTaskEventByKey = collectLatestTaskEventByKey(replaySummary.taskTimeline);
 	for (const task of replaySummary.taskTimeline) {
+		if (isSupersededWaitingTaskEvent(task, latestTaskEventByKey)) {
+			continue;
+		}
 		if (task.taskId && !snapshot.identity.taskId) {
 			snapshot.identity.taskId = task.taskId;
 		}
@@ -883,13 +890,11 @@ function runtimeToolItemId(event: RuntimeProgressEvent): string {
 }
 
 function resolveReplayStatus(summary: ReplaySummaryWithIdentity): AgentTrajectoryStatus {
-	const waitingTask = [...summary.taskTimeline].reverse().find((task) =>
-		task.event === "waiting_for_approval" || task.event === "waiting_for_user"
-	);
-	if (waitingTask?.event === "waiting_for_approval") {
+	const latestTask = [...summary.taskTimeline].reverse().find((task) => Boolean(task.event));
+	if (latestTask?.event === "waiting_for_approval") {
 		return "waiting_for_approval";
 	}
-	if (waitingTask?.event === "waiting_for_user") {
+	if (latestTask?.event === "waiting_for_user") {
 		return "waiting_for_user";
 	}
 	if (summary.mutationTimeline.some((mutation) => mutation.event === "conflicted" || mutation.event === "apply_failed")) {
@@ -1175,7 +1180,45 @@ function isWaitingStatus(status: AgentTrajectoryStatus): boolean {
 	return status === "waiting_for_approval" || status === "waiting_for_user";
 }
 
-function mapMutationStatus(event: AgentTrajectoryMutation["event"]): AgentTrajectoryItemStatus {
+function collectResolvedMutationPlanIds(
+	mutations: TurnReplaySummary["mutationTimeline"],
+): Set<string> {
+	return new Set(mutations
+		.filter((mutation) => mutation.event !== "planned" && Boolean(mutation.id))
+		.map((mutation) => mutation.id));
+}
+
+function collectLatestTaskEventByKey(
+	tasks: TurnReplaySummary["taskTimeline"],
+): Map<string, TurnReplaySummary["taskTimeline"][number]["event"]> {
+	const latest = new Map<string, TurnReplaySummary["taskTimeline"][number]["event"]>();
+	for (const task of tasks) {
+		latest.set(taskTimelineKey(task), task.event);
+	}
+	return latest;
+}
+
+function isSupersededWaitingTaskEvent(
+	task: TurnReplaySummary["taskTimeline"][number],
+	latestTaskEventByKey: Map<string, TurnReplaySummary["taskTimeline"][number]["event"]>,
+): boolean {
+	if (task.event !== "waiting_for_approval" && task.event !== "waiting_for_user") {
+		return false;
+	}
+	return latestTaskEventByKey.get(taskTimelineKey(task)) !== task.event;
+}
+
+function taskTimelineKey(task: TurnReplaySummary["taskTimeline"][number]): string {
+	return task.taskId || "__turn__";
+}
+
+function mapMutationStatus(
+	event: AgentTrajectoryMutation["event"],
+	resolvedPlannedMutation = false,
+): AgentTrajectoryItemStatus {
+	if (resolvedPlannedMutation) {
+		return "ok";
+	}
 	switch (event) {
 		case "applied":
 			return "ok";

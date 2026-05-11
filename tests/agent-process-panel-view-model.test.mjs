@@ -868,6 +868,76 @@ test("buildAgentProcessPanelViewModel keeps ordinary process text free of intern
 	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "ordinary process view");
 });
 
+test("buildAgentProcessPanelViewModel does not keep applied mutation reviews waiting", async () => {
+	const [{ buildAgentProcessPanelViewModel }, { projectReplaySummary }] = await Promise.all([
+		loadViewModel(),
+		loadProjector(),
+	]);
+	const snapshot = projectReplaySummary({
+		conversationId: "conversation-1",
+		turnId: "turn-1",
+		taskId: "task-1",
+		traceId: "trace-1",
+		totalEvents: 8,
+		eventTypes: [],
+		status: "completed",
+		startedAt: "2026-05-05T00:00:00.000Z",
+		updatedAt: "2026-05-05T00:00:08.000Z",
+		completedAt: "2026-05-05T00:00:08.000Z",
+		durationMs: 8000,
+		modelCalls: { requested: 1, completed: 1, failed: 0 },
+		intakeTimeline: [],
+		planTimeline: [],
+		narrationTimeline: [],
+		checkpoints: { saved: 0, resumed: 0, rejected: 0, latestBoundary: "" },
+		checkpointTimeline: [],
+		transport: { retries: 0, exhausted: 0, lastMessage: "" },
+		transportTimeline: [],
+		toolEvents: { requested: 0, completed: 0, failed: 0, denied: 0 },
+		toolCalls: [],
+		approvals: { requested: 0, resolved: 0, approved: 0, denied: 0 },
+		mutations: { planned: 1, applied: 1, rejected: 0, conflicted: 0, applyFailed: 0 },
+		mutationTimeline: [
+			{
+				id: "plan-1",
+				event: "planned",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "pending_review",
+				summary: "已准备好文件创建。",
+				reason: "",
+				at: "2026-05-05T00:00:03.000Z",
+			},
+			{
+				id: "plan-1",
+				event: "applied",
+				operation: "write",
+				targetPath: "workspace/FRIDAY 文档关系分析.md",
+				status: "applied",
+				summary: "已应用文件创建。",
+				reason: "Approved by user.",
+				at: "2026-05-05T00:00:06.000Z",
+			},
+		],
+		taskTimeline: [
+			{ taskId: "task-1", event: "created", status: "created", summary: "Task created.", reason: "", at: "2026-05-05T00:00:00.000Z" },
+			{ taskId: "task-1", event: "waiting_for_approval", status: "waiting_for_approval", summary: "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。", reason: "", at: "2026-05-05T00:00:04.000Z" },
+			{ taskId: "task-1", event: "completed", status: "completed", summary: "文件修改已应用。", reason: "", at: "2026-05-05T00:00:08.000Z" },
+		],
+		finalAnswerSummary: "已整理成文档。",
+		errors: [],
+		terminalStatus: "turn_completed",
+	});
+
+	const view = buildAgentProcessPanelViewModel(snapshot);
+	const text = ordinaryProcessText(view);
+
+	assert.equal(view.timeline?.status, "completed");
+	assert.match(view.timeline?.title ?? "", /已完成工作/);
+	assert.doesNotMatch(text, /等待确认|待应用|确认后才会写入/);
+	assert.deepEqual(view.timeline?.actions.map((action) => action.id), []);
+});
+
 test("buildAgentProcessPanelViewModel renders transport retry without checkpoint resume claims", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -1006,6 +1076,40 @@ test("buildAgentProcessPanelViewModel groups process details by user-visible pha
 	assert.deepEqual(view.timeline?.groups.map((group) => group.title), ["收到任务", "计划", "执行"]);
 	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false, false]);
 	assert.equal(view.timeline?.groups[2]?.items.length, 1);
+});
+
+test("buildAgentProcessPanelViewModel status bar prefers the current visible plan task", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		headline: "FRIDAY 正在处理",
+		summary: "正在读取项目文件。",
+		time: {
+			startedAt: "2026-05-06T00:00:00.000Z",
+			updatedAt: "2026-05-06T00:00:12.000Z",
+		},
+		plan: {
+			planId: "plan-current-task",
+			visibility: "visible",
+			status: "running",
+			currentTaskId: "task-2",
+			tasks: [
+				{ id: "task-1", title: "确认资料范围", status: "completed" },
+				{ id: "task-2", title: "整理工作区文档关系", status: "in_progress" },
+				{ id: "task-3", title: "输出整理结果", status: "pending" },
+			],
+		},
+		items: [
+			makeItem({ id: "read", kind: "tool", title: "Read Project/a.md", detail: "读取参考文件。", status: "running", tool: "read", targetPath: "Project/a.md" }),
+		],
+	}), { now: new Date("2026-05-06T00:00:12.000Z") });
+
+	assert.ok(view.timeline?.statusBar);
+	assert.equal(view.timeline?.statusBar.phase, "任务");
+	assert.equal(view.timeline?.statusBar.action, "整理工作区文档关系");
+	assert.equal(view.timeline?.statusBar.elapsed, "12s");
+	assert.doesNotMatch(view.timeline?.statusBar.action ?? "", /读取项目现状|FRIDAY 正在理解/);
 });
 
 test("buildAgentProcessPanelViewModel exposes completed replay summary and evidence strip", async () => {

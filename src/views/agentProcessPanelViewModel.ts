@@ -787,7 +787,7 @@ function buildTimelineView(
 		defaultExpanded: timelineDefaultExpanded(status, context.interactionRoute),
 		canExpand: items.length > 0,
 		collapsedSummary: collapsedTimelineSummary(snapshot, context, status, items),
-		statusBar: buildTimelineStatusBar(groups, status, context.durationSeconds),
+		statusBar: buildTimelineStatusBar(snapshot, groups, status, context.durationSeconds),
 		groups,
 		items,
 		actions,
@@ -1125,10 +1125,20 @@ function buildTimelineGroups(
 }
 
 function buildTimelineStatusBar(
+	snapshot: AgentTrajectorySnapshot,
 	groups: AgentProcessTimelineGroupView[],
 	status: AgentProcessTimelineStatus,
 	durationSeconds: number,
 ): AgentProcessTimelineStatusBarView | null {
+	const currentTaskTitle = status === "completed" ? "" : currentVisiblePlanTaskTitle(snapshot);
+	if (currentTaskTitle) {
+		return {
+			phase: "任务",
+			action: currentTaskTitle,
+			elapsed: formatDuration(durationSeconds),
+			status,
+		};
+	}
 	if (groups.length === 0) {
 		return null;
 	}
@@ -1153,6 +1163,17 @@ function buildTimelineStatusBar(
 		elapsed: formatDuration(durationSeconds),
 		status,
 	};
+}
+
+function currentVisiblePlanTaskTitle(snapshot: AgentTrajectorySnapshot): string {
+	const plan = snapshot.plan;
+	if (!plan || !isTaskBarPlanVisibility(plan.visibility) || plan.tasks.length === 0) {
+		return "";
+	}
+	const currentTask = plan.tasks.find((task) => task.id === plan.currentTaskId) ??
+		plan.tasks.find((task) => task.status === "in_progress") ??
+		plan.tasks.find((task) => task.status === "blocked");
+	return sanitizeTimelineSummary(currentTask?.title ?? "");
 }
 
 function timelineGroupIdForItem(item: AgentProcessTimelineItemView): string {
@@ -1408,12 +1429,22 @@ function timelineSummaryForStep(
 }
 
 function pendingMutationCountForSnapshot(snapshot: AgentTrajectorySnapshot): number {
-	return snapshot.mutations.filter((mutation) => mutation.event === "planned").length;
+	return activePlannedMutations(snapshot.mutations).length;
 }
 
 function pendingMutationSummary(snapshot: AgentTrajectorySnapshot): string {
 	const count = pendingMutationCountForSnapshot(snapshot);
 	return count > 0 ? `已准备好 ${count} 个待应用的文件修改，确认后才会写入 Obsidian。` : "";
+}
+
+function activePlannedMutations(mutations: AgentTrajectorySnapshot["mutations"]): AgentTrajectorySnapshot["mutations"] {
+	const resolvedIds = new Set(mutations
+		.filter((mutation) => mutation.event !== "planned" && Boolean(mutation.id))
+		.map((mutation) => mutation.id));
+	return mutations.filter((mutation) =>
+		mutation.event === "planned" &&
+		(!mutation.id || !resolvedIds.has(mutation.id))
+	);
 }
 
 function reasoningTimelineSummary(summary: string): string {
@@ -2254,8 +2285,7 @@ function summaryForStep(
 
 function pendingMutationCount(snapshot: AgentTrajectorySnapshot, builder: StepBuilder): number {
 	const filePaths = new Set([...builder.fileRefs.keys()]);
-	const count = snapshot.mutations.filter((mutation) =>
-		mutation.event === "planned" &&
+	const count = activePlannedMutations(snapshot.mutations).filter((mutation) =>
 		(!filePaths.size || filePaths.has(mutation.targetPath))
 	).length;
 	return count || filePaths.size;
@@ -2361,7 +2391,10 @@ function buildEvidence(items: AgentTrajectoryItem[]): AgentProcessEvidenceView[]
 }
 
 function buildMutations(snapshot: AgentTrajectorySnapshot): AgentProcessMutationView[] {
-	return snapshot.mutations.map((mutation) => ({
+	const activePlanned = new Set(activePlannedMutations(snapshot.mutations));
+	return snapshot.mutations
+		.filter((mutation) => mutation.event !== "planned" || activePlanned.has(mutation))
+		.map((mutation) => ({
 		id: mutation.id,
 		event: mutation.event,
 		operation: mutation.operation,
@@ -2439,10 +2472,7 @@ function buildActionViews(snapshot: AgentTrajectorySnapshot): AgentProcessAction
 		.filter((action) => action.id !== "view_replay")
 		.map(toActionView);
 	const actions = [...explicitActions];
-	for (const mutation of snapshot.mutations) {
-		if (mutation.event !== "planned") {
-			continue;
-		}
+	for (const mutation of activePlannedMutations(snapshot.mutations)) {
 		if (!actions.some((action) => action.id === "view_changes" && action.targetId === mutation.id)) {
 			actions.push(toActionView({
 				id: "view_changes",

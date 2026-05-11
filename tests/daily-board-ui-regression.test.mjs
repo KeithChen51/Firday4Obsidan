@@ -283,6 +283,23 @@ test("mutation review uses pending-language buttons and notices", async () => {
 	assert.doesNotMatch(itemBlock, /"Reject"/);
 });
 
+test("mutation review exposes an inline full-change review instead of only truncated preview", async () => {
+	const source = readViewSource();
+	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);
+	assert.ok(itemMatch, "renderEditPlanReviewItem block should exist");
+	const itemBlock = itemMatch[1] ?? "";
+	const fullDiffMatch = source.match(/private renderEditPlanFullDiff\(containerEl: HTMLElement, before: string, after: string\): void \{([\s\S]*?)\n\t\}\n\n\tprivate addMutationReviewButton/);
+	assert.ok(fullDiffMatch, "renderEditPlanFullDiff block should exist");
+	const fullDiffBlock = fullDiffMatch[1] ?? "";
+
+	assert.match(itemBlock, /mutation\.review\.viewFullChanges/);
+	assert.match(itemBlock, /mutation\.review\.hideFullChanges/);
+	assert.match(itemBlock, /renderEditPlanFullDiff\(fullReviewEl, firstItem\.before, firstItem\.after\)/);
+	assert.match(fullDiffBlock, /maxLines:\s*Number\.MAX_SAFE_INTEGER/);
+	assert.match(fullDiffBlock, /friday-mutation-review-full/);
+	assert.doesNotMatch(itemBlock, /new\s+\w+Modal|window\.confirm|window\.prompt/);
+});
+
 test("mutation review actions stay clickable while the agent is waiting on that decision", async () => {
 	const source = readViewSource();
 	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);

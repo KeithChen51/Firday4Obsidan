@@ -109,6 +109,14 @@ const requiredAgentUxCopy = {
 		zh: "文件修改",
 		en: "File changes",
 	},
+	"mutation.review.viewFullChanges": {
+		zh: "查看完整改动",
+		en: "View full changes",
+	},
+	"mutation.review.hideFullChanges": {
+		zh: "收起完整改动",
+		en: "Hide full changes",
+	},
 	"mutation.review.summary": {
 		zh: "{count} 个修改待确认，确认后才会写入 Obsidian。",
 		en: "{count} change(s) waiting for confirmation. They will be written to Obsidian only after you confirm.",

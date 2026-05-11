@@ -580,6 +580,8 @@ export const enUSMessages: I18nMessages = {
 	"mutation.review.itemTitle": "Ready to apply {count} file change(s)",
 	"mutation.review.itemConflictedTitle": "File changes need review again",
 	"mutation.review.itemEmptyTitle": "File changes",
+	"mutation.review.viewFullChanges": "View full changes",
+	"mutation.review.hideFullChanges": "Hide full changes",
 	"mutation.review.diffOmitted": "Omitted {count} more changed line(s)",
 	"mutation.review.failed": "Could not complete review action: {error}",
 	"mutation.review.empty": "No file changes.",

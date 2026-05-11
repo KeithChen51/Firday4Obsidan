@@ -580,6 +580,8 @@ export const zhCNMessages: I18nMessages = {
 	"mutation.review.itemTitle": "准备应用 {count} 个文件修改",
 	"mutation.review.itemConflictedTitle": "文件修改需要重新确认",
 	"mutation.review.itemEmptyTitle": "文件修改",
+	"mutation.review.viewFullChanges": "查看完整改动",
+	"mutation.review.hideFullChanges": "收起完整改动",
 	"mutation.review.diffOmitted": "已省略 {count} 行变更",
 	"mutation.review.failed": "处理修改确认失败：{error}",
 	"mutation.review.empty": "没有文件修改。",

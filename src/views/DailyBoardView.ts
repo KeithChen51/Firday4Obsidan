@@ -1780,6 +1780,25 @@ export class DailyBoardView extends ItemView {
 		});
 		if (firstItem) {
 			this.renderEditPlanDiffPreview(itemEl, firstItem.before, firstItem.after);
+			const fullReviewToggle = itemEl.createEl("button", {
+				cls: "friday-approval-btn friday-mutation-review-full-toggle",
+				text: this.t("mutation.review.viewFullChanges", "查看完整改动"),
+			});
+			fullReviewToggle.type = "button";
+			const fullReviewEl = itemEl.createDiv({
+				cls: "friday-mutation-review-full",
+				attr: { "aria-hidden": "true" },
+			});
+			fullReviewEl.hidden = true;
+			this.renderEditPlanFullDiff(fullReviewEl, firstItem.before, firstItem.after);
+			fullReviewToggle.onclick = () => {
+				const shouldShow = fullReviewEl.hidden;
+				fullReviewEl.hidden = !shouldShow;
+				fullReviewEl.setAttribute("aria-hidden", shouldShow ? "false" : "true");
+				fullReviewToggle.setText(shouldShow
+					? this.t("mutation.review.hideFullChanges", "收起完整改动")
+					: this.t("mutation.review.viewFullChanges", "查看完整改动"));
+			};
 		}
 		const actions = itemEl.createDiv({ cls: "friday-approval-actions" });
 		const canApply = plan.items.some((item) => item.status === "pending");
@@ -1844,6 +1863,29 @@ export class DailyBoardView extends ItemView {
 				text: this.t("mutation.review.diffOmitted", "{count} more changed lines omitted", {
 					count: preview.omittedLineCount,
 				}),
+			});
+		}
+	}
+
+	private renderEditPlanFullDiff(containerEl: HTMLElement, before: string, after: string): void {
+		const preview = buildMutationDiffPreview({
+			before,
+			after,
+			maxLines: Number.MAX_SAFE_INTEGER,
+			maxLineChars: 1000,
+		});
+		if (preview.lines.length === 0) {
+			containerEl.createDiv({
+				cls: "friday-approval-detail friday-mutation-review-full-empty",
+				text: this.t("mutation.review.empty", "没有文件修改。"),
+			});
+			return;
+		}
+		const diffEl = containerEl.createDiv({ cls: "friday-mutation-review-diff friday-mutation-review-full-diff" });
+		for (const line of preview.lines) {
+			diffEl.createDiv({
+				cls: `friday-mutation-review-diff-line is-${line.kind}`,
+				text: `${line.kind === "remove" ? "-" : "+"} ${line.text}`,
 			});
 		}
 	}
