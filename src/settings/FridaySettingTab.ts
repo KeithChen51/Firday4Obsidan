@@ -42,6 +42,13 @@ import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS } from "../constants/officialContent";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
+import {
+	createNativeSettingsGroup,
+	renderFridaySettingsTitle,
+	renderNativeSectionTabs,
+	type NativeSettingsGroupOptions,
+	type NativeSectionTabItem,
+} from "../ui/obsidian-native/SettingsKit";
 
 type SettingsHost = FridayPluginApi & Plugin;
 type LlmMode = "openai" | "group";
@@ -169,34 +176,15 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSettingsTitle(containerEl: HTMLElement): void {
-		const titleText = this.host.t("settings.title");
-		const brandText = this.t("nav.friday", "FRIDAY");
-		const brandIndex = titleText.indexOf(brandText);
-		if (brandIndex < 0) {
-			containerEl.createEl("h2", { text: titleText });
-			return;
-		}
-
-		const titleEl = containerEl.createEl("h2", { cls: "friday-settings-title" });
-		const prefixText = titleText.slice(0, brandIndex).trim();
-		const suffixText = titleText.slice(brandIndex + brandText.length).trim();
-
-		if (prefixText) {
-			titleEl.createSpan({ cls: "friday-settings-title-prefix", text: prefixText });
-		}
-		const brandEl = titleEl.createSpan({
-			cls: "friday-settings-title-brand friday-wordmark",
-			text: brandText,
+		renderFridaySettingsTitle(containerEl, {
+			titleText: this.host.t("settings.title"),
+			brandText: this.t("nav.friday", "FRIDAY"),
+			wordmarkFontFamily: FRIDAY_WORDMARK_FONT_FAMILY,
 		});
-		brandEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
-		if (suffixText) {
-			titleEl.createSpan({ cls: "friday-settings-title-suffix", text: suffixText });
-		}
 	}
 
 	private renderSectionTabs(containerEl: HTMLElement): void {
-		const nav = containerEl.createDiv({ cls: "friday-top-nav" });
-		const items: Array<{ id: SettingsSection; label: string }> = [
+		const items: NativeSectionTabItem<SettingsSection>[] = [
 			{ id: "user", label: this.host.t("settings.section.user") },
 			{ id: "project", label: this.host.t("settings.section.project") },
 			{ id: "sync", label: this.host.t("settings.section.sync") },
@@ -204,41 +192,21 @@ export class FridaySettingTab extends PluginSettingTab {
 			{ id: "agent", label: this.host.t("settings.section.agent") },
 			{ id: "subscriptions", label: this.host.t("settings.section.subscriptions") },
 		];
-		for (const item of items) {
-			const button = nav.createEl("button", {
-				cls: `friday-nav-button${this.activeSection === item.id ? " is-active" : ""}`,
-				text: item.label,
-			});
-			button.onclick = () => {
-				this.activeSection = item.id;
+		renderNativeSectionTabs(containerEl, {
+			items,
+			activeId: this.activeSection,
+			onSelect: (section) => {
+				this.activeSection = section;
 				this.display();
-			};
-		}
+			},
+		});
 	}
 
 	private createNativeSettingsGroup(
 		containerEl: HTMLElement,
-		options: { title?: string; description?: string; extraClass?: string } = {},
+		options: NativeSettingsGroupOptions = {},
 	): HTMLDivElement {
-		const group = containerEl.createDiv({
-			cls: ["friday-native-settings-group", options.extraClass].filter(Boolean).join(" "),
-		});
-		if (options.title || options.description) {
-			const header = group.createDiv({ cls: "friday-native-settings-group-header" });
-			if (options.title) {
-				header.createDiv({
-					cls: "friday-native-settings-group-title",
-					text: options.title,
-				});
-			}
-			if (options.description) {
-				header.createDiv({
-					cls: "friday-native-settings-group-description",
-					text: options.description,
-				});
-			}
-		}
-		return group;
+		return createNativeSettingsGroup(containerEl, options);
 	}
 
 	private renderUserSection(containerEl: HTMLElement): void {

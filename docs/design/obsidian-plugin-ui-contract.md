@@ -449,8 +449,10 @@ Before merging new or changed plugin UI, verify:
 
 Use these existing patterns first:
 
-- `src/settings/FridaySettingTab.ts`: `renderSettingsTitle`,
-  `renderSectionTabs`, and `createNativeSettingsGroup`.
+- `src/ui/obsidian-native/SettingsKit.ts`: first FRIDAY Obsidian Native Kit
+  module for reusable settings title, section tabs, and native settings groups.
+- `src/settings/FridaySettingTab.ts`: should consume the Native Kit for shared
+  settings primitives before adding local UI helpers.
 - `styles.css`: `friday-wordmark`, `friday-nav-button`,
   `friday-native-settings-group`, `friday-card`, project list/card styles,
   empty state styles, and assistant/chat styles.

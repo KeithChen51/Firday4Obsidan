@@ -11,6 +11,7 @@ const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
 const settingsModelPath = path.join(projectRoot, "src/types/settings.ts");
 const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
+const settingsKitPath = path.join(projectRoot, "src/ui/obsidian-native/SettingsKit.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
@@ -18,10 +19,12 @@ function read(filePath) {
 
 test("settings tab exposes a shared native settings group helper", () => {
 	const source = read(settingsPath);
+	const kitSource = read(settingsKitPath);
 	assert.match(source, /private createNativeSettingsGroup\(/);
-	assert.match(source, /friday-native-settings-group-header/);
-	assert.match(source, /friday-native-settings-group-title/);
-	assert.match(source, /friday-native-settings-group-description/);
+	assert.match(source, /createNativeSettingsGroup\(containerEl, options\)/);
+	assert.match(kitSource, /friday-native-settings-group-header/);
+	assert.match(kitSource, /friday-native-settings-group-title/);
+	assert.match(kitSource, /friday-native-settings-group-description/);
 });
 
 test("sync llm and soul sections render settings inside native groups", () => {

@@ -10,6 +10,7 @@ const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const settingsKitPath = path.join(projectRoot, "src/ui/obsidian-native/SettingsKit.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const iconPath = path.join(projectRoot, "src/constants/icon.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
@@ -24,6 +25,7 @@ test("FRIDAY wordmark and Obsidian icons use the current brand system", () => {
 	const view = read(viewPath);
 	const renderer = read(rendererPath);
 	const settings = read(settingsPath);
+	const settingsKit = read(settingsKitPath);
 	const main = read(mainPath);
 	const icon = read(iconPath);
 	const styles = read(stylesPath);
@@ -75,8 +77,10 @@ test("FRIDAY wordmark and Obsidian icons use the current brand system", () => {
 	assert.match(zhLocale, /"ai\.role\.assistant": "FRIDAY"/);
 	assert.match(enLocale, /"ai\.role\.assistant": "FRIDAY"/);
 
-	assert.match(settings, /const titleText = this\.host\.t\("settings\.title"\)/);
-	assert.match(settings, /const brandText = this\.t\("nav\.friday", "FRIDAY"\)/);
-	assert.match(settings, /cls:\s*"friday-settings-title-brand friday-wordmark"/);
-	assert.match(settings, /brandEl\.style\.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;/);
+	assert.match(settings, /renderFridaySettingsTitle\(containerEl,\s*\{/);
+	assert.match(settings, /titleText: this\.host\.t\("settings\.title"\)/);
+	assert.match(settings, /brandText: this\.t\("nav\.friday", "FRIDAY"\)/);
+	assert.match(settings, /wordmarkFontFamily: FRIDAY_WORDMARK_FONT_FAMILY/);
+	assert.match(settingsKit, /cls:\s*"friday-settings-title-brand friday-wordmark"/);
+	assert.match(settingsKit, /brandEl\.style\.fontFamily = options\.wordmarkFontFamily;/);
 });
