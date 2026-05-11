@@ -1174,11 +1174,12 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assert.equal(view.visibleSteps[1]?.status, "waiting_for_approval");
 	assert.deepEqual(view.visibleSteps[0]?.actions.map((action) => action.label), [
 		"Loaded memory",
-		"Model step 1",
+		"FRIDAY 正在理解你的请求。",
 		"Search project",
 	]);
 	assert.deepEqual(view.visibleSteps[1]?.fileRefs.map((file) => file.path), ["Notes/A.md"]);
 	assert.doesNotMatch(JSON.stringify(view.visibleSteps), /Finalize|Future|pending future/i);
+	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "progressive visible process steps");
 });
 
 test("buildAgentProcessPanelViewModel shows acknowledged task, plan, and stage reports as real timeline steps", async () => {

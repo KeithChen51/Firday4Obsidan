@@ -24,6 +24,12 @@ $BannedTerms = @(
 	"checkpoint",
 	"model_request",
 	"model request",
+	"requesting model decision",
+	"native tools",
+	"prompt runtime",
+	"Model step",
+	"Agent is reasoning",
+	"Model decision received",
 	"raw reasoning",
 	"debug",
 	"replay",
@@ -276,7 +282,7 @@ const plugin=app.plugins.plugins["friday-obsidian-plugin"];
 const view=app.workspace.getLeavesOfType("friday-daily-board")[0]?.view;
 if(!plugin||!view){resolve("missing");return;}
 view.aiConversation=[{role:"user",content:"整理运行过程",uiMeta:{conversationId:view.aiSessionId,turnId:"audit-running-turn",taskId:"audit-running-task"}}];
-view.handleRuntimeProgress({phase:"model_request",depth:0,turnId:"audit-running-turn",taskId:"audit-running-task",conversationId:view.aiSessionId,agentId:"audit-agent",message:"FRIDAY 正在理解你的请求",at:new Date().toISOString()});
+view.handleRuntimeProgress({phase:"model_request",depth:0,turnId:"audit-running-turn",taskId:"audit-running-task",conversationId:view.aiSessionId,agentId:"audit-agent",message:"Step 1: requesting model decision (native tools)",at:new Date().toISOString()});
 view.handleRuntimeProgress({phase:"tool_call",depth:0,turnId:"audit-running-turn",taskId:"audit-running-task",conversationId:view.aiSessionId,agentId:"audit-agent",tool:"read",targetPath:"Audit/Test.md",message:"正在读取相关笔记",at:new Date().toISOString()});
 view.renderBoard();
 let processAdds=0,processRemoves=0;

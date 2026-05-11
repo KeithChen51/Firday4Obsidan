@@ -122,6 +122,27 @@ test("trajectory projector ordinary text does not expose checkpoint or replay co
 	assertNoBannedOrdinaryTerms(ordinaryText, "trajectory ordinary text");
 });
 
+test("trajectory projector productizes live model-request progress", async () => {
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "model_request",
+			depth: 0,
+			step: 1,
+			message: "Step 1: requesting model decision (native tools)",
+		},
+	]);
+	const ordinaryText = [
+		snapshot.headline,
+		snapshot.summary,
+		...snapshot.items.flatMap((item) => [item.title, item.detail]),
+	].join("\n");
+
+	assert.match(ordinaryText, /FRIDAY|理解|整理|处理/);
+	assertNoBannedOrdinaryTerms(ordinaryText, "live model-request process text");
+});
+
 test("leaf-node scanner reports only visible leaf text matches", () => {
 	const child = { textContent: "Waiting for approval", children: [], tagName: "SPAN", className: "leaf" };
 	const parent = { textContent: "Wrapper Waiting for approval", children: [child], tagName: "DIV", className: "parent" };

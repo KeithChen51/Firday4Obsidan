@@ -116,6 +116,12 @@ export function productizeRuntimeText(raw: string | undefined | null): string {
 	if (/Checkpoint saved/i.test(text)) {
 		return "FRIDAY 已保存当前进度。";
 	}
+	if (/requesting model decision|native tools|prompt runtime|Model step|Agent is reasoning/i.test(text)) {
+		return "FRIDAY 正在理解你的请求。";
+	}
+	if (/Model decision received/i.test(text)) {
+		return "FRIDAY 已整理当前判断。";
+	}
 	if (/\bcheckpoint\b|model_request|model request|View replay|\breplay\b|\bdebug\b|raw reasoning/i.test(text)) {
 		return "";
 	}

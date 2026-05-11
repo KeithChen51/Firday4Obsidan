@@ -369,13 +369,13 @@ function applyRuntimeProgress(
 			setStageStatus(snapshot, "context", hasKind(snapshot, "context") ? "ok" : "pending");
 			setStageStatus(snapshot, "reasoning", "running");
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
-			snapshot.headline = "Agent is reasoning";
-			snapshot.summary = safeText(event.message);
+			snapshot.headline = "FRIDAY 正在理解你的请求";
+			snapshot.summary = formatModelRequestDetail(event.message);
 			upsertItem(snapshot, "reasoning", {
 				id: `live:model:${step}`,
 				kind: "model",
-				title: `Model step ${step}`,
-				detail: safeText(event.message),
+				title: "理解请求",
+				detail: formatModelRequestDetail(event.message),
 				status: "running",
 				step,
 				rawEventType: event.phase,
@@ -383,8 +383,8 @@ function applyRuntimeProgress(
 			break;
 		case "model_response":
 			snapshot.status = snapshot.status === "idle" ? "running" : snapshot.status;
-			snapshot.headline = "Model decision received";
-			snapshot.summary = safeText(event.reasoningVisibleSummary || event.message);
+			snapshot.headline = "FRIDAY 已整理当前判断";
+			snapshot.summary = safeText(event.reasoningVisibleSummary || formatModelResponseDetail(event.message));
 			upsertItem(snapshot, "reasoning", event.reasoningVisibleSummary ? {
 				id: `live:reasoning:${step}`,
 				kind: "reasoning",
@@ -399,8 +399,8 @@ function applyRuntimeProgress(
 			} : {
 				id: `live:model:${step}`,
 				kind: "model",
-				title: `Model step ${step}`,
-				detail: safeText(event.message),
+				title: "完成理解",
+				detail: formatModelResponseDetail(event.message),
 				status: "ok",
 				step,
 				rawEventType: event.phase,
@@ -1104,6 +1104,22 @@ function mapCheckpointStatus(
 		return "running";
 	}
 	return "ok";
+}
+
+function formatModelRequestDetail(value: string | undefined): string {
+	const text = safeText(value ?? "");
+	if (!text || /requesting model decision|native tools|prompt runtime|model_request|model request/i.test(text)) {
+		return "FRIDAY 正在理解你的请求。";
+	}
+	return text;
+}
+
+function formatModelResponseDetail(value: string | undefined): string {
+	const text = safeText(value ?? "");
+	if (!text || /model decision received|model response|model_request|model request/i.test(text)) {
+		return "FRIDAY 已整理当前判断。";
+	}
+	return text;
 }
 
 function formatRuntimeTransportDetail(event: RuntimeProgressEvent): string {
