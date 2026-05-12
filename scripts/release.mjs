@@ -35,6 +35,57 @@ function writeJson(filePath, value) {
 	fs.writeFileSync(filePath, `${JSON.stringify(value, null, "\t")}\n`, "utf8");
 }
 
+function readJsonIfPresent(filePath) {
+	if (!fs.existsSync(filePath)) {
+		return null;
+	}
+	try {
+		return JSON.parse(fs.readFileSync(filePath, "utf8"));
+	} catch {
+		return null;
+	}
+}
+
+function stableJson(value) {
+	if (Array.isArray(value)) {
+		return value.map((item) => stableJson(item));
+	}
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.keys(value)
+				.sort()
+				.map((key) => [key, stableJson(value[key])]),
+		);
+	}
+	return value;
+}
+
+function feedContentWithoutPublishedAt(feed) {
+	const content = { ...(feed ?? {}) };
+	delete content.publishedAt;
+	return content;
+}
+
+function releaseFeedContentEquals(left, right) {
+	const leftContent = feedContentWithoutPublishedAt(left);
+	const rightContent = feedContentWithoutPublishedAt(right);
+	return JSON.stringify(stableJson(leftContent)) === JSON.stringify(stableJson(rightContent));
+}
+
+function resolvePublishedAtForUnchangedFeeds(feedCandidates, fallbackPublishedAt) {
+	for (const { filePath, feed } of feedCandidates) {
+		const existingFeed = readJsonIfPresent(filePath);
+		if (
+			existingFeed
+			&& typeof existingFeed.publishedAt === "string"
+			&& releaseFeedContentEquals(existingFeed, feed)
+		) {
+			return existingFeed.publishedAt;
+		}
+	}
+	return fallbackPublishedAt;
+}
+
 function runCommand(command, args, cwd) {
 	const result = spawnSync(command, args, {
 		cwd,
@@ -217,7 +268,19 @@ export function syncReleaseArtifacts({
 		throw new Error("manifest.json is missing required release fields");
 	}
 
-	syncChangelogPublishDate(projectRoot, manifest.version, publishedAt);
+	const releaseNotes = readReleaseNotes(projectRoot, manifest.version);
+	const latestJsonPath = path.join(projectRoot, PLUGIN_LATEST_PATH);
+	const legacyLatestJsonPath = path.join(projectRoot, LEGACY_RELEASE_LATEST_PATH);
+	const writesLegacyBridge = manifest.version === legacyBridgeVersion;
+	const feedCandidates = [
+		...(writesLegacyBridge
+			? [{ filePath: legacyLatestJsonPath, feed: buildLegacyBridgeFeed(manifest, publishedAt, releaseNotes) }]
+			: []),
+		{ filePath: latestJsonPath, feed: buildReleaseFeed(manifest, publishedAt, releaseNotes) },
+	];
+	const resolvedPublishedAt = resolvePublishedAtForUnchangedFeeds(feedCandidates, publishedAt);
+
+	syncChangelogPublishDate(projectRoot, manifest.version, resolvedPublishedAt);
 
 	const artifactDir = path.join(projectRoot, PLUGIN_ARTIFACT_RELATIVE_DIR);
 	fs.mkdirSync(artifactDir, { recursive: true });
@@ -228,15 +291,13 @@ export function syncReleaseArtifacts({
 		fs.copyFileSync(sourcePath, targetPath);
 	}
 
-	const releaseNotes = readReleaseNotes(projectRoot, manifest.version);
-	const latestJson = buildReleaseFeed(manifest, publishedAt, releaseNotes);
-	const latestJsonPath = path.join(projectRoot, PLUGIN_LATEST_PATH);
+	const latestJson = buildReleaseFeed(manifest, resolvedPublishedAt, releaseNotes);
 	writeJson(latestJsonPath, latestJson);
 
 	const zipPath = path.join(projectRoot, PLUGIN_ZIP_PATH);
 	zipWriter(artifactDir, zipPath);
 
-	if (manifest.version === legacyBridgeVersion) {
+	if (writesLegacyBridge) {
 		const legacyArtifactDir = path.join(projectRoot, LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR);
 		fs.mkdirSync(legacyArtifactDir, { recursive: true });
 		for (const fileName of LEGACY_BRIDGE_FILES) {
@@ -244,8 +305,8 @@ export function syncReleaseArtifacts({
 			const targetPath = path.join(legacyArtifactDir, fileName);
 			fs.copyFileSync(sourcePath, targetPath);
 		}
-		const legacyLatestJson = buildLegacyBridgeFeed(manifest, publishedAt, releaseNotes);
-		writeJson(path.join(projectRoot, LEGACY_RELEASE_LATEST_PATH), legacyLatestJson);
+		const legacyLatestJson = buildLegacyBridgeFeed(manifest, resolvedPublishedAt, releaseNotes);
+		writeJson(legacyLatestJsonPath, legacyLatestJson);
 	}
 
 	return {
