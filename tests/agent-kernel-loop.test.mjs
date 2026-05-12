@@ -295,6 +295,118 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
 });
 
+test("AgentLoopController continues native assistant JSON tool calls with prompt-style tool feedback", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const assistantToolEnvelope = JSON.stringify({
+		type: "tool_call",
+		tool: {
+			name: "list_files",
+			args: { path: "Project" },
+		},
+	});
+	const modelRequests = [];
+	const toolRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 3,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+					contextSummary: { used: 8, softLimit: 100, hardLimit: 120, trimmedChannels: [] },
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (modelRequests.length === 1) {
+					return {
+						assistantText: assistantToolEnvelope,
+						toolCalls: [],
+						finishReason: "stop",
+					};
+				}
+				return {
+					assistantText: "Project contains a.md and b.md.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "list_files", description: "List files", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				toolRequests.push(input);
+				return {
+					trace: {
+						runId: "list-files-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Listed 2 item(s)",
+					},
+					payload: {
+						ok: true,
+						tool: "list_files",
+						status: "ok",
+						data: { path: "Project", items: ["a.md", "b.md"] },
+					},
+					modelResultText: 'TOOL_RESULT {"ok":true,"tool":"list_files","status":"ok","data":{"items":["a.md","b.md"]}}',
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-native-json-tool-continuation",
+		taskId: "task-native-json-tool-continuation",
+		traceId: "trace-native-json-tool-continuation",
+		conversationId: "conversation-native-json-tool-continuation",
+		agentId: "agent-native-json-tool-continuation",
+		conversation: [],
+		userPrompt: "List files before answering",
+		allowedTools: ["list_files"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 3 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Project contains a.md and b.md.");
+	assert.notEqual(result.assistantText, "Listed 2 item(s)");
+	assert.equal(modelRequests.length, 2);
+	assert.equal(toolRequests.length, 1);
+	assert.deepEqual(toolRequests.map((request) => request.tool), [
+		{ name: "list_files", args: { path: "Project" } },
+	]);
+	const continuationMessages = modelRequests[1].messages;
+	assert.equal(continuationMessages.some((message) => message.role === "tool"), false);
+	assert.equal(continuationMessages.at(-2).role, "assistant");
+	assert.equal(continuationMessages.at(-2).content, assistantToolEnvelope);
+	assert.equal(continuationMessages.at(-2).toolCalls, undefined);
+	assert.equal(continuationMessages.at(-1).role, "user");
+	assert.match(continuationMessages.at(-1).content, /^TOOL_RESULT /);
+	assert.match(continuationMessages.at(-1).content, /"list_files"/);
+});
+
 test("AgentLoopController emits native model-authored intake and plan only after model_response", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),

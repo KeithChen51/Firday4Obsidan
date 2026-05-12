@@ -162,6 +162,7 @@ test("AgentLoopController blocks duplicate failed calls returned as native assis
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
 	]);
+	const modelRequests = [];
 	const toolExecutions = [];
 	const controller = new AgentLoopController({
 		contextEngine: {
@@ -178,6 +179,7 @@ test("AgentLoopController blocks duplicate failed calls returned as native assis
 				throw new Error("prompt path should not be used");
 			},
 			async requestWithTools(input) {
+				modelRequests.push(input);
 				if (input.step === 1) {
 					return {
 						assistantText: "",
@@ -187,6 +189,13 @@ test("AgentLoopController blocks duplicate failed calls returned as native assis
 							args: { path: "workspace/missing.md", options: { beta: true, alpha: 1 } },
 						}],
 						finishReason: "tool_calls",
+					};
+				}
+				if (input.step === 3) {
+					return {
+						assistantText: "I will use the suggested path instead of repeating the failed call.",
+						toolCalls: [],
+						finishReason: "stop",
 					};
 				}
 				return {
@@ -257,9 +266,15 @@ test("AgentLoopController blocks duplicate failed calls returned as native assis
 	});
 
 	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "I will use the suggested path instead of repeating the failed call.");
+	assert.equal(modelRequests.length, 3);
 	assert.equal(toolExecutions.length, 1);
 	assert.equal(result.traces.length, 2);
 	assert.match(result.traces[1].summary, /identical call already failed/i);
+	assert.equal(modelRequests[2].messages.at(-2).role, "assistant");
+	assert.equal(modelRequests[2].messages.at(-1).role, "user");
+	assert.match(modelRequests[2].messages.at(-1).content, /^TOOL_RESULT /);
+	assert.match(modelRequests[2].messages.at(-1).content, /duplicate_failed_tool_call/);
 });
 
 test("AgentLoopController does not block identical successful native calls", async () => {

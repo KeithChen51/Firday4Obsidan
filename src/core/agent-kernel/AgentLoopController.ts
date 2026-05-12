@@ -83,6 +83,10 @@ interface ActivePlanState {
 	lastEmittedPlanSignature?: string;
 }
 
+type NativeNoToolResultResolution =
+	| { kind: "terminal"; result: AgentTurnResult }
+	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"] };
+
 interface FailedToolInvocationRecord {
 	invocation: NormalizedToolInvocation;
 	result: ToolExecutionResult;
@@ -415,18 +419,26 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			}
 
 			if (response.toolCalls.length === 0) {
-				const terminal = this.resolveNativeNoToolResult(
+				const resolution = await this.resolveNativeNoToolResult(
 					input,
 					context,
 					contextPackage,
 					traces,
+					modelMessages,
+					step,
+					maxIterations,
 					assistantStepText,
 					finalReply,
 					lastToolPayload,
 					failedInvocations,
 					activePlan,
+					response.reasoningArtifact,
 				);
-				return terminal;
+				if (resolution.kind === "continue") {
+					lastToolPayload = resolution.lastToolPayload;
+					continue;
+				}
+				return resolution.result;
 			}
 
 			const toolResultMessages: AgentChatMessage[] = [];
@@ -489,61 +501,95 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 		contextPackage: ContextPackage,
 		traces: RuntimeToolTrace[],
+		modelMessages: AgentChatMessage[],
+		step: number,
+		maxIterations: number,
 		assistantStepText: string,
 		finalReply: string,
 		lastToolPayload: ToolExecutionResult["payload"] | null,
-		failedInvocations?: FailedToolInvocationTracker,
-		activePlan?: ActivePlanState,
-	): Promise<AgentTurnResult> {
+		failedInvocations: FailedToolInvocationTracker | undefined,
+		activePlan: ActivePlanState | undefined,
+		reasoningArtifact?: ReasoningArtifact,
+	): Promise<NativeNoToolResultResolution> {
 		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload);
 		if (!assistantStepText || this.isIntermediateAssistantText(assistantStepText)) {
-			return this.makeResult(input, context, {
-				assistantText: fallbackAssistant,
-				traces,
-				rawFinalReply: finalReply,
-				parseError: "Native tool call completed without a user-facing final answer. Generated a fallback reply from tool results.",
-				contextSummary: contextPackage.contextSummary,
-			});
+			return {
+				kind: "terminal",
+				result: this.makeResult(input, context, {
+					assistantText: fallbackAssistant,
+					traces,
+					rawFinalReply: finalReply,
+					parseError: "Native tool call completed without a user-facing final answer. Generated a fallback reply from tool results.",
+					contextSummary: contextPackage.contextSummary,
+				}),
+			};
 		}
 		const parsed = parseKernelRuntimeEnvelope(assistantStepText);
 		if (parsed) {
 			this.applyRuntimeEnvelopeProcess(input, context, parsed, activePlan);
 			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage);
 			if (terminal) {
-				return terminal;
+				return { kind: "terminal", result: terminal };
 			}
 			const tool = parsed.tool;
 			if (parsed.type === "tool_call" || tool) {
 				if (!tool?.name) {
-					return this.makeResult(input, context, {
-						assistantText: "Tool call is missing tool.name. Runtime execution stopped for this turn.",
-						traces,
-						rawFinalReply: assistantStepText || finalReply,
-						parseError: "tool.name is missing",
-						contextSummary: contextPackage.contextSummary,
-					});
+					return {
+						kind: "terminal",
+						result: this.makeResult(input, context, {
+							assistantText: "Tool call is missing tool.name. Runtime execution stopped for this turn.",
+							traces,
+							rawFinalReply: assistantStepText || finalReply,
+							parseError: "tool.name is missing",
+							contextSummary: contextPackage.contextSummary,
+						}),
+					};
 				}
 				this.emitPlanExecutionStarted(input, context, activePlan);
-				const executed = await this.executeTool(input, context, traces.length + 1, {
+				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
 				}, failedInvocations);
 				traces.push(executed.trace);
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
-				return this.makeResult(input, context, {
-					assistantText: fallbackAssistant || executed.trace.summary,
-					traces,
-					rawFinalReply: assistantStepText || finalReply,
-					contextSummary: contextPackage.contextSummary,
+				modelMessages.push({
+					role: "assistant",
+					content: assistantStepText,
+					...(reasoningArtifact?.hasReasoning ? { reasoningArtifact } : {}),
 				});
+				modelMessages.push({ role: "user", content: executed.modelResultText });
+				if (executed.loadedSkillContext) {
+					modelMessages.push({ role: "system", content: executed.loadedSkillContext });
+				}
+				await this.saveCheckpoint(input, context, {
+					boundary: "after_tool_result",
+					channel: "native",
+					step,
+					nextStep: step + 1,
+					maxIterations,
+					modelMessages,
+					traces,
+					completedToolCalls: [{
+						toolCallId: executed.trace.runId,
+						tool: executed.trace.tool,
+						status: executed.trace.status,
+						step: executed.trace.step,
+						targetPath: executed.trace.targetPath,
+					}],
+					safetyReason: "Native assistant text-envelope tool result appended as prompt-style TOOL_RESULT feedback.",
+				});
+				return { kind: "continue", lastToolPayload: executed.payload };
 			}
 		}
-		return this.makeResult(input, context, {
-			assistantText: assistantStepText || "(Model returned no usable content)",
-			traces,
-			rawFinalReply: finalReply,
-			contextSummary: contextPackage.contextSummary,
-		});
+		return {
+			kind: "terminal",
+			result: this.makeResult(input, context, {
+				assistantText: assistantStepText || "(Model returned no usable content)",
+				traces,
+				rawFinalReply: finalReply,
+				contextSummary: contextPackage.contextSummary,
+			}),
+		};
 	}
 
 	private async resolveTerminalEnvelope(
