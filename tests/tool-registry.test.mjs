@@ -37,6 +37,13 @@ test("tool registry owns complete tool contracts with unique names", async () =>
 		assert.equal(tool.parameters.type, "object", `${tool.name} missing object schema`);
 		assert.ok(["low", "medium", "high"].includes(tool.riskLevel), `${tool.name} missing risk level`);
 		assert.ok(["read", "write", "delete", "system", "memory", "skill", "knowledge"].includes(tool.category));
+		assert.equal(typeof tool.concurrencySafe, "boolean", `${tool.name} missing concurrencySafe`);
+		assert.equal(typeof tool.idempotent, "boolean", `${tool.name} missing idempotent`);
+		assert.equal(typeof tool.cacheable, "boolean", `${tool.name} missing cacheable`);
+		assert.equal(typeof tool.mutatesVault, "boolean", `${tool.name} missing mutatesVault`);
+		assert.equal(typeof tool.mutatesExternal, "boolean", `${tool.name} missing mutatesExternal`);
+		assert.equal(typeof tool.resultKind, "string", `${tool.name} missing resultKind`);
+		assert.equal(typeof tool.outputBudget, "number", `${tool.name} missing outputBudget`);
 	}
 });
 
@@ -53,9 +60,43 @@ test("tool manifest catalog is derived from the tool registry", async () => {
 		name: "read",
 		capability: "filesystem.read",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "document",
+		outputBudget: 10000,
 		primary: true,
 	});
 	assert.equal(manifest.findToolManifest("compile_wiki"), null);
+});
+
+test("tool contracts mark observation tools concurrency-safe and mutation tools unsafe", async () => {
+	const { registry } = await loadModules();
+	const toolRegistry = registry.ToolRegistry.getInstance();
+
+	for (const name of ["read", "ls", "grep", "search_text", "glob"]) {
+		const tool = toolRegistry.get(name);
+		assert.equal(tool?.readOnly, true, `${name} should be read-only`);
+		assert.equal(tool?.concurrencySafe, true, `${name} should be safe to run concurrently`);
+		assert.equal(tool?.idempotent, true, `${name} should be idempotent`);
+		assert.equal(tool?.cacheable, true, `${name} should be cacheable`);
+		assert.equal(tool?.mutatesVault, false, `${name} should not mutate vault state`);
+		assert.equal(tool?.mutatesExternal, false, `${name} should not mutate external state`);
+		assert.ok(tool?.outputBudget > 0, `${name} should declare an output budget`);
+	}
+
+	for (const name of ["write", "edit", "delete", "exec", "memory", "compile_wiki"]) {
+		const tool = toolRegistry.get(name);
+		if (!tool) {
+			continue;
+		}
+		assert.equal(tool.concurrencySafe, false, `${name} should not run concurrently`);
+		assert.equal(tool.cacheable, false, `${name} should not be cacheable`);
+	}
+
+	assert.equal(toolRegistry.get("use_skill")?.concurrencySafe, false);
 });
 
 test("default Obsidian modes hide debug-only exec from prompt and native surfaces", async () => {

@@ -369,6 +369,136 @@ test("AgentLoopController safe-stops repeated unchanged successful native observ
 	assert.equal(terminal.status, "safe_stopped");
 });
 
+test("AgentLoopController treats a native batch with repeated observations and new evidence as progress", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const modelRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 4,
+					messages: [{ role: "user", content: "List project and read new files" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{ id: "call-ls-1", name: "ls", args: { path: "Project" } },
+							{ id: "call-read-a", name: "read", args: { path: "Project/a.md" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				if (input.step === 2) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{ id: "call-ls-2", name: "ls", args: { path: "Project" } },
+							{ id: "call-read-b", name: "read", args: { path: "Project/b.md" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "Collected the new evidence.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [
+					{ name: "ls", description: "List files", parameters: { type: "object" } },
+					{ name: "read", description: "Read file", parameters: { type: "object" } },
+				];
+			},
+			async executeTool(input) {
+				if (input.tool.name === "ls") {
+					return {
+						trace: {
+							runId: `ls-${input.step}`,
+							step: input.step,
+							tool: "ls",
+							scope: "vault",
+							targetPath: "Project",
+							approved: true,
+							approvalReason: "No approval required",
+							persistedRule: false,
+							viaRule: false,
+							status: "ok",
+							ok: true,
+							summary: "Listed Project",
+						},
+						payload: {
+							ok: true,
+							tool: "ls",
+							status: "ok",
+							data: { path: "Project", entries: ["a.md", "b.md"] },
+							trace: { targetPath: "Project" },
+						},
+						modelResultText: 'TOOL_RESULT {"ok":true,"tool":"ls","data":{"entries":["a.md","b.md"]}}',
+					};
+				}
+				const target = input.tool.args.path;
+				return {
+					trace: {
+						runId: `read-${target.endsWith("a.md") ? "a" : "b"}`,
+						step: input.step,
+						tool: "read",
+						scope: "vault",
+						targetPath: target,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: `Read ${target}`,
+					},
+					payload: {
+						ok: true,
+						tool: "read",
+						status: "ok",
+						data: { path: target, content: target.endsWith("a.md") ? "alpha" : "beta" },
+						trace: { targetPath: target },
+					},
+					modelResultText: `TOOL_RESULT ${target}`,
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-batch-repeat-with-progress",
+		traceId: "trace-batch-repeat-with-progress",
+		conversationId: "conversation-batch-repeat-with-progress",
+		agentId: "agent-batch-repeat-with-progress",
+		conversation: [],
+		userPrompt: "List project and read new files",
+		mode: "ask",
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Collected the new evidence.");
+	assert.equal(modelRequests.length, 3);
+	assert.deepEqual(result.traces.map((trace) => `${trace.tool}:${trace.targetPath}`), [
+		"ls:Project",
+		"read:Project/a.md",
+		"ls:Project",
+		"read:Project/b.md",
+	]);
+	assert.equal(result.events.some((event) => event.type === "loop_control_stop"), false);
+});
+
 test("AgentLoopController emits max_tool_iterations only when the emergency fuse is exhausted", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),

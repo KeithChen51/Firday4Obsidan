@@ -12,6 +12,7 @@ import type { AgentLoopCheckpointPort, AgentLoopFallbackPolicy, AgentLoopLifecyc
 import type { ContextEnginePort, ContextPackage } from "./ContextEnginePort";
 import type { ModelDriverPort } from "./ModelDriverPort";
 import type { ToolExecutionPort, ToolExecutionResult } from "./ToolExecutionPort";
+import { ToolRegistry } from "../tools/ToolRegistry";
 import {
 	createAgentLoopCheckpointId,
 	sanitizeAgentLoopCheckpoint,
@@ -92,6 +93,11 @@ type NativeNoToolResultResolution =
 type LoopToolExecutionResult = ToolExecutionResult & {
 	loopRepetition?: AgentLoopRepetition;
 };
+
+interface NativeToolBatchExecution {
+	toolCall: ToolCall;
+	executed: LoopToolExecutionResult;
+}
 
 const MIN_EMERGENCY_FUSE_ITERATIONS = 50;
 const MAX_EMERGENCY_FUSE_ITERATIONS = 500;
@@ -463,18 +469,17 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			const toolResultMessages: AgentChatMessage[] = [];
 			const loadedSkillContexts: string[] = [];
 			const completedToolCalls: AgentCheckpointToolResultRef[] = [];
-			let loopRepetition: AgentLoopRepetition | undefined;
-			for (const toolCall of response.toolCalls) {
-				this.emitPlanExecutionStarted(input, context, activePlan);
-				const executed = await this.executeTool(input, context, step, {
-					id: toolCall.id,
-					name: toolCall.name,
-					args: toolCall.args ?? {},
-				}, loopControl);
+			this.emitPlanExecutionStarted(input, context, activePlan);
+			const batchExecutions = await this.executeNativeToolBatch(input, context, step, response.toolCalls, loopControl);
+			const repeatedUnchanged = batchExecutions
+				.map((item) => item.executed.loopRepetition)
+				.filter((repetition): repetition is AgentLoopRepetition =>
+					repetition?.kind === "repeated_unchanged_observation");
+			const loopRepetition = repeatedUnchanged.length === batchExecutions.length
+				? repeatedUnchanged[0]
+				: undefined;
+			for (const { toolCall, executed } of batchExecutions) {
 				traces.push(executed.trace);
-				if (!loopRepetition && executed.loopRepetition) {
-					loopRepetition = executed.loopRepetition;
-				}
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				lastToolPayload = executed.payload;
 				completedToolCalls.push({
@@ -661,6 +666,58 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			});
 		}
 		return null;
+	}
+
+	private async executeNativeToolBatch(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		step: number,
+		toolCalls: ToolCall[],
+		loopControl: AgentLoopControlTracker,
+	): Promise<NativeToolBatchExecution[]> {
+		const executions: NativeToolBatchExecution[] = [];
+		let index = 0;
+		while (index < toolCalls.length) {
+			const toolCall = toolCalls[index];
+			if (!toolCall) {
+				index += 1;
+				continue;
+			}
+			if (!this.isReadOnlyConcurrencySafeTool(toolCall.name)) {
+				const executed = await this.executeTool(input, context, step, this.normalizeNativeToolCall(toolCall), loopControl);
+				executions.push({ toolCall, executed });
+				index += 1;
+				continue;
+			}
+			const run: ToolCall[] = [];
+			while (index < toolCalls.length) {
+				const candidate = toolCalls[index];
+				if (!candidate || !this.isReadOnlyConcurrencySafeTool(candidate.name)) {
+					break;
+				}
+				run.push(candidate);
+				index += 1;
+			}
+			const runExecutions = await Promise.all(run.map(async (call) => ({
+				toolCall: call,
+				executed: await this.executeTool(input, context, step, this.normalizeNativeToolCall(call), loopControl),
+			})));
+			executions.push(...runExecutions);
+		}
+		return executions;
+	}
+
+	private normalizeNativeToolCall(toolCall: ToolCall): ToolCall {
+		return {
+			id: toolCall.id,
+			name: toolCall.name,
+			args: toolCall.args ?? {},
+		};
+	}
+
+	private isReadOnlyConcurrencySafeTool(toolName: string): boolean {
+		const contract = ToolRegistry.getInstance().get(toolName);
+		return Boolean(contract?.readOnly && contract.concurrencySafe);
 	}
 
 	private async executeTool(

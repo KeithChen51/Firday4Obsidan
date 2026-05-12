@@ -4,6 +4,15 @@ import type { ToolDefinition } from "../../types/tools";
 export type AgentMode = "ask" | "research" | "write" | "organize" | "review" | "debug" | "developer";
 export type ToolRiskLevel = "low" | "medium" | "high";
 export type ToolCategory = "read" | "write" | "delete" | "system" | "memory" | "skill" | "knowledge";
+export type ToolResultKind =
+	| "skill"
+	| "listing"
+	| "document"
+	| "search_results"
+	| "knowledge"
+	| "memory"
+	| "mutation"
+	| "command";
 
 export interface ToolParameterSchema {
 	[key: string]: unknown;
@@ -20,6 +29,13 @@ export interface ToolContract {
 	capability: string;
 	handlerName: string;
 	readOnly: boolean;
+	concurrencySafe: boolean;
+	idempotent: boolean;
+	cacheable: boolean;
+	mutatesVault: boolean;
+	mutatesExternal: boolean;
+	resultKind: ToolResultKind;
+	outputBudget: number;
 	primary: boolean;
 	category: ToolCategory;
 	riskLevel: ToolRiskLevel;
@@ -32,6 +48,13 @@ export interface ToolManifestContract {
 	name: string;
 	capability: string;
 	readOnly: boolean;
+	concurrencySafe: boolean;
+	idempotent: boolean;
+	cacheable: boolean;
+	mutatesVault: boolean;
+	mutatesExternal: boolean;
+	resultKind: ToolResultKind;
+	outputBudget: number;
 	primary: boolean;
 	relatedSkillCommand?: string;
 }
@@ -68,6 +91,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "skill.load",
 		handlerName: "toolUseSkill",
 		readOnly: true,
+		concurrencySafe: false,
+		idempotent: true,
+		cacheable: false,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "skill",
+		outputBudget: 12000,
 		primary: true,
 		category: "skill",
 		riskLevel: "low",
@@ -88,6 +118,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.list",
 		handlerName: "toolList",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "listing",
+		outputBudget: 6000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -108,6 +145,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.read",
 		handlerName: "toolRead",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "document",
+		outputBudget: 10000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -130,6 +174,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.search",
 		handlerName: "toolGrep",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "search_results",
+		outputBudget: 12000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -151,6 +202,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.search_text",
 		handlerName: "toolSearchText",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "search_results",
+		outputBudget: 12000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -172,6 +230,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.glob",
 		handlerName: "toolGlob",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "listing",
+		outputBudget: 6000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -194,6 +259,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "knowledge.compile",
 		handlerName: "toolCompileWiki",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "knowledge",
+		outputBudget: 12000,
 		primary: true,
 		category: "knowledge",
 		riskLevel: "medium",
@@ -217,6 +289,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "memory.write",
 		handlerName: "toolMemory",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "memory",
+		outputBudget: 4000,
 		primary: true,
 		category: "memory",
 		riskLevel: "medium",
@@ -238,6 +317,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.write",
 		handlerName: "toolWrite",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
@@ -270,6 +356,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.patch",
 		handlerName: "toolEdit",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
@@ -289,6 +382,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.delete",
 		handlerName: "toolDelete",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: false,
 		category: "delete",
 		riskLevel: "high",
@@ -313,6 +413,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "system.exec",
 		handlerName: "toolExec",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: true,
+		resultKind: "command",
+		outputBudget: 12000,
 		primary: false,
 		category: "system",
 		riskLevel: "high",
@@ -392,6 +499,13 @@ export class ToolRegistry {
 				name: tool.name,
 				capability: tool.capability,
 				readOnly: tool.readOnly,
+				concurrencySafe: tool.concurrencySafe,
+				idempotent: tool.idempotent,
+				cacheable: tool.cacheable,
+				mutatesVault: tool.mutatesVault,
+				mutatesExternal: tool.mutatesExternal,
+				resultKind: tool.resultKind,
+				outputBudget: tool.outputBudget,
 				primary: tool.primary,
 				...(tool.relatedSkillCommand ? { relatedSkillCommand: tool.relatedSkillCommand } : {}),
 			}));

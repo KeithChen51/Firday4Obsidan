@@ -50,6 +50,20 @@ function assertEventAfter(events, laterType, earlierType) {
 	assert.ok(later > earlier, `${laterType} should be emitted after ${earlierType}`);
 }
 
+function createDeferred() {
+	let resolve;
+	const promise = new Promise((innerResolve) => {
+		resolve = innerResolve;
+	});
+	return { promise, resolve };
+}
+
+async function flushMicrotasks(count = 8) {
+	for (let index = 0; index < count; index += 1) {
+		await Promise.resolve();
+	}
+}
+
 test("RuntimeProtocol normalizes canonical interaction routes and legacy intake routes", async () => {
 	const { parseKernelRuntimeEnvelope } = await jiti.import(runtimeProtocolPath);
 	const cases = [
@@ -293,6 +307,229 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	assert.deepEqual(modelResponsePayloads.map((payload) => payload.reasoningProvider), ["deepseek", "openai"]);
 	assert.equal(JSON.stringify(modelResponsePayloads).includes("raw chain of thought"), false);
 	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
+});
+
+test("AgentLoopController executes consecutive read-only concurrency-safe native calls concurrently while preserving output order", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const started = [];
+	const completions = [];
+	const savedCheckpoints = [];
+	const modelRequests = [];
+	const deferredByPath = new Map([
+		["Project/a.md", createDeferred()],
+		["Project/b.md", createDeferred()],
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [{ role: "user", content: "Read two files" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{ id: "call-a", name: "read", args: { path: "Project/a.md" } },
+							{ id: "call-b", name: "read", args: { path: "Project/b.md" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "Read both files.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				const target = input.tool.args.path;
+				started.push(target);
+				await deferredByPath.get(target).promise;
+				completions.push(target);
+				return {
+					trace: {
+						runId: `read-${target.endsWith("a.md") ? "a" : "b"}`,
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: target,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: `Read ${target}`,
+					},
+					payload: {
+						ok: true,
+						tool: "read",
+						status: "ok",
+						data: { path: target, content: target.endsWith("a.md") ? "alpha" : "beta" },
+						trace: { targetPath: target },
+					},
+					modelResultText: `TOOL_RESULT ${target}`,
+				};
+			},
+		},
+		checkpoint: {
+			async save(checkpoint) {
+				savedCheckpoints.push(checkpoint);
+			},
+		},
+	});
+
+	const resultPromise = new AgentKernel(controller).runTurn({
+		turnId: "turn-native-parallel-order",
+		traceId: "trace-native-parallel-order",
+		conversationId: "conversation-native-parallel-order",
+		agentId: "agent-native-parallel-order",
+		conversation: [],
+		userPrompt: "Read two files",
+		mode: "ask",
+	});
+
+	await flushMicrotasks();
+	assert.deepEqual(started, ["Project/a.md", "Project/b.md"]);
+	deferredByPath.get("Project/b.md").resolve();
+	await flushMicrotasks();
+	assert.deepEqual(completions, ["Project/b.md"]);
+	deferredByPath.get("Project/a.md").resolve();
+
+	const result = await resultPromise;
+	assert.equal(result.status, "completed");
+	assert.deepEqual(completions, ["Project/b.md", "Project/a.md"]);
+	assert.deepEqual(result.traces.map((trace) => trace.targetPath), ["Project/a.md", "Project/b.md"]);
+	assert.equal(modelRequests.length, 2);
+	const toolMessages = modelRequests[1].messages.filter((message) => message.role === "tool");
+	assert.deepEqual(toolMessages.map((message) => message.toolCallId), ["call-a", "call-b"]);
+	assert.deepEqual(toolMessages.map((message) => message.content), ["TOOL_RESULT Project/a.md", "TOOL_RESULT Project/b.md"]);
+	const afterToolCheckpoint = savedCheckpoints.find((checkpoint) => checkpoint.boundary === "after_tool_result");
+	assert.ok(afterToolCheckpoint);
+	assert.deepEqual(afterToolCheckpoint.completedToolCalls.map((tool) => tool.toolCallId), ["call-a", "call-b"]);
+	assert.deepEqual(afterToolCheckpoint.traces.map((trace) => trace.targetPath), ["Project/a.md", "Project/b.md"]);
+});
+
+test("AgentLoopController keeps unsafe native calls serial between read-only runs", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const started = [];
+	const deferredByTool = new Map([
+		["read:first", createDeferred()],
+		["write:middle", createDeferred()],
+		["read:last", createDeferred()],
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [{ role: "user", content: "Read write read" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{ id: "call-read-first", name: "read", args: { path: "first" } },
+							{ id: "call-write", name: "write", args: { path: "middle", content: "changed" } },
+							{ id: "call-read-last", name: "read", args: { path: "last" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "Finished.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [
+					{ name: "read", description: "Read file", parameters: { type: "object" } },
+					{ name: "write", description: "Write file", parameters: { type: "object" } },
+				];
+			},
+			async executeTool(input) {
+				const key = `${input.tool.name}:${input.tool.args.path}`;
+				started.push(key);
+				await deferredByTool.get(key).promise;
+				return {
+					trace: {
+						runId: key,
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "Approved",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: `${input.tool.name} ${input.tool.args.path}`,
+					},
+					payload: {
+						ok: true,
+						tool: input.tool.name,
+						status: "ok",
+						data: { path: input.tool.args.path },
+						trace: { targetPath: input.tool.args.path },
+					},
+					modelResultText: `TOOL_RESULT ${key}`,
+				};
+			},
+		},
+	});
+
+	const resultPromise = new AgentKernel(controller).runTurn({
+		turnId: "turn-native-serial-unsafe",
+		traceId: "trace-native-serial-unsafe",
+		conversationId: "conversation-native-serial-unsafe",
+		agentId: "agent-native-serial-unsafe",
+		conversation: [],
+		userPrompt: "Read write read",
+		mode: "ask",
+	});
+
+	await flushMicrotasks();
+	assert.deepEqual(started, ["read:first"]);
+	deferredByTool.get("read:first").resolve();
+	await flushMicrotasks();
+	assert.deepEqual(started, ["read:first", "write:middle"]);
+	deferredByTool.get("write:middle").resolve();
+	await flushMicrotasks();
+	assert.deepEqual(started, ["read:first", "write:middle", "read:last"]);
+	deferredByTool.get("read:last").resolve();
+
+	const result = await resultPromise;
+	assert.equal(result.status, "completed");
+	assert.deepEqual(result.traces.map((trace) => `${trace.tool}:${trace.targetPath}`), [
+		"read:first",
+		"write:middle",
+		"read:last",
+	]);
 });
 
 test("AgentLoopController allows productive native tool work beyond the configured maxIterations cap", async () => {

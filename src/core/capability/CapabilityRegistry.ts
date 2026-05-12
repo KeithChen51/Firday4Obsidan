@@ -42,6 +42,13 @@ export class CapabilityRegistry {
 			name: tool.name,
 			capability: tool.capability,
 			readOnly: tool.readOnly,
+			concurrencySafe: tool.concurrencySafe,
+			idempotent: tool.idempotent,
+			cacheable: tool.cacheable,
+			mutatesVault: tool.mutatesVault,
+			mutatesExternal: tool.mutatesExternal,
+			resultKind: tool.resultKind,
+			outputBudget: tool.outputBudget,
 			primary: tool.primary,
 			relatedSkillCommand: tool.relatedSkillCommand,
 		}));
