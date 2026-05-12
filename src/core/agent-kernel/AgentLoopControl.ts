@@ -241,7 +241,7 @@ function isSuccessfulObservation(tool: Pick<ToolCall, "name" | "args">, result: 
 
 function isObservationTool(toolName: string): boolean {
 	const normalized = toolName.trim().toLowerCase();
-	return normalized === "read" || normalized === "list" || normalized === "search";
+	return ["read", "ls", "grep", "search_text", "glob", "list", "search"].includes(normalized);
 }
 
 function hasRecoverySuggestion(recovery: ToolResultRecovery | undefined): boolean {

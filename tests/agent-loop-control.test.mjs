@@ -160,29 +160,31 @@ test("AgentLoopControlTracker identifies ignored recovery suggestions and preser
 	assert.deepEqual(repetition.recovery?.candidatePaths, ["Project/workspace/missing.md"]);
 });
 
-test("AgentLoopControlTracker detects unchanged successful read/list/search observations after execution", async () => {
+test("AgentLoopControlTracker detects unchanged successful FRIDAY read observation tools after execution", async () => {
 	const { AgentLoopControlTracker } = await jiti.import(loopControlPath);
-	const tracker = new AgentLoopControlTracker();
-	const tool = { name: "search", args: { query: "loop control", root: "Project" } };
-	const firstResult = makeResult({
-		tool: "search",
-		data: { matches: [{ path: "Project/a.md", line: 1, text: "loop control" }] },
-		trace: { tool: "search", targetPath: "Project" },
-		payloadTrace: { targetPath: "Project" },
-	});
-	const secondResult = makeResult({
-		tool: "search",
-		data: { matches: [{ text: "loop control", line: 1, path: "Project/a.md" }] },
-		trace: { tool: "search", targetPath: "Project" },
-		payloadTrace: { targetPath: "Project" },
-	});
+	for (const toolName of ["read", "ls", "grep", "search_text", "glob"]) {
+		const tracker = new AgentLoopControlTracker();
+		const tool = { name: toolName, args: { query: "loop control", root: "Project" } };
+		const firstResult = makeResult({
+			tool: toolName,
+			data: { matches: [{ path: "Project/a.md", line: 1, text: "loop control" }] },
+			trace: { tool: toolName, targetPath: "Project" },
+			payloadTrace: { targetPath: "Project" },
+		});
+		const secondResult = makeResult({
+			tool: toolName,
+			data: { matches: [{ text: "loop control", line: 1, path: "Project/a.md" }] },
+			trace: { tool: toolName, targetPath: "Project" },
+			payloadTrace: { targetPath: "Project" },
+		});
 
-	assert.equal(tracker.recordResult(tool, firstResult), undefined);
-	const repetition = tracker.recordResult(tool, secondResult);
+		assert.equal(tracker.recordResult(tool, firstResult), undefined);
+		const repetition = tracker.recordResult(tool, secondResult);
 
-	assert.equal(repetition?.kind, "repeated_unchanged_observation");
-	assert.equal(repetition.stopReason, "no_progress");
-	assert.equal(repetition.fingerprint.status, "ok");
-	assert.equal(repetition.fingerprint.resolvedTarget, "Project");
-	assert.equal(repetition.previous.result.payload.data.matches[0].path, "Project/a.md");
+		assert.equal(repetition?.kind, "repeated_unchanged_observation", toolName);
+		assert.equal(repetition.stopReason, "no_progress", toolName);
+		assert.equal(repetition.fingerprint.status, "ok", toolName);
+		assert.equal(repetition.fingerprint.resolvedTarget, "Project", toolName);
+		assert.equal(repetition.previous.result.payload.data.matches[0].path, "Project/a.md", toolName);
+	}
 });
