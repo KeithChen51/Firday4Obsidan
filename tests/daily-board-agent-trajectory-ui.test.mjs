@@ -3185,7 +3185,6 @@ function makeTaskBarSnapshot(overrides = {}) {
 		headline: "正在执行计划",
 		summary: "正在推进计划。",
 		time: { startedAt: "2026-05-07T00:00:00.000Z", updatedAt: "2026-05-07T00:00:12.000Z", durationMs: 12000 },
-		plan: makeTaskBarPlan(),
 		items: [
 			makeItem({ id: "task", kind: "plan", title: "实现 Composer Task Bar", detail: "推进计划。", status: "running" }),
 		],

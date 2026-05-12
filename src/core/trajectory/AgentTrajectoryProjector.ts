@@ -1365,7 +1365,7 @@ function formatCheckpointDetail(checkpoint: TurnReplaySummary["checkpointTimelin
 
 function formatCheckpointRuntimeDetail(
 	value: string | undefined,
-	event: TurnReplaySummary["checkpointTimeline"][number]["event"] | NonNullable<RuntimeProgressEvent["checkpoint"]>["type"] | undefined,
+	event: TurnReplaySummary["checkpointTimeline"][number]["event"] | undefined,
 ): string {
 	const text = safeText(value ?? "");
 	if (/resume_rejected|skipped/i.test(String(event)) || /rejected|skipped/i.test(text)) {
