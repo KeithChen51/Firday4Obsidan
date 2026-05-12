@@ -597,8 +597,6 @@ export const zhCNMessages: I18nMessages = {
 	"settings.agent.enableExec.name": "启用命令执行 (exec)",
 	"settings.agent.execTimeout.desc": "单条命令执行的最大等待时间。",
 	"settings.agent.execTimeout.name": "命令超时（秒）",
-	"settings.agent.maxToolIterations.desc": "这是防止工具循环失控的最后保护，不是常规步骤上限。除非排查循环控制问题，否则保持默认值。",
-	"settings.agent.maxToolIterations.name": "高级：工具循环紧急保险",
 	"settings.agent.model.desc": "优先级高于全局默认模型。留空则使用全局模型。",
 	"settings.agent.model.followGlobal": "跟随全局默认",
 	"settings.agent.model.name": "当前 Agent 模型",

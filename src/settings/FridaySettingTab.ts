@@ -1460,22 +1460,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.maxToolIterations.name", "高级：工具循环紧急保险"))
-			.setDesc(this.t("settings.agent.maxToolIterations.desc", "这是防止工具循环失控的最后保护，不是常规步骤上限。除非排查循环控制问题，否则保持默认值。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("6")
-					.setValue(String(this.host.settings.agentRuntime.maxToolIterations))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.agentRuntime.maxToolIterations = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.permissionMode.name", "工具权限模式"))
 			.setDesc(
 				this.t(

@@ -597,8 +597,6 @@ export const enUSMessages: I18nMessages = {
 	"settings.agent.enableExec.name": "启用命令执行 (exec)",
 	"settings.agent.execTimeout.desc": "单条命令执行的最大等待时间。",
 	"settings.agent.execTimeout.name": "命令超时（秒）",
-	"settings.agent.maxToolIterations.desc": "Last-resort guard for runaway tool loops. Keep the default unless you are debugging loop-control behavior.",
-	"settings.agent.maxToolIterations.name": "Advanced emergency fuse",
 	"settings.agent.model.desc": "优先级高于全局默认模型。留空则使用全局模型。",
 	"settings.agent.model.followGlobal": "Follow global default",
 	"settings.agent.model.name": "当前 Agent 模型",
