@@ -32,6 +32,27 @@ test("formatForModel preserves the legacy TOOL_RESULT payload shape", async () =
 	});
 });
 
+test("formatToolResultChannels separates model content, trace summary, and user fallback", async () => {
+	const { formatToolResultChannels } = await jiti.import(formatterPath);
+
+	const channels = formatToolResultChannels({
+		ok: true,
+		tool: "grep",
+		status: "ok",
+		data: {
+			matches: [
+				{ path: "Project/a.md", line: 1, text: "alpha" },
+				{ path: "Project/b.md", line: 2, text: "alpha beta" },
+			],
+		},
+	});
+
+	assert.match(channels.modelContent, /^TOOL_RESULT /);
+	assert.equal(channels.traceSummary, "grep matched 2 result(s)");
+	assert.equal(channels.userFallback, "I found 2 text matches. Narrow the search or choose a file to inspect next.");
+	assert.notEqual(channels.userFallback, channels.traceSummary);
+});
+
 test("formatForModel preserves failed recovery and trace metadata for model-facing output", async () => {
 	const { formatForModel } = await jiti.import(formatterPath);
 

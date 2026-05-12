@@ -50,6 +50,14 @@ function assertEventAfter(events, laterType, earlierType) {
 	assert.ok(later > earlier, `${laterType} should be emitted after ${earlierType}`);
 }
 
+function assertNoTraceOnlyFinalText(text) {
+	assert.doesNotMatch(text, /^Listed \d+ item\(s\)$/);
+	assert.doesNotMatch(text, /^grep matched \d+ result\(s\)$/);
+	assert.doesNotMatch(text, /^search_text matched \d+ result\(s\)$/);
+	assert.doesNotMatch(text, /^Read .+/);
+	assert.doesNotMatch(text, /^Exec completed /);
+}
+
 function createDeferred() {
 	let resolve;
 	const promise = new Promise((innerResolve) => {
@@ -730,6 +738,283 @@ test("AgentLoopController allows productive prompt-envelope tool work beyond the
 	assert.deepEqual(modelRequests.map((request) => request.step), [1, 2, 3, 4]);
 	assert.equal(result.events.some((event) => event.type === "max_tool_iterations"), false);
 	assert.equal(result.events.some((event) => event.type === "loop_control_stop"), false);
+});
+
+test("AgentLoopController does not accept prompt trace summaries as final answers", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText(input) {
+				if (input.step === 1) {
+					return runtimeEnvelope({
+						type: "tool_call",
+						assistant: "Searching project notes.",
+						tool: {
+							name: "grep",
+							args: { pattern: "alpha", path: "Project" },
+						},
+					});
+				}
+				return "grep matched 2 result(s)";
+			},
+			async requestWithTools() {
+				throw new Error("native path should not be used");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				throw new Error("native tools should not be listed");
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "grep-prompt-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "grep matched 2 result(s)",
+					},
+					payload: {
+						ok: true,
+						tool: "grep",
+						status: "ok",
+						data: {
+							matches: [
+								{ path: "Project/a.md", line: 1, text: "alpha" },
+								{ path: "Project/b.md", line: 2, text: "alpha beta" },
+							],
+						},
+					},
+					modelResultText: "TOOL_RESULT {\"ok\":true,\"tool\":\"grep\",\"status\":\"ok\",\"data\":{\"matches\":[{\"path\":\"Project/a.md\"},{\"path\":\"Project/b.md\"}]}}",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-prompt-trace-summary-final",
+		taskId: "task-prompt-trace-summary-final",
+		traceId: "trace-prompt-trace-summary-final",
+		conversationId: "conversation-prompt-trace-summary-final",
+		agentId: "agent-prompt-trace-summary-final",
+		conversation: [],
+		userPrompt: "Search for alpha before answering",
+		allowedTools: ["grep"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assertNoTraceOnlyFinalText(result.assistantText);
+	assert.match(result.assistantText, /found 2 text match/i);
+	assert.equal(result.traces[0]?.summary, "grep matched 2 result(s)");
+});
+
+test("AgentLoopController uses product-facing native fallback when the model returns no final answer", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: "call-grep-1", name: "grep", args: { pattern: "alpha", path: "Project" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: "",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "grep", description: "Search text", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "grep-native-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "grep matched 2 result(s)",
+					},
+					payload: {
+						ok: true,
+						tool: "grep",
+						status: "ok",
+						data: {
+							matches: [
+								{ path: "Project/a.md", line: 1, text: "alpha" },
+								{ path: "Project/b.md", line: 2, text: "alpha beta" },
+							],
+						},
+					},
+					modelResultText: "TOOL_RESULT {\"ok\":true,\"tool\":\"grep\",\"status\":\"ok\",\"data\":{\"matches\":[{\"path\":\"Project/a.md\"},{\"path\":\"Project/b.md\"}]}}",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-native-no-final-fallback",
+		taskId: "task-native-no-final-fallback",
+		traceId: "trace-native-no-final-fallback",
+		conversationId: "conversation-native-no-final-fallback",
+		agentId: "agent-native-no-final-fallback",
+		conversation: [],
+		userPrompt: "Search for alpha before answering",
+		allowedTools: ["grep"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assertNoTraceOnlyFinalText(result.assistantText);
+	assert.match(result.assistantText, /found 2 text match/i);
+	assert.equal(result.traces[0]?.summary, "grep matched 2 result(s)");
+	assert.match(result.parseError ?? "", /without a user-facing final answer/);
+});
+
+test("AgentLoopController rewrites native response envelopes that only repeat trace summaries", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: "call-ls-1", name: "ls", args: { path: "Project" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: runtimeEnvelope({
+						type: "response",
+						assistant: "Listed 2 item(s)",
+					}),
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "ls", description: "List files", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "ls-native-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Listed 2 item(s)",
+					},
+					payload: {
+						ok: true,
+						tool: "ls",
+						status: "ok",
+						data: { path: "Project", items: ["a.md", "b.md"] },
+					},
+					modelResultText: "TOOL_RESULT {\"ok\":true,\"tool\":\"ls\",\"status\":\"ok\",\"data\":{\"items\":[\"a.md\",\"b.md\"]}}",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-native-envelope-trace-summary-final",
+		taskId: "task-native-envelope-trace-summary-final",
+		traceId: "trace-native-envelope-trace-summary-final",
+		conversationId: "conversation-native-envelope-trace-summary-final",
+		agentId: "agent-native-envelope-trace-summary-final",
+		conversation: [],
+		userPrompt: "List Project before answering",
+		allowedTools: ["ls"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assertNoTraceOnlyFinalText(result.assistantText);
+	assert.match(result.assistantText, /Project contains 2 visible items/i);
+	assert.equal(result.traces[0]?.summary, "Listed 2 item(s)");
 });
 
 test("AgentLoopController continues native assistant JSON tool calls with prompt-style tool feedback", async () => {

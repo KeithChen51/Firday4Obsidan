@@ -1,6 +1,6 @@
 import type { ToolCall } from "../../types/tools";
 import { ToolBoundaryFilter, type ToolBoundaryMessage, type ToolBoundaryRepair } from "../context/ToolBoundaryFilter";
-import { formatForModel } from "../tools/ToolResultFormatter";
+import { formatForModel, formatToolResultChannels, summarizeForUserFallback } from "../tools/ToolResultFormatter";
 import type { ToolResultPayload, ToolResultRecovery } from "../tools/ToolResultContract";
 import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
 import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
@@ -88,7 +88,7 @@ interface ActivePlanState {
 
 type NativeNoToolResultResolution =
 	| { kind: "terminal"; result: AgentTurnResult }
-	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"]; loopRepetition?: AgentLoopRepetition };
+	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"]; lastToolUserFallback?: string; loopRepetition?: AgentLoopRepetition };
 
 type LoopToolExecutionResult = ToolExecutionResult & {
 	loopRepetition?: AgentLoopRepetition;
@@ -238,6 +238,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const modelMessages = [...contextPackage.messages];
 		const loopControl = new AgentLoopControlTracker();
 		let finalReply = "";
+		let lastToolUserFallback = "";
 		let step = startStep;
 		while (step <= emergencyFuseStep) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
@@ -257,16 +258,19 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 			const parsed = parseKernelRuntimeEnvelope(finalReply);
 			if (!parsed) {
+				const finalText = this.resolveFinalAssistantText(finalReply, traces, lastToolUserFallback, finalReply);
 				return this.makeResult(input, context, {
-					assistantText: finalReply,
+					assistantText: finalText.assistantText,
 					traces,
 					rawFinalReply: finalReply,
-					parseError: "Runtime response is not valid JSON; returned as plain text.",
+					parseError: finalText.replacedTraceSummary
+						? "Model returned a trace-only tool summary. Generated a product-facing fallback reply from tool results."
+						: "Runtime response is not valid JSON; returned as plain text.",
 					contextSummary: contextPackage.contextSummary,
 				});
 			}
 			this.applyRuntimeEnvelopeProcess(input, context, parsed, activePlan);
-			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, finalReply, traces, contextPackage);
+			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, finalReply, traces, contextPackage, lastToolUserFallback);
 			if (terminal) {
 				return terminal;
 			}
@@ -299,6 +303,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					args: tool.args ?? {},
 				}, loopControl);
 				traces.push(executed.trace);
+				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
 					role: "assistant",
@@ -387,6 +392,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 		let finalReply = "";
 		let lastToolPayload: ToolExecutionResult["payload"] | null = null;
+		let lastToolUserFallback = "";
 		let step = startStep;
 		while (step <= emergencyFuseStep) {
 			const repairs = this.repairNativeModelMessages(modelMessages);
@@ -441,12 +447,14 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					assistantStepText,
 					finalReply,
 					lastToolPayload,
+					lastToolUserFallback,
 					loopControl,
 					activePlan,
 					response.reasoningArtifact,
 				);
 				if (resolution.kind === "continue") {
 					lastToolPayload = resolution.lastToolPayload;
+					lastToolUserFallback = resolution.lastToolUserFallback?.trim() || lastToolUserFallback;
 					const loopControlStop = this.buildLoopControlStopResult(
 						input,
 						context,
@@ -482,6 +490,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				traces.push(executed.trace);
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				lastToolPayload = executed.payload;
+				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
 				completedToolCalls.push({
 					toolCallId: toolCall.id ?? executed.trace.runId,
 					tool: executed.trace.tool,
@@ -558,16 +567,18 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		assistantStepText: string,
 		finalReply: string,
 		lastToolPayload: ToolExecutionResult["payload"] | null,
+		lastToolUserFallback: string,
 		loopControl: AgentLoopControlTracker | undefined,
 		activePlan: ActivePlanState | undefined,
 		reasoningArtifact?: ReasoningArtifact,
 	): Promise<NativeNoToolResultResolution> {
-		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload);
+		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload, lastToolUserFallback);
 		if (!assistantStepText || this.isIntermediateAssistantText(assistantStepText)) {
+			const finalText = this.resolveFinalAssistantText("", traces, fallbackAssistant, "(Model returned no usable content)");
 			return {
 				kind: "terminal",
 				result: this.makeResult(input, context, {
-					assistantText: fallbackAssistant,
+					assistantText: finalText.assistantText,
 					traces,
 					rawFinalReply: finalReply,
 					parseError: "Native tool call completed without a user-facing final answer. Generated a fallback reply from tool results.",
@@ -578,7 +589,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const parsed = parseKernelRuntimeEnvelope(assistantStepText);
 		if (parsed) {
 			this.applyRuntimeEnvelopeProcess(input, context, parsed, activePlan);
-			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage);
+			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage, fallbackAssistant);
 			if (terminal) {
 				return { kind: "terminal", result: terminal };
 			}
@@ -602,6 +613,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					args: tool.args ?? {},
 				}, loopControl);
 				traces.push(executed.trace);
+				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
 					role: "assistant",
@@ -632,16 +644,21 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				return {
 					kind: "continue",
 					lastToolPayload: executed.payload,
+					lastToolUserFallback,
 					...(executed.loopRepetition ? { loopRepetition: executed.loopRepetition } : {}),
 				};
 			}
 		}
+		const finalText = this.resolveFinalAssistantText(assistantStepText, traces, fallbackAssistant, assistantStepText || "(Model returned no usable content)");
 		return {
 			kind: "terminal",
 			result: this.makeResult(input, context, {
-				assistantText: assistantStepText || "(Model returned no usable content)",
+				assistantText: finalText.assistantText,
 				traces,
 				rawFinalReply: finalReply,
+				...(finalText.replacedTraceSummary
+					? { parseError: "Model returned a trace-only tool summary. Generated a product-facing fallback reply from tool results." }
+					: {}),
 				contextSummary: contextPackage.contextSummary,
 			}),
 		};
@@ -654,13 +671,24 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		rawFinalReply: string,
 		traces: RuntimeToolTrace[],
 		contextPackage: ContextPackage,
+		lastToolUserFallback = "",
 	): Promise<AgentTurnResult | null> {
 		if (isResponseEnvelope(envelope) || (!envelope.tool && hasMutationPlans(envelope))) {
 			const pendingMutations = await this.recordMutationPlans(envelope, context);
+			const assistantCandidate = (envelope.assistant ?? rawFinalReply).trim();
+			const finalText = this.resolveFinalAssistantText(
+				assistantCandidate,
+				traces,
+				lastToolUserFallback,
+				"(Model returned no usable content)",
+			);
 			return this.makeResult(input, context, {
-				assistantText: (envelope.assistant ?? rawFinalReply).trim() || "(Model returned no usable content)",
+				assistantText: finalText.assistantText,
 				traces,
 				rawFinalReply,
+				...(finalText.replacedTraceSummary
+					? { parseError: "Model returned a trace-only tool summary. Generated a product-facing fallback reply from tool results." }
+					: {}),
 				pendingMutations,
 				contextSummary: contextPackage.contextSummary,
 			});
@@ -795,9 +823,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			message: `Step ${step}: calling tool ${tool.name}`,
 		});
 		const repetition = loopControl?.beforeInvocation(tool);
-		const result = repetition
+		const rawResult = repetition
 			? this.buildDuplicateFailedToolResult(step, tool, repetition)
 			: await this.options.toolExecution.executeTool({ input, context, step, tool });
+		const result = this.withToolResultChannels(rawResult);
 		let loopRepetition: AgentLoopRepetition | undefined;
 		if (!repetition) {
 			loopRepetition = loopControl?.recordResult(tool, result);
@@ -839,6 +868,19 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return loopRepetition ? { ...result, loopRepetition } : result;
 	}
 
+	private withToolResultChannels(result: ToolExecutionResult): ToolExecutionResult {
+		const channels = formatToolResultChannels(result.payload);
+		return {
+			...result,
+			modelResultText: result.modelResultText?.trim() ? result.modelResultText : channels.modelContent,
+			userFallback: result.userFallback?.trim() || channels.userFallback,
+			trace: {
+				...result.trace,
+				summary: result.trace.summary?.trim() || channels.traceSummary,
+			},
+		};
+	}
+
 	private buildDuplicateFailedToolResult(
 		step: number,
 		tool: ToolCall,
@@ -874,6 +916,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			trace,
 			payload,
 			modelResultText: formatForModel(payload),
+			userFallback: summarizeForUserFallback(payload),
 		};
 	}
 
@@ -2193,7 +2236,58 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return !normalized || normalized.startsWith("calling tool:") || normalized.includes("continuing with tool calls");
 	}
 
-	private buildFallbackAssistantFromToolPayload(payload: ToolExecutionResult["payload"] | null): string {
+	private resolveFinalAssistantText(
+		candidate: string,
+		traces: RuntimeToolTrace[],
+		lastToolUserFallback: string,
+		emptyFallback: string,
+	): { assistantText: string; replacedTraceSummary: boolean } {
+		const assistantText = candidate.trim();
+		const fallback = lastToolUserFallback.trim() || this.buildGenericToolFallback(traces);
+		if (!assistantText) {
+			return { assistantText: fallback || emptyFallback, replacedTraceSummary: Boolean(fallback) };
+		}
+		if (this.isTraceOnlyAssistantText(assistantText, traces)) {
+			return { assistantText: fallback || emptyFallback, replacedTraceSummary: true };
+		}
+		return { assistantText, replacedTraceSummary: false };
+	}
+
+	private isTraceOnlyAssistantText(text: string, traces: RuntimeToolTrace[]): boolean {
+		const normalized = text.trim();
+		if (!normalized || /^TOOL_RESULT\b/.test(normalized)) {
+			return true;
+		}
+		if (traces.some((trace) => trace.summary.trim() === normalized)) {
+			return true;
+		}
+		return [
+			/^Listed \d+ item\(s\)$/,
+			/^(?:grep|search_text) matched \d+ result\(s\)$/,
+			/^glob matched \d+ file\(s\)$/,
+			/^Write completed .+$/,
+			/^Delete completed (?:file|folder) .+$/,
+			/^Edited .+ \(\d+ replacement\(s\)\)$/,
+			/^Exec completed \((?:exit code .+|timed out)\)$/,
+		].some((pattern) => pattern.test(normalized));
+	}
+
+	private buildGenericToolFallback(traces: RuntimeToolTrace[]): string {
+		const lastTrace = [...traces].reverse().find((trace) => trace.tool);
+		if (!lastTrace) {
+			return "";
+		}
+		if (lastTrace.status === "failed" || lastTrace.status === "denied") {
+			return `I couldn't complete the ${lastTrace.tool} step. Check the process details for the error and recovery suggestions.`;
+		}
+		return "I completed the tool step, but the model did not provide a user-facing final answer. Check the process details for the tool output.";
+	}
+
+	private buildFallbackAssistantFromToolPayload(payload: ToolExecutionResult["payload"] | null, explicitFallback = ""): string {
+		const fallback = explicitFallback.trim() || summarizeForUserFallback(payload).trim();
+		if (fallback) {
+			return fallback;
+		}
 		if (!payload?.ok) {
 			return "";
 		}
