@@ -1017,6 +1017,98 @@ test("AgentLoopController rewrites native response envelopes that only repeat tr
 	assert.equal(result.traces[0]?.summary, "Listed 2 item(s)");
 });
 
+test("AgentLoopController rewrites standalone read path summaries even when they differ from the trace text", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: "call-read-1", name: "read", args: { path: "Project/a.md" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: runtimeEnvelope({
+						type: "response",
+						assistant: "Read Project/a.md",
+					}),
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-native-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read Project/a.md (truncated)",
+					},
+					payload: {
+						ok: true,
+						tool: "read",
+						status: "ok",
+						data: { path: "Project/a.md", content: "alpha beta gamma", truncated: true },
+					},
+					modelResultText: "TOOL_RESULT {\"ok\":true,\"tool\":\"read\",\"status\":\"ok\",\"data\":{\"path\":\"Project/a.md\",\"truncated\":true}}",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-native-read-path-summary-final",
+		taskId: "task-native-read-path-summary-final",
+		traceId: "trace-native-read-path-summary-final",
+		conversationId: "conversation-native-read-path-summary-final",
+		agentId: "agent-native-read-path-summary-final",
+		conversation: [],
+		userPrompt: "Read Project/a.md before answering",
+		allowedTools: ["read"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assertNoTraceOnlyFinalText(result.assistantText);
+	assert.match(result.assistantText, /I read Project\/a\.md/i);
+	assert.match(result.assistantText, /alpha beta gamma/);
+	assert.equal(result.traces[0]?.summary, "Read Project/a.md (truncated)");
+});
+
 test("AgentLoopController continues native assistant JSON tool calls with prompt-style tool feedback", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),

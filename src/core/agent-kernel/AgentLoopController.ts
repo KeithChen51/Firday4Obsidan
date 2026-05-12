@@ -2261,6 +2261,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		if (traces.some((trace) => trace.summary.trim() === normalized)) {
 			return true;
 		}
+		if (this.isTraceOnlyReadSummary(normalized, traces)) {
+			return true;
+		}
 		return [
 			/^Listed \d+ item\(s\)$/,
 			/^(?:grep|search_text) matched \d+ result\(s\)$/,
@@ -2270,6 +2273,24 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			/^Edited .+ \(\d+ replacement\(s\)\)$/,
 			/^Exec completed \((?:exit code .+|timed out)\)$/,
 		].some((pattern) => pattern.test(normalized));
+	}
+
+	private isTraceOnlyReadSummary(text: string, traces: RuntimeToolTrace[]): boolean {
+		const match = text.match(/^Read\s+(.+?)(?:\s+\(truncated\))?$/);
+		const readTarget = match?.[1]?.trim();
+		if (!readTarget) {
+			return false;
+		}
+		return traces.some((trace) => {
+			if (trace.tool !== "read") {
+				return false;
+			}
+			const traceTarget = trace.targetPath?.trim();
+			if (traceTarget && traceTarget === readTarget) {
+				return true;
+			}
+			return trace.summary.trim().replace(/\s+\(truncated\)$/, "") === text;
+		});
 	}
 
 	private buildGenericToolFallback(traces: RuntimeToolTrace[]): string {
