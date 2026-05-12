@@ -1460,8 +1460,8 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.maxToolIterations.name", "单轮最大工具步数"))
-			.setDesc(this.t("settings.agent.maxToolIterations.desc", "限制单次对话中的工具循环次数，防止无限调用。"))
+			.setName(this.t("settings.agent.maxToolIterations.name", "高级：工具循环紧急保险"))
+			.setDesc(this.t("settings.agent.maxToolIterations.desc", "这是防止工具循环失控的最后保护，不是常规步骤上限。除非排查循环控制问题，否则保持默认值。"))
 			.addText((text) =>
 				text
 					.setPlaceholder("6")

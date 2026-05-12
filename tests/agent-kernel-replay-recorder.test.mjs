@@ -255,6 +255,8 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 		payload: {
 			channel: "native",
 			maxIterations: 2,
+			configuredMaxIterations: 1,
+			reason: "emergency_fuse",
 			status: "safe_stopped",
 			summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
 		},
@@ -298,11 +300,15 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 	}]);
 	assert.deepEqual(summary.loopPreventionTimeline, [{
 		event: "max_tool_iterations",
+		channel: "native",
 		step: 0,
 		tool: "",
 		toolCallId: "",
 		status: "safe_stopped",
 		summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
+		reason: "emergency_fuse",
+		maxIterations: 2,
+		configuredMaxIterations: 1,
 		at: summary.loopPreventionTimeline[0]?.at,
 	}]);
 	assertNoRawMaxToolIterationText(summary.finalAnswerSummary);

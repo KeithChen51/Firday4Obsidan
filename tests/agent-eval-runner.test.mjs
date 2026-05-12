@@ -57,6 +57,8 @@ const supportedExpectKeys = new Set([
 	"toolBoundaryViolationCount",
 	"contextTrimmed",
 	"safeStopped",
+	"safeStopEvent",
+	"safeStopReason",
 ]);
 
 async function loadEvalScenarios() {
@@ -223,7 +225,22 @@ function assertScenario(result, expect) {
 	}
 	if (expect.safeStopped) {
 		assert.equal(result.turnEventSummary.status, "safe_stopped");
-		assert.ok(result.turnEvents.some((event) => event.type === "max_tool_iterations"));
+	}
+	if (expect.safeStopEvent) {
+		const eventTypes = result.turnEvents.map((event) => event.type);
+		assert.ok(
+			eventTypes.includes(expect.safeStopEvent),
+			`expected safe stop event ${expect.safeStopEvent}, got ${eventTypes.join(", ")}`,
+		);
+	}
+	if (expect.safeStopReason) {
+		const reasons = (result.turnEventSummary.loopPreventionTimeline ?? [])
+			.map((item) => item.reason)
+			.filter(Boolean);
+		assert.ok(
+			reasons.includes(expect.safeStopReason),
+			`expected safe stop reason ${expect.safeStopReason}, got ${reasons.join(", ")}`,
+		);
 	}
 }
 

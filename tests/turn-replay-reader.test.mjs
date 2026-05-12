@@ -667,6 +667,8 @@ test("TurnEventLog redacts headers and TurnReplayReader summarizes recovery and 
 			payload: {
 				channel: "native",
 				maxIterations: 2,
+				configuredMaxIterations: 1,
+				reason: "emergency_fuse",
 				status: "safe_stopped",
 				summary: "Stopped after repeated failed calls.",
 			},
@@ -709,11 +711,15 @@ test("TurnEventLog redacts headers and TurnReplayReader summarizes recovery and 
 		},
 		{
 			event: "max_tool_iterations",
+			channel: "native",
 			step: 0,
 			tool: "",
 			toolCallId: "",
 			status: "safe_stopped",
 			summary: "Stopped after repeated failed calls.",
+			reason: "emergency_fuse",
+			maxIterations: 2,
+			configuredMaxIterations: 1,
 			at: events[4].at,
 		},
 	]);
