@@ -158,6 +158,137 @@ test("AgentLoopController returns a structured duplicate failure without executi
 	assert.deepEqual(duplicateResult.recovery.candidatePaths, ["Project/workspace/missing.md"]);
 });
 
+test("AgentLoopController suppresses identical failed read-only calls within the same native batch", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const toolExecutions = [];
+	const modelRequests = [];
+	const savedCheckpoints = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 3,
+					messages: [{ role: "user", content: "Read missing file twice" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{
+								id: "call-a",
+								name: "read",
+								args: { path: "workspace/missing.md", options: { beta: true, alpha: 1 } },
+							},
+							{
+								id: "call-b",
+								name: "read",
+								args: { options: { alpha: 1, beta: true }, path: "workspace/missing.md" },
+							},
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: "I will use the suggested path next.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				toolExecutions.push(input.tool.id);
+				return {
+					trace: {
+						runId: "read-failed-1",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "failed",
+						failureClass: "invalid_input",
+						ok: false,
+						summary: "Vault file was not found.",
+						error: "Vault file was not found.",
+					},
+					payload: {
+						ok: false,
+						tool: "read",
+						status: "failed",
+						failureClass: "invalid_input",
+						error: "Vault file was not found.",
+						recovery: {
+							recoverable: true,
+							retryable: false,
+							code: "vault_file_not_found",
+							message: "A likely active-project path exists.",
+							suggestedArgs: { path: "Project/workspace/missing.md" },
+							candidatePaths: ["Project/workspace/missing.md"],
+						},
+						trace: {
+							inputPath: "workspace/missing.md",
+							targetPath: "workspace/missing.md",
+							projectRoot: "Project",
+						},
+					},
+					modelResultText: 'TOOL_RESULT {"ok":false,"tool":"read","status":"failed","failureClass":"invalid_input"}',
+				};
+			},
+		},
+		checkpoint: {
+			async save(checkpoint) {
+				savedCheckpoints.push(checkpoint);
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-same-batch-duplicate-native",
+		traceId: "trace-same-batch-duplicate-native",
+		conversationId: "conversation-same-batch-duplicate-native",
+		agentId: "agent-same-batch-duplicate-native",
+		conversation: [],
+		userPrompt: "Read missing file twice",
+		mode: "ask",
+	});
+
+	assert.equal(result.status, "completed");
+	assert.deepEqual(toolExecutions, ["call-a"]);
+	assert.equal(result.traces.length, 2);
+	assert.deepEqual(result.traces.map((trace) => trace.runId), ["read-failed-1", "read-failed-1-duplicate-1"]);
+	assert.match(result.traces[1].summary, /identical call already failed/i);
+	const toolMessages = modelRequests[1].messages.filter((message) => message.role === "tool");
+	assert.deepEqual(toolMessages.map((message) => message.toolCallId), ["call-a", "call-b"]);
+	assert.match(toolMessages[1].content, /duplicate_failed_tool_call/);
+	const duplicateResult = JSON.parse(toolMessages[1].content.replace(/^TOOL_RESULT\s+/, ""));
+	assert.equal(duplicateResult.recovery.code, "duplicate_failed_tool_call");
+	assert.deepEqual(duplicateResult.recovery.suggestedArgs, { path: "Project/workspace/missing.md" });
+	assert.deepEqual(duplicateResult.recovery.candidatePaths, ["Project/workspace/missing.md"]);
+	const afterToolCheckpoint = savedCheckpoints.find((checkpoint) => checkpoint.boundary === "after_tool_result");
+	assert.ok(afterToolCheckpoint);
+	assert.deepEqual(afterToolCheckpoint.completedToolCalls.map((tool) => tool.toolCallId), ["call-a", "call-b"]);
+	assert.deepEqual(afterToolCheckpoint.traces.map((trace) => trace.runId), ["read-failed-1", "read-failed-1-duplicate-1"]);
+});
+
 test("AgentLoopController blocks duplicate failed calls returned as native assistant JSON envelopes", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),

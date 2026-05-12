@@ -7,7 +7,7 @@ import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import { AgentFailureClassifier } from "./AgentFailureClassifier";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "./AgentKernelPorts";
-import { AgentLoopControlTracker, type AgentLoopRepetition } from "./AgentLoopControl";
+import { AgentLoopControlTracker, createToolInvocationFingerprint, type AgentLoopRepetition } from "./AgentLoopControl";
 import type { AgentLoopCheckpointPort, AgentLoopFallbackPolicy, AgentLoopLifecyclePort, AgentLoopProgressPort } from "./AgentLoopTypes";
 import type { ContextEnginePort, ContextPackage } from "./ContextEnginePort";
 import type { ModelDriverPort } from "./ModelDriverPort";
@@ -698,13 +698,69 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				run.push(candidate);
 				index += 1;
 			}
-			const runExecutions = await Promise.all(run.map(async (call) => ({
-				toolCall: call,
-				executed: await this.executeTool(input, context, step, this.normalizeNativeToolCall(call), loopControl),
-			})));
-			executions.push(...runExecutions);
+			executions.push(...await this.executeReadOnlyConcurrencySafeRun(input, context, step, run, loopControl));
 		}
 		return executions;
+	}
+
+	private async executeReadOnlyConcurrencySafeRun(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		step: number,
+		toolCalls: ToolCall[],
+		loopControl: AgentLoopControlTracker,
+	): Promise<NativeToolBatchExecution[]> {
+		const normalizedCalls = toolCalls.map((toolCall) => this.normalizeNativeToolCall(toolCall));
+		const firstIndexByIdentity = new Map<string, number>();
+		const primaryIndexes: number[] = [];
+		for (let index = 0; index < normalizedCalls.length; index += 1) {
+			const toolCall = normalizedCalls[index];
+			if (!toolCall) {
+				continue;
+			}
+			const identity = createToolInvocationFingerprint(toolCall).invocationIdentity;
+			if (firstIndexByIdentity.has(identity)) {
+				continue;
+			}
+			firstIndexByIdentity.set(identity, index);
+			primaryIndexes.push(index);
+		}
+
+		const executions: Array<NativeToolBatchExecution | undefined> = new Array(toolCalls.length);
+		const primaryExecutions = await Promise.all(primaryIndexes.map(async (index) => {
+			const toolCall = toolCalls[index];
+			const normalized = normalizedCalls[index];
+			if (!toolCall || !normalized) {
+				return null;
+			}
+			return {
+				index,
+				execution: {
+					toolCall,
+					executed: await this.executeTool(input, context, step, normalized, loopControl),
+				},
+			};
+		}));
+		for (const item of primaryExecutions) {
+			if (item) {
+				executions[item.index] = item.execution;
+			}
+		}
+		for (let index = 0; index < normalizedCalls.length; index += 1) {
+			if (executions[index]) {
+				continue;
+			}
+			const toolCall = toolCalls[index];
+			const normalized = normalizedCalls[index];
+			if (!toolCall || !normalized) {
+				continue;
+			}
+			executions[index] = {
+				toolCall,
+				executed: await this.executeTool(input, context, step, normalized, loopControl),
+			};
+		}
+		return executions.filter((item): item is NativeToolBatchExecution => Boolean(item));
 	}
 
 	private normalizeNativeToolCall(toolCall: ToolCall): ToolCall {
