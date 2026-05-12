@@ -1,13 +1,13 @@
 import type { ToolCall } from "../../types/tools";
 import { ToolBoundaryFilter, type ToolBoundaryMessage, type ToolBoundaryRepair } from "../context/ToolBoundaryFilter";
 import { formatForModel } from "../tools/ToolResultFormatter";
-import { normalizeToolInvocation, type NormalizedToolInvocation } from "../tools/ToolInvocationNormalizer";
-import type { ToolResultFailureClass, ToolResultPayload, ToolResultRecovery } from "../tools/ToolResultContract";
+import type { ToolResultPayload, ToolResultRecovery } from "../tools/ToolResultContract";
 import type { LlmTransportEvent } from "../llm/LlmTransportTelemetry";
 import type { ReasoningArtifact } from "../llm/ReasoningArtifact";
 import type { AgentExecutionContext } from "./AgentExecutionContext";
 import { AgentFailureClassifier } from "./AgentFailureClassifier";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "./AgentKernelPorts";
+import { AgentLoopControlTracker, type AgentLoopRepetition } from "./AgentLoopControl";
 import type { AgentLoopCheckpointPort, AgentLoopFallbackPolicy, AgentLoopLifecyclePort, AgentLoopProgressPort } from "./AgentLoopTypes";
 import type { ContextEnginePort, ContextPackage } from "./ContextEnginePort";
 import type { ModelDriverPort } from "./ModelDriverPort";
@@ -86,38 +86,6 @@ interface ActivePlanState {
 type NativeNoToolResultResolution =
 	| { kind: "terminal"; result: AgentTurnResult }
 	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"] };
-
-interface FailedToolInvocationRecord {
-	invocation: NormalizedToolInvocation;
-	result: ToolExecutionResult;
-	status: RuntimeToolTrace["status"];
-	failureClass: ToolResultFailureClass;
-}
-
-class FailedToolInvocationTracker {
-	private readonly records = new Map<string, FailedToolInvocationRecord>();
-
-	findDuplicate(invocation: NormalizedToolInvocation): FailedToolInvocationRecord | undefined {
-		return this.records.get(invocation.identity);
-	}
-
-	record(invocation: NormalizedToolInvocation, result: ToolExecutionResult): void {
-		const status = result.payload.status ?? result.trace.status;
-		if (status === "ok" || result.payload.ok || result.trace.ok) {
-			return;
-		}
-		const failureClass = result.payload.failureClass ?? result.trace.failureClass;
-		if (!failureClass) {
-			return;
-		}
-		this.records.set(invocation.identity, {
-			invocation,
-			result,
-			status: result.trace.status,
-			failureClass,
-		});
-	}
-}
 
 export class AgentLoopController implements RuntimeTurnExecutorPort {
 	private readonly failureClassifier: AgentFailureClassifierPort;
@@ -251,7 +219,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
-		const failedInvocations = new FailedToolInvocationTracker();
+		const loopControl = new AgentLoopControlTracker();
 		let finalReply = "";
 		for (let step = startStep; step <= maxIterations; step += 1) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
@@ -311,7 +279,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
-				}, failedInvocations);
+				}, loopControl);
 				traces.push(executed.trace);
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
@@ -364,7 +332,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
-		const failedInvocations = new FailedToolInvocationTracker();
+		const loopControl = new AgentLoopControlTracker();
 		const tools = await this.options.toolExecution.listNativeTools({ input, context, allowedTools: input.allowedTools });
 		if (tools.length === 0) {
 			return this.makeResult(input, context, {
@@ -430,7 +398,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					assistantStepText,
 					finalReply,
 					lastToolPayload,
-					failedInvocations,
+					loopControl,
 					activePlan,
 					response.reasoningArtifact,
 				);
@@ -450,7 +418,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					id: toolCall.id,
 					name: toolCall.name,
 					args: toolCall.args ?? {},
-				}, failedInvocations);
+				}, loopControl);
 				traces.push(executed.trace);
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				lastToolPayload = executed.payload;
@@ -507,7 +475,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		assistantStepText: string,
 		finalReply: string,
 		lastToolPayload: ToolExecutionResult["payload"] | null,
-		failedInvocations: FailedToolInvocationTracker | undefined,
+		loopControl: AgentLoopControlTracker | undefined,
 		activePlan: ActivePlanState | undefined,
 		reasoningArtifact?: ReasoningArtifact,
 	): Promise<NativeNoToolResultResolution> {
@@ -549,7 +517,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
-				}, failedInvocations);
+				}, loopControl);
 				traces.push(executed.trace);
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
@@ -618,9 +586,8 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		context: AgentExecutionContext,
 		step: number,
 		tool: ToolCall,
-		failedInvocations?: FailedToolInvocationTracker,
+		loopControl?: AgentLoopControlTracker,
 	): Promise<ToolExecutionResult> {
-		const invocation = normalizeToolInvocation(tool);
 		context.emit({
 			type: "tool_call",
 			payload: { step, tool: tool.name, args: tool.args ?? {}, toolCallId: tool.id },
@@ -632,12 +599,12 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			tool: tool.name,
 			message: `Step ${step}: calling tool ${tool.name}`,
 		});
-		const previousFailure = failedInvocations?.findDuplicate(invocation);
-		const result = previousFailure
-			? this.buildDuplicateFailedToolResult(step, tool, previousFailure)
+		const repetition = loopControl?.beforeInvocation(tool);
+		const result = repetition
+			? this.buildDuplicateFailedToolResult(step, tool, repetition)
 			: await this.options.toolExecution.executeTool({ input, context, step, tool });
-		if (!previousFailure) {
-			failedInvocations?.record(invocation, result);
+		if (!repetition) {
+			loopControl?.recordResult(tool, result);
 		}
 		const recovery = result.payload.recovery;
 		const recoverable = recovery?.recoverable ?? result.trace.failureClass === "transport_unstable";
@@ -679,10 +646,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	private buildDuplicateFailedToolResult(
 		step: number,
 		tool: ToolCall,
-		previousFailure: FailedToolInvocationRecord,
+		repetition: AgentLoopRepetition,
 	): ToolExecutionResult {
-		const previousPayload = previousFailure.result.payload;
-		const failureClass = previousFailure.failureClass ?? previousPayload.failureClass ?? "invalid_input";
+		const previousPayload = repetition.previous.result.payload;
+		const failureClass = previousPayload.failureClass ?? repetition.previous.result.trace.failureClass ?? "invalid_input";
 		const message = `Identical call already failed earlier in this turn for ${tool.name}. Use recovery.suggestedArgs/candidatePaths if present, or change the tool arguments before retrying.`;
 		const recovery = this.buildDuplicateRecovery(previousPayload.recovery, message);
 		const payload: ToolResultPayload = {
@@ -694,7 +661,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			recovery,
 			...(previousPayload.trace ? { trace: { ...previousPayload.trace } } : {}),
 		};
-		const previousTrace = previousFailure.result.trace;
+		const previousTrace = repetition.previous.result.trace;
 		const trace: RuntimeToolTrace = {
 			...previousTrace,
 			runId: `${previousTrace.runId || tool.name}-duplicate-${step}`,
