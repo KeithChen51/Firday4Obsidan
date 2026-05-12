@@ -33,6 +33,8 @@ export interface RuntimeEnvelope {
 
 export const MAX_TOOL_ITERATION_SAFE_SUMMARY = "工具调用次数过多，FRIDAY 已安全停止本轮操作。";
 export const MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT = `${MAX_TOOL_ITERATION_SAFE_SUMMARY}请缩小任务范围后再试。`;
+export const LOOP_CONTROL_SAFE_SUMMARY = "工具观察没有新的进展，FRIDAY 已安全停止本轮操作。";
+export const LOOP_CONTROL_SAFE_ASSISTANT_TEXT = `${LOOP_CONTROL_SAFE_SUMMARY}请调整路径、关键词或任务范围后再试。`;
 export const RAW_MAX_TOOL_ITERATION_TEXTS = [
 	"Tool iteration limit reached; stopped further tool calls for this turn.",
 	"Maximum tool-iteration limit reached",

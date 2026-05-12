@@ -433,7 +433,7 @@ export class ObsidianAgentStateAdapter {
 		return {
 			type: "turn_completed",
 			payload: {
-				status: this.isMaxToolIterationStop(result)
+				status: status === "safe_stopped"
 					? "safe_stopped"
 					: status === "waiting_for_approval" || status === "waiting_for_user" ? status : "completed",
 				traceId: result.traceId,
@@ -455,7 +455,8 @@ export class ObsidianAgentStateAdapter {
 	}
 
 	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
-		return result.status === "safe_stopped" || containsRawMaxToolIterationText(result.assistantText);
+		return Boolean(result.events?.some((event) => event.type === "max_tool_iterations")) ||
+			containsRawMaxToolIterationText(result.assistantText);
 	}
 
 	private buildFailureDiagnostics(message: string, status: AgentTurnStatus): Record<string, unknown> {

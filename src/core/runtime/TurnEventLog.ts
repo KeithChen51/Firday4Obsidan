@@ -45,6 +45,7 @@ export type TurnEventType =
 	| "turn_failed"
 	| "fallback"
 	| "parse_error"
+	| "loop_control_stop"
 	| "max_tool_iterations";
 
 export interface TurnEventRef {

@@ -117,12 +117,14 @@ export interface TurnReplaySummary extends TurnEventRef {
 		at?: string;
 	}>;
 	loopPreventionTimeline: Array<{
-		event: "duplicate_failed_tool_call" | "max_tool_iterations";
+		event: "duplicate_failed_tool_call" | "loop_control_stop" | "max_tool_iterations";
 		step: number;
 		tool: string;
 		toolCallId: string;
 		status: string;
 		summary: string;
+		reason?: string;
+		repetitionKind?: string;
 		at?: string;
 	}>;
 	approvals: {
@@ -673,6 +675,20 @@ export class TurnReplayReader {
 	private summarizeLoopPreventionTimeline(events: TurnEventRecord[]): TurnReplaySummary["loopPreventionTimeline"] {
 		const timeline: TurnReplaySummary["loopPreventionTimeline"] = [];
 		for (const event of events) {
+			if (event.type === "loop_control_stop") {
+				timeline.push({
+					event: "loop_control_stop",
+					step: this.getPayloadNumber(event, "step"),
+					tool: this.getPayloadText(event, "tool"),
+					toolCallId: this.getPayloadText(event, "toolCallId"),
+					status: this.getPayloadText(event, "status"),
+					summary: this.getPayloadText(event, "summary") || this.getPayloadText(event, "message"),
+					reason: this.getPayloadText(event, "reason") || this.getPayloadText(event, "stopReason"),
+					repetitionKind: this.getPayloadText(event, "repetitionKind"),
+					at: event.at,
+				});
+				continue;
+			}
 			if (event.type === "max_tool_iterations") {
 				timeline.push({
 					event: "max_tool_iterations",

@@ -295,6 +295,206 @@ test("AgentKernel executes a native model/tool loop through AgentLoopController"
 	assert.equal(modelResponsePayloads.some((payload) => "hasReasoningContent" in payload), false);
 });
 
+test("AgentLoopController allows productive native tool work beyond the configured maxIterations cap", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const modelRequests = [];
+	const toolRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+					contextSummary: { used: 8, softLimit: 100, hardLimit: 120, trimmedChannels: [] },
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step <= 3) {
+					return {
+						assistantText: "",
+						toolCalls: [{
+							id: `call-${input.step}`,
+							name: "read",
+							args: { path: `Project/file-${input.step}.md` },
+						}],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: "Read three distinct files.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				toolRequests.push(input);
+				const pathName = input.tool.args.path;
+				return {
+					trace: {
+						runId: `read-ok-${input.step}`,
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: pathName,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: `Read ${pathName}`,
+					},
+					payload: {
+						ok: true,
+						tool: "read",
+						status: "ok",
+						data: { path: pathName, content: `content ${input.step}` },
+						trace: { targetPath: pathName },
+					},
+					modelResultText: `TOOL_RESULT ${JSON.stringify({ ok: true, tool: "read", status: "ok", data: { path: pathName } })}`,
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-native-productive-beyond-cap",
+		taskId: "task-native-productive-beyond-cap",
+		traceId: "trace-native-productive-beyond-cap",
+		conversationId: "conversation-native-productive-beyond-cap",
+		agentId: "agent-native-productive-beyond-cap",
+		conversation: [],
+		userPrompt: "Read multiple files before answering",
+		allowedTools: ["read"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Read three distinct files.");
+	assert.deepEqual(toolRequests.map((request) => request.step), [1, 2, 3]);
+	assert.deepEqual(modelRequests.map((request) => request.step), [1, 2, 3, 4]);
+	assert.equal(result.events.some((event) => event.type === "max_tool_iterations"), false);
+	assert.equal(result.events.some((event) => event.type === "loop_control_stop"), false);
+});
+
+test("AgentLoopController allows productive prompt-envelope tool work beyond the configured maxIterations cap", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const modelRequests = [];
+	const toolRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "prompt",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+					contextSummary: { used: 8, softLimit: 100, hardLimit: 120, trimmedChannels: [] },
+				};
+			},
+		},
+		modelDriver: {
+			async requestText(input) {
+				modelRequests.push(input);
+				if (input.step <= 3) {
+					return runtimeEnvelope({
+						type: "tool_call",
+						assistant: `Reading Project/file-${input.step}.md`,
+						tool: {
+							name: "read",
+							args: { path: `Project/file-${input.step}.md` },
+						},
+					});
+				}
+				return runtimeEnvelope({
+					type: "response",
+					assistant: "Prompt loop read three distinct files.",
+				});
+			},
+			async requestWithTools() {
+				throw new Error("native path should not be used");
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				throw new Error("native tools should not be listed");
+			},
+			async executeTool(input) {
+				toolRequests.push(input);
+				const pathName = input.tool.args.path;
+				return {
+					trace: {
+						runId: `read-prompt-ok-${input.step}`,
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: pathName,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: `Read ${pathName}`,
+					},
+					payload: {
+						ok: true,
+						tool: "read",
+						status: "ok",
+						data: { path: pathName, content: `prompt content ${input.step}` },
+						trace: { targetPath: pathName },
+					},
+					modelResultText: `TOOL_RESULT ${JSON.stringify({ ok: true, tool: "read", status: "ok", data: { path: pathName } })}`,
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-prompt-productive-beyond-cap",
+		taskId: "task-prompt-productive-beyond-cap",
+		traceId: "trace-prompt-productive-beyond-cap",
+		conversationId: "conversation-prompt-productive-beyond-cap",
+		agentId: "agent-prompt-productive-beyond-cap",
+		conversation: [],
+		userPrompt: "Read multiple files before answering",
+		allowedTools: ["read"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Prompt loop read three distinct files.");
+	assert.deepEqual(toolRequests.map((request) => request.step), [1, 2, 3]);
+	assert.deepEqual(modelRequests.map((request) => request.step), [1, 2, 3, 4]);
+	assert.equal(result.events.some((event) => event.type === "max_tool_iterations"), false);
+	assert.equal(result.events.some((event) => event.type === "loop_control_stop"), false);
+});
+
 test("AgentLoopController continues native assistant JSON tool calls with prompt-style tool feedback", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),

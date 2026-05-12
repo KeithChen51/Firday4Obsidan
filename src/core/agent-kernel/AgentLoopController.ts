@@ -23,6 +23,8 @@ import {
 import {
 	hasMutationPlans,
 	isResponseEnvelope,
+	LOOP_CONTROL_SAFE_ASSISTANT_TEXT,
+	LOOP_CONTROL_SAFE_SUMMARY,
 	MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
 	MAX_TOOL_ITERATION_SAFE_SUMMARY,
 	parseKernelRuntimeEnvelope,
@@ -85,7 +87,15 @@ interface ActivePlanState {
 
 type NativeNoToolResultResolution =
 	| { kind: "terminal"; result: AgentTurnResult }
-	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"] };
+	| { kind: "continue"; lastToolPayload: ToolExecutionResult["payload"]; loopRepetition?: AgentLoopRepetition };
+
+type LoopToolExecutionResult = ToolExecutionResult & {
+	loopRepetition?: AgentLoopRepetition;
+};
+
+const MIN_EMERGENCY_FUSE_ITERATIONS = 50;
+const MAX_EMERGENCY_FUSE_ITERATIONS = 500;
+const EMERGENCY_FUSE_MULTIPLIER = 10;
 
 export class AgentLoopController implements RuntimeTurnExecutorPort {
 	private readonly failureClassifier: AgentFailureClassifierPort;
@@ -217,11 +227,13 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	): Promise<AgentTurnResult> {
 		const startStep = initialState.startStep ?? 1;
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
+		const emergencyFuseStep = this.resolveEmergencyFuseStep(startStep, maxIterations);
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		const loopControl = new AgentLoopControlTracker();
 		let finalReply = "";
-		for (let step = startStep; step <= maxIterations; step += 1) {
+		let step = startStep;
+		while (step <= emergencyFuseStep) {
 			this.emitModelRequest(input, context, step, "prompt", modelMessages);
 			const rawResponse = await this.options.modelDriver.requestText({
 				messages: cloneMessages(modelMessages),
@@ -308,6 +320,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					}],
 					safetyReason: "Prompt tool result appended to model messages.",
 				});
+				const loopControlStop = this.buildLoopControlStopResult(
+					input,
+					context,
+					"prompt",
+					step,
+					executed.loopRepetition,
+					finalReply,
+					traces,
+					contextPackage,
+				);
+				if (loopControlStop) {
+					return loopControlStop;
+				}
+				step += 1;
 				continue;
 			}
 			return this.makeResult(input, context, {
@@ -318,7 +344,16 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				contextSummary: contextPackage.contextSummary,
 			});
 		}
-		return this.buildMaxToolIterationResult(input, context, "prompt", maxIterations, finalReply, traces, contextPackage);
+		return this.buildMaxToolIterationResult(
+			input,
+			context,
+			"prompt",
+			emergencyFuseStep,
+			finalReply,
+			traces,
+			contextPackage,
+			maxIterations,
+		);
 	}
 
 	private async runNativeLoop(
@@ -330,6 +365,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	): Promise<AgentTurnResult> {
 		const startStep = initialState.startStep ?? 1;
 		const maxIterations = Math.max(startStep, this.resolveMaxIterations(contextPackage, context));
+		const emergencyFuseStep = this.resolveEmergencyFuseStep(startStep, maxIterations);
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		const loopControl = new AgentLoopControlTracker();
@@ -345,7 +381,8 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 		let finalReply = "";
 		let lastToolPayload: ToolExecutionResult["payload"] | null = null;
-		for (let step = startStep; step <= maxIterations; step += 1) {
+		let step = startStep;
+		while (step <= emergencyFuseStep) {
 			const repairs = this.repairNativeModelMessages(modelMessages);
 			if (repairs.length > 0) {
 				this.reportNativeMessageRepairs(input, step, repairs);
@@ -404,6 +441,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				);
 				if (resolution.kind === "continue") {
 					lastToolPayload = resolution.lastToolPayload;
+					const loopControlStop = this.buildLoopControlStopResult(
+						input,
+						context,
+						"native",
+						step,
+						resolution.loopRepetition,
+						finalReply,
+						traces,
+						contextPackage,
+					);
+					if (loopControlStop) {
+						return loopControlStop;
+					}
+					step += 1;
 					continue;
 				}
 				return resolution.result;
@@ -412,6 +463,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			const toolResultMessages: AgentChatMessage[] = [];
 			const loadedSkillContexts: string[] = [];
 			const completedToolCalls: AgentCheckpointToolResultRef[] = [];
+			let loopRepetition: AgentLoopRepetition | undefined;
 			for (const toolCall of response.toolCalls) {
 				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, step, {
@@ -420,6 +472,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					args: toolCall.args ?? {},
 				}, loopControl);
 				traces.push(executed.trace);
+				if (!loopRepetition && executed.loopRepetition) {
+					loopRepetition = executed.loopRepetition;
+				}
 				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				lastToolPayload = executed.payload;
 				completedToolCalls.push({
@@ -460,8 +515,31 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				completedToolCalls,
 				safetyReason: "Native tool result appended to model messages.",
 			});
+			const loopControlStop = this.buildLoopControlStopResult(
+				input,
+				context,
+				"native",
+				step,
+				loopRepetition,
+				finalReply,
+				traces,
+				contextPackage,
+			);
+			if (loopControlStop) {
+				return loopControlStop;
+			}
+			step += 1;
 		}
-		return this.buildMaxToolIterationResult(input, context, "native", maxIterations, finalReply, traces, contextPackage);
+		return this.buildMaxToolIterationResult(
+			input,
+			context,
+			"native",
+			emergencyFuseStep,
+			finalReply,
+			traces,
+			contextPackage,
+			maxIterations,
+		);
 	}
 
 	private async resolveNativeNoToolResult(
@@ -546,7 +624,11 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					}],
 					safetyReason: "Native assistant text-envelope tool result appended as prompt-style TOOL_RESULT feedback.",
 				});
-				return { kind: "continue", lastToolPayload: executed.payload };
+				return {
+					kind: "continue",
+					lastToolPayload: executed.payload,
+					...(executed.loopRepetition ? { loopRepetition: executed.loopRepetition } : {}),
+				};
 			}
 		}
 		return {
@@ -587,7 +669,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		step: number,
 		tool: ToolCall,
 		loopControl?: AgentLoopControlTracker,
-	): Promise<ToolExecutionResult> {
+	): Promise<LoopToolExecutionResult> {
 		context.emit({
 			type: "tool_call",
 			payload: { step, tool: tool.name, args: tool.args ?? {}, toolCallId: tool.id },
@@ -603,8 +685,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const result = repetition
 			? this.buildDuplicateFailedToolResult(step, tool, repetition)
 			: await this.options.toolExecution.executeTool({ input, context, step, tool });
+		let loopRepetition: AgentLoopRepetition | undefined;
 		if (!repetition) {
-			loopControl?.recordResult(tool, result);
+			loopRepetition = loopControl?.recordResult(tool, result);
 		}
 		const recovery = result.payload.recovery;
 		const recoverable = recovery?.recoverable ?? result.trace.failureClass === "transport_unstable";
@@ -640,7 +723,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		if (this.shouldEmitToolStageNarration(input)) {
 			this.emitToolStageReport(input, context, result.trace);
 		}
-		return result;
+		return loopRepetition ? { ...result, loopRepetition } : result;
 	}
 
 	private buildDuplicateFailedToolResult(
@@ -696,6 +779,53 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		};
 	}
 
+	private buildLoopControlStopResult(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		channel: "native" | "prompt",
+		step: number,
+		repetition: AgentLoopRepetition | undefined,
+		finalReply: string,
+		traces: RuntimeToolTrace[],
+		contextPackage: ContextPackage,
+	): AgentTurnResult | null {
+		if (!repetition || repetition.kind !== "repeated_unchanged_observation") {
+			return null;
+		}
+		const previousStep = repetition.previous.result.trace.step;
+		context.emit({
+			type: "loop_control_stop",
+			status: "safe_stopped",
+			payload: {
+				channel,
+				step,
+				previousStep,
+				tool: repetition.fingerprint.tool,
+				reason: repetition.stopReason,
+				stopReason: repetition.stopReason,
+				repetitionKind: repetition.kind,
+				status: "safe_stopped",
+				summary: LOOP_CONTROL_SAFE_SUMMARY,
+				invocationIdentity: repetition.fingerprint.invocationIdentity,
+				...(repetition.fingerprint.resultIdentity ? { resultIdentity: repetition.fingerprint.resultIdentity } : {}),
+			},
+		});
+		this.report(input, {
+			phase: "done",
+			depth: input.depth ?? 0,
+			step,
+			tool: repetition.fingerprint.tool,
+			message: LOOP_CONTROL_SAFE_SUMMARY,
+		});
+		return this.makeResult(input, context, {
+			status: "safe_stopped",
+			assistantText: LOOP_CONTROL_SAFE_ASSISTANT_TEXT,
+			traces,
+			rawFinalReply: finalReply,
+			contextSummary: contextPackage.contextSummary,
+		});
+	}
+
 	private buildMaxToolIterationResult(
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
@@ -704,6 +834,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		finalReply: string,
 		traces: RuntimeToolTrace[],
 		contextPackage: ContextPackage,
+		configuredMaxIterations?: number,
 	): AgentTurnResult {
 		context.emit({
 			type: "max_tool_iterations",
@@ -711,6 +842,8 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			payload: {
 				channel,
 				maxIterations,
+				...(configuredMaxIterations === undefined ? {} : { configuredMaxIterations }),
+				reason: "emergency_fuse",
 				toolTraces: traces.length,
 				status: "safe_stopped",
 				summary: MAX_TOOL_ITERATION_SAFE_SUMMARY,
@@ -1917,6 +2050,15 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 	private resolveMaxIterations(contextPackage: ContextPackage, context: AgentExecutionContext): number {
 		return Math.max(1, context.budget.tool?.maxIterations ?? contextPackage.maxIterations ?? 1);
+	}
+
+	private resolveEmergencyFuseStep(startStep: number, maxIterations: number): number {
+		const configuredIterations = Math.max(1, maxIterations - startStep + 1);
+		const fuseIterations = Math.min(
+			MAX_EMERGENCY_FUSE_ITERATIONS,
+			Math.max(MIN_EMERGENCY_FUSE_ITERATIONS, configuredIterations * EMERGENCY_FUSE_MULTIPLIER),
+		);
+		return startStep + fuseIterations - 1;
 	}
 
 	private isRetryableTransportFailure(message: string): boolean {

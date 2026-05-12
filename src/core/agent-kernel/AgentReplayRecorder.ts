@@ -80,6 +80,8 @@ export class AgentReplayRecorder {
 				return this.mapTaskEvent(event, payload);
 			case "fallback":
 				return [this.replayEvent(event, "fallback", payload)];
+			case "loop_control_stop":
+				return [this.replayEvent(event, "loop_control_stop", payload)];
 			case "max_tool_iterations":
 				return [this.replayEvent(event, "max_tool_iterations", payload)];
 			case "turn_failed":
