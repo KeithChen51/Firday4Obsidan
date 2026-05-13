@@ -293,7 +293,7 @@ export const enUSMessages: I18nMessages = {
 	"modal.project.error.localPathMissing": "Local path does not exist: {path}",
 	"modal.project.error.linkExistsOther": "Project link exists and points to another location: {path}",
 	"modal.project.error.vaultPathExists": "A project path with same name already exists in Vault: {path}",
-	"ai.action.cancelled": "已取消文件操作执行。",
+	"ai.action.cancelled": "已停止本次任务。",
 	"ai.action.confirmExecute": "FRIDAY 准备执行以下 {count} 个文件操作：\n\n{list}\n\n是否继续？",
 	"ai.action.resultTitle": "执行结果：",
 	"ai.banner.imagesAttached": "已附加图片 {count} 张（{vision}）",

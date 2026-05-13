@@ -1966,13 +1966,13 @@ test("renderAgentTrajectoryCard expanded process panel renders a status bar and 
 
 	assert.equal(root.countByClass("friday-agent-process-statusbar"), 1);
 	assert.equal(root.countByClass("friday-agent-process-phase-groups"), 1);
-	assert.equal(root.countByClass("friday-agent-process-phase-group"), 3);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
+	assert.equal(root.countByClass("friday-agent-process-phase-group"), 2);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 2);
 	assert.match(root.textContent, /执行/);
 	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /12s/);
 	assert.match(root.textContent, /收到任务/);
-	assert.match(root.textContent, /计划/);
+	assert.doesNotMatch(root.textContent, /计划|整理方案/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
 
@@ -2066,10 +2066,10 @@ test("renderAgentAnswerFlow keeps stage reports out of the structured process pa
 	});
 
 	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
+	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 2);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
 	assert.match(root.textContent, /收到任务/);
-	assert.match(root.textContent, /整理方案/);
+	assert.doesNotMatch(root.textContent, /整理方案/);
 	assert.doesNotMatch(root.textContent, /阶段性汇报/);
 	assert.doesNotMatch(root.textContent, /已读取相关文件，接下来实现事件链路。/);
 	assert.equal(root.countByClass("friday-agent-process-timeline-note"), 0);

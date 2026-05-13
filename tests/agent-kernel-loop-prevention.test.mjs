@@ -616,6 +616,7 @@ test("AgentLoopController treats a native batch with repeated observations and n
 		conversation: [],
 		userPrompt: "List project and read new files",
 		mode: "ask",
+		metadata: { suppressVisibleNarration: true },
 	});
 
 	assert.equal(result.status, "completed");

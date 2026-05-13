@@ -47,6 +47,7 @@ import {
 	createPlanState,
 	getIntakeRouteDefaults,
 	inferInteractionRouteFromLegacy,
+	normalizePlanState,
 	revisePlanState,
 	skipPlanState,
 	type IntakeDecision,
@@ -84,6 +85,9 @@ interface ActivePlanState {
 	finalStarted: boolean;
 	intakeEmitted: boolean;
 	lastEmittedPlanSignature?: string;
+	missingModelPlanReminderEmitted?: boolean;
+	finalPlanSyncRequested?: boolean;
+	source?: "model" | "runtime" | "fallback" | "legacy";
 }
 
 type NativeNoToolResultResolution =
@@ -97,6 +101,11 @@ type LoopToolExecutionResult = ToolExecutionResult & {
 interface NativeToolBatchExecution {
 	toolCall: ToolCall;
 	executed: LoopToolExecutionResult;
+}
+
+interface MissingModelTaskBarSuppression {
+	reminder: string;
+	shouldDeferToolExecution: boolean;
 }
 
 const MIN_EMERGENCY_FUSE_ITERATIONS = 50;
@@ -118,7 +127,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				return blockedResult;
 			}
 			const result = await this.runConfiguredLoop(input, context);
-			return await this.options.lifecycle?.complete?.(input, context, result) ?? result;
+			const completed = await this.options.lifecycle?.complete?.(input, context, result) ?? result;
+			this.emitTerminalProgress(input, completed);
+			return completed;
 		} catch (error) {
 			await this.options.lifecycle?.fail?.(input, context, error);
 			throw error;
@@ -156,7 +167,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			});
 			const result = await this.runPromptLoop(input, context, contextPackage, {}, activePlan);
 			this.emitPlanFinalizing(input, context, activePlan);
-			this.emitPlanCompleted(input, context, activePlan.current);
+			this.emitPlanCompleted(input, context, activePlan);
 			return result;
 		}
 		if (contextPackage.toolCallingMode === "native") {
@@ -172,7 +183,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			});
 			const result = await this.runNativeLoop(input, context, contextPackage, {}, activePlan);
 			this.emitPlanFinalizing(input, context, activePlan);
-			this.emitPlanCompleted(input, context, activePlan.current);
+			this.emitPlanCompleted(input, context, activePlan);
 			return result;
 		}
 		try {
@@ -188,7 +199,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			});
 			const result = await this.runNativeLoop(input, context, contextPackage, {}, activePlan);
 			this.emitPlanFinalizing(input, context, activePlan);
-			this.emitPlanCompleted(input, context, activePlan.current);
+			this.emitPlanCompleted(input, context, activePlan);
 			return result;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error ?? "");
@@ -214,7 +225,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			});
 			const result = await this.runPromptLoop(input, context, promptContext, {}, activePlan);
 			this.emitPlanFinalizing(input, context, activePlan);
-			this.emitPlanCompleted(input, context, activePlan.current);
+			this.emitPlanCompleted(input, context, activePlan);
 			return {
 				...result,
 				parseError: result.parseError
@@ -297,20 +308,48 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 						contextSummary: contextPackage.contextSummary,
 					});
 				}
+				const suppression = this.maybeSuppressMissingModelTaskBar(input, context, activePlan, [{
+					name: tool.name,
+					args: tool.args ?? {},
+				}]);
+				if (suppression.shouldDeferToolExecution) {
+					modelMessages.push({
+						role: "assistant",
+						content: finalReply,
+						...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
+					});
+					if (suppression.reminder) {
+						modelMessages.push({ role: "system", content: suppression.reminder });
+					}
+					await this.saveCheckpoint(input, context, {
+						boundary: "after_model_response_before_tool_execution",
+						channel: "prompt",
+						step,
+						nextStep: step + 1,
+						maxIterations,
+						modelMessages,
+						traces,
+						safetyReason: "Prompt tool execution deferred so the model can call plan_write first.",
+					});
+					step += 1;
+					continue;
+				}
 				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
-				}, loopControl);
+				}, loopControl, activePlan);
 				traces.push(executed.trace);
 				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
-				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
 					role: "assistant",
 					content: finalReply,
 					...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
 				});
 				modelMessages.push({ role: "user", content: executed.modelResultText });
+				if (suppression.reminder) {
+					modelMessages.push({ role: "system", content: suppression.reminder });
+				}
 				if (executed.loadedSkillContext) {
 					modelMessages.push({ role: "system", content: executed.loadedSkillContext });
 				}
@@ -477,8 +516,33 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			const toolResultMessages: AgentChatMessage[] = [];
 			const loadedSkillContexts: string[] = [];
 			const completedToolCalls: AgentCheckpointToolResultRef[] = [];
+			const suppression = this.maybeSuppressMissingModelTaskBar(input, context, activePlan, response.toolCalls);
+			if (suppression.shouldDeferToolExecution) {
+				if (assistantStepText) {
+					modelMessages.push({
+						role: "assistant",
+						content: assistantStepText,
+						...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
+					});
+				}
+				if (suppression.reminder) {
+					modelMessages.push({ role: "system", content: suppression.reminder });
+				}
+				await this.saveCheckpoint(input, context, {
+					boundary: "after_model_response_before_tool_execution",
+					channel: "native",
+					step,
+					nextStep: step + 1,
+					maxIterations,
+					modelMessages,
+					traces,
+					safetyReason: "Native tool execution deferred so the model can call plan_write first.",
+				});
+				step += 1;
+				continue;
+			}
 			this.emitPlanExecutionStarted(input, context, activePlan);
-			const batchExecutions = await this.executeNativeToolBatch(input, context, step, response.toolCalls, loopControl);
+			const batchExecutions = await this.executeNativeToolBatch(input, context, step, response.toolCalls, loopControl, activePlan);
 			const repeatedUnchanged = batchExecutions
 				.map((item) => item.executed.loopRepetition)
 				.filter((repetition): repetition is AgentLoopRepetition =>
@@ -488,7 +552,6 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				: undefined;
 			for (const { toolCall, executed } of batchExecutions) {
 				traces.push(executed.trace);
-				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				lastToolPayload = executed.payload;
 				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
 				completedToolCalls.push({
@@ -515,6 +578,9 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				...(response.reasoningArtifact?.hasReasoning ? { reasoningArtifact: response.reasoningArtifact } : {}),
 			});
 			modelMessages.push(...toolResultMessages);
+			if (suppression.reminder) {
+				modelMessages.push({ role: "system", content: suppression.reminder });
+			}
 			for (const loadedSkillContext of loadedSkillContexts) {
 				modelMessages.push({ role: "system", content: loadedSkillContext });
 			}
@@ -574,6 +640,22 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	): Promise<NativeNoToolResultResolution> {
 		const fallbackAssistant = this.buildFallbackAssistantFromToolPayload(lastToolPayload, lastToolUserFallback);
 		if (!assistantStepText || this.isIntermediateAssistantText(assistantStepText)) {
+			const planSync = this.resolveModelPlanSyncBeforeFinal(
+				input,
+				context,
+				modelMessages,
+				step,
+				assistantStepText,
+				reasoningArtifact,
+				activePlan,
+				lastToolPayload,
+				lastToolUserFallback,
+				traces,
+				contextPackage,
+			);
+			if (planSync) {
+				return planSync;
+			}
 			const finalText = this.resolveFinalAssistantText("", traces, fallbackAssistant, "(Model returned no usable content)");
 			return {
 				kind: "terminal",
@@ -589,6 +671,22 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const parsed = parseKernelRuntimeEnvelope(assistantStepText);
 		if (parsed) {
 			this.applyRuntimeEnvelopeProcess(input, context, parsed, activePlan);
+			const planSync = this.resolveModelPlanSyncBeforeFinal(
+				input,
+				context,
+				modelMessages,
+				step,
+				assistantStepText,
+				reasoningArtifact,
+				activePlan,
+				lastToolPayload,
+				lastToolUserFallback,
+				traces,
+				contextPackage,
+			);
+			if (planSync && !parsed.tool) {
+				return planSync;
+			}
 			const terminal = await this.resolveTerminalEnvelope(input, context, parsed, assistantStepText, traces, contextPackage, fallbackAssistant);
 			if (terminal) {
 				return { kind: "terminal", result: terminal };
@@ -607,20 +705,56 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 						}),
 					};
 				}
+				const suppression = this.maybeSuppressMissingModelTaskBar(input, context, activePlan, [{
+					name: tool.name,
+					args: tool.args ?? {},
+				}]);
+				if (suppression.shouldDeferToolExecution) {
+					modelMessages.push({
+						role: "assistant",
+						content: assistantStepText,
+						...(reasoningArtifact?.hasReasoning ? { reasoningArtifact } : {}),
+					});
+					if (suppression.reminder) {
+						modelMessages.push({ role: "system", content: suppression.reminder });
+					}
+					await this.saveCheckpoint(input, context, {
+						boundary: "after_model_response_before_tool_execution",
+						channel: "native",
+						step,
+						nextStep: step + 1,
+						maxIterations,
+						modelMessages,
+						traces,
+						safetyReason: "Native assistant text-envelope tool execution deferred so the model can call plan_write first.",
+					});
+					return {
+						kind: "continue",
+						lastToolPayload: {
+							ok: true,
+							tool: "plan_write",
+							status: "ok",
+							data: { planReminderEmitted: true },
+						},
+						...(lastToolUserFallback ? { lastToolUserFallback } : {}),
+					};
+				}
 				this.emitPlanExecutionStarted(input, context, activePlan);
 				const executed = await this.executeTool(input, context, step, {
 					name: tool.name,
 					args: tool.args ?? {},
-				}, loopControl);
+				}, loopControl, activePlan);
 				traces.push(executed.trace);
 				lastToolUserFallback = executed.userFallback?.trim() || lastToolUserFallback;
-				this.advancePlanAfterToolResult(input, context, activePlan, executed.trace);
 				modelMessages.push({
 					role: "assistant",
 					content: assistantStepText,
 					...(reasoningArtifact?.hasReasoning ? { reasoningArtifact } : {}),
 				});
 				modelMessages.push({ role: "user", content: executed.modelResultText });
+				if (suppression.reminder) {
+					modelMessages.push({ role: "system", content: suppression.reminder });
+				}
 				if (executed.loadedSkillContext) {
 					modelMessages.push({ role: "system", content: executed.loadedSkillContext });
 				}
@@ -648,6 +782,22 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					...(executed.loopRepetition ? { loopRepetition: executed.loopRepetition } : {}),
 				};
 			}
+		}
+		const planSync = this.resolveModelPlanSyncBeforeFinal(
+			input,
+			context,
+			modelMessages,
+			step,
+			assistantStepText,
+			reasoningArtifact,
+			activePlan,
+			lastToolPayload,
+			lastToolUserFallback,
+			traces,
+			contextPackage,
+		);
+		if (planSync) {
+			return planSync;
 		}
 		const finalText = this.resolveFinalAssistantText(assistantStepText, traces, fallbackAssistant, assistantStepText || "(Model returned no usable content)");
 		return {
@@ -696,37 +846,142 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return null;
 	}
 
+	private resolveModelPlanSyncBeforeFinal(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		modelMessages: AgentChatMessage[],
+		step: number,
+		assistantStepText: string,
+		reasoningArtifact: ReasoningArtifact | undefined,
+		activePlan: ActivePlanState | undefined,
+		lastToolPayload: ToolExecutionResult["payload"] | null,
+		lastToolUserFallback: string,
+		traces: RuntimeToolTrace[],
+		contextPackage: ContextPackage,
+	): NativeNoToolResultResolution | null {
+		if (!this.requiresModelPlanSync(activePlan)) {
+			return null;
+		}
+		if (activePlan?.finalPlanSyncRequested) {
+			context.emit({
+				type: "loop_control_stop",
+				status: "safe_stopped",
+				payload: {
+					channel: "native",
+					step,
+					reason: "pending_model_plan_sync",
+					stopReason: "pending_model_plan_sync",
+					status: "safe_stopped",
+					summary: "Model final answer arrived before plan_write synchronized the visible Task Bar.",
+				},
+			});
+			this.report(input, {
+				phase: "plan",
+				depth: input.depth ?? 0,
+				step,
+				summary: "Stopped because model did not synchronize the visible Task Bar before final answer.",
+				message: "Stopped because model did not synchronize the visible Task Bar before final answer.",
+			});
+			return {
+				kind: "terminal",
+				result: this.makeResult(input, context, {
+					status: "safe_stopped",
+					assistantText: "FRIDAY 暂停了这次处理：模型还没有用 plan_write 同步任务进度，避免把未完成的 Task Bar 伪装成已完成。可以稍后重试。",
+					traces,
+					rawFinalReply: assistantStepText,
+					parseError: "Model final answer arrived while a model-authored visible plan still had non-terminal tasks.",
+					contextSummary: contextPackage.contextSummary,
+				}),
+			};
+		}
+		if (!activePlan) {
+			return null;
+		}
+		activePlan.finalPlanSyncRequested = true;
+		if (assistantStepText.trim()) {
+			modelMessages.push({
+				role: "assistant",
+				content: assistantStepText,
+				...(reasoningArtifact?.hasReasoning ? { reasoningArtifact } : {}),
+			});
+		}
+		modelMessages.push({
+			role: "system",
+			content: [
+				"SYSTEM REMINDER: Before finalizing, synchronize the visible Task Bar by calling plan_write.",
+				"Mark completed work as completed, leave remaining work pending/blocked/failed/skipped, then provide the final answer after the plan_write tool result.",
+			].join("\n"),
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			step,
+			summary: "Requested model plan synchronization before final answer.",
+			message: "Requested model plan synchronization before final answer.",
+		});
+		return {
+			kind: "continue",
+			lastToolPayload: lastToolPayload ?? {
+				ok: true,
+				tool: "plan_write",
+				status: "ok",
+				data: { planSyncRequested: true },
+			},
+			...(lastToolUserFallback ? { lastToolUserFallback } : {}),
+		};
+	}
+
+	private requiresModelPlanSync(activePlan: ActivePlanState | undefined): boolean {
+		if (activePlan?.source !== "model" || !activePlan.current) {
+			return false;
+		}
+		const visibility = activePlan.current.visibility;
+		if (visibility !== "task_bar" && visibility !== "visible") {
+			return false;
+		}
+		return !this.isTerminalPlanState(activePlan.current);
+	}
+
 	private async executeNativeToolBatch(
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		step: number,
 		toolCalls: ToolCall[],
 		loopControl: AgentLoopControlTracker,
+		activePlan?: ActivePlanState,
 	): Promise<NativeToolBatchExecution[]> {
 		const executions: NativeToolBatchExecution[] = [];
+		for (const toolCall of toolCalls) {
+			if (!toolCall || !this.isPlanWriteTool(toolCall.name)) {
+				continue;
+			}
+			const executed = await this.executeTool(input, context, step, this.normalizeNativeToolCall(toolCall), loopControl, activePlan);
+			executions.push({ toolCall, executed });
+		}
+		const workToolCalls = toolCalls.filter((toolCall) => !this.isPlanWriteTool(toolCall?.name ?? ""));
 		let index = 0;
-		while (index < toolCalls.length) {
-			const toolCall = toolCalls[index];
+		while (index < workToolCalls.length) {
+			const toolCall = workToolCalls[index];
 			if (!toolCall) {
 				index += 1;
 				continue;
 			}
 			if (!this.isReadOnlyConcurrencySafeTool(toolCall.name)) {
-				const executed = await this.executeTool(input, context, step, this.normalizeNativeToolCall(toolCall), loopControl);
+				const executed = await this.executeTool(input, context, step, this.normalizeNativeToolCall(toolCall), loopControl, activePlan);
 				executions.push({ toolCall, executed });
 				index += 1;
 				continue;
 			}
 			const run: ToolCall[] = [];
-			while (index < toolCalls.length) {
-				const candidate = toolCalls[index];
+			while (index < workToolCalls.length) {
+				const candidate = workToolCalls[index];
 				if (!candidate || !this.isReadOnlyConcurrencySafeTool(candidate.name)) {
 					break;
 				}
 				run.push(candidate);
 				index += 1;
 			}
-			executions.push(...await this.executeReadOnlyConcurrencySafeRun(input, context, step, run, loopControl));
+			executions.push(...await this.executeReadOnlyConcurrencySafeRun(input, context, step, run, loopControl, activePlan));
 		}
 		return executions;
 	}
@@ -737,6 +992,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		step: number,
 		toolCalls: ToolCall[],
 		loopControl: AgentLoopControlTracker,
+		activePlan?: ActivePlanState,
 	): Promise<NativeToolBatchExecution[]> {
 		const normalizedCalls = toolCalls.map((toolCall) => this.normalizeNativeToolCall(toolCall));
 		const firstIndexByIdentity = new Map<string, number>();
@@ -765,7 +1021,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				index,
 				execution: {
 					toolCall,
-					executed: await this.executeTool(input, context, step, normalized, loopControl),
+					executed: await this.executeTool(input, context, step, normalized, loopControl, activePlan),
 				},
 			};
 		}));
@@ -785,7 +1041,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			}
 			executions[index] = {
 				toolCall,
-				executed: await this.executeTool(input, context, step, normalized, loopControl),
+				executed: await this.executeTool(input, context, step, normalized, loopControl, activePlan),
 			};
 		}
 		return executions.filter((item): item is NativeToolBatchExecution => Boolean(item));
@@ -804,12 +1060,208 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return Boolean(contract?.readOnly && contract.concurrencySafe);
 	}
 
+	private isPlanWriteTool(toolName: string): boolean {
+		return toolName.trim().toLowerCase() === "plan_write";
+	}
+
+	private executePlanWriteTool(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		step: number,
+		tool: ToolCall,
+		activePlan?: ActivePlanState,
+	): ToolExecutionResult {
+		const normalized = this.normalizePlanWriteArgs(tool.args ?? {});
+		if (normalized.tasks.length === 0) {
+			const message = "plan_write requires a non-empty tasks array with concrete task titles.";
+			const payload: ToolResultPayload = {
+				ok: false,
+				tool: "plan_write",
+				status: "failed",
+				failureClass: "invalid_input",
+				error: message,
+				recovery: {
+					recoverable: true,
+					retryable: false,
+					code: "invalid_plan_write",
+					message,
+					suggestedArgs: {
+						visibility: "task_bar",
+						tasks: [
+							{ id: "step-1", title: "Define the next concrete step", status: "in_progress" },
+						],
+					},
+				},
+			};
+			return {
+				trace: {
+					runId: tool.id ?? `plan_write-${step}`,
+					step,
+					tool: "plan_write",
+					scope: "any",
+					targetPath: "task_bar",
+					approved: true,
+					approvalReason: "Harness planning tool",
+					persistedRule: false,
+					viaRule: false,
+					status: "failed",
+					failureClass: "invalid_input",
+					ok: false,
+					summary: message,
+					error: message,
+				},
+				payload,
+				modelResultText: formatForModel(payload),
+				userFallback: "",
+			};
+		}
+
+		const existing = activePlan?.current ?? null;
+		const planId = existing?.planId ?? `plan-${context.turnId}`;
+		const visibility = normalized.visibility === "visible" ? "task_bar" : normalized.visibility;
+		let nextPlan = createPlanState({
+			planId,
+			visibility,
+			tasks: normalized.tasks,
+		});
+		if (existing?.createdAt) {
+			nextPlan = normalizePlanState({ ...nextPlan, createdAt: existing.createdAt });
+		}
+		const eventType: "plan_create" | "plan_update" | "plan_revise" = !existing
+			? "plan_create"
+			: this.planTaskStructureSignature(existing) === this.planTaskStructureSignature(nextPlan)
+				? "plan_update"
+				: "plan_revise";
+		if (activePlan) {
+			activePlan.current = nextPlan;
+			activePlan.source = "model";
+			activePlan.lastEmittedPlanSignature = this.planStateMeaningfulSignature(nextPlan);
+		}
+		const visible = nextPlan.visibility === "task_bar" || nextPlan.visibility === "visible";
+		if (eventType === "plan_create" && visible) {
+			context.emit({
+				type: "task_bar_created",
+				payload: {
+					source: "model",
+					reason: normalized.reason || "model_plan_write",
+					taskCount: nextPlan.tasks.length,
+				},
+			});
+		}
+		const planPayload = {
+			type: eventType,
+			state: nextPlan,
+			source: "model",
+			...(normalized.reason ? { reason: normalized.reason } : {}),
+		};
+		context.emit({
+			type: eventType,
+			payload: planPayload,
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			step,
+			plan: planPayload,
+			summary: normalized.reason || `Plan ${eventType.replace("plan_", "")}.`,
+			message: normalized.reason || `Plan ${eventType.replace("plan_", "")}.`,
+		});
+		const payload: ToolResultPayload = {
+			ok: true,
+			tool: "plan_write",
+			status: "ok",
+			data: {
+				planId: nextPlan.planId,
+				eventType,
+				taskCount: nextPlan.tasks.length,
+				currentTaskId: nextPlan.currentTaskId,
+			},
+		};
+		return {
+			trace: {
+				runId: tool.id ?? `plan_write-${step}`,
+				step,
+				tool: "plan_write",
+				scope: "any",
+				targetPath: "task_bar",
+				approved: true,
+				approvalReason: "Harness planning tool",
+				persistedRule: false,
+				viaRule: false,
+				status: "ok",
+				ok: true,
+				summary: `${eventType} wrote ${nextPlan.tasks.length} task(s)`,
+			},
+			payload,
+			modelResultText: formatForModel(payload),
+			userFallback: "",
+		};
+	}
+
+	private normalizePlanWriteArgs(args: Record<string, unknown>): {
+		visibility: PlanState["visibility"];
+		reason?: string;
+		tasks: RuntimePlanTaskInstruction[];
+	} {
+		const rawVisibility = typeof args.visibility === "string" ? args.visibility : "";
+		const visibility: PlanState["visibility"] =
+			rawVisibility === "hidden" || rawVisibility === "internal" || rawVisibility === "visible" || rawVisibility === "task_bar"
+				? rawVisibility
+				: "task_bar";
+		const reason = typeof args.reason === "string" && args.reason.trim()
+			? args.reason.trim()
+			: undefined;
+		const rawTasks = Array.isArray(args.tasks) ? args.tasks : [];
+		const tasks = rawTasks
+			.map((task, index): RuntimePlanTaskInstruction | null => {
+				if (typeof task === "string") {
+					const title = task.trim();
+					return title ? { id: `step-${index + 1}`, title, status: index === 0 ? "in_progress" : "pending" } : null;
+				}
+				if (!task || typeof task !== "object" || Array.isArray(task)) {
+					return null;
+				}
+				const record = task as Record<string, unknown>;
+				const title = typeof record.title === "string" ? record.title.trim() : "";
+				if (!title) {
+					return null;
+				}
+				const id = typeof record.id === "string" && record.id.trim()
+					? record.id.trim()
+					: `step-${index + 1}`;
+				const status = this.isPlanTaskStatus(record.status) ? record.status : index === 0 ? "in_progress" : "pending";
+				const summary = typeof record.summary === "string" && record.summary.trim()
+					? record.summary.trim()
+					: undefined;
+				return {
+					id,
+					title,
+					status,
+					...(summary ? { summary } : {}),
+				};
+			})
+			.filter((task): task is RuntimePlanTaskInstruction => Boolean(task));
+		return {
+			visibility,
+			...(reason ? { reason } : {}),
+			tasks,
+		};
+	}
+
+	private planTaskStructureSignature(planState: PlanState): string {
+		return JSON.stringify(planState.tasks.map((task) => ({
+			id: task.id,
+			title: task.title,
+		})));
+	}
+
 	private async executeTool(
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		step: number,
 		tool: ToolCall,
 		loopControl?: AgentLoopControlTracker,
+		activePlan?: ActivePlanState,
 	): Promise<LoopToolExecutionResult> {
 		context.emit({
 			type: "tool_call",
@@ -822,13 +1274,15 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			tool: tool.name,
 			message: `Step ${step}: calling tool ${tool.name}`,
 		});
-		const repetition = loopControl?.beforeInvocation(tool);
+		const repetition = this.isPlanWriteTool(tool.name) ? undefined : loopControl?.beforeInvocation(tool);
 		const rawResult = repetition
 			? this.buildDuplicateFailedToolResult(step, tool, repetition)
-			: await this.options.toolExecution.executeTool({ input, context, step, tool });
+			: this.isPlanWriteTool(tool.name)
+				? this.executePlanWriteTool(input, context, step, tool, activePlan)
+				: await this.options.toolExecution.executeTool({ input, context, step, tool });
 		const result = this.withToolResultChannels(rawResult);
 		let loopRepetition: AgentLoopRepetition | undefined;
-		if (!repetition) {
+		if (!repetition && !this.isPlanWriteTool(tool.name)) {
 			loopRepetition = loopControl?.recordResult(tool, result);
 		}
 		const recovery = result.payload.recovery;
@@ -862,7 +1316,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			summary: result.trace.summary,
 			message: `Step ${step}: tool ${tool.name} finished - ${result.trace.summary}`,
 		});
-		if (this.shouldEmitToolStageNarration(input)) {
+		if (tool.name !== "plan_write" && this.shouldEmitToolStageNarration(input)) {
 			this.emitToolStageReport(input, context, result.trace);
 		}
 		return loopRepetition ? { ...result, loopRepetition } : result;
@@ -1037,6 +1491,19 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		};
 	}
 
+	private emitTerminalProgress(input: AgentTurnInput, result: AgentTurnResult): void {
+		if ((result.status ?? "completed") !== "completed") {
+			return;
+		}
+		const message = result.assistantText?.trim() || "Done.";
+		this.report(input, {
+			phase: "done",
+			depth: input.depth ?? 0,
+			message,
+			summary: message,
+		});
+	}
+
 	private emitModelRequest(
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
@@ -1167,8 +1634,140 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		return planState;
 	}
 
-	private emitPlanCompleted(input: AgentTurnInput, context: AgentExecutionContext, planState: PlanState | null): void {
-		if (!planState) {
+	private maybeCreateRuntimeTaskBarForNativeToolWork(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		activePlan: ActivePlanState | undefined,
+		toolCalls: ToolCall[],
+	): void {
+		if (!activePlan || input.metadata?.suppressVisibleNarration === true || activePlan.current || toolCalls.length === 0) {
+			return;
+		}
+		const reason = this.resolveRuntimeTaskBarTrigger(input, toolCalls);
+		if (!reason) {
+			return;
+		}
+		const intake = this.buildIntakeDecision(input);
+		if (!activePlan.intakeEmitted && intake.interactionRoute === "task_with_process") {
+			this.emitIntakeDecision(input, context, intake);
+			activePlan.intakeEmitted = true;
+		}
+		const planState = createPlanState({
+			planId: `plan-${context.turnId}`,
+			visibility: "task_bar",
+			tasks: this.buildInitialPlan(input),
+		});
+		activePlan.current = planState;
+		activePlan.source = "runtime";
+		activePlan.lastEmittedPlanSignature = this.planStateMeaningfulSignature(planState);
+		context.emit({
+			type: "task_bar_created",
+			payload: {
+				source: "runtime",
+				reason,
+				toolCount: toolCalls.length,
+				tools: toolCalls.map((toolCall) => toolCall.name),
+			},
+		});
+		const payload = {
+			type: "plan_create" as const,
+			state: planState,
+			source: "runtime",
+			reason,
+		};
+		context.emit({
+			type: "plan_create",
+			payload,
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			plan: payload,
+			summary: "Runtime task bar created.",
+			message: "Runtime task bar created.",
+		});
+	}
+
+	private maybeSuppressMissingModelTaskBar(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		activePlan: ActivePlanState | undefined,
+		toolCalls: ToolCall[],
+	): MissingModelTaskBarSuppression {
+		if (
+			!activePlan ||
+			input.metadata?.suppressVisibleNarration === true ||
+			activePlan.current ||
+			toolCalls.length === 0 ||
+			toolCalls.some((toolCall) => this.isPlanWriteTool(toolCall.name))
+		) {
+			return { reminder: "", shouldDeferToolExecution: false };
+		}
+		const trigger = this.resolveRuntimeTaskBarTrigger(input, toolCalls);
+		if (!trigger) {
+			return { reminder: "", shouldDeferToolExecution: false };
+		}
+		context.emit({
+			type: "task_bar_suppressed",
+			payload: {
+				source: "runtime",
+				reason: "missing_model_plan",
+				trigger,
+				toolCount: toolCalls.length,
+				tools: toolCalls.map((toolCall) => toolCall.name),
+			},
+		});
+		this.report(input, {
+			phase: "plan",
+			depth: input.depth ?? 0,
+			summary: "Task bar suppressed because the model did not provide plan_write.",
+			message: "Task bar suppressed because the model did not provide plan_write.",
+		});
+		if (activePlan.missingModelPlanReminderEmitted) {
+			return { reminder: "", shouldDeferToolExecution: false };
+		}
+		activePlan.missingModelPlanReminderEmitted = true;
+		const shouldDeferToolExecution = (
+			trigger === "complex_tool_work" ||
+			trigger === "verification_tool_work"
+		) && toolCalls.length > 1;
+		return {
+			shouldDeferToolExecution,
+			reminder: [
+				"SYSTEM REMINDER: This looks like multi-step work, but no visible Task Bar plan exists.",
+				"Before continuing the user-facing workflow, call plan_write with 3-6 concrete steps and current statuses.",
+				"If a visible Task Bar is truly unnecessary, continue without inventing one.",
+			].join("\n"),
+		};
+	}
+
+	private resolveRuntimeTaskBarTrigger(input: AgentTurnInput, toolCalls: ToolCall[]): string {
+		if (toolCalls.some((toolCall) => this.isMutationNativeToolCall(toolCall))) {
+			return "mutation_tool_batch";
+		}
+		if (this.hasVerificationTaskSignal(input.userPrompt)) {
+			return "verification_tool_work";
+		}
+		if (this.classifyIntakeComplexity(input) === "complex") {
+			return "complex_tool_work";
+		}
+		if (toolCalls.length > 1) {
+			return "multi_tool_batch";
+		}
+		return "";
+	}
+
+	private isMutationNativeToolCall(toolCall: ToolCall): boolean {
+		const contract = ToolRegistry.getInstance().get(toolCall.name);
+		if (!contract) {
+			return false;
+		}
+		return !contract.readOnly || contract.mutatesVault || contract.mutatesExternal;
+	}
+
+	private emitPlanCompleted(input: AgentTurnInput, context: AgentExecutionContext, activePlan: ActivePlanState | undefined): void {
+		const planState = activePlan?.current;
+		if (!planState || activePlan?.source === "model") {
 			return;
 		}
 		if (planState.status === "skipped" || planState.status === "failed") {
@@ -1178,6 +1777,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const payload = {
 			type: "plan_complete" as const,
 			state: completed,
+			...(activePlan?.source ? { source: activePlan.source } : {}),
 		};
 		context.emit({
 			type: "plan_complete",
@@ -1237,7 +1837,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 	}
 
 	private emitPlanFinalizing(input: AgentTurnInput, context: AgentExecutionContext, activePlan?: ActivePlanState): void {
-		if (!activePlan?.current || activePlan.finalStarted || this.isTerminalPlanState(activePlan.current)) {
+		if (!activePlan?.current || activePlan.source === "model" || activePlan.finalStarted || this.isTerminalPlanState(activePlan.current)) {
 			return;
 		}
 		const taskId = activePlan.current.currentTaskId;
@@ -1245,10 +1845,38 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			return;
 		}
 		activePlan.finalStarted = true;
-		activePlan.current = completePlanTask(activePlan.current, taskId, {
-			reason: "正在整理最终回答。",
-		});
+		activePlan.current = this.markPlanTaskRunning(activePlan.current, taskId, "正在整理最终回答。");
 		this.emitPlanUpdated(input, context, activePlan.current, taskId, "正在整理最终回答。", activePlan);
+	}
+
+	private markPlanTaskRunning(planState: PlanState, taskId: string, summary: string): PlanState {
+		const now = new Date().toISOString();
+		const target = planState.tasks.find((task) => task.id === taskId);
+		if (!target || target.status === "blocked") {
+			return planState;
+		}
+		return {
+			...planState,
+			status: "running",
+			currentTaskId: taskId,
+			updatedAt: now,
+			completedAt: undefined,
+			tasks: planState.tasks.map((task) => {
+				if (task.id === taskId) {
+					return {
+						...task,
+						status: "in_progress",
+						summary,
+						startedAt: task.startedAt ?? now,
+						completedAt: undefined,
+					};
+				}
+				if (task.status === "in_progress") {
+					return { ...task, status: "pending", completedAt: undefined };
+				}
+				return task;
+			}),
+		};
 	}
 
 	private applyRuntimePlanInstruction(
@@ -1300,10 +1928,12 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			tasks: taskInput,
 		});
 		activePlan.current = planState;
+		activePlan.source = "legacy";
 		activePlan.lastEmittedPlanSignature = this.planStateMeaningfulSignature(planState);
 		const payload = {
 			type: "plan_create" as const,
 			state: planState,
+			source: "legacy",
 			...(instruction.reason ? { reason: instruction.reason } : {}),
 			...(instruction.tasksMalformed && visible ? { fallback: true } : {}),
 		};
@@ -1390,6 +2020,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const payload = {
 			type: "plan_revise" as const,
 			state: next,
+			...(activePlan.source ? { source: activePlan.source } : {}),
 			...(instruction.reason ? { reason: instruction.reason } : {}),
 			...(changes.length > 0 ? { changes } : {}),
 		};
@@ -1424,6 +2055,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const payload = {
 			type: "plan_skip" as const,
 			state: skipped,
+			...(activePlan.source ? { source: activePlan.source } : {}),
 			...(instruction.reason ? { reason: instruction.reason } : {}),
 		};
 		context.emit({
@@ -1457,6 +2089,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const payload = {
 			type: "plan_update" as const,
 			state: planState,
+			...(activePlan?.source ? { source: activePlan.source } : {}),
 			...(taskId ? { taskId } : {}),
 			message,
 		};
@@ -1782,6 +2415,11 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 
 	private hasMutationTool(input: AgentTurnInput): boolean {
 		return (input.allowedTools ?? []).some((tool) => /(edit|write|delete|create|patch|apply|rename|move)/i.test(tool));
+	}
+
+	private hasVerificationTaskSignal(prompt: string): boolean {
+		return /\b(test|verify|build|lint|check|ci|regression)\b/i.test(prompt) ||
+			/(娴嬭瘯|楠岃瘉|鏋勫缓|妫€鏌鍥炲綊)/u.test(prompt);
 	}
 
 	private isSimpleAnswerLikePrompt(prompt: string): boolean {

@@ -9,6 +9,8 @@ export type TurnEventType =
 	| "plan_revise"
 	| "plan_complete"
 	| "plan_skip"
+	| "task_bar_created"
+	| "task_bar_suppressed"
 	| "narration_report"
 	| "context_built"
 	| "model_requested"

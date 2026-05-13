@@ -3466,10 +3466,25 @@
 
 .friday-ai-send-button {
 	margin-left: auto;
-	padding: 0 12px;
+	width: 36px;
+	padding: 0;
 	border-radius: 8px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 	background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
 	border-color: color-mix(in srgb, var(--interactive-accent) 36%, var(--background-modifier-border));
+}
+
+.friday-ai-send-button svg {
+	width: 16px;
+	height: 16px;
+}
+
+.friday-ai-send-button.is-stop {
+	background: color-mix(in srgb, var(--text-error) 10%, var(--background-primary));
+	border-color: color-mix(in srgb, var(--text-error) 34%, var(--background-modifier-border));
+	color: var(--text-error);
 }
 
 .friday-ai-session-drawer {

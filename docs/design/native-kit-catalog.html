@@ -1,0 +1,3757 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light" data-density="comfortable">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>FRIDAY Obsidian Native Kit Catalog</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--background-primary: #f7f7f5;
+			--background-primary-alt: #efefec;
+			--background-secondary: #e6e6e2;
+			--background-secondary-alt: #ddddda;
+			--background-modifier-border: #d1d0ca;
+			--background-modifier-hover: #e8e7e2;
+			--text-normal: #1f2424;
+			--text-muted: #666f70;
+			--text-faint: #8a9090;
+			--interactive-accent: #4f8f8b;
+			--color-red: #c14f4a;
+			--color-orange: #c17835;
+			--color-yellow: #c79b28;
+			--color-green: #4f8c5b;
+			--color-cyan: #4d969f;
+			--font-interface: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			--font-monospace: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+			--radius-s: 6px;
+			--radius-m: 8px;
+			--radius-l: 12px;
+			--space-1: 4px;
+			--space-2: 8px;
+			--space-3: 12px;
+			--space-4: 16px;
+			--space-5: 24px;
+			--space-6: 32px;
+			--shell-width: 1180px;
+		}
+
+		html[data-theme="dark"] {
+			color-scheme: dark;
+			--background-primary: #202224;
+			--background-primary-alt: #282a2d;
+			--background-secondary: #303236;
+			--background-secondary-alt: #383b40;
+			--background-modifier-border: #44484d;
+			--background-modifier-hover: #34373b;
+			--text-normal: #e4e2dc;
+			--text-muted: #aaa79f;
+			--text-faint: #777a7d;
+			--interactive-accent: #6aa5a0;
+			--color-red: #d46a62;
+			--color-orange: #d08b48;
+			--color-yellow: #d6ac38;
+			--color-green: #78a86f;
+			--color-cyan: #66aab3;
+		}
+
+		html[data-density="compact"] {
+			--space-3: 10px;
+			--space-4: 14px;
+			--space-5: 18px;
+			--space-6: 24px;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			background: var(--background-primary);
+			color: var(--text-normal);
+			font-family: var(--font-interface);
+			font-size: 14px;
+			line-height: 1.5;
+			letter-spacing: 0;
+		}
+
+		button,
+		select,
+		input,
+		textarea {
+			font: inherit;
+		}
+
+		button {
+			min-height: 30px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			color: var(--text-normal);
+			cursor: pointer;
+			transition:
+				background-color 140ms ease,
+				border-color 140ms ease,
+				color 140ms ease,
+				transform 140ms ease;
+		}
+
+		button:hover {
+			border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+		}
+
+		button:focus-visible,
+		select:focus-visible,
+		input:focus-visible,
+		textarea:focus-visible {
+			outline: 2px solid color-mix(in srgb, var(--interactive-accent) 60%, transparent);
+			outline-offset: 2px;
+		}
+
+		.catalog-frame {
+			min-height: 100vh;
+			background:
+				linear-gradient(
+					180deg,
+					color-mix(in srgb, var(--background-primary-alt) 52%, transparent) 0,
+					var(--background-primary) 240px
+				);
+		}
+
+		.catalog-header {
+			border-bottom: 1px solid var(--background-modifier-border);
+			background: color-mix(in srgb, var(--background-primary-alt) 84%, transparent);
+		}
+
+		.catalog-header-inner {
+			width: min(var(--shell-width), calc(100% - 32px));
+			margin: 0 auto;
+			padding: 22px 0 18px;
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-4);
+			align-items: center;
+		}
+
+		.catalog-title-block {
+			min-width: 0;
+		}
+
+		.catalog-kicker {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+			margin-bottom: var(--space-2);
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			font-weight: 700;
+		}
+
+		.friday-wordmark {
+			font-weight: 700;
+			letter-spacing: 0.16em;
+			text-transform: uppercase;
+		}
+
+		.brand-logo-lockup {
+			display: inline-flex;
+			align-items: center;
+			min-width: 0;
+		}
+
+		.brand-logo-lockup img {
+			display: block;
+			width: auto;
+			height: 28px;
+			max-width: min(170px, 48vw);
+		}
+
+		.brand-asset-on-dark {
+			display: none !important;
+		}
+
+		html[data-theme="dark"] .brand-asset-on-light {
+			display: none !important;
+		}
+
+		html[data-theme="dark"] .brand-asset-on-dark {
+			display: block !important;
+		}
+
+		.catalog-title {
+			margin: 0;
+			font-size: clamp(1.45rem, 3vw, 2.1rem);
+			line-height: 1.18;
+			font-weight: 760;
+			letter-spacing: 0;
+		}
+
+		.catalog-subtitle {
+			max-width: 760px;
+			margin: var(--space-2) 0 0;
+			color: var(--text-muted);
+			font-size: 0.95rem;
+			overflow-wrap: anywhere;
+		}
+
+		.catalog-controls {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			gap: var(--space-2);
+		}
+
+		.segmented {
+			display: inline-flex;
+			gap: var(--space-1);
+			padding: var(--space-1);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary-alt);
+		}
+
+		.segmented button {
+			min-height: 28px;
+			padding: 0 10px;
+			border-color: transparent;
+			background: transparent;
+			color: var(--text-muted);
+			font-size: 0.82rem;
+			font-weight: 650;
+		}
+
+		.segmented button.is-active {
+			background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			color: var(--text-normal);
+		}
+
+		.catalog-layout {
+			width: min(var(--shell-width), calc(100% - 32px));
+			margin: 0 auto;
+			padding: var(--space-5) 0 var(--space-6);
+			display: grid;
+			grid-template-columns: 240px minmax(0, 1fr);
+			gap: var(--space-5);
+			align-items: start;
+		}
+
+		.catalog-sidebar {
+			position: sticky;
+			top: var(--space-4);
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary-alt);
+		}
+
+		.catalog-sidebar h2 {
+			margin: 0;
+			font-size: 0.82rem;
+			color: var(--text-muted);
+		}
+
+		.catalog-nav {
+			display: grid;
+			gap: var(--space-1);
+		}
+
+		.catalog-nav a {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-2);
+			padding: 7px 8px;
+			border-radius: var(--radius-m);
+			color: var(--text-muted);
+			text-decoration: none;
+			font-weight: 650;
+		}
+
+		.catalog-nav a:hover {
+			background: var(--background-modifier-hover);
+			color: var(--text-normal);
+		}
+
+		.catalog-nav .nav-count {
+			color: var(--text-faint);
+			font-size: 0.76rem;
+			font-weight: 700;
+		}
+
+		.selection-summary {
+			border-top: 1px solid var(--background-modifier-border);
+			padding-top: var(--space-3);
+			display: grid;
+			gap: var(--space-2);
+			color: var(--text-muted);
+			font-size: 0.82rem;
+		}
+
+		.selection-summary strong {
+			color: var(--text-normal);
+		}
+
+		.sync-status {
+			border-top: 1px solid var(--background-modifier-border);
+			padding-top: var(--space-3);
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			line-height: 1.45;
+		}
+
+		.sync-status strong {
+			display: block;
+			margin-bottom: 2px;
+			color: var(--text-normal);
+			font-size: 0.82rem;
+		}
+
+		.sync-status span {
+			display: block;
+			overflow-wrap: anywhere;
+		}
+
+		.catalog-main {
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-5);
+			min-width: 0;
+		}
+
+		.kit-section {
+			scroll-margin-top: var(--space-5);
+			border-top: 1px solid var(--background-modifier-border);
+			padding-top: var(--space-5);
+		}
+
+		.kit-section:first-child {
+			border-top: 0;
+			padding-top: 0;
+		}
+
+		.section-head {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: end;
+			margin-bottom: var(--space-3);
+		}
+
+		.section-head h2 {
+			margin: 0;
+			font-size: 1.08rem;
+			line-height: 1.35;
+		}
+
+		.section-head p {
+			margin: var(--space-1) 0 0;
+			color: var(--text-muted);
+			font-size: 0.9rem;
+			overflow-wrap: anywhere;
+		}
+
+		.section-mode {
+			display: inline-flex;
+			align-items: center;
+			min-height: 24px;
+			padding: 0 8px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+			border-radius: 999px;
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 700;
+			white-space: nowrap;
+		}
+
+		.component-grid {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: var(--space-4);
+		}
+
+		.component-specimen {
+			display: flex;
+			flex-direction: column;
+			min-width: 0;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary-alt);
+			overflow: hidden;
+		}
+
+		.component-specimen.is-wide {
+			grid-column: 1 / -1;
+		}
+
+		.specimen-head {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			padding: var(--space-3) var(--space-4);
+			border-bottom: 1px solid var(--background-modifier-border);
+			background: color-mix(in srgb, var(--background-primary) 56%, transparent);
+		}
+
+		.specimen-title {
+			margin: 0;
+			font-size: 0.94rem;
+			font-weight: 760;
+		}
+
+		.specimen-meta {
+			margin-top: 2px;
+			color: var(--text-muted);
+			font-size: 0.8rem;
+			font-family: var(--font-monospace);
+			overflow-wrap: anywhere;
+		}
+
+		.component-choice {
+			display: inline-flex;
+			gap: var(--space-1);
+			align-self: start;
+		}
+
+		.component-choice button {
+			min-height: 26px;
+			padding: 0 8px;
+			border-radius: var(--radius-s);
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 700;
+		}
+
+		.component-choice button.is-selected {
+			background: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+			color: var(--text-normal);
+		}
+
+		.specimen-body {
+			padding: var(--space-4);
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-3);
+		}
+
+		.component-version {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+			margin-top: 6px;
+		}
+
+		.adjustment-badge {
+			display: inline-flex;
+			align-items: center;
+			min-height: 20px;
+			padding: 0 7px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+			color: var(--text-normal);
+			font-family: var(--font-interface);
+			font-size: 0.72rem;
+			font-weight: 760;
+			white-space: nowrap;
+		}
+
+		.adjustment-badge.is-version {
+			border-color: var(--background-modifier-border);
+			background: var(--background-primary);
+			color: var(--text-muted);
+		}
+
+		.component-specimen[data-adjusted-candidate="true"] {
+			border-color: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+		}
+
+		.preview-note {
+			margin: 0;
+			color: var(--text-muted);
+			font-size: 0.82rem;
+		}
+
+		.brand-asset-grid {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: var(--space-3);
+		}
+
+		.brand-asset-sample {
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-2);
+			min-width: 0;
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.brand-asset-sample strong {
+			font-size: 0.86rem;
+		}
+
+		.brand-asset-sample span {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.brand-asset-preview {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			min-height: 76px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary-alt) 70%, transparent);
+			overflow: hidden;
+		}
+
+		.brand-asset-preview.is-graphite {
+			background: #1e1f21;
+		}
+
+		.brand-asset-preview.is-warm-bone {
+			background: #f4f1eb;
+		}
+
+		.brand-asset-preview img {
+			display: block;
+			max-width: 84%;
+			max-height: 56px;
+			object-fit: contain;
+		}
+
+		.brand-asset-preview.is-tile img {
+			width: 56px;
+			height: 56px;
+		}
+
+		.friday-mark {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 24px;
+			height: 24px;
+			color: var(--text-normal);
+		}
+
+		.friday-mark img {
+			display: block;
+			width: 18px;
+			height: auto;
+			max-height: 22px;
+			object-fit: contain;
+		}
+
+		.friday-mark.is-contained {
+			width: 32px;
+			height: 32px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary-alt) 76%, transparent);
+		}
+
+		.friday-icon {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 16px;
+			height: 16px;
+		}
+
+		.friday-icon svg {
+			width: 16px;
+			height: 16px;
+			stroke: currentColor;
+			stroke-width: 2;
+			stroke-linecap: round;
+			stroke-linejoin: round;
+			fill: none;
+		}
+
+		.friday-settings-title {
+			margin: 0;
+			font-size: 1.35rem;
+			line-height: 1.25;
+		}
+
+		.friday-settings-title-brand {
+			margin: 0 0.18em;
+		}
+
+		.friday-top-nav {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: var(--space-2);
+			padding: 6px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.friday-nav-button {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			gap: var(--space-2);
+			min-height: 34px;
+			padding: 0 10px;
+			border-color: transparent;
+			background: transparent;
+			color: var(--text-muted);
+			font-size: 0.9rem;
+			font-weight: 700;
+			white-space: nowrap;
+		}
+
+		.friday-nav-button.is-active {
+			background: color-mix(in srgb, var(--interactive-accent) 14%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			color: var(--text-normal);
+		}
+
+		.friday-native-settings-group {
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			overflow: hidden;
+			background: var(--background-primary);
+		}
+
+		.friday-native-settings-group-header {
+			padding: 18px 20px 12px;
+		}
+
+		.friday-native-settings-group-title {
+			font-weight: 760;
+		}
+
+		.friday-native-settings-group-description {
+			margin-top: 4px;
+			color: var(--text-muted);
+			font-size: 0.84rem;
+		}
+
+		.setting-item {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+			padding: 16px 20px;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+		}
+
+		.friday-native-settings-group > .setting-item:first-child,
+		.friday-native-settings-group > .friday-native-settings-group-header + .setting-item {
+			border-top: 0;
+		}
+
+		.setting-item-name {
+			font-weight: 700;
+		}
+
+		.setting-item-description {
+			margin-top: 3px;
+			color: var(--text-muted);
+			font-size: 0.84rem;
+		}
+
+		.setting-item-control {
+			display: inline-flex;
+			align-items: center;
+			justify-content: flex-end;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.mod-cta {
+			background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border));
+			color: var(--text-normal);
+			font-weight: 700;
+		}
+
+		.mod-warning {
+			background: color-mix(in srgb, var(--color-red) 10%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--color-red) 34%, var(--background-modifier-border));
+			color: var(--text-normal);
+			font-weight: 700;
+		}
+
+		.toggle {
+			position: relative;
+			width: 38px;
+			height: 22px;
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-secondary));
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 44%, var(--background-modifier-border));
+		}
+
+		.toggle::after {
+			content: "";
+			position: absolute;
+			top: 3px;
+			right: 3px;
+			width: 14px;
+			height: 14px;
+			border-radius: 50%;
+			background: var(--background-primary);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 50%, transparent);
+		}
+
+		.native-select,
+		.native-input {
+			min-height: 30px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			color: var(--text-normal);
+			padding: 0 9px;
+		}
+
+		.native-input {
+			width: min(240px, 100%);
+		}
+
+		.inline-status {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			white-space: nowrap;
+		}
+
+		.friday-inline-alert {
+			display: flex;
+			gap: var(--space-3);
+			align-items: flex-start;
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--color-orange) 36%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--color-orange) 8%, var(--background-primary));
+		}
+
+		.friday-inline-alert strong {
+			display: block;
+			margin-bottom: 2px;
+		}
+
+		.friday-inline-alert p {
+			margin: 0;
+			color: var(--text-muted);
+			font-size: 0.84rem;
+		}
+
+		.friday-empty-state {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-3);
+			align-items: start;
+			padding: var(--space-4);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.friday-empty-state h3,
+		.friday-empty-state p {
+			margin: 0;
+		}
+
+		.friday-empty-state h3 {
+			font-size: 1rem;
+			line-height: 1.35;
+		}
+
+		.friday-empty-state p {
+			margin-top: 4px;
+			color: var(--text-muted);
+			font-size: 0.86rem;
+		}
+
+		.prereq-list {
+			display: grid;
+			gap: var(--space-2);
+			margin: 0;
+			padding: 0;
+			list-style: none;
+		}
+
+		.prereq-list li {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+			padding: 9px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.status-pill {
+			display: inline-flex;
+			align-items: center;
+			min-height: 22px;
+			padding: 0 8px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			color: var(--text-muted);
+			font-size: 0.74rem;
+			font-weight: 750;
+			white-space: nowrap;
+		}
+
+		.status-pill.is-ready {
+			border-color: color-mix(in srgb, var(--color-green) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-green) 9%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.status-pill.is-waiting {
+			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 9%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.friday-approval-card {
+			padding: var(--space-3) var(--space-4);
+			border: 1px solid color-mix(in srgb, var(--color-yellow) 30%, var(--background-modifier-border));
+			border-radius: var(--radius-l);
+			background: color-mix(in srgb, var(--color-yellow) 6%, var(--background-primary));
+		}
+
+		.friday-approval-header {
+			font-weight: 760;
+			margin-bottom: 4px;
+		}
+
+		.friday-approval-detail {
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.8rem;
+			line-height: 1.5;
+			word-break: break-word;
+		}
+
+		.friday-approval-actions {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-2);
+			margin-top: var(--space-3);
+		}
+
+		.friday-approval-btn {
+			min-height: 30px;
+			padding: 0 10px;
+			border-radius: var(--radius-s);
+			font-size: 0.82rem;
+			font-weight: 700;
+		}
+
+		.friday-approval-btn.is-allow {
+			background: color-mix(in srgb, var(--color-green) 12%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--color-green) 40%, var(--background-modifier-border));
+		}
+
+		.friday-approval-btn.is-session {
+			background: color-mix(in srgb, var(--color-cyan) 12%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--color-cyan) 40%, var(--background-modifier-border));
+		}
+
+		.friday-approval-btn.is-always {
+			background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 40%, var(--background-modifier-border));
+		}
+
+		.friday-approval-btn.is-deny {
+			background: color-mix(in srgb, var(--color-red) 10%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--color-red) 35%, var(--background-modifier-border));
+		}
+
+		.diff-preview {
+			display: grid;
+			gap: 2px;
+			margin-top: var(--space-3);
+			padding: var(--space-2);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			font-family: var(--font-monospace);
+			font-size: 0.78rem;
+		}
+
+		.diff-line {
+			padding: 2px 4px;
+			border-radius: 4px;
+			color: var(--text-muted);
+		}
+
+		.diff-line.is-add {
+			background: color-mix(in srgb, var(--color-green) 10%, transparent);
+			color: var(--text-normal);
+		}
+
+		.diff-line.is-remove {
+			background: color-mix(in srgb, var(--color-red) 10%, transparent);
+			color: var(--text-normal);
+		}
+
+		.friday-shell-header {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+			padding: var(--space-2) var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.friday-shell-bar-left,
+		.friday-shell-bar-right {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.friday-shell-bar-right {
+			flex-wrap: wrap;
+			justify-content: flex-end;
+		}
+
+		.friday-shell-project {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.friday-shell-project-brand {
+			color: var(--text-muted);
+			font-size: 0.84rem;
+			line-height: 22px;
+		}
+
+		.friday-shell-project-select {
+			min-height: 30px;
+			min-width: 150px;
+			max-width: min(240px, 52vw);
+			padding: 0 9px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, var(--interactive-accent) 12%);
+			border-radius: 999px;
+			background: var(--background-primary);
+			color: var(--text-normal);
+			font-weight: 700;
+		}
+
+		.friday-shell-icon-button {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 32px;
+			height: 32px;
+			padding: 0;
+			color: var(--text-muted);
+		}
+
+		.friday-shell-icon-button:hover {
+			transform: translateY(-1px);
+			color: var(--text-normal);
+		}
+
+		.project-status-group {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.project-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.project-row strong {
+			display: block;
+			margin-bottom: 2px;
+		}
+
+		.project-row span {
+			color: var(--text-muted);
+			font-size: 0.82rem;
+		}
+
+		.project-actions {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			gap: var(--space-2);
+		}
+
+		.friday-ai-message-list {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.friday-ai-message-row {
+			display: flex;
+			width: 100%;
+		}
+
+		.friday-ai-message-row.is-user {
+			justify-content: flex-end;
+		}
+
+		.friday-ai-message {
+			display: flex;
+			flex-direction: column;
+			gap: var(--space-2);
+			max-width: min(94%, 560px);
+			padding: 10px 12px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
+			border-radius: var(--radius-l);
+			background: color-mix(in srgb, var(--background-primary-alt) 88%, transparent);
+		}
+
+		.friday-ai-message.is-user {
+			background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--interactive-accent) 36%, var(--background-modifier-border));
+		}
+
+		.friday-ai-message-meta {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.friday-ai-message-avatar {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 22px;
+			height: 22px;
+			color: var(--text-normal);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+			border-radius: 6px;
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.friday-ai-message-avatar img {
+			display: block;
+			width: 15px;
+			height: auto;
+			max-height: 18px;
+			object-fit: contain;
+		}
+
+		.friday-ai-message-role {
+			font-weight: 700;
+		}
+
+		.friday-ai-message-badges {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+		}
+
+		.friday-ai-message-badge {
+			display: inline-flex;
+			align-items: center;
+			min-height: 20px;
+			padding: 0 7px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			background: var(--background-secondary);
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 700;
+		}
+
+		.friday-ai-message-badge.is-skill {
+			border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.friday-ai-message-content {
+			line-height: 1.58;
+		}
+
+		.composer-shell {
+			display: grid;
+			gap: var(--space-2);
+			padding: var(--space-2);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.composer-input {
+			min-height: 76px;
+			width: 100%;
+			resize: vertical;
+			border: 0;
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+			color: var(--text-normal);
+			padding: var(--space-3);
+		}
+
+		.composer-footer {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-2);
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.agent-process-shell {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+		}
+
+		.agent-process-head {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+		}
+
+		.agent-process-head strong {
+			display: block;
+		}
+
+		.agent-timeline {
+			display: grid;
+			gap: var(--space-2);
+			position: relative;
+			padding-left: 22px;
+		}
+
+		.agent-timeline::before {
+			content: "";
+			position: absolute;
+			top: 10px;
+			bottom: 10px;
+			left: 7px;
+			width: 1px;
+			background: var(--background-modifier-border);
+		}
+
+		.timeline-item {
+			position: relative;
+			display: grid;
+			gap: 2px;
+			padding: var(--space-2) var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+		}
+
+		.timeline-item::before {
+			content: "";
+			position: absolute;
+			top: 13px;
+			left: -20px;
+			width: 9px;
+			height: 9px;
+			border-radius: 50%;
+			background: var(--background-secondary-alt);
+			border: 1px solid var(--background-modifier-border);
+		}
+
+		.timeline-item.is-active::before {
+			background: var(--interactive-accent);
+			border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
+		}
+
+		.timeline-item span {
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		.artifact-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+			padding: var(--space-2) var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+		}
+
+		.artifact-row code {
+			font-family: var(--font-monospace);
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.friday-inline-notice-v2 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.friday-native-inline-callout {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.friday-native-inline-callout strong,
+		.friday-native-inline-callout p {
+			margin: 0;
+		}
+
+		.friday-native-inline-callout p {
+			margin-top: 2px;
+			color: var(--text-muted);
+			font-size: 0.83rem;
+		}
+
+		.callout-control-row {
+			display: flex;
+			align-items: center;
+			gap: var(--space-2);
+		}
+
+		.callout-status-label {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			font-weight: 700;
+			white-space: nowrap;
+		}
+
+		.notice-action,
+		.callout-action {
+			min-height: 26px;
+			padding: 0 8px;
+			border-radius: var(--radius-s);
+			font-size: 0.76rem;
+			font-weight: 720;
+		}
+
+		.friday-workbench-bar-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			gap: var(--space-3);
+			align-items: center;
+			padding: 8px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.workbench-primary-v2,
+		.workbench-project-v2,
+		.workbench-tools-v2 {
+			display: flex;
+			align-items: center;
+			min-width: 0;
+		}
+
+		.workbench-primary-v2 {
+			gap: var(--space-2);
+		}
+
+		.workbench-brand-logo-v4 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 32px;
+			height: 32px;
+			flex: 0 0 auto;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-s);
+			background: var(--background-primary-alt);
+			overflow: hidden;
+		}
+
+		.workbench-brand-logo-v4 img {
+			width: 22px;
+			max-height: 24px;
+			object-fit: contain;
+		}
+
+		.workbench-brand-text-v3 {
+			display: grid;
+			gap: 1px;
+			min-width: 0;
+			padding-left: 2px;
+		}
+
+		.workbench-brand-text-v3 .friday-wordmark {
+			color: var(--text-normal);
+			font-size: 0.92rem;
+			line-height: 1.25;
+		}
+
+		.workbench-brand-text-v3 span:not(.friday-wordmark) {
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		.workbench-title-v2 {
+			display: grid;
+			gap: 1px;
+			min-width: 0;
+		}
+
+		.workbench-title-v2 strong,
+		.workbench-title-v2 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.workbench-title-v2 span,
+		.workbench-project-v2 span {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.workbench-project-v2 {
+			gap: var(--space-2);
+		}
+
+		.workbench-project-v2 select {
+			min-height: 30px;
+			max-width: 220px;
+		}
+
+		.workbench-tools-v2 {
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			gap: var(--space-2);
+		}
+
+		.composer-taskbar-kit-v5 {
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.composer-taskbar-kit-v5.is-running {
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+		}
+
+		.composer-taskbar-summary-v5 {
+			display: grid;
+			grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+			gap: var(--space-2);
+			align-items: center;
+			width: 100%;
+			min-height: 34px;
+			padding: 6px 8px;
+			border: 0;
+			background: transparent;
+			text-align: left;
+		}
+
+		.composer-taskbar-summary-v5 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.composer-taskbar-status-v5,
+		.composer-taskbar-step-v5,
+		.composer-taskbar-elapsed-v5 {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+			font-weight: 700;
+		}
+
+		.composer-taskbar-title-v5 {
+			color: var(--text-normal);
+			font-size: 0.82rem;
+			font-weight: 720;
+		}
+
+		.composer-taskbar-list-v5 {
+			display: grid;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+		}
+
+		.composer-taskbar-task-v5 {
+			display: grid;
+			grid-template-columns: 18px 42px minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 7px 10px;
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.composer-taskbar-task-v5 + .composer-taskbar-task-v5 {
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 64%, transparent);
+		}
+
+		.composer-taskbar-task-v5.is-in-progress {
+			background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+			color: var(--text-normal);
+		}
+
+		.composer-taskbar-marker-v5 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 18px;
+			height: 18px;
+			border-radius: 999px;
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+		}
+
+		.composer-taskbar-task-v5 strong,
+		.composer-taskbar-task-v5 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.friday-assistant-thread-v2 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.assistant-document-flow-v3 {
+			background: var(--background-primary);
+		}
+
+		.assistant-turn-v2 {
+			display: grid;
+			grid-template-columns: 28px minmax(0, 1fr);
+			gap: var(--space-3);
+			align-items: start;
+		}
+
+		.assistant-turn-v2.is-user {
+			display: flex;
+			justify-content: flex-end;
+			padding-left: 48px;
+		}
+
+		.assistant-user-bubble-v3 {
+			max-width: min(76%, 480px);
+			padding: 8px 10px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+		}
+
+		.assistant-avatar-v2,
+		.assistant-source-mark-v3 {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px;
+			height: 28px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+			overflow: hidden;
+		}
+
+		.assistant-avatar-v2 img,
+		.assistant-source-mark-v3 img {
+			width: 18px;
+			max-height: 22px;
+			object-fit: contain;
+		}
+
+		.assistant-turn-body-v2 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.assistant-meta-v2,
+		.assistant-context-v2 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+			align-items: center;
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.assistant-context-v2 span,
+		.agent-step-state-v2 {
+			display: inline-flex;
+			align-items: center;
+			min-height: 20px;
+			padding: 0 7px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 700;
+		}
+
+		.assistant-turn-body-v2 p {
+			margin: 0;
+			line-height: 1.55;
+		}
+
+		.assistant-output-stack-v3 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.assistant-output-block {
+			display: grid;
+			gap: var(--space-2);
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.assistant-output-block.is-prose {
+			border-color: transparent;
+			padding: 2px 0;
+			background: transparent;
+		}
+
+		.assistant-output-block.is-tool {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-1) var(--space-2);
+			padding: 2px 0;
+			border-color: transparent;
+			background: transparent;
+			color: var(--text-muted);
+			font-size: 0.82rem;
+		}
+
+		.assistant-output-block.is-artifact {
+			background: var(--background-primary-alt);
+		}
+
+		.assistant-tool-call-v5 {
+			min-height: 24px;
+		}
+
+		.assistant-tool-icon-v5 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 18px;
+			height: 18px;
+			color: var(--text-faint);
+		}
+
+		.assistant-tool-icon-v5 svg {
+			width: 15px;
+			height: 15px;
+		}
+
+		.assistant-tool-name-v5 {
+			font-family: var(--font-monospace);
+			color: var(--text-muted);
+		}
+
+		.assistant-tool-detail-v5 {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			color: var(--text-muted);
+		}
+
+		.assistant-tool-state-v5 {
+			color: var(--text-faint);
+			font-size: 0.74rem;
+		}
+
+		.assistant-block-title {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-2);
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 750;
+		}
+
+		.assistant-plan-list-v4 {
+			display: grid;
+			gap: 6px;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+		}
+
+		.assistant-plan-list-v4 li {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-2);
+			align-items: baseline;
+			color: var(--text-muted);
+			font-size: 0.82rem;
+		}
+
+		.assistant-plan-list-v4 li::before {
+			content: "";
+			width: 6px;
+			height: 6px;
+			margin-top: 0.45em;
+			border: 1px solid var(--interactive-accent);
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--interactive-accent) 22%, transparent);
+		}
+
+		.assistant-artifact-list-v4 {
+			display: grid;
+			gap: var(--space-1);
+		}
+
+		.assistant-artifact-row-v4 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 7px 8px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-s);
+			background: var(--background-primary);
+		}
+
+		.assistant-artifact-row-v4 strong,
+		.assistant-artifact-row-v4 code {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.assistant-artifact-row-v4 code {
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.76rem;
+		}
+
+		.composer-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: end;
+			padding-top: var(--space-3);
+			border-top: 1px solid var(--background-modifier-border);
+		}
+
+		.composer-stack-v2 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.assistant-control-button {
+			display: inline-flex;
+			align-items: center;
+			min-height: 28px;
+			padding: 0 9px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			background: var(--background-primary);
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 700;
+		}
+
+		.assistant-control-button.is-model {
+			color: var(--text-normal);
+		}
+
+		.assistant-control-button.is-permission {
+			border-color: color-mix(in srgb, var(--text-warning) 38%, var(--background-modifier-border));
+		}
+
+		.assistant-control-button.is-context,
+		.assistant-control-button.is-skill {
+			background: var(--background-primary-alt);
+		}
+
+		.composer-state-grid-v5 {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: var(--space-3);
+		}
+
+		.composer-state-card-v5 {
+			display: grid;
+			gap: var(--space-2);
+			align-content: start;
+			min-width: 0;
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.composer-state-card-v5.is-wide {
+			grid-column: 1 / -1;
+		}
+
+		.composer-live-combo-grid-v5 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+			gap: var(--space-3);
+		}
+
+		.composer-live-shell-v5 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+			padding: var(--space-2);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent) 12%);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary) 94%, transparent);
+		}
+
+		.composer-live-shell-v5.is-expanded {
+			background: color-mix(in srgb, var(--interactive-accent) 4%, var(--background-primary));
+		}
+
+		.composer-live-caption-v5 {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 760;
+		}
+
+		.composer-live-compose-v5 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.composer-live-compose-v5.is-attached {
+			gap: 0;
+		}
+
+		.composer-live-compose-v5.is-attached-surface {
+			overflow: hidden;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 88%, var(--interactive-accent) 12%);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.composer-live-compose-v5.is-attached-surface .friday-ai-composer-task-bar-host,
+		.composer-live-compose-v5.is-attached-surface .composer-taskbar-kit-v5,
+		.composer-live-compose-v5.is-attached-surface .composer-live-input-v5 {
+			border-radius: 0;
+		}
+
+		.composer-live-compose-v5.is-attached-surface .composer-taskbar-kit-v5,
+		.composer-live-compose-v5.is-attached-surface .composer-live-input-v5 {
+			border-right: 0;
+			border-left: 0;
+		}
+
+		.composer-live-compose-v5.is-attached-surface .composer-taskbar-kit-v5 {
+			border-top: 0;
+		}
+
+		.composer-live-compose-v5.is-attached .composer-taskbar-kit-v5 {
+			border-bottom: 0;
+			border-bottom-right-radius: 0;
+			border-bottom-left-radius: 0;
+		}
+
+		.composer-live-compose-v5.is-attached .composer-live-input-v5 {
+			border-bottom: 0;
+			border-top-left-radius: 0;
+			border-top-right-radius: 0;
+		}
+
+		.composer-live-input-v5 {
+			background: var(--background-primary);
+		}
+
+		.composer-state-label-v5 {
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 760;
+		}
+
+		.composer-input-kit-v5 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+			padding: 9px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.composer-input-kit-v5.is-skill {
+			background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+		}
+
+		.composer-input-kit-v5.is-approval {
+			border-color: color-mix(in srgb, var(--color-orange) 30%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 6%, var(--background-primary));
+		}
+
+		.composer-editor-shell-v5 {
+			min-height: 52px;
+			padding: 2px 0;
+			color: var(--text-normal);
+			line-height: 1.55;
+		}
+
+		.composer-placeholder-v5 {
+			color: var(--text-faint);
+		}
+
+		.composer-token-v5 {
+			display: inline-flex;
+			align-items: center;
+			min-height: 22px;
+			padding: 0 7px;
+			margin-right: 4px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 32%, var(--background-modifier-border));
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+			color: var(--text-normal);
+			font-size: 0.78rem;
+			font-weight: 700;
+		}
+
+		.composer-control-row-v5 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+			align-items: center;
+			justify-content: space-between;
+			padding-top: var(--space-1);
+		}
+
+		.composer-control-group-v5 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+		}
+
+		.composer-skill-picker-v5 {
+			display: grid;
+			gap: var(--space-1);
+			padding: var(--space-2);
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+		}
+
+		.composer-skill-popover-demo-v5 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.composer-skill-picker-v5.is-above-input {
+			box-shadow: var(--shadow-s);
+		}
+
+		.composer-skill-anchor-v5 {
+			border-color: color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+		}
+
+		.composer-skill-query-v5 {
+			display: grid;
+			gap: 2px;
+			padding: 7px 9px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
+			border-radius: var(--radius-s);
+			background: var(--background-primary);
+			box-shadow: var(--shadow-s);
+		}
+
+		.composer-skill-query-v5 strong {
+			color: var(--text-normal);
+			font-size: 0.85rem;
+		}
+
+		.composer-skill-query-v5 span {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+		}
+
+		.composer-skill-list-v5 {
+			display: grid;
+			gap: var(--space-1);
+		}
+
+		.composer-skill-option-v5 {
+			display: grid;
+			gap: 3px;
+			width: 100%;
+			padding: 8px 9px;
+			border: 1px solid transparent;
+			border-radius: var(--radius-s);
+			background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+			color: var(--text-normal);
+			text-align: left;
+		}
+
+		.composer-skill-option-v5.is-active {
+			border-color: color-mix(in srgb, var(--interactive-accent) 26%, var(--background-modifier-border));
+			background: var(--background-primary);
+			box-shadow: var(--shadow-s);
+		}
+
+		.composer-skill-option-v5 strong {
+			font-size: 0.82rem;
+		}
+
+		.composer-skill-option-v5 span {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+		}
+
+		.composer-mention-popover-demo-v5 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.composer-mention-picker-v5 {
+			display: grid;
+			gap: var(--space-1);
+			padding: var(--space-2);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			box-shadow: var(--shadow-s);
+		}
+
+		.composer-mention-picker-v5.is-above-input {
+			border-color: color-mix(in srgb, var(--color-cyan) 22%, var(--background-modifier-border));
+		}
+
+		.composer-mention-option-v5 {
+			display: grid;
+			grid-template-columns: 30px minmax(0, 1fr);
+			align-items: center;
+			gap: var(--space-2);
+			width: 100%;
+			padding: 8px 9px;
+			border: 1px solid transparent;
+			border-radius: var(--radius-s);
+			background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+			color: var(--text-normal);
+			text-align: left;
+		}
+
+		.composer-mention-option-v5.is-active {
+			border-color: color-mix(in srgb, var(--color-cyan) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-cyan) 10%, var(--background-secondary));
+		}
+
+		.composer-mention-option-v5 strong {
+			font-size: 0.82rem;
+		}
+
+		.composer-mention-copy-v5 {
+			display: grid;
+			gap: 3px;
+			min-width: 0;
+		}
+
+		.composer-mention-copy-v5 > span {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			word-break: break-all;
+		}
+
+		.composer-file-type-icon-v5 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border: 1px solid var(--background-modifier-border);
+			background: var(--background-primary);
+			color: var(--text-muted);
+			flex: 0 0 auto;
+		}
+
+		.composer-file-type-icon-v5 {
+			width: 28px;
+			height: 28px;
+			border-radius: var(--radius-s);
+		}
+
+		.composer-file-type-icon-v5.is-note {
+			color: var(--color-green);
+		}
+
+		.composer-file-type-icon-v5.is-html {
+			color: var(--color-orange);
+		}
+
+		.composer-file-type-icon-v5.is-markdown {
+			color: var(--interactive-accent);
+		}
+
+		.composer-file-type-icon-v5.is-canvas {
+			color: var(--color-cyan);
+		}
+
+		.composer-mention-anchor-v5 {
+			border-color: color-mix(in srgb, var(--color-cyan) 26%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-cyan) 5%, var(--background-primary));
+		}
+
+		.composer-token-v5.is-context {
+			border-color: color-mix(in srgb, var(--color-cyan) 28%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-cyan) 10%, var(--background-primary));
+		}
+
+		.composer-approval-card-v5 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.composer-approval-card-v5.friday-approval-card {
+			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+			border-radius: var(--radius-s);
+			background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary));
+		}
+
+		.composer-approval-card-v5 .friday-approval-detail {
+			font-family: var(--font-interface);
+			font-size: 0.78rem;
+		}
+
+		.composer-dialog-approval-demo-v5 {
+			display: grid;
+			gap: var(--space-2);
+			max-width: 720px;
+		}
+
+		.composer-dialog-approval-demo-v5 .composer-input-kit-v5 {
+			padding: var(--space-2);
+		}
+
+		.composer-v2 textarea {
+			min-height: 58px;
+			width: 100%;
+			resize: vertical;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+			color: var(--text-normal);
+			padding: 9px 10px;
+		}
+
+		.friday-agent-run-list-v2 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.agent-run-summary-v2,
+		.agent-run-output-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+		}
+
+		.agent-run-summary-v2 strong,
+		.agent-run-summary-v2 span {
+			display: block;
+		}
+
+		.agent-run-summary-v2 span {
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		.agent-run-steps-v2 {
+			display: grid;
+			gap: 0;
+			margin: 0;
+			padding: 0;
+			list-style: none;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			overflow: hidden;
+		}
+
+		.agent-run-steps-v2 li {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+			padding: 9px 10px;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+			background: var(--background-primary-alt);
+		}
+
+		.agent-run-steps-v2 li:first-child {
+			border-top: 0;
+		}
+
+		.agent-run-steps-v2 strong,
+		.agent-run-steps-v2 span {
+			display: block;
+		}
+
+		.agent-run-steps-v2 span {
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		.agent-run-output-v2 {
+			padding: 9px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+		}
+
+		.agent-run-output-v2 code {
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.78rem;
+			overflow-wrap: anywhere;
+		}
+
+		.agent-running-surface-v5 {
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary)) !important;
+		}
+
+		.agent-artifact-grid-v3 {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: var(--space-2);
+		}
+
+		.artifact-card-v3 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 9px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+		}
+
+		.artifact-card-v3 strong,
+		.artifact-card-v3 code {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.artifact-card-v3 code {
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.76rem;
+		}
+
+		.artifact-type-icon {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px;
+			height: 28px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			color: var(--text-muted);
+		}
+
+		.artifact-type-icon.is-markdown {
+			color: var(--interactive-accent);
+		}
+
+		.artifact-type-icon.is-canvas {
+			color: var(--color-cyan);
+		}
+
+		.artifact-type-icon.is-note {
+			color: var(--color-green);
+		}
+
+		.friday-project-panel-v2 {
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.project-candidate-grid-v3 {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: var(--space-3);
+		}
+
+		.project-candidate-card {
+			display: grid;
+			grid-template-rows: auto minmax(0, 1fr);
+			min-width: 0;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.project-candidate-head {
+			padding: var(--space-3);
+			border-bottom: 1px solid var(--background-modifier-border);
+			background: color-mix(in srgb, var(--background-primary-alt) 70%, transparent);
+		}
+
+		.project-candidate-head strong,
+		.project-candidate-head span {
+			display: block;
+		}
+
+		.project-candidate-head span {
+			margin-top: 2px;
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.project-mini-list,
+		.project-compact-stack,
+		.project-inspector-v3 {
+			display: grid;
+			gap: var(--space-2);
+			padding: var(--space-3);
+		}
+
+		.project-mini-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 8px 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+		}
+
+		.project-mini-row:last-child {
+			border-bottom: 0;
+		}
+
+		.project-mini-row strong,
+		.project-mini-row span,
+		.project-compact-card strong,
+		.project-compact-card span,
+		.project-inspector-v3 strong,
+		.project-inspector-v3 span {
+			display: block;
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+
+		.project-mini-row span,
+		.project-compact-card span,
+		.project-inspector-v3 span {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.project-compact-card {
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+		}
+
+		.project-compact-meta {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-1);
+			margin-top: var(--space-2);
+		}
+
+		.project-focus-strip-v4 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+		}
+
+		.project-focus-main-v4 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.project-focus-main-v4 strong,
+		.project-focus-main-v4 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-focus-main-v4 span {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.project-health-meter-v4 {
+			display: grid;
+			grid-template-columns: 5fr 2fr 1fr;
+			gap: 2px;
+			height: 7px;
+			padding: 1px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.project-health-meter-v4 span {
+			min-width: 0;
+			border-radius: 999px;
+			background: var(--interactive-accent);
+		}
+
+		.project-health-meter-v4 .is-warning {
+			background: var(--text-warning);
+		}
+
+		.project-health-meter-v4 .is-muted {
+			background: var(--background-modifier-border);
+		}
+
+		.project-focus-signals-v4 {
+			display: grid;
+			gap: var(--space-1);
+		}
+
+		.project-focus-signal-v4 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-2);
+			align-items: baseline;
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.project-focus-signal-v4 strong {
+			color: var(--text-normal);
+			font-size: 0.8rem;
+		}
+
+		.project-focus-actions-v4 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--space-2);
+		}
+
+		.project-inspector-v3 {
+			grid-template-rows: auto auto 1fr auto;
+		}
+
+		.project-inspector-target {
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 30%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+		}
+
+		.project-field-row {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-2);
+			align-items: baseline;
+			font-size: 0.8rem;
+		}
+
+		.project-field-row span:first-child {
+			color: var(--text-faint);
+			font-weight: 700;
+		}
+
+		.project-panel-head-v2,
+		.project-list-row-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto auto;
+			gap: var(--space-3);
+			align-items: center;
+			padding: 10px 12px;
+		}
+
+		.project-panel-head-v2 {
+			border-bottom: 1px solid var(--background-modifier-border);
+			background: color-mix(in srgb, var(--background-primary-alt) 70%, transparent);
+		}
+
+		.project-list-row-v2 {
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+		}
+
+		.project-list-row-v2:first-child {
+			border-top: 0;
+		}
+
+		.project-copy-v2 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.project-copy-v2 strong,
+		.project-copy-v2 span {
+			overflow-wrap: anywhere;
+		}
+
+		.project-copy-v2 span,
+		.project-panel-head-v2 span {
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		@media (max-width: 980px) {
+			.catalog-layout {
+				grid-template-columns: 1fr;
+			}
+
+			.catalog-sidebar {
+				position: static;
+			}
+
+			.catalog-nav {
+				grid-template-columns: repeat(2, minmax(0, 1fr));
+			}
+		}
+
+		@media (max-width: 760px) {
+			.catalog-header-inner {
+				grid-template-columns: 1fr;
+			}
+
+			.catalog-controls {
+				justify-content: flex-start;
+			}
+
+			.component-grid {
+				grid-template-columns: 1fr;
+			}
+
+			.brand-asset-grid {
+				grid-template-columns: 1fr;
+			}
+
+			.section-head,
+			.specimen-head,
+			.setting-item,
+			.project-row,
+			.friday-inline-notice-v2,
+			.friday-native-inline-callout,
+			.friday-workbench-bar-v2,
+			.composer-v2,
+			.agent-run-summary-v2,
+			.agent-run-output-v2,
+			.project-panel-head-v2,
+			.project-list-row-v2,
+			.project-candidate-grid-v3,
+			.project-mini-row,
+			.project-field-row,
+			.assistant-artifact-row-v4,
+			.project-focus-signal-v4,
+			.composer-state-grid-v5,
+			.composer-live-combo-grid-v5 {
+				grid-template-columns: 1fr;
+			}
+
+			.setting-item-control,
+			.project-actions,
+			.component-choice,
+			.workbench-tools-v2,
+			.composer-control-row-v5,
+			.project-focus-actions-v4 {
+				justify-content: flex-start;
+			}
+
+			.workbench-project-v2 {
+				flex-wrap: wrap;
+			}
+
+			.agent-artifact-grid-v3 {
+				grid-template-columns: 1fr;
+			}
+
+			.assistant-turn-v2.is-user {
+				padding-left: 24px;
+			}
+
+			.assistant-user-bubble-v3 {
+				max-width: 100%;
+			}
+
+			.friday-top-nav,
+			.catalog-nav {
+				grid-template-columns: 1fr;
+			}
+
+			.friday-shell-header,
+			.composer-footer,
+			.agent-process-head {
+				align-items: flex-start;
+				flex-direction: column;
+			}
+		}
+	</style>
+</head>
+<body>
+	<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+		<symbol id="icon-refresh" viewBox="0 0 24 24">
+			<path d="M21 12a9 9 0 0 1-14.7 7"></path>
+			<path d="M3 12a9 9 0 0 1 14.7-7"></path>
+			<path d="M7 19H3v-4"></path>
+			<path d="M17 5h4v4"></path>
+		</symbol>
+		<symbol id="icon-settings" viewBox="0 0 24 24">
+			<circle cx="12" cy="12" r="3"></circle>
+			<path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.1 2.1-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-3v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1-2.1-2.1.1-.1A1.7 1.7 0 0 0 5 15a1.7 1.7 0 0 0-1.6-1h-.2v-3h.2A1.7 1.7 0 0 0 5 10a1.7 1.7 0 0 0-.3-1.9l-.1-.1 2.1-2.1.1.1A1.7 1.7 0 0 0 8.7 6a1.7 1.7 0 0 0 1-1.6v-.2h3v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1 2.1 2.1-.1.1A1.7 1.7 0 0 0 19 10a1.7 1.7 0 0 0 1.6 1h.2v3h-.2a1.7 1.7 0 0 0-1.2 1z"></path>
+		</symbol>
+		<symbol id="icon-search" viewBox="0 0 24 24">
+			<circle cx="11" cy="11" r="7"></circle>
+			<path d="m20 20-3.5-3.5"></path>
+		</symbol>
+		<symbol id="icon-send" viewBox="0 0 24 24">
+			<path d="m22 2-7 20-4-9-9-4 20-7z"></path>
+			<path d="M22 2 11 13"></path>
+		</symbol>
+		<symbol id="icon-file-text" viewBox="0 0 24 24">
+			<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+			<path d="M14 2v6h6"></path>
+			<path d="M8 13h8"></path>
+			<path d="M8 17h6"></path>
+		</symbol>
+		<symbol id="icon-code" viewBox="0 0 24 24">
+			<path d="m16 18 6-6-6-6"></path>
+			<path d="m8 6-6 6 6 6"></path>
+		</symbol>
+		<symbol id="icon-layout" viewBox="0 0 24 24">
+			<rect x="3" y="3" width="18" height="18" rx="2"></rect>
+			<path d="M3 9h18"></path>
+			<path d="M9 21V9"></path>
+		</symbol>
+		<symbol id="icon-note" viewBox="0 0 24 24">
+			<path d="M4 4h16v13l-5 5H4z"></path>
+			<path d="M15 22v-5h5"></path>
+			<path d="M8 8h8"></path>
+			<path d="M8 12h8"></path>
+		</symbol>
+	</svg>
+	<div class="catalog-frame">
+		<header class="catalog-header">
+			<div class="catalog-header-inner">
+				<div class="catalog-title-block">
+					<div class="catalog-kicker">
+						<span class="brand-logo-lockup">
+							<img class="brand-asset-on-light" src="../../brand/logo/friday-logo.svg" alt="FRIDAY">
+							<img class="brand-asset-on-dark" src="../../brand/logo/friday-logo-reversed.svg" alt="FRIDAY">
+						</span>
+						<span>Obsidian Native Kit v0.1</span>
+					</div>
+					<h1 class="catalog-title">组件候选画板</h1>
+					<p class="catalog-subtitle">这版用于快速筛选可沉淀进 Native Kit 的模式。它模拟 Obsidian 主题变量，FRIDAY 只出现在身份、空状态、助手和少量入口里。</p>
+				</div>
+				<div class="catalog-controls" aria-label="Catalog controls">
+					<div class="segmented" aria-label="Theme">
+						<button type="button" data-theme-target="light" class="is-active">亮色</button>
+						<button type="button" data-theme-target="dark">暗色</button>
+					</div>
+					<div class="segmented" aria-label="Density">
+						<button type="button" data-density-target="comfortable" class="is-active">舒适</button>
+						<button type="button" data-density-target="compact">紧凑</button>
+					</div>
+				</div>
+			</div>
+		</header>
+
+		<div class="catalog-layout">
+			<aside class="catalog-sidebar">
+				<h2>组件区域</h2>
+				<nav class="catalog-nav" aria-label="组件区域">
+					<a href="#brand">品牌识别 <span class="nav-count">3</span></a>
+					<a href="#settings">设置组件 <span class="nav-count">3</span></a>
+					<a href="#feedback">反馈组件 <span class="nav-count">3</span></a>
+					<a href="#actions">审批操作 <span class="nav-count">1</span></a>
+					<a href="#shell">工作台外壳 <span class="nav-count">1</span></a>
+					<a href="#ai">助手组件 <span class="nav-count">2</span></a>
+					<a href="#agent">执行过程 <span class="nav-count">1</span></a>
+					<a href="#project">项目组件 <span class="nav-count">1</span></a>
+				</nav>
+				<div class="selection-summary">
+					<strong>本页选择</strong>
+					<span id="selectionSummary">还没有选择。每个组件右上角可以标记保留、调整或暂缓。</span>
+				</div>
+				<div class="sync-status">
+					<strong>同步状态</strong>
+					<span id="syncStatus">浏览器本地记录。通过本地预览服务打开后，会自动写入 JSON。</span>
+				</div>
+			</aside>
+
+			<main class="catalog-main">
+				<section class="kit-section" id="brand">
+					<div class="section-head">
+						<div>
+							<h2>品牌识别组件</h2>
+							<p>这些组件只用于 FRIDAY 身份出现的地方：页头、空状态、助手身份、插件入口。普通设置行和工具按钮仍然走 Obsidian 原生样式。</p>
+						</div>
+						<span class="section-mode">品牌锚点</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen" data-component="品牌页头">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">品牌页头</h3>
+									<div class="specimen-meta">横向 logo，用于文档页头和明确品牌入口</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="brand-asset-preview">
+									<img class="brand-asset-on-light" src="../../brand/logo/friday-logo.svg" alt="FRIDAY 横向标志">
+									<img class="brand-asset-on-dark" src="../../brand/logo/friday-logo-reversed.svg" alt="FRIDAY 反白横向标志">
+								</div>
+								<p class="preview-note">适合 Native Kit 目录、onboarding、发布说明；不放进每个普通面板标题。</p>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="小尺寸标识">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">小尺寸标识</h3>
+									<div class="specimen-meta">Double Shell 图标，用于页头锚点和助手头像</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="brand-asset-grid">
+									<div class="brand-asset-sample">
+										<div class="brand-asset-preview">
+											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="FRIDAY 主图标">
+											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="FRIDAY 反白图标">
+										</div>
+										<strong>主题自适应图标</strong>
+										<span>用于品牌感较明确的入口和空状态。</span>
+									</div>
+									<div class="brand-asset-sample">
+										<div class="brand-asset-preview is-warm-bone">
+											<img src="../../brand/logo/friday-icon-mono.svg" alt="FRIDAY 单色图标">
+										</div>
+										<strong>单色图标</strong>
+										<span>用于受限、小尺寸或低色彩环境。</span>
+									</div>
+									<div class="brand-asset-sample">
+										<div class="brand-asset-preview is-graphite">
+											<img src="../../brand/logo/friday-icon-reversed.svg" alt="FRIDAY 深色背景图标">
+										</div>
+										<strong>深色背景图标</strong>
+										<span>用于 Graphite 或深色发布表面。</span>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="插件入口图标">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">插件入口图标</h3>
+									<div class="specimen-meta">Plugin Tile，用于插件市场、仓库封面和入口预览</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="brand-asset-preview is-tile">
+									<img src="../../brand/logo/friday-plugin-tile-square.svg" alt="FRIDAY 插件入口图标">
+								</div>
+								<p class="preview-note">这个资产适合外部入口，不建议直接放进日常设置项或工具栏。</p>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="settings">
+					<div class="section-head">
+						<div>
+							<h2>设置组件</h2>
+							<p>先放入 Native Kit 的核心层，设置页、配置面板、普通控件都从这里开始。</p>
+						</div>
+						<span class="section-mode">Obsidian 原生</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="设置页框架">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">设置页框架</h3>
+									<div class="specimen-meta">标题 + 分区切换 + 设置组</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<h2 class="friday-settings-title">设置 <span class="friday-settings-title-brand friday-wordmark">FRIDAY</span></h2>
+								<div class="friday-top-nav" role="tablist" aria-label="FRIDAY settings sections">
+									<button type="button" class="friday-nav-button is-active">基础</button>
+									<button type="button" class="friday-nav-button">项目</button>
+									<button type="button" class="friday-nav-button">模型</button>
+									<button type="button" class="friday-nav-button">工具</button>
+								</div>
+								<div class="friday-native-settings-group">
+									<div class="friday-native-settings-group-header">
+										<div class="friday-native-settings-group-title">项目上下文</div>
+										<div class="friday-native-settings-group-description">控制 FRIDAY 在当前库里如何识别项目、读取笔记和同步状态。</div>
+									</div>
+									<div class="setting-item">
+										<div class="setting-item-info">
+											<div class="setting-item-name">启用项目模式</div>
+											<div class="setting-item-description">开启后，FRIDAY 会按项目边界组织上下文。</div>
+										</div>
+										<div class="setting-item-control">
+											<span class="inline-status">已启用</span>
+											<span class="toggle" aria-hidden="true"></span>
+										</div>
+									</div>
+									<div class="setting-item">
+										<div class="setting-item-info">
+											<div class="setting-item-name">默认项目</div>
+											<div class="setting-item-description">新会话没有显式项目时使用的工作区。</div>
+										</div>
+										<div class="setting-item-control">
+											<select class="native-select" aria-label="Default project">
+												<option>Friday-beta-evm</option>
+												<option>Inbox</option>
+											</select>
+										</div>
+									</div>
+									<div class="setting-item">
+										<div class="setting-item-info">
+											<div class="setting-item-name">重建项目索引</div>
+											<div class="setting-item-description">仅在项目列表明显不同步时使用。</div>
+										</div>
+										<div class="setting-item-control">
+											<button type="button">重建</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="设置行状态">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">设置行状态</h3>
+									<div class="specimen-meta">设置行细节</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-native-settings-group">
+									<div class="setting-item">
+										<div class="setting-item-info">
+											<div class="setting-item-name">OpenAI API Key</div>
+											<div class="setting-item-description">保存到 Obsidian 插件设置，留空则禁用云模型。</div>
+										</div>
+										<div class="setting-item-control">
+											<input class="native-input" type="password" value="sk-000000000000" aria-label="API key">
+											<span class="status-pill is-ready">就绪</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="危险操作设置行">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">危险操作设置行</h3>
+									<div class="specimen-meta">危险操作放置规则</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-native-settings-group">
+									<div class="setting-item">
+										<div class="setting-item-info">
+											<div class="setting-item-name">清除会话缓存</div>
+											<div class="setting-item-description">删除本地临时状态，不会改动笔记文件。</div>
+										</div>
+										<div class="setting-item-control">
+											<button type="button" class="mod-warning">清除</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="feedback">
+					<div class="section-head">
+						<div>
+							<h2>反馈组件</h2>
+							<p>空状态、局部告警、前置条件，适合做得有一点 FRIDAY 感，但不脱离 Obsidian。</p>
+						</div>
+						<span class="section-mode">轻品牌</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen" data-component="空状态">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">空状态</h3>
+									<div class="specimen-meta">空状态容器</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-empty-state">
+									<span class="friday-mark is-contained" aria-hidden="true">
+										<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
+										<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
+									</span>
+									<div>
+										<h3>还没有注册项目</h3>
+										<p>先选择一个文件夹，FRIDAY 会把相关笔记和上下文放在同一个项目里。</p>
+										<div class="friday-approval-actions">
+											<button type="button" class="mod-cta">注册项目</button>
+											<button type="button">稍后</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="行内提醒" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">行内提醒</h3>
+									<div class="specimen-meta">局部提示回到原生反馈语气，不单独跳出整套 UI</div>
+									<div class="component-version">
+										<span class="adjustment-badge">调整版候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-inline-notice-v2 friday-native-inline-callout" role="status">
+									<div>
+										<strong>缺少模型配置</strong>
+										<p>设置 API Key 后，当前会话会自动恢复。这个提示作为设置组内的一行出现。</p>
+									</div>
+									<div class="callout-control-row">
+										<span class="callout-status-label">需配置</span>
+										<button type="button" class="callout-action">去设置</button>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="前置条件列表">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">前置条件列表</h3>
+									<div class="specimen-meta">阻塞状态检查列表</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<ul class="prereq-list">
+									<li><span>已选择当前项目</span><span class="status-pill is-ready">就绪</span></li>
+									<li><span>已启用写入审批</span><span class="status-pill is-ready">就绪</span></li>
+									<li><span>配置可用模型</span><span class="status-pill is-waiting">缺失</span></li>
+								</ul>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="actions">
+					<div class="section-head">
+						<div>
+							<h2>审批与操作组件</h2>
+							<p>审批、危险操作、diff 预览，优先标准化，因为这些组件直接影响用户信任。</p>
+						</div>
+						<span class="section-mode">原生恢复</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="审批强提醒">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">审批强提醒</h3>
+									<div class="specimen-meta">审批操作占用对话框输入区，复用审批卡片样式 + 操作行</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="composer-dialog-approval-demo-v5">
+									<div class="composer-input-kit-v5 is-approval">
+										<div class="friday-approval-card composer-approval-card-v5">
+											<div class="friday-approval-header">需要你确认后继续</div>
+											<div class="friday-approval-detail">FRIDAY 已准备好 2 个待应用的文件修改，确认后才会写入 Obsidian。</div>
+											<div class="diff-preview" aria-label="Diff preview">
+												<div class="diff-line is-remove">- 旧的设置页组件直接写在 FridaySettingTab.ts</div>
+												<div class="diff-line is-add">+ 设置页组件进入 SettingsKit.ts</div>
+												<div class="diff-line">  其余业务逻辑保持不变</div>
+											</div>
+											<div class="friday-approval-actions">
+												<button type="button" class="friday-approval-btn is-allow">应用修改</button>
+												<button type="button" class="friday-approval-btn is-deny">不应用</button>
+											</div>
+										</div>
+									</div>
+									<div class="composer-control-row-v5">
+										<div class="composer-control-group-v5">
+											<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
+											<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
+											<button type="button" class="assistant-control-button is-context">@</button>
+											<button type="button" class="assistant-control-button is-skill">+Skill</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="shell">
+					<div class="section-head">
+						<div>
+							<h2>工作台外壳组件</h2>
+							<p>Daily Board、项目页、工具页都需要一致的顶部栏、项目选择和紧凑工具按钮。</p>
+						</div>
+						<span class="section-mode">Obsidian 原生</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="工作台顶部栏" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">工作台顶部栏</h3>
+									<div class="specimen-meta">顶部栏 + 项目选择 + 原生操作按钮，左侧保留品牌 logo 和 FRIDAY</div>
+									<div class="component-version">
+										<span class="adjustment-badge">调整版候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-workbench-bar-v2">
+									<div class="workbench-primary-v2">
+										<span class="workbench-brand-logo-v4" aria-hidden="true">
+											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
+											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
+										</span>
+										<div class="workbench-brand-text-v3">
+											<span class="friday-wordmark">FRIDAY</span>
+											<span>当前项目工作台</span>
+										</div>
+									</div>
+									<label class="workbench-project-v2">
+										<span>项目</span>
+										<select class="native-select" aria-label="选择项目">
+											<option>Friday-beta-evm</option>
+											<option>Inbox</option>
+										</select>
+									</label>
+									<div class="workbench-tools-v2" role="toolbar" aria-label="工作台工具">
+										<span class="status-pill is-ready">已同步</span>
+										<button type="button">搜索</button>
+										<button type="button">刷新</button>
+										<button type="button">设置</button>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="ai">
+					<div class="section-head">
+						<div>
+							<h2>助手组件</h2>
+							<p>助手身份可以有 FRIDAY 记忆点，但消息、徽标、输入框仍然保持 Obsidian 的密度。</p>
+						</div>
+						<span class="section-mode">身份识别</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="助手消息" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">助手消息</h3>
+									<div class="specimen-meta">用户右侧气泡，FRIDAY 走文档流；工具调用弱化为一行记录，计划进 Task Bar</div>
+									<div class="component-version">
+										<span class="adjustment-badge">调整版候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="friday-assistant-thread-v2 assistant-document-flow-v3">
+									<div class="assistant-turn-v2 is-user">
+										<div class="assistant-user-bubble-v3">
+											<div class="assistant-meta-v2">
+												<span>你</span>
+												<span>刚刚</span>
+											</div>
+											<p>先做一个初版，我来挑。</p>
+										</div>
+									</div>
+									<div class="assistant-turn-v2 is-assistant">
+										<span class="assistant-source-mark-v3" aria-hidden="true">
+											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
+											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
+										</span>
+										<div class="assistant-turn-body-v2">
+											<div class="assistant-meta-v2">
+												<span class="friday-wordmark">FRIDAY</span>
+												<span>文档流输出</span>
+												<span>上下文 3</span>
+											</div>
+											<div class="assistant-output-stack-v3">
+												<section class="assistant-output-block is-prose">
+													<div class="assistant-block-title">
+														<span>正文</span>
+													</div>
+													<p>我会先读取当前项目的设计规范，再给出最小可迁移的组件候选。</p>
+												</section>
+												<div class="assistant-output-block is-tool assistant-tool-call-v5">
+													<span class="assistant-tool-icon-v5" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+													<span class="assistant-tool-name-v5">read_file</span>
+													<span class="assistant-tool-detail-v5">docs/design/obsidian-plugin-ui-contract.md</span>
+													<span class="assistant-tool-state-v5">已运行 1 条命令</span>
+												</div>
+												<section class="assistant-output-block is-artifact">
+													<div class="assistant-block-title">
+														<span>产物</span>
+														<span>可进入执行过程详情</span>
+													</div>
+													<div class="assistant-artifact-list-v4">
+														<div class="assistant-artifact-row-v4">
+															<span class="artifact-type-icon is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+															<strong>UI 差异报告</strong>
+															<code>friday-ui-ux-gap.md</code>
+														</div>
+														<div class="assistant-artifact-row-v4">
+															<span class="artifact-type-icon is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+															<strong>组件白板</strong>
+															<code>native-kit-map.canvas</code>
+														</div>
+													</div>
+												</section>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+						<article class="component-specimen is-wide" data-component="对话输入区" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">对话输入区与 Task Bar</h3>
+									<div class="specimen-meta">对应 friday-ai-composer-wrap：Task Bar host + 输入面 + 下方模型/权限/@/Skill 控件；Skill 列表沿用 friday-mention-dropdown，向输入框上方展开</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="composer-state-grid-v5">
+									<div class="composer-state-card-v5 is-wide">
+										<div class="composer-state-label-v5">Task Bar 收起 / 展开</div>
+										<div class="friday-ai-composer-task-bar-host">
+											<div class="friday-composer-task-bar composer-taskbar-kit-v5 is-collapsed is-running">
+												<button type="button" class="composer-taskbar-summary-v5" aria-expanded="false">
+													<span class="composer-taskbar-status-v5">正在执行</span>
+													<span class="composer-taskbar-step-v5">2/4</span>
+													<span class="composer-taskbar-title-v5">排查 Native Kit 差异</span>
+													<span class="composer-taskbar-elapsed-v5">18s</span>
+													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+												</button>
+											</div>
+										</div>
+										<div class="friday-ai-composer-task-bar-host">
+											<div class="friday-composer-task-bar composer-taskbar-kit-v5 is-expanded is-running">
+												<button type="button" class="composer-taskbar-summary-v5" aria-expanded="true">
+													<span class="composer-taskbar-status-v5">正在执行</span>
+													<span class="composer-taskbar-step-v5">2/4</span>
+													<span class="composer-taskbar-title-v5">排查 Native Kit 差异</span>
+													<span class="composer-taskbar-elapsed-v5">18s</span>
+													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+												</button>
+												<div class="composer-taskbar-list-v5">
+													<div class="composer-taskbar-task-v5 is-completed">
+														<span class="composer-taskbar-marker-v5">✓</span>
+														<span>1/4</span>
+														<strong>确认现有 UI 结构</strong>
+														<span>已完成</span>
+													</div>
+													<div class="composer-taskbar-task-v5 is-in-progress">
+														<span class="composer-taskbar-marker-v5">•</span>
+														<span>2/4</span>
+														<strong>排查 Native Kit 差异</strong>
+														<span>执行中</span>
+													</div>
+													<div class="composer-taskbar-task-v5 is-pending">
+														<span class="composer-taskbar-marker-v5">○</span>
+														<span>3/4</span>
+														<strong>调整候选组件</strong>
+														<span>未开始</span>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="composer-state-card-v5 is-wide">
+										<div class="composer-state-label-v5">Task Bar 与对话框组合态</div>
+										<div class="composer-live-combo-grid-v5">
+											<div class="composer-live-shell-v5">
+												<div class="composer-live-caption-v5">收起态：默认跟随输入框上方常驻</div>
+												<div class="composer-live-compose-v5 is-attached is-attached-surface">
+													<div class="friday-ai-composer-task-bar-host">
+														<div class="friday-composer-task-bar composer-taskbar-kit-v5 is-collapsed is-running">
+															<button type="button" class="composer-taskbar-summary-v5" aria-expanded="false">
+																<span class="composer-taskbar-status-v5">正在执行</span>
+																<span class="composer-taskbar-step-v5">2/4</span>
+																<span class="composer-taskbar-title-v5">整理 Native Kit 候选</span>
+																<span class="composer-taskbar-elapsed-v5">18s</span>
+																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+															</button>
+														</div>
+													</div>
+													<div class="composer-input-kit-v5 composer-live-input-v5">
+														<div class="composer-editor-shell-v5">
+															<span>把 Task Bar 和输入区贴在一起看一下，重点看密度和层级。</span>
+														</div>
+														<div class="composer-control-row-v5">
+															<div class="composer-control-group-v5">
+																<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
+																<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
+																<button type="button" class="assistant-control-button is-context">@</button>
+																<button type="button" class="assistant-control-button is-skill">+Skill</button>
+															</div>
+															<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
+														</div>
+													</div>
+												</div>
+											</div>
+											<div class="composer-live-shell-v5 is-expanded">
+												<div class="composer-live-caption-v5">展开态：临时查看步骤，输入框仍在下方</div>
+												<div class="composer-live-compose-v5">
+													<div class="friday-ai-composer-task-bar-host">
+														<div class="friday-composer-task-bar composer-taskbar-kit-v5 is-expanded is-running">
+															<button type="button" class="composer-taskbar-summary-v5" aria-expanded="true">
+																<span class="composer-taskbar-status-v5">正在执行</span>
+																<span class="composer-taskbar-step-v5">2/4</span>
+																<span class="composer-taskbar-title-v5">整理 Native Kit 候选</span>
+																<span class="composer-taskbar-elapsed-v5">18s</span>
+																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+															</button>
+															<div class="composer-taskbar-list-v5">
+																<div class="composer-taskbar-task-v5 is-completed">
+																	<span class="composer-taskbar-marker-v5">✓</span>
+																	<span>1/4</span>
+																	<strong>读取现有实现</strong>
+																	<span>已完成</span>
+																</div>
+																<div class="composer-taskbar-task-v5 is-in-progress">
+																	<span class="composer-taskbar-marker-v5">•</span>
+																	<span>2/4</span>
+																	<strong>调整组合态</strong>
+																	<span>执行中</span>
+																</div>
+																<div class="composer-taskbar-task-v5 is-pending">
+																	<span class="composer-taskbar-marker-v5">○</span>
+																	<span>3/4</span>
+																	<strong>补齐输入区状态</strong>
+																	<span>未开始</span>
+																</div>
+																<div class="composer-taskbar-task-v5 is-pending">
+																	<span class="composer-taskbar-marker-v5">○</span>
+																	<span>4/4</span>
+																	<strong>确认迁移规范</strong>
+																	<span>未开始</span>
+																</div>
+															</div>
+														</div>
+													</div>
+													<div class="composer-input-kit-v5 composer-live-input-v5">
+														<div class="composer-editor-shell-v5">
+															<span class="composer-placeholder-v5">输入补充要求，Task Bar 不占用输入内容区域。</span>
+														</div>
+														<div class="composer-control-row-v5">
+															<div class="composer-control-group-v5">
+																<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
+																<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
+																<button type="button" class="assistant-control-button is-context">@</button>
+																<button type="button" class="assistant-control-button is-skill">+Skill</button>
+															</div>
+															<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
+														</div>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="composer-state-card-v5">
+										<div class="composer-state-label-v5">未输入</div>
+										<div class="composer-input-kit-v5 is-empty">
+											<div class="composer-editor-shell-v5">
+												<span class="composer-placeholder-v5">输入消息，支持 @ 文件引用与 Skill 命令</span>
+											</div>
+											<div class="composer-control-row-v5">
+												<div class="composer-control-group-v5">
+													<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
+													<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
+													<button type="button" class="assistant-control-button is-context">@</button>
+													<button type="button" class="assistant-control-button is-skill">+Skill</button>
+												</div>
+												<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
+											</div>
+										</div>
+									</div>
+									<div class="composer-state-card-v5">
+										<div class="composer-state-label-v5">@ 引用文件选择</div>
+										<div class="composer-mention-popover-demo-v5">
+											<div class="composer-mention-picker-v5 is-above-input">
+												<button type="button" class="composer-mention-option-v5">
+													<span class="composer-file-type-icon-v5 is-note" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-note"></use></svg></span></span>
+													<span class="composer-mention-copy-v5">
+														<strong>当前笔记</strong>
+														<span>发送时引用当前打开的笔记</span>
+													</span>
+												</button>
+												<button type="button" class="composer-mention-option-v5 is-active">
+													<span class="composer-file-type-icon-v5 is-html" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-code"></use></svg></span></span>
+													<span class="composer-mention-copy-v5">
+														<strong>native-kit-catalog</strong>
+														<span>docs/design/native-kit-catalog.html</span>
+													</span>
+												</button>
+												<button type="button" class="composer-mention-option-v5">
+													<span class="composer-file-type-icon-v5 is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+													<span class="composer-mention-copy-v5">
+														<strong>obsidian-plugin-ui-contract</strong>
+														<span>docs/design/obsidian-plugin-ui-contract.md</span>
+													</span>
+												</button>
+												<button type="button" class="composer-mention-option-v5">
+													<span class="composer-file-type-icon-v5 is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+													<span class="composer-mention-copy-v5">
+														<strong>组件关系白板</strong>
+														<span>docs/design/native-kit-map.canvas</span>
+													</span>
+												</button>
+											</div>
+											<div class="composer-input-kit-v5 composer-mention-anchor-v5">
+												<div class="composer-editor-shell-v5">
+													<span class="composer-token-v5 is-context">@ native-kit-catalog</span>
+													<span>对照这份目录继续调整组件状态。</span>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="composer-state-card-v5">
+										<div class="composer-state-label-v5">调用 Skill</div>
+										<div class="composer-input-kit-v5 is-skill">
+											<div class="composer-editor-shell-v5">
+												<span class="composer-token-v5">obsidian-markdown</span>
+												<span>把这段规范整理成可复用组件</span>
+											</div>
+										</div>
+									</div>
+									<div class="composer-state-card-v5">
+										<div class="composer-state-label-v5">Skill 列表展开</div>
+										<div class="composer-skill-popover-demo-v5">
+											<div class="composer-skill-picker-v5 is-above-input">
+												<div class="composer-skill-query-v5">
+													<strong>/skills</strong>
+													<span>List available skills</span>
+												</div>
+												<div class="composer-skill-list-v5">
+													<button type="button" class="composer-skill-option-v5 is-active">
+														<strong>json-canvas</strong>
+														<span>创建和编辑 Obsidian .canvas 文件，支持节点、连线、分组和布局校验。</span>
+													</button>
+													<button type="button" class="composer-skill-option-v5">
+														<strong>obsidian-bases</strong>
+														<span>创建和编辑 Obsidian .base 文件，支持 YAML schema、筛选、公式和视图。</span>
+													</button>
+													<button type="button" class="composer-skill-option-v5">
+														<strong>obsidian-cli</strong>
+														<span>操作正在运行的 Obsidian Vault，并通过 Obsidian CLI 调试插件与主题。</span>
+													</button>
+												</div>
+											</div>
+											<div class="composer-input-kit-v5 is-skill-picker composer-skill-anchor-v5">
+												<div class="composer-editor-shell-v5">
+													<span class="composer-placeholder-v5">/</span>
+												</div>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="agent">
+					<div class="section-head">
+						<div>
+							<h2>执行过程组件</h2>
+							<p>先做 catalog，不急着抽源码。这个区域状态多，适合第二阶段系统化。</p>
+						</div>
+						<span class="section-mode">第二阶段</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="执行过程时间线" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">执行过程时间线</h3>
+									<div class="specimen-meta">保留时间线结构，与助手文档流共用工具事件，并增强 md、白板、笔记等产物类型</div>
+									<div class="component-version">
+										<span class="adjustment-badge">调整版候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="agent-process-shell friday-agent-run-list-v2">
+									<div class="agent-process-head">
+										<div>
+											<strong>排查 Native Kit 差异</strong>
+											<span class="inline-status">正在检查 DailyBoardView.ts 和 styles.css</span>
+										</div>
+										<span class="status-pill is-waiting">运行中</span>
+									</div>
+									<div class="agent-timeline">
+										<div class="timeline-item">
+											<strong>读取规范</strong>
+											<span>DESIGN.md 和 obsidian-plugin-ui-contract.md</span>
+										</div>
+										<div class="timeline-item is-active agent-running-surface-v5">
+											<strong>扫描 UI surface</strong>
+											<span>查找重复 class、硬编码样式和局部 helper</span>
+										</div>
+										<div class="timeline-item">
+											<strong>输出差异报告</strong>
+											<span>按 Settings、Shell、Assistant、Agent 分组</span>
+										</div>
+									</div>
+									<div class="agent-artifact-grid-v3" aria-label="执行产物">
+										<div class="artifact-card-v3">
+											<span class="artifact-type-icon is-markdown" aria-hidden="true">
+												<span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span>
+											</span>
+											<div>
+												<strong>差异报告</strong>
+												<code>friday-ui-ux-gap.md</code>
+											</div>
+										</div>
+										<div class="artifact-card-v3">
+											<span class="artifact-type-icon is-canvas" aria-hidden="true">
+												<span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span>
+											</span>
+											<div>
+												<strong>组件白板</strong>
+												<code>native-kit-map.canvas</code>
+											</div>
+										</div>
+										<div class="artifact-card-v3">
+											<span class="artifact-type-icon is-note" aria-hidden="true">
+												<span class="friday-icon"><svg><use href="#icon-note"></use></svg></span>
+											</span>
+											<div>
+												<strong>实施笔记</strong>
+												<code>migration-notes.md</code>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="project">
+					<div class="section-head">
+						<div>
+							<h2>项目组件</h2>
+							<p>项目状态、同步冲突、忽略规则更像 Obsidian 管理面板，不应该做成营销卡片。</p>
+						</div>
+						<span class="section-mode">原生管理</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="项目状态组" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">项目状态组</h3>
+									<div class="specimen-meta">项目状态、切换和冲突入口，先做 3 个方向横向比较</div>
+									<div class="component-version">
+										<span class="adjustment-badge">调整版候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.2</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-candidate-grid-v3">
+									<div class="friday-project-panel-v2 project-candidate-card" data-project-variant="list">
+										<div class="project-candidate-head">
+											<strong>版本 A：列表管理</strong>
+											<span>适合项目多、需要扫状态的设置页。</span>
+										</div>
+										<div class="project-mini-list">
+											<div class="project-mini-row">
+												<div>
+													<strong>Friday-beta-evm</strong>
+													<span>12 个文件 · 索引刚刚更新</span>
+												</div>
+												<span class="status-pill is-ready">当前</span>
+											</div>
+											<div class="project-mini-row">
+												<div>
+													<strong>同步冲突</strong>
+													<span>2 个文件需要确认来源</span>
+												</div>
+												<button type="button" class="mod-cta">查看</button>
+											</div>
+											<div class="project-mini-row">
+												<div>
+													<strong>Inbox</strong>
+													<span>未注册为项目</span>
+												</div>
+												<button type="button">注册</button>
+											</div>
+										</div>
+									</div>
+									<div class="friday-project-panel-v2 project-candidate-card" data-project-variant="compact">
+										<div class="project-candidate-head">
+											<strong>版本 B：当前项目摘要</strong>
+											<span>保留 B 的紧凑性，但把状态、风险和动作合成一个原生控制条。</span>
+										</div>
+										<div class="project-compact-stack">
+											<div class="project-focus-strip-v4">
+												<div class="project-focus-main-v4">
+													<strong>Friday-beta-evm</strong>
+													<span>当前上下文 · 12 个项目文件 · 刚刚同步</span>
+												</div>
+												<div class="project-health-meter-v4" aria-label="项目状态概览">
+													<span></span>
+													<span class="is-warning"></span>
+													<span class="is-muted"></span>
+												</div>
+												<div class="project-focus-signals-v4">
+													<div class="project-focus-signal-v4">
+														<strong>上下文</strong>
+														<span>Native Kit、Daily Board、设置页已纳入扫描</span>
+													</div>
+													<div class="project-focus-signal-v4">
+														<strong>待处理</strong>
+														<span>2 个冲突，1 个审批项需要用户确认</span>
+													</div>
+												</div>
+												<div class="project-focus-actions-v4">
+													<button type="button" class="mod-cta">处理冲突</button>
+													<button type="button">切换项目</button>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="friday-project-panel-v2 project-candidate-card" data-project-variant="inspector">
+										<div class="project-candidate-head">
+											<strong>版本 C：检查器</strong>
+											<span>适合需要解释状态和下一步动作的项目页。</span>
+										</div>
+										<div class="project-inspector-v3">
+											<div class="project-inspector-target">
+												<strong>Friday-beta-evm</strong>
+												<span>当前项目</span>
+											</div>
+											<div class="project-field-row">
+												<span>索引</span>
+												<span>刚刚更新，12 个文件可用</span>
+											</div>
+											<div class="project-field-row">
+												<span>冲突</span>
+												<span>2 个文件等待确认来源</span>
+											</div>
+											<button type="button" class="mod-cta">打开项目检查器</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+			</main>
+		</div>
+	</div>
+
+	<script>
+		const root = document.documentElement;
+		const storageKey = "friday-native-kit-catalog";
+		let state = JSON.parse(localStorage.getItem(storageKey) || "{}");
+		const summary = document.querySelector("#selectionSummary");
+		const syncStatus = document.querySelector("#syncStatus");
+		const syncEndpoint = window.location.protocol === "http:" || window.location.protocol === "https:"
+			? "/api/native-kit-catalog-decisions"
+			: null;
+
+		function setSyncStatus(message) {
+			syncStatus.textContent = message;
+		}
+
+		function setTheme(theme) {
+			root.dataset.theme = theme;
+			document.querySelectorAll("[data-theme-target]").forEach((button) => {
+				button.classList.toggle("is-active", button.dataset.themeTarget === theme);
+			});
+		}
+
+		function setDensity(density) {
+			root.dataset.density = density;
+			document.querySelectorAll("[data-density-target]").forEach((button) => {
+				button.classList.toggle("is-active", button.dataset.densityTarget === density);
+			});
+		}
+
+		function updateSummary() {
+			const totals = { keep: 0, adjust: 0, hold: 0 };
+			for (const choice of Object.values(state.choices || {})) {
+				if (totals[choice] !== undefined) totals[choice] += 1;
+			}
+			const total = totals.keep + totals.adjust + totals.hold;
+			summary.textContent = total
+				? `保留 ${totals.keep} · 调整 ${totals.adjust} · 暂缓 ${totals.hold}`
+				: "还没有选择。每个组件右上角可以标记保留、调整或暂缓。";
+		}
+
+		function getPersistableState() {
+			return {
+				theme: state.theme || root.dataset.theme || "light",
+				density: state.density || root.dataset.density || "comfortable",
+				choices: state.choices || {},
+			};
+		}
+
+		function applySelections() {
+			document.querySelectorAll(".component-specimen").forEach((specimen) => {
+				const component = specimen.dataset.component;
+				const choice = state.choices?.[component];
+				specimen.querySelectorAll("[data-choice]").forEach((button) => {
+					button.classList.toggle("is-selected", button.dataset.choice === choice);
+				});
+			});
+		}
+
+		async function syncStateToServer() {
+			if (!syncEndpoint) {
+				setSyncStatus("浏览器本地记录。通过本地预览服务打开后，会自动写入 JSON。");
+				return;
+			}
+			try {
+				setSyncStatus("正在写入 docs/design/native-kit-catalog-decisions.json...");
+				const response = await fetch(syncEndpoint, {
+					method: "POST",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify(getPersistableState()),
+				});
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}`);
+				}
+				const saved = await response.json();
+				state = {
+					...state,
+					theme: saved.theme,
+					density: saved.density,
+					choices: saved.choices || {},
+				};
+				localStorage.setItem(storageKey, JSON.stringify(state));
+				updateSummary();
+				setSyncStatus(`已写入 JSON：保留 ${saved.counts.keep} · 调整 ${saved.counts.adjust} · 暂缓 ${saved.counts.hold}`);
+			} catch (error) {
+				setSyncStatus(`同步失败，已暂存浏览器：${error.message}`);
+			}
+		}
+
+		async function loadServerState() {
+			if (!syncEndpoint) {
+				setSyncStatus("浏览器本地记录。通过本地预览服务打开后，会自动写入 JSON。");
+				return;
+			}
+			try {
+				const response = await fetch(syncEndpoint, { cache: "no-store" });
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}`);
+				}
+				const saved = await response.json();
+				const hasServerChoices = saved.choices && Object.keys(saved.choices).length > 0;
+				if (hasServerChoices) {
+					state = {
+						...state,
+						theme: saved.theme,
+						density: saved.density,
+						choices: saved.choices,
+					};
+					localStorage.setItem(storageKey, JSON.stringify(state));
+					setTheme(state.theme || "light");
+					setDensity(state.density || "comfortable");
+					applySelections();
+					updateSummary();
+					setSyncStatus(`已读取 JSON：保留 ${saved.counts.keep} · 调整 ${saved.counts.adjust} · 暂缓 ${saved.counts.hold}`);
+					return;
+				}
+				await syncStateToServer();
+			} catch (error) {
+				setSyncStatus(`同步服务未连接，继续使用浏览器记录：${error.message}`);
+			}
+		}
+
+		function saveState() {
+			localStorage.setItem(storageKey, JSON.stringify(state));
+			updateSummary();
+			void syncStateToServer();
+		}
+
+		document.querySelectorAll("[data-theme-target]").forEach((button) => {
+			button.addEventListener("click", () => {
+				state.theme = button.dataset.themeTarget;
+				setTheme(state.theme);
+				saveState();
+			});
+		});
+
+		document.querySelectorAll("[data-density-target]").forEach((button) => {
+			button.addEventListener("click", () => {
+				state.density = button.dataset.densityTarget;
+				setDensity(state.density);
+				saveState();
+			});
+		});
+
+		document.querySelectorAll(".component-specimen").forEach((specimen) => {
+			const component = specimen.dataset.component;
+			specimen.querySelectorAll("[data-choice]").forEach((button) => {
+				button.addEventListener("click", () => {
+					state.choices = state.choices || {};
+					state.choices[component] = button.dataset.choice;
+					applySelections();
+					saveState();
+				});
+			});
+		});
+
+		setTheme(state.theme || "light");
+		setDensity(state.density || "comfortable");
+		applySelections();
+		updateSummary();
+		void loadServerState();
+	</script>
+</body>
+</html>

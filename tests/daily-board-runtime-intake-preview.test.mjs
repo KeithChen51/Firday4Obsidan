@@ -92,6 +92,17 @@ test("runtime intake state resets at the start of each runtime invocation", () =
 	assert.ok(compileSawResetIndex < compileExecuteIndex, "compile should reset intake-seen state before runtime events can arrive");
 });
 
+test("task action retries bind live process to the new runtime turn identity", () => {
+	const source = readViewSource();
+	const bindBlock = extractMethod(source, "bindRuntimeSnapshotToLatestUserMessage", "isLiveRuntimeSnapshotAttachedToMessage");
+
+	assert.match(bindBlock, /snapshot\.identity\.conversationId \|\| uiMeta\.conversationId/);
+	assert.match(bindBlock, /snapshot\.identity\.turnId \|\| uiMeta\.turnId/);
+	assert.match(bindBlock, /snapshot\.identity\.taskId \|\| uiMeta\.taskId/);
+	assert.doesNotMatch(bindBlock, /uiMeta\.turnId\?\.trim\(\) \|\| snapshot\.identity\.turnId/);
+	assert.doesNotMatch(bindBlock, /uiMeta\.taskId\?\.trim\(\) \|\| snapshot\.identity\.taskId/);
+});
+
 test("runtime preflight progress keeps the local intake preview until visible process exists", () => {
 	const source = readViewSource();
 	const progressBlock = extractMethod(source, "handleRuntimeProgress", "buildRuntimeReply");
@@ -207,6 +218,7 @@ test("assistant message rendering sanitizes legacy file mutation notices", () =>
 	assert.match(renderContentBlock, /normalizeDisplayedAssistantMessageContent/);
 	assert.match(normalizeBlock, /Pending file changes/);
 	assert.match(normalizeBlock, /productizeRuntimeText\(content\)/);
+	assert.match(normalizeBlock, /Agent turn cancelled/);
 	assert.match(normalizeBlock, /ERR_CONNECTION_CLOSED/);
 	assert.match(normalizeBlock, /确认后才会写入 Obsidian/);
 	assert.match(normalizeBlock, /Applied file/);

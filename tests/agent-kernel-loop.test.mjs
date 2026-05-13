@@ -26,6 +26,7 @@ function planStateSignature(state) {
 			id: task.id,
 			title: task.title,
 			status: task.status,
+			summary: task.summary ?? "",
 		})),
 	});
 }
@@ -409,6 +410,7 @@ test("AgentLoopController executes consecutive read-only concurrency-safe native
 		conversation: [],
 		userPrompt: "Read two files",
 		mode: "ask",
+		metadata: { suppressVisibleNarration: true },
 	});
 
 	await flushMicrotasks();
@@ -430,6 +432,413 @@ test("AgentLoopController executes consecutive read-only concurrency-safe native
 	assert.ok(afterToolCheckpoint);
 	assert.deepEqual(afterToolCheckpoint.completedToolCalls.map((tool) => tool.toolCallId), ["call-a", "call-b"]);
 	assert.deepEqual(afterToolCheckpoint.traces.map((trace) => trace.targetPath), ["Project/a.md", "Project/b.md"]);
+});
+
+test("AgentLoopController suppresses the task bar for complex native tool work without a model-authored plan", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const modelRequests = [];
+	const toolRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 3,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{ id: "call-read-parser", name: "read", args: { path: "src/parser.ts" } },
+							{ id: "call-read-state", name: "read", args: { path: "src/state.ts" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				if (input.step === 2) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: "call-read-parser-after-reminder", name: "read", args: { path: "src/parser.ts" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "The parser failure is caused by stale state.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				toolRequests.push(input);
+				return {
+					trace: {
+						runId: "read-parser",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read src/parser.ts",
+					},
+					payload: { ok: true, tool: "read", data: { path: "src/parser.ts", content: "parser" } },
+					modelResultText: "TOOL_RESULT parser",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-runtime-task-bar",
+		taskId: "task-runtime-task-bar",
+		traceId: "trace-runtime-task-bar",
+		conversationId: "conversation-runtime-task-bar",
+		agentId: "agent-runtime-task-bar",
+		conversation: [],
+		userPrompt: "Debug the parser failure and report the likely root cause",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.deepEqual(toolRequests.map((request) => request.tool.name), ["read"]);
+	assert.equal(toolRequests[0]?.step, 2, "first missing-plan batch should be deferred until the model sees the reminder");
+	assert.equal(modelRequests.length, 3);
+	assert.match(JSON.stringify(modelRequests[1]?.messages ?? []), /call plan_write/i);
+	assert.equal(result.events.some((event) => event.type === "task_bar_created"), false);
+	assert.equal(result.events.some((event) => event.type === "plan_create"), false);
+	assertEventAfter(result.events, "task_bar_suppressed", "model_response");
+	const suppressed = result.events.find((event) => event.type === "task_bar_suppressed")?.payload;
+	assert.equal(suppressed?.source, "runtime");
+	assert.equal(suppressed?.reason, "missing_model_plan");
+	assert.match(String(suppressed?.trigger ?? ""), /complex|tool/i);
+});
+
+test("AgentLoopController emits terminal progress when a normal completed run finishes", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const progressEvents = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 1,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools() {
+				return { assistantText: "Done.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool() {
+				throw new Error("no tools should run");
+			},
+		},
+		progress: {
+			report(_input, event) {
+				progressEvents.push(event);
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-terminal-progress",
+		taskId: "task-terminal-progress",
+		traceId: "trace-terminal-progress",
+		conversationId: "conversation-terminal-progress",
+		agentId: "agent-terminal-progress",
+		conversation: [],
+		userPrompt: "Answer directly",
+		allowedTools: ["read"],
+		mode: "ask",
+		budget: { tool: { maxIterations: 1 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.equal(progressEvents.at(-1)?.phase, "done");
+	assert.match(progressEvents.at(-1)?.message ?? "", /Done/);
+});
+
+test("AgentLoopController executes model plan_write before other native batch tools", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const externalToolRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{
+								id: "call-plan",
+								name: "plan_write",
+								args: {
+									visibility: "task_bar",
+									reason: "Build a canvas from all workspace files.",
+									tasks: [
+										{ id: "map", title: "Map workspace files", status: "in_progress" },
+										{ id: "read", title: "Read relevant files", status: "pending" },
+										{ id: "relate", title: "Extract relationships", status: "pending" },
+										{ id: "canvas", title: "Write the whiteboard canvas", status: "pending" },
+										{ id: "verify", title: "Verify the created canvas", status: "pending" },
+									],
+								},
+							},
+							{ id: "call-tree", name: "project_tree", args: { path: "", maxDepth: 3 } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				if (input.step === 2) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{
+								id: "call-plan-complete",
+								name: "plan_write",
+								args: {
+									visibility: "task_bar",
+									reason: "Workspace tree mapped for the next step.",
+									tasks: [
+										{ id: "map", title: "Map workspace files", status: "completed" },
+										{ id: "read", title: "Read relevant files", status: "completed" },
+										{ id: "relate", title: "Extract relationships", status: "completed" },
+										{ id: "canvas", title: "Write the whiteboard canvas", status: "completed" },
+										{ id: "verify", title: "Verify the created canvas", status: "completed" },
+									],
+								},
+							},
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "I mapped the project and will continue from the plan.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [
+					{ name: "plan_write", description: "Write plan", parameters: { type: "object" } },
+					{ name: "project_tree", description: "Map tree", parameters: { type: "object" } },
+				];
+			},
+			async executeTool(input) {
+				externalToolRequests.push(input);
+				return {
+					trace: {
+						runId: "tree",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "project_tree listed 2 entry(s)",
+					},
+					payload: { ok: true, tool: "project_tree", data: { entries: ["workspace/a.md", "workspace/b.md"] } },
+					modelResultText: "TOOL_RESULT tree",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-model-plan-write",
+		taskId: "task-model-plan-write",
+		traceId: "trace-model-plan-write",
+		conversationId: "conversation-model-plan-write",
+		agentId: "agent-model-plan-write",
+		conversation: [],
+		userPrompt: "读取工作区全部文件，整理成白板展示各文件间的关系",
+		allowedTools: ["project_tree"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 3 } },
+	});
+
+	assert.equal(result.status, "completed");
+	assert.deepEqual(externalToolRequests.map((request) => request.tool.name), ["project_tree"]);
+	assertEventAfter(result.events, "task_bar_created", "model_response");
+	assertEventAfter(result.events, "plan_create", "task_bar_created");
+	const planCreateIndex = eventIndex(result.events, "plan_create");
+	const projectTreeCallIndex = result.events.findIndex((event) =>
+		event.type === "tool_call" && event.payload?.tool === "project_tree"
+	);
+	assert.ok(projectTreeCallIndex > planCreateIndex, "Task Bar should be created before actual file work starts");
+	const created = result.events.find((event) => event.type === "task_bar_created")?.payload;
+	assert.equal(created?.source, "model");
+	const planCreate = result.events.find((event) => event.type === "plan_create");
+	assert.equal(planCreate?.payload?.source, "model");
+	assert.deepEqual(planCreate?.payload?.state?.tasks.map((task) => task.title), [
+		"Map workspace files",
+		"Read relevant files",
+		"Extract relationships",
+		"Write the whiteboard canvas",
+		"Verify the created canvas",
+	]);
+	const autoPlanUpdates = result.events.filter((event) =>
+		event.type === "plan_update" &&
+		String(event.payload?.message ?? "").includes("project_tree")
+	);
+	assert.equal(autoPlanUpdates.length, 0, "tool results must not auto-complete or advance model plans");
+	assert.deepEqual(result.traces.map((trace) => trace.tool), ["plan_write", "project_tree", "plan_write"]);
+	assert.equal(result.events.some((event) => event.type === "plan_complete"), false);
+});
+
+test("AgentLoopController safe-stops when final answer ignores pending model plan synchronization", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const modelSteps = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 3,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelSteps.push(input.step);
+				if (input.step === 1) {
+					return {
+						assistantText: "",
+						toolCalls: [
+							{
+								id: "call-plan",
+								name: "plan_write",
+								args: {
+									visibility: "task_bar",
+									tasks: [
+										{ id: "read", title: "Read workspace", status: "in_progress" },
+										{ id: "answer", title: "Answer from results", status: "pending" },
+									],
+								},
+							},
+							{ id: "call-tree", name: "project_tree", args: { path: "" } },
+						],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: `Premature final at step ${input.step}.`, toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [
+					{ name: "plan_write", description: "Write plan", parameters: { type: "object" } },
+					{ name: "project_tree", description: "Map tree", parameters: { type: "object" } },
+				];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "tree",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "project_tree listed 1 entry(s)",
+					},
+					payload: { ok: true, tool: "project_tree", data: { entries: ["workspace/a.md"] } },
+					modelResultText: "TOOL_RESULT tree",
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-plan-sync-stop",
+		taskId: "task-plan-sync-stop",
+		traceId: "trace-plan-sync-stop",
+		conversationId: "conversation-plan-sync-stop",
+		agentId: "agent-plan-sync-stop",
+		conversation: [],
+		userPrompt: "Read the workspace and summarize it",
+		allowedTools: ["project_tree"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 3 } },
+	});
+
+	assert.deepEqual(modelSteps, [1, 2, 3]);
+	assert.equal(result.status, "safe_stopped");
+	assert.ok(result.events.some((event) =>
+		event.type === "loop_control_stop" &&
+		event.payload?.reason === "pending_model_plan_sync"
+	));
 });
 
 test("AgentLoopController keeps unsafe native calls serial between read-only runs", async () => {
@@ -519,6 +928,7 @@ test("AgentLoopController keeps unsafe native calls serial between read-only run
 		conversation: [],
 		userPrompt: "Read write read",
 		mode: "ask",
+		metadata: { suppressVisibleNarration: true },
 	});
 
 	await flushMicrotasks();
@@ -2544,7 +2954,7 @@ test("AgentLoopController keeps explicit debug and analysis scopes complex enoug
 	}
 });
 
-test("AgentLoopController emits living plan updates as complex tool work advances", async () => {
+test("AgentLoopController keeps legacy envelope plans readable without tool-result auto advancement", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
@@ -2655,7 +3065,6 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 	assert.deepEqual(planEvents.map((event) => event.type), [
 		"plan_create",
 		"plan_update",
-		"plan_update",
 		"plan_complete",
 	]);
 	for (const event of planEvents) {
@@ -2663,8 +3072,7 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 		assert.ok(runningTasks.length <= 1, `${event.type} has more than one in-progress task`);
 	}
 	const updates = planEvents.filter((event) => event.type === "plan_update").map((event) => event.payload);
-	assert.deepEqual(updates[0]?.state?.tasks?.map((task) => task.status), ["completed", "in_progress", "pending"]);
-	assert.deepEqual(updates[1]?.state?.tasks?.map((task) => task.status), ["completed", "completed", "in_progress"]);
+	assert.deepEqual(updates[0]?.state?.tasks?.map((task) => task.status), ["in_progress", "pending", "pending"]);
 	let previousPlanSignature = planStateSignature(planEvents[0]?.payload?.state);
 	for (const update of updates) {
 		const signature = planStateSignature(update?.state);
@@ -2684,6 +3092,115 @@ test("AgentLoopController emits living plan updates as complex tool work advance
 	const completePayload = planEvents.at(-1)?.payload;
 	assert.equal(completePayload?.state?.status, "completed");
 	assert.deepEqual(completePayload?.state?.tasks?.map((task) => task.status), ["completed", "completed", "completed"]);
+});
+
+test("AgentLoopController does not advance legacy visible plans from tool results before final completion", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext(input) {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 2,
+					messages: [
+						{ role: "system", content: "system prompt" },
+						{ role: "user", content: input.userPrompt },
+					],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				if (input.step === 1) {
+					return {
+						assistantText: runtimeEnvelope({
+							type: "tool_call",
+							assistant: "I will read the project context and then answer.",
+							intake: {
+								interactionRoute: "task_with_process",
+								statement: "I will inspect the workspace before answering.",
+							},
+							plan: {
+								type: "plan_create",
+								visibility: "visible",
+								tasks: [
+									{ id: "read-context", title: "Read workspace context", status: "in_progress" },
+									{ id: "answer", title: "Answer from results", status: "pending" },
+								],
+							},
+						}),
+						toolCalls: [{ id: "call-1", name: "read", args: { path: "workspace/a.md" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return {
+					assistantText: "The workspace context is summarized.",
+					toolCalls: [],
+					finishReason: "stop",
+				};
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "read", description: "Read file", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				return {
+					trace: {
+						runId: "read-context",
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Read workspace/a.md",
+					},
+					payload: { ok: true, tool: "read", data: { path: "workspace/a.md", content: "context" } },
+					modelResultText: "TOOL_RESULT context",
+				};
+			},
+		},
+	});
+	const kernel = new AgentKernel(controller);
+
+	const result = await kernel.runTurn({
+		turnId: "turn-last-plan-task-running",
+		taskId: "task-last-plan-task-running",
+		traceId: "trace-last-plan-task-running",
+		conversationId: "conversation-last-plan-task-running",
+		agentId: "agent-last-plan-task-running",
+		conversation: [],
+		userPrompt: "Read the workspace and summarize it",
+		allowedTools: ["read"],
+		mode: "agent",
+		budget: { tool: { maxIterations: 2 } },
+	});
+
+	assert.equal(result.status, "completed");
+	const planEvents = result.events.filter((event) => event.type.startsWith("plan_"));
+	const updates = planEvents.filter((event) => event.type === "plan_update");
+	assert.ok(updates.length >= 1, "finalizing should emit the only automatic legacy plan update");
+	assert.deepEqual(updates.at(-1)?.payload?.state?.tasks?.map((task) => task.status), [
+		"in_progress",
+		"pending",
+	]);
+	assert.equal(updates.at(-1)?.payload?.state?.status, "running");
+	assert.equal(planEvents.at(-1)?.type, "plan_complete");
+	assert.deepEqual(planEvents.at(-1)?.payload?.state?.tasks?.map((task) => task.status), [
+		"completed",
+		"completed",
+	]);
 });
 
 test("AgentLoopController applies runtime plan_revise instructions from prompt envelopes", async () => {

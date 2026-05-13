@@ -293,7 +293,7 @@ export const zhCNMessages: I18nMessages = {
 	"modal.project.error.localPathMissing": "本地路径不存在：{path}",
 	"modal.project.error.linkExistsOther": "项目链接已存在且指向其他位置：{path}",
 	"modal.project.error.vaultPathExists": "Vault 中已存在同名项目路径：{path}",
-	"ai.action.cancelled": "已取消文件操作执行。",
+	"ai.action.cancelled": "已停止本次任务。",
 	"ai.action.confirmExecute": "FRIDAY 准备执行以下 {count} 个文件操作：\n\n{list}\n\n是否继续？",
 	"ai.action.resultTitle": "执行结果：",
 	"ai.banner.imagesAttached": "已附加图片 {count} 张（{vision}）",

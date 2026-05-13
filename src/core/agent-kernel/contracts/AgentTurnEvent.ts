@@ -9,6 +9,8 @@ export const AGENT_TURN_EVENT_TYPES = [
 	"plan_revise",
 	"plan_complete",
 	"plan_skip",
+	"task_bar_created",
+	"task_bar_suppressed",
 	"narration",
 	"model_request",
 	"model_response",

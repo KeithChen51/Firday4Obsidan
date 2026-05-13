@@ -23,9 +23,12 @@ export class ObsidianToolAdapter {
 		const resolver = new CapabilityResolver({
 			ls: async (payload) => this.requireHandler("toolList")(payload, agentId),
 			read: async (payload) => this.requireHandler("toolRead")(payload, agentId),
+			read_many: async (payload) => this.requireHandler("toolReadMany")(payload, agentId),
 			grep: async (payload) => this.requireHandler("toolGrep")(payload, agentId),
 			search_text: async (payload) => this.requireHandler("toolSearchText")(payload, agentId),
+			search_and_read: async (payload) => this.requireHandler("toolSearchAndRead")(payload, agentId),
 			glob: async (payload) => this.requireHandler("toolGlob")(payload, agentId),
+			project_tree: async (payload) => this.requireHandler("toolProjectTree")(payload, agentId),
 			...(WIKI_FEATURE_ENABLED ? { compile_wiki: async (payload) => this.requireHandler("toolCompileWiki")(payload, agentId) } : {}),
 			memory: async (payload) => this.requireHandler("toolMemory")(payload, agentId),
 			write: async (payload) => this.requireHandler("toolWrite")(payload, agentId, toolCallId),

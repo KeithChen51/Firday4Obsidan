@@ -622,6 +622,9 @@ function projectPlan(
 	plan: ProjectablePlan,
 ): void {
 	snapshot.plan = clonePlanState(plan.state);
+	if (plan.source) {
+		snapshot.planSource = plan.source;
+	}
 }
 
 function findLatestFailedToolItem(snapshot: AgentTrajectorySnapshot): AgentTrajectoryItem | null {

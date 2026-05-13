@@ -72,7 +72,11 @@ export interface RuntimeProgressEvent {
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
+	turnId?: string;
 	taskId?: string;
+	traceId?: string;
+	conversationId?: string;
+	agentId?: string;
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
 	narration?: AgentNarrationPayload;

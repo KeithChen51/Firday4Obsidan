@@ -47,6 +47,7 @@ export class LiveTrajectoryStore {
 	reset(): void {
 		this.progressEvents = [];
 		this.currentSnapshot = null;
+		this.completedSnapshot = null;
 	}
 
 	getSnapshot(): AgentTrajectorySnapshot | null {

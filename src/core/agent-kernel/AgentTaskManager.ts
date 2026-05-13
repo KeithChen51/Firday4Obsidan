@@ -126,6 +126,14 @@ export class AgentTaskManager {
 		if (!taskId) {
 			return undefined;
 		}
+		const currentTask = await this.options.taskStore.get(taskId);
+		if (currentTask?.status === "completed") {
+			return currentTask;
+		}
+		if (currentTask?.status === "failed" || currentTask?.status === "cancelled") {
+			this.emitTaskIfMissing(context, currentTask);
+			return currentTask;
+		}
 		const message = error instanceof Error ? error.message : String(error ?? "Task failed.");
 		const task = this.isCancellationFailure(message) || context.isCancelled()
 			? await this.options.taskStore.cancelTask(taskId, {
@@ -245,6 +253,17 @@ export class AgentTaskManager {
 				...(task.changedFileCount ? { changedFileCount: task.changedFileCount } : {}),
 			},
 		});
+	}
+
+	private emitTaskIfMissing(context: AgentExecutionContext, task: AgentTask): void {
+		const hasEvent = context.snapshotEvents().some((event) =>
+			event.type === "task_updated" &&
+			event.payload?.taskId === task.id &&
+			event.payload?.status === task.status
+		);
+		if (!hasEvent) {
+			this.emitTask(context, task);
+		}
 	}
 
 	private createRunInputSnapshot(input: AgentTurnInput): AgentTaskCreateInput["runInput"] {

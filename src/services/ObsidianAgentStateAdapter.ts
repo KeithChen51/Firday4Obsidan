@@ -173,52 +173,63 @@ export class ObsidianAgentStateAdapter {
 			runtimeProfile: options.runtimeProfile ?? finalResult.runtimeProfile,
 			contextSummary: options.contextSummary ?? finalResult.contextSummary,
 		};
-		await this.replayRecorder.recordTurn({
-			context,
-			result: output,
-			extraEvents: [
-				...(options.sideEvents ?? []),
-				...this.buildDiagnosticReplayEvents(output),
-				{ type: "assistant_final", payload: { summary: this.truncate(output.assistantText, 240), traceId: context.traceId } },
-				this.buildTerminalReplayEvent(status, output),
-			],
-		});
+		try {
+			await this.replayRecorder.recordTurn({
+				context,
+				result: output,
+				extraEvents: [
+					...(options.sideEvents ?? []),
+					...this.buildDiagnosticReplayEvents(output),
+					{ type: "assistant_final", payload: { summary: this.truncate(output.assistantText, 240), traceId: context.traceId } },
+					this.buildTerminalReplayEvent(status, output),
+				],
+			});
+		} catch {
+			// Replay events are diagnostic; task completion and the user-facing result are authoritative.
+		}
 		void input;
 		return output;
 	}
 
 	async failTurn(error: unknown, context: AgentExecutionContext, options: ObsidianFailTurnOptions = {}): Promise<void> {
 		const task = await this.taskManager.failTurn(error, context);
+		if (task?.status === "completed") {
+			return;
+		}
 		const message = error instanceof Error ? error.message : String(error ?? "Task failed.");
 		const status: AgentTurnStatus = task?.status === "cancelled" ? "cancelled" : "failed";
 		const diagnostics = this.buildFailureDiagnostics(message, status);
-		await this.replayRecorder.recordTurn({
-			context,
-			result: {
-				turnId: context.turnId,
-				taskId: context.taskId,
-				traceId: context.traceId,
-				conversationId: context.conversationId,
-				status,
-				assistantText: message,
-				events: context.snapshotEvents(),
-				traces: [],
-				rawFinalReply: "",
-				...(task ? { task } : {}),
-				stepTraces: options.stepTraces,
-			},
-			extraEvents: [
-				...(options.sideEvents ?? []),
-				{
-					type: "model_failed",
-					payload: { summary: this.truncate(message, 240), traceId: context.traceId, ...diagnostics },
+		try {
+			await this.replayRecorder.recordTurn({
+				context,
+				result: {
+					turnId: context.turnId,
+					taskId: context.taskId,
+					traceId: context.traceId,
+					conversationId: context.conversationId,
+					status,
+					assistantText: message,
+					events: context.snapshotEvents(),
+					traces: [],
+					rawFinalReply: "",
+					...(task ? { task } : {}),
+					stepTraces: options.stepTraces,
 				},
-				{
-					type: status === "cancelled" ? "turn_cancelled" : "turn_failed",
-					payload: { summary: this.truncate(message, 240), traceId: context.traceId, ...diagnostics },
-				},
-			],
-		});
+				extraEvents: [
+					...(options.sideEvents ?? []),
+					{
+						type: "model_failed",
+						payload: { summary: this.truncate(message, 240), traceId: context.traceId, ...diagnostics },
+					},
+					{
+						type: status === "cancelled" ? "turn_cancelled" : "turn_failed",
+						payload: { summary: this.truncate(message, 240), traceId: context.traceId, ...diagnostics },
+					},
+				],
+			});
+		} catch {
+			// Preserve the original runtime failure instead of replacing it with replay persistence errors.
+		}
 	}
 
 	private collectPendingMutations(result: AgentTurnResult, context: AgentExecutionContext): RuntimeMutationPlan[] {

@@ -28,6 +28,8 @@ const TRANSPORT_PATTERNS: RegExp[] = [
 	/gateway/i,
 	/econnreset/i,
 	/err_connection_reset/i,
+	/err_http2_protocol_error/i,
+	/http2_protocol/i,
 	/econnclosed/i,
 	/err_connection_closed/i,
 	/fetch failed/i,

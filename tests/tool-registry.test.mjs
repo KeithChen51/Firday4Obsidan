@@ -36,7 +36,7 @@ test("tool registry owns complete tool contracts with unique names", async () =>
 		assert.equal(typeof tool.handlerName, "string", `${tool.name} missing handlerName`);
 		assert.equal(tool.parameters.type, "object", `${tool.name} missing object schema`);
 		assert.ok(["low", "medium", "high"].includes(tool.riskLevel), `${tool.name} missing risk level`);
-		assert.ok(["read", "write", "delete", "system", "memory", "skill", "knowledge"].includes(tool.category));
+		assert.ok(["read", "write", "delete", "system", "memory", "skill", "knowledge", "planning"].includes(tool.category));
 		assert.equal(typeof tool.concurrencySafe, "boolean", `${tool.name} missing concurrencySafe`);
 		assert.equal(typeof tool.idempotent, "boolean", `${tool.name} missing idempotent`);
 		assert.equal(typeof tool.cacheable, "boolean", `${tool.name} missing cacheable`);
@@ -76,7 +76,7 @@ test("tool contracts mark observation tools concurrency-safe and mutation tools 
 	const { registry } = await loadModules();
 	const toolRegistry = registry.ToolRegistry.getInstance();
 
-	for (const name of ["read", "ls", "grep", "search_text", "glob"]) {
+	for (const name of ["read", "ls", "grep", "search_text", "glob", "read_many", "search_and_read", "project_tree"]) {
 		const tool = toolRegistry.get(name);
 		assert.equal(tool?.readOnly, true, `${name} should be read-only`);
 		assert.equal(tool?.concurrencySafe, true, `${name} should be safe to run concurrently`);
@@ -97,6 +97,58 @@ test("tool contracts mark observation tools concurrency-safe and mutation tools 
 	}
 
 	assert.equal(toolRegistry.get("use_skill")?.concurrencySafe, false);
+});
+
+test("composite read-only tools are available to normal agent modes", async () => {
+	const { registry } = await loadModules();
+	const toolRegistry = registry.ToolRegistry.getInstance();
+
+	for (const name of ["read_many", "search_and_read", "project_tree"]) {
+		const tool = toolRegistry.get(name);
+		assert.ok(tool, `${name} should be registered`);
+		assert.equal(tool.readOnly, true, `${name} should be read-only`);
+		assert.equal(tool.concurrencySafe, true, `${name} should be concurrency-safe`);
+		assert.equal(tool.idempotent, true, `${name} should be idempotent`);
+		assert.equal(tool.cacheable, true, `${name} should be cacheable`);
+		assert.equal(tool.mutatesVault, false, `${name} should not mutate vault state`);
+		assert.equal(tool.mutatesExternal, false, `${name} should not mutate external state`);
+		assert.equal(tool.riskLevel, "low", `${name} should be a low-risk tool`);
+		assert.ok(tool.outputBudget > 0, `${name} should declare output budget`);
+	}
+
+	const askNames = toolRegistry.listForAgentMode("ask").map((tool) => tool.name);
+	assert.ok(askNames.includes("read_many"));
+	assert.ok(askNames.includes("search_and_read"));
+	assert.ok(askNames.includes("project_tree"));
+	assert.ok(toolRegistry.buildPromptToolNameUnion({ agentMode: "ask" }).includes("read_many"));
+	assert.ok(toolRegistry.buildNativeToolDefinitions({ agentMode: "research" }).some((tool) => tool.name === "search_and_read"));
+});
+
+test("plan_write is model-only planning infrastructure hidden from user manifests", async () => {
+	const { registry, manifest } = await loadModules();
+	const toolRegistry = registry.ToolRegistry.getInstance();
+	const planWrite = toolRegistry.get("plan_write");
+
+	assert.ok(planWrite, "plan_write should be registered");
+	assert.equal(planWrite.modelOnly, true);
+	assert.equal(planWrite.userVisible, false);
+	assert.equal(planWrite.category, "planning");
+	assert.equal(planWrite.resultKind, "plan");
+	assert.equal(planWrite.readOnly, true);
+	assert.equal(planWrite.concurrencySafe, false, "plan writes must run before other tool work");
+	assert.equal(planWrite.mutatesVault, false);
+	assert.equal(planWrite.mutatesExternal, false);
+
+	const askTools = toolRegistry.listForAgentMode("ask").map((tool) => tool.name);
+	assert.ok(askTools.includes("plan_write"), "normal agent modes should expose plan_write to the model");
+	assert.ok(toolRegistry.buildNativeToolDefinitions({ agentMode: "research" }).some((tool) => tool.name === "plan_write"));
+	assert.ok(toolRegistry.buildPromptToolNameUnion({ agentMode: "write" }).includes("plan_write"));
+
+	const readOnlyAllowlist = toolRegistry.listForAgentMode("ask", { allowedTools: ["read"] }).map((tool) => tool.name);
+	assert.ok(readOnlyAllowlist.includes("read"));
+	assert.ok(readOnlyAllowlist.includes("plan_write"), "file-tool allowlists should not remove harness planning");
+	assert.deepEqual(manifest.findToolManifest("plan_write"), null);
+	assert.ok(!toolRegistry.listManifests().some((tool) => tool.name === "plan_write"));
 });
 
 test("default Obsidian modes hide debug-only exec from prompt and native surfaces", async () => {
@@ -125,7 +177,7 @@ test("prompt tool argument lines describe project-relative filesystem paths", as
 	const lines = toolRegistry.buildPromptToolArgumentLines({ agentMode: "developer", enableExecTool: true });
 	const lineFor = (name) => lines.find((line) => line.startsWith(`- ${name}:`)) ?? "";
 
-	for (const name of ["ls", "read", "grep", "search_text", "glob", "write", "edit", "delete"]) {
+	for (const name of ["ls", "read", "read_many", "grep", "search_text", "search_and_read", "glob", "project_tree", "write", "edit", "delete"]) {
 		assert.match(lineFor(name), /project-relative/i, `${name} prompt line should use project-relative guidance`);
 		assert.doesNotMatch(lineFor(name), /Vault-relative path/i, `${name} prompt line should not require vault-relative paths`);
 	}

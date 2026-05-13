@@ -52,6 +52,17 @@ test("agent runtime settings hide max tool iterations emergency fuse from user-f
 	}
 });
 
+test("agent runtime settings hide exec controls from user-facing UI", () => {
+	const settingsSource = read(settingsPath);
+
+	assert.doesNotMatch(settingsSource, /settings\.agent\.enableExec\.name/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.enableExec\.desc/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.execTimeout\.name/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.execTimeout\.desc/);
+	assert.doesNotMatch(settingsSource, /enableExecTool\)\.onChange/);
+	assert.doesNotMatch(settingsSource, /agentRuntime\.execTimeout\s*=/);
+});
+
 test("sync llm and soul sections render settings inside native groups", () => {
 	const source = read(settingsPath);
 	assert.match(source, /private renderSyncSection\(containerEl: HTMLElement\): void \{[\s\S]*?const group = this\.createNativeSettingsGroup\(containerEl\);[\s\S]*?new Setting\(group\)/);

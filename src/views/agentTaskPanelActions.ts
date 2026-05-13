@@ -30,6 +30,7 @@ export interface AgentTaskPanelActionCallbacks {
 	abortCurrentRun?: () => void;
 	getContinuePrompt?: () => string;
 	onProgress?: (event: RuntimeProgressEvent) => void;
+	beforeRuntimeRun?: (action: "resume" | "retry" | "continue", taskId: string) => void;
 	recordAgentTask: (task?: AgentTask) => void;
 	afterMutationReview?: () => Promise<void> | void;
 	render: () => void;
@@ -60,6 +61,7 @@ export function createAgentTaskPanelActionHandlers(
 
 	return {
 		async resume() {
+			callbacks.beforeRuntimeRun?.("resume", taskId);
 			const result = await runtime.resumeAgentTask(taskId, {
 				onProgress: callbacks.onProgress,
 				signal: callbacks.signal,
@@ -70,6 +72,7 @@ export function createAgentTaskPanelActionHandlers(
 		},
 
 		async retry() {
+			callbacks.beforeRuntimeRun?.("retry", taskId);
 			const result = await runtime.retryAgentTask(taskId, {
 				onProgress: callbacks.onProgress,
 				signal: callbacks.signal,
@@ -88,6 +91,7 @@ export function createAgentTaskPanelActionHandlers(
 		},
 
 		async continue() {
+			callbacks.beforeRuntimeRun?.("continue", taskId);
 			const result = await runtime.continueAgentTask(taskId, {
 				userPrompt: callbacks.getContinuePrompt?.() || "Continue.",
 				onProgress: callbacks.onProgress,

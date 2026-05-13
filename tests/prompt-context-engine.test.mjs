@@ -85,7 +85,7 @@ test("prompt path guidance delegates active project normalization to the tool la
 	assert.doesNotMatch(result.prompt, /prefer scoping ls\/grep\/search_text\/glob to that root/);
 });
 
-test("prompt context engine instructs canonical interaction routes and plan_create without read-only mutations", async () => {
+test("prompt context engine instructs canonical interaction routes and plan_write without read-only mutations", async () => {
 	const mod = await loadPromptContextEngineModule();
 	const engine = new mod.PromptContextEngine();
 	const result = engine.build({
@@ -102,12 +102,63 @@ test("prompt context engine instructs canonical interaction routes and plan_crea
 	assert.match(result.prompt, /direct_answer: no visible process, no visible plan, direct answer only/i);
 	assert.match(result.prompt, /clarify: ask one necessary question/i);
 	assert.match(result.prompt, /light_task: may show lightweight running status/i);
-	assert.match(result.prompt, /task_with_process: use visible process and visible plan/i);
+	assert.match(result.prompt, /task_with_process: use plan_write/i);
 	assert.doesNotMatch(result.prompt, /Simple tasks must return only the response schema/i);
+	assert.match(result.prompt, /plan_write/);
 	assert.match(result.prompt, /"type":"plan_create"/);
 	assert.match(result.prompt, /"blocked"/);
 	assert.match(result.prompt, /Read-only requests cannot invent mutation tasks/i);
 	assert.match(result.prompt, /no modifications|no changes|read-only|只读|不要修改/);
+});
+
+test("prompt context engine teaches batched read-only tools without single-tool step limits", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		activeProjectRoot: "<projectRoot>",
+		userPrompt: "Investigate these related files before answering.",
+		agentProfile: "agent",
+	});
+
+	assert.doesNotMatch(result.prompt, /Call at most one tool each step/);
+	assert.match(result.prompt, /multiple read-only.*tool calls/i);
+	assert.match(result.prompt, /read_many/);
+	assert.match(result.prompt, /search_and_read/);
+	assert.match(result.prompt, /project_tree/);
+	assert.match(result.prompt, /plan_write/);
+	assert.match(result.prompt, /complex.*plan_write/i);
+	assert.match(result.prompt, /recovery\.suggestedArgs/);
+	assert.match(result.prompt, /"type":"tool_call"[\s\S]*"intake"/);
+	assert.match(result.prompt, /"name":"plan_write"/);
+	assert.match(result.prompt, /"name":"read_many"/);
+	assert.match(result.prompt, /"name":"search_and_read"/);
+	assert.match(result.prompt, /"name":"project_tree"/);
+});
+
+test("prompt context engine demonstrates model-owned task bar steps for workspace canvas tasks", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		activeProjectRoot: "<projectRoot>",
+		userPrompt: "读取工作区全部文件，整理成白板展示各文件间的关系",
+		agentProfile: "agent",
+	});
+
+	assert.match(result.prompt, /读取工作区全部文件/);
+	assert.match(result.prompt, /"name":"plan_write"/);
+	assert.match(result.prompt, /"title":"Map workspace files"/);
+	assert.match(result.prompt, /"title":"Read relevant files"/);
+	assert.match(result.prompt, /"title":"Extract file relationships"/);
+	assert.match(result.prompt, /"title":"Create the canvas"/);
+	assert.match(result.prompt, /"title":"Verify the canvas output"/);
 });
 
 test("prompt context engine omits active file lines by default even when an editor file exists elsewhere", async () => {

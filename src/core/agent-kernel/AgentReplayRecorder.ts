@@ -42,6 +42,8 @@ export class AgentReplayRecorder {
 			case "plan_revise":
 			case "plan_complete":
 			case "plan_skip":
+			case "task_bar_created":
+			case "task_bar_suppressed":
 				return [this.replayEvent(event, event.type, payload)];
 			case "narration":
 				return [this.replayEvent(event, "narration_report", payload)];

@@ -21,10 +21,12 @@ test("native tool definitions are built from registry contracts", async () => {
 	const definitions = registry.buildNativeToolDefinitions({ agentMode: "ask", enableExecTool: false });
 	const read = definitions.find((tool) => tool.name === "read");
 	const write = definitions.find((tool) => tool.name === "write");
+	const planWrite = definitions.find((tool) => tool.name === "plan_write");
 
 	assert.equal(read?.description, registry.get("read")?.description);
 	assert.deepEqual(read?.parameters, registry.get("read")?.parameters);
 	assert.deepEqual(write?.parameters.required, ["path", "content"]);
+	assert.ok(planWrite, "model-native tool definitions should include plan_write");
 	assert.ok(!definitions.some((tool) => tool.name === "exec"));
 });
 
@@ -38,7 +40,7 @@ test("native tool definitions respect disabled and allowed tool filters", async 
 		allowedTools: new Set(["read", "delete", "exec"]),
 	});
 
-	assert.deepEqual(definitions.map((tool) => tool.name).sort(), ["exec", "read"]);
+	assert.deepEqual(definitions.map((tool) => tool.name).sort(), ["exec", "plan_write", "read"]);
 });
 
 test("native filesystem tool descriptions align with project-relative path normalization", async () => {

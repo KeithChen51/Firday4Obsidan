@@ -71,6 +71,7 @@ test("agent task UI actions call runtime services and update visible task state"
 	const { createAgentTaskPanelActionHandlers } = await loadTaskPanelActions();
 	const calls = [];
 	const recorded = [];
+	const lifecycle = [];
 	let renderCount = 0;
 	let abortCount = 0;
 	const runtime = {
@@ -113,6 +114,7 @@ test("agent task UI actions call runtime services and update visible task state"
 		},
 		getContinuePrompt: () => "additional detail",
 		onProgress: (event) => progressEvents.push(event),
+		beforeRuntimeRun: (action, taskId) => lifecycle.push(["before", action, taskId]),
 		recordAgentTask: (task) => recorded.push(task),
 		afterMutationReview: async () => {
 			mutationReviewRefreshCount += 1;
@@ -139,6 +141,11 @@ test("agent task UI actions call runtime services and update visible task state"
 		["reject", "plan-1"],
 		["get", "task-1"],
 	]);
+	assert.deepEqual(lifecycle, [
+		["before", "resume", "task-1"],
+		["before", "retry", "task-1"],
+		["before", "continue", "task-1"],
+	]);
 	assert.equal(abortCount, 1);
 	assert.equal(mutationReviewRefreshCount, 2);
 	assert.equal(renderCount, 6);
@@ -147,6 +154,23 @@ test("agent task UI actions call runtime services and update visible task state"
 		["completed", "completed", "cancelled", "completed", "waiting_for_user", "waiting_for_user"],
 	);
 	assert.deepEqual(progressEvents.map((event) => event.message), ["resuming", "retrying", "continuing"]);
+});
+
+test("daily board task retry prepares a fresh runtime surface before progress arrives", () => {
+	const source = readViewSource();
+	const handlersMatch = source.match(/private createAgentTaskPanelActionHandlers\(taskId: string\) \{[\s\S]*?\n\t\}/);
+	assert.ok(handlersMatch, "task action handler factory should exist");
+	assert.match(handlersMatch[0], /beforeRuntimeRun:\s*\(\)\s*=>\s*this\.prepareTaskActionRuntimeRun\(taskId\)/);
+
+	const prepareMatch = source.match(/private prepareTaskActionRuntimeRun\(taskId: string\): void \{[\s\S]*?\n\t\}/);
+	assert.ok(prepareMatch, "task action runs should reset stale runtime UI state");
+	const prepareBlock = prepareMatch[0];
+	assert.match(prepareBlock, /this\.aiRuntimeTrajectoryStore\.reset\(\)/);
+	assert.match(prepareBlock, /this\.aiRuntimeTrajectorySnapshot = null/);
+	assert.match(prepareBlock, /this\.aiStreamingTrajectorySnapshot = null/);
+	assert.match(prepareBlock, /this\.aiRuntimeProgressTaskIds\.clear\(\)/);
+	assert.match(prepareBlock, /this\.forgetTrajectorySnapshotsForTask\(taskId\)/);
+	assert.match(prepareBlock, /this\.removeAssistantMessagesForTask\(taskId\)/);
 });
 
 test("runtime progress with task id hydrates the running task before final result", async () => {
