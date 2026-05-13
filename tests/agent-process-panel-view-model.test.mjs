@@ -42,6 +42,7 @@ function ordinaryProcessText(view) {
 			item.meta,
 			item.detail?.title,
 			...(item.detail?.lines ?? []),
+			...(item.notes ?? []).map((note) => note.text),
 		]),
 		...(view.timeline?.actions ?? []).flatMap((action) => [action.label, action.reason]),
 		view.timeline?.title,
@@ -657,8 +658,8 @@ test("buildAgentProcessPanelViewModel keeps completed file or context reads as c
 	assert.equal(view.timeline?.defaultExpanded, false);
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), ["读取上下文"]);
 	assert.deepEqual(view.visibleSteps[0]?.actions.map((action) => action.label), [
-		"Loaded current note",
-		"Read Notes/Today.md",
+		"读取项目现状",
+		"读取项目现状",
 	]);
 });
 
@@ -1105,7 +1106,7 @@ test("buildAgentProcessPanelViewModel groups process details by user-visible pha
 	assert.equal(view.timeline?.groups[1]?.items.length, 1);
 });
 
-test("buildAgentProcessPanelViewModel status bar prefers the current visible plan task", async () => {
+test("buildAgentProcessPanelViewModel keeps running status bar from repeating the visible Task Bar title", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
 	const view = buildAgentProcessPanelViewModel(makeSnapshot({
@@ -1133,10 +1134,10 @@ test("buildAgentProcessPanelViewModel status bar prefers the current visible pla
 	}), { now: new Date("2026-05-06T00:00:12.000Z") });
 
 	assert.ok(view.timeline?.statusBar);
-	assert.equal(view.timeline?.statusBar.phase, "任务");
-	assert.equal(view.timeline?.statusBar.action, "整理工作区文档关系");
+	assert.equal(view.timeline?.statusBar.phase, "执行中");
+	assert.equal(view.timeline?.statusBar.action, "过程记录会在展开后更新");
 	assert.equal(view.timeline?.statusBar.elapsed, "12s");
-	assert.doesNotMatch(view.timeline?.statusBar.action ?? "", /读取项目现状|FRIDAY 正在理解/);
+	assert.doesNotMatch(view.timeline?.statusBar.action ?? "", /整理工作区文档关系|读取项目现状|FRIDAY 正在理解/);
 });
 
 test("buildAgentProcessPanelViewModel exposes completed replay summary and evidence strip", async () => {
@@ -1222,6 +1223,33 @@ test("buildAgentProcessPanelViewModel exposes result artifacts and excludes pend
 	assert.equal(JSON.stringify(view.timeline.finalArtifacts).includes("Notes/Pending.md"), false);
 });
 
+test("buildAgentProcessPanelViewModel assigns Native Kit file types to artifacts and diff files", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		mutations: [
+			{ id: "md", event: "applied", operation: "edit", targetPath: "Notes/Updated.md", status: "applied", summary: "Updated note.", reason: "" },
+			{ id: "canvas", event: "applied", operation: "write", targetPath: "Maps/Project.canvas", status: "applied", summary: "Updated canvas.", reason: "" },
+			{ id: "html", event: "applied", operation: "write", targetPath: "docs/design/native-kit-catalog.html", status: "applied", summary: "Updated catalog.", reason: "" },
+			{ id: "plain", event: "applied", operation: "write", targetPath: "attachments/readme", status: "applied", summary: "Updated attachment.", reason: "" },
+		],
+	}));
+
+	assert.deepEqual(view.resultArtifacts.map((artifact) => [artifact.path, artifact.fileType]), [
+		["Notes/Updated.md", "markdown"],
+		["Maps/Project.canvas", "canvas"],
+		["docs/design/native-kit-catalog.html", "code"],
+		["attachments/readme", "note"],
+	]);
+	assert.deepEqual(view.diffSummary?.files.map((file) => [file.path, file.fileType]), [
+		["Notes/Updated.md", "markdown"],
+		["Maps/Project.canvas", "canvas"],
+		["docs/design/native-kit-catalog.html", "code"],
+		["attachments/readme", "note"],
+	]);
+});
+
 test("buildAgentProcessPanelViewModel uses approved FRIDAY process labels with duration", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -1304,7 +1332,7 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assert.equal(view.visibleSteps[0]?.status, "completed");
 	assert.equal(view.visibleSteps[1]?.status, "waiting_for_approval");
 	assert.deepEqual(view.visibleSteps[0]?.actions.map((action) => action.label), [
-		"Loaded memory",
+		"读取项目现状",
 		"FRIDAY 正在理解你的请求。",
 		"Search project",
 	]);
@@ -1413,12 +1441,13 @@ test("buildAgentProcessPanelViewModel keeps stage reports out of structured proc
 		"读取项目现状",
 	]);
 	assert.equal(view.timeline?.items[0]?.summary, "需要把过程叙事放进线性时间线。");
-	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "Read process view model.");
+	assert.equal(view.timeline?.items[1]?.detail, undefined);
 	assert.equal(view.timeline?.items.some((item) => item.kind === "stage_report"), false);
 	const contextItem = view.timeline?.items.find((item) => item.kind === "context");
 	assert.deepEqual(contextItem?.notes, [
 		{ id: "note:narration-stage", text: stageText, tone: "progress" },
 	]);
+	assert.doesNotMatch(ordinaryProcessText(view), /Read process view model/);
 	assert.doesNotMatch(view.timeline?.collapsedSummary ?? "", /已读取相关文件，接下来实现事件链路/);
 	assert.doesNotMatch(JSON.stringify(view.timeline), /阶段性汇报|stage_report|narration_report/);
 	assert.doesNotMatch(JSON.stringify(view.timeline), /context_ready|Context|Reasoning|Tools|Review|Finalize/);
@@ -1526,6 +1555,77 @@ test("buildAgentProcessPanelViewModel hides generic live model reasoning so it d
 
 	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context"]);
 	assert.doesNotMatch(JSON.stringify(view), /整理方案|计划|received model reasoning|正在理解你的请求/);
+});
+
+test("buildAgentProcessPanelViewModel productizes repeated context tool results without runtime plumbing", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({
+				id: "tree",
+				kind: "tool",
+				title: "project_tree",
+				detail: "project_tree listed 13 entry(s)",
+				status: "ok",
+				tool: "project_tree",
+				targetPath: "workspace",
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "read-many",
+				kind: "tool",
+				title: "Read 8 file(s)",
+				detail: "Read 8 file(s)",
+				status: "ok",
+				tool: "read_many",
+				targetPath: "src/views",
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "tool-ok",
+				kind: "tool",
+				title: "Tool ok.",
+				detail: "Tool ok.",
+				status: "ok",
+				tool: "read",
+				targetPath: "src/views/agentProcessPanelViewModel.ts",
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "plumbing",
+				kind: "system",
+				title: "Native tool result appended to model messages.",
+				detail: "Native tool result appended to model messages.",
+				status: "ok",
+				rawEventType: "tool_result_appended",
+			}),
+			makeItem({
+				id: "stage",
+				kind: "narration",
+				title: "阶段性汇报",
+				detail: "checkpoint debug model messages",
+				status: "running",
+				rawEventType: "narration_report",
+				narrationKind: "stage_report",
+				narrationJustDone: "Read 8 file(s)",
+				narrationNext: "Native tool result appended to model messages.",
+				narrationSource: "model",
+			}),
+		],
+	}));
+
+	assert.ok(view.timeline);
+	assert.deepEqual(view.timeline.items.map((item) => item.kind), ["receipt", "context"]);
+	const contextItem = view.timeline.items.find((item) => item.kind === "context");
+	assert.ok(contextItem);
+	assert.equal(contextItem.title, "读取项目现状");
+	assert.equal(contextItem.summary, "已查看项目结构和相关文件。");
+	assert.equal(contextItem.meta, undefined);
+	assert.equal(contextItem.detail, undefined);
+	assert.equal(contextItem.notes, undefined);
+	assert.doesNotMatch(ordinaryProcessText(view), /Tool ok\.|Native tool result appended|project_tree listed|Read 8 file\(s\)|model messages|checkpoint|debug|已运行\s*\d+\s*条命令/i);
 });
 
 test("buildAgentProcessPanelViewModel hides context checkpoint implementation wording", async () => {

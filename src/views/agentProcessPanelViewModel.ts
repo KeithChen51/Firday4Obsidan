@@ -75,6 +75,7 @@ type AgentTrajectoryIntakeSurfaceItem = AgentTrajectoryItem & {
 const USER_VISIBLE_RETRY_LIMIT = 5;
 const RETRY_RECOVERY_COPY_PREFIX = "网络波动，正在恢复请求";
 const REQUEST_EXHAUSTED_COPY = "请求多次未成功，请稍后重试。";
+const PROJECT_CONTEXT_SUMMARY = "已查看项目结构和相关文件。";
 
 export interface AgentProcessStatusView {
 	key: AgentTrajectoryStatus;
@@ -106,11 +107,14 @@ export interface AgentProcessMutationView {
 	tone: AgentProcessTone;
 }
 
+export type AgentProcessFileType = "markdown" | "canvas" | "code" | "note";
+
 export interface AgentProcessArtifactView {
 	id: string;
 	path: string;
 	name: string;
 	extension: string;
+	fileType: AgentProcessFileType;
 	metadata: string;
 	status: "created" | "modified" | "applied";
 	summary: string;
@@ -122,6 +126,7 @@ export interface AgentProcessDiffSummaryView {
 	files: Array<{
 		path: string;
 		summary: string;
+		fileType: AgentProcessFileType;
 		additions?: number;
 		deletions?: number;
 	}>;
@@ -1206,10 +1211,20 @@ function isStageReportNoteAnchor(item: AgentProcessTimelineItemView): boolean {
 }
 
 function stageReportNoteText(item: AgentTrajectoryItem): string {
-	const detail = productizeRuntimeText(item.detail || "");
-	const progress = productizeRuntimeText([item.narrationJustDone, item.narrationNext].filter(Boolean).join(" "));
+	const rawDetail = item.detail || "";
+	const rawProgress = [item.narrationJustDone, item.narrationNext].filter(Boolean).join(" ");
+	if (
+		isInternalRuntimeTimelineText(rawDetail) ||
+		isProjectContextRuntimeText(rawDetail) ||
+		isInternalRuntimeTimelineText(rawProgress) ||
+		isProjectContextRuntimeText(rawProgress)
+	) {
+		return "";
+	}
+	const detail = productizeRuntimeText(rawDetail);
+	const progress = productizeRuntimeText(rawProgress);
 	const text = detail || progress;
-	if (!text || /stage_report|narration_report|阶段性汇报/i.test(text)) {
+	if (!text || /stage_report|narration_report|阶段性汇报/i.test(text) || isInternalRuntimeTimelineText(text)) {
 		return "";
 	}
 	return sanitizeTimelineSummary(text);
@@ -1261,8 +1276,8 @@ function buildTimelineStatusBar(
 	const currentTaskTitle = status === "completed" ? "" : currentVisiblePlanTaskTitle(snapshot);
 	if (currentTaskTitle) {
 		return {
-			phase: "任务",
-			action: currentTaskTitle,
+			phase: "执行中",
+			action: "过程记录会在展开后更新",
 			elapsed: formatDuration(durationSeconds),
 			status,
 		};
@@ -1534,11 +1549,15 @@ function timelineSummaryForStep(
 		return retryTimelineSummaryForStep(step);
 	}
 	if (kind === "context") {
+		if (isProjectContextStep(step)) {
+			return PROJECT_CONTEXT_SUMMARY;
+		}
 		const fileCount = step.fileRefs.length;
 		if (fileCount > 0) {
 			return fileCount === 1 ? "已查看相关文件和项目上下文。" : `已查看 ${fileCount} 个相关文件和项目上下文。`;
 		}
-		return sanitizeTimelineSummary(step.summary || "已读取项目上下文。");
+		const summary = sanitizeTimelineSummary(step.summary);
+		return isGenericContextReadSummary(summary) ? PROJECT_CONTEXT_SUMMARY : summary || "已读取项目上下文。";
 	}
 	if (kind === "receipt") {
 		const summary = sanitizeTimelineSummary(step.summary);
@@ -1590,10 +1609,54 @@ function reasoningTimelineSummary(summary: string): string {
 	return sentences.join(" ") || sanitized;
 }
 
+function isProjectContextStep(step: AgentProcessStepView): boolean {
+	if (step.actions.some((action) => isProjectContextTool(action.tool))) {
+		return true;
+	}
+	const text = step.actions
+		.map((action) => `${action.label || ""} ${action.detail || ""} ${action.targetPath || ""}`)
+		.join(" ");
+	return isProjectContextRuntimeText(text);
+}
+
+function isProjectContextTool(tool: string | undefined): boolean {
+	const normalized = normalizeToken(tool);
+	return normalized === "project_tree" ||
+		normalized === "read_many" ||
+		normalized === "search_and_read" ||
+		normalized === "read" ||
+		normalized === "ls" ||
+		normalized === "glob" ||
+		normalized === "grep" ||
+		normalized === "search_text";
+}
+
+function isProjectContextRuntimeText(value: string): boolean {
+	return /project_tree|listed\s+\d+\s+(?:entry|entries|item|items)|read\s+\d+\s+file\(s\)|read_many|search_and_read/i.test(value);
+}
+
+function isGenericContextReadSummary(value: string): boolean {
+	return /^(?:read|loaded|listed|searched|found|checked)\b/i.test(value) ||
+		isProjectContextRuntimeText(value);
+}
+
+function isInternalRuntimeTimelineText(value: string): boolean {
+	const text = cleanText(value);
+	if (!text) {
+		return false;
+	}
+	return /^Tool ok\.?$/i.test(text) ||
+		/Native tool result appended/i.test(text) ||
+		/\bmodel messages?\b/i.test(text) ||
+		/\bcheckpoint\b/i.test(text) ||
+		/\bdebug\b/i.test(text) ||
+		/Context package built before|context_ready|native model request/i.test(text);
+}
+
 function timelineMetaForStep(step: AgentProcessStepView, kind: AgentProcessTimelineItemKind): string {
 	if (kind === "context") {
-		const commandCount = step.actions.filter((action) => action.kind === "event").length;
-		return commandCount > 0 ? `已运行 ${commandCount} 条命令` : "";
+		void step;
+		return "";
 	}
 	if (kind === "retry") {
 		return retryAttemptMeta(step.summary);
@@ -1617,6 +1680,11 @@ function timelineDetailForStep(
 	kind: AgentProcessTimelineItemKind,
 	visibleTexts: string[] = [],
 ): AgentProcessTimelineDetailView | undefined {
+	if (kind === "context") {
+		void step;
+		void visibleTexts;
+		return undefined;
+	}
 	const lines: string[] = [];
 	const visible = new Set(visibleTexts.map(normalizeTimelineDedupeText).filter(Boolean));
 	for (const action of step.actions) {
@@ -1655,6 +1723,9 @@ function sanitizeTimelineDetail(value: string, kind: AgentProcessTimelineItemKin
 	if (kind === "approval" && normalizeFileMutationStatusText(value)) {
 		return "";
 	}
+	if (isInternalRuntimeTimelineText(value) || isProjectContextRuntimeText(value)) {
+		return "";
+	}
 	if (/Context package built before|context_ready/i.test(value)) {
 		return "";
 	}
@@ -1669,6 +1740,12 @@ function sanitizeTimelineSummary(value: string): string {
 	const productText = productizeRuntimeText(text);
 	if (productText && productText !== text) {
 		return productText;
+	}
+	if (isProjectContextRuntimeText(text)) {
+		return PROJECT_CONTEXT_SUMMARY;
+	}
+	if (isInternalRuntimeTimelineText(text)) {
+		return "";
 	}
 	if (!productText && /checkpoint|model_request|model request|replay|debug/i.test(text)) {
 		return "FRIDAY 正在整理当前进度。";
@@ -1824,26 +1901,21 @@ function compactRepeatedContextTimelineItems(
 	const compacted: AgentProcessTimelineItemView[] = [];
 	let activeContext: AgentProcessTimelineItemView | null = null;
 	let activeBatches = 0;
-	let activeCommands = 0;
 	for (const item of items) {
 		if (item.kind === "context") {
-			const commandCount = contextCommandCount(item);
 			if (!activeContext) {
 				activeContext = { ...item };
 				activeBatches = 1;
-				activeCommands = commandCount;
 				compacted.push(activeContext);
 				continue;
 			}
 			activeBatches += 1;
-			activeCommands += commandCount;
-			mergeContextTimelineItem(activeContext, item, activeBatches, activeCommands);
+			mergeContextTimelineItem(activeContext, item, activeBatches);
 			continue;
 		}
 		compacted.push(item);
 		activeContext = null;
 		activeBatches = 0;
-		activeCommands = 0;
 	}
 	return compacted;
 }
@@ -1852,11 +1924,11 @@ function mergeContextTimelineItem(
 	target: AgentProcessTimelineItemView,
 	item: AgentProcessTimelineItemView,
 	batches: number,
-	commands: number,
 ): void {
+	void batches;
 	target.status = mergeTimelineStatus(target.status, item.status);
-	target.summary = `已合并 ${batches} 批项目现状读取。`;
-	target.meta = commands > 0 ? `已运行 ${commands} 条命令` : `${batches} 批`;
+	target.summary = PROJECT_CONTEXT_SUMMARY;
+	delete target.meta;
 	target.artifactRefs = mergeUnique([...(target.artifactRefs ?? []), ...(item.artifactRefs ?? [])]);
 	target.actionRefs = mergeUnique([...(target.actionRefs ?? []), ...(item.actionRefs ?? [])]);
 	target.sourceItemIds = mergeUnique([...(target.sourceItemIds ?? []), ...(item.sourceItemIds ?? [])]);
@@ -1875,14 +1947,6 @@ function mergeTimelineNotes(
 		}
 	}
 	return notes.length > 0 ? notes : undefined;
-}
-
-function contextCommandCount(item: AgentProcessTimelineItemView): number {
-	const match = item.meta?.match(/\d+/);
-	if (match) {
-		return Number(match[0]);
-	}
-	return 1;
 }
 
 function mergeTimelineStatus(
@@ -2410,6 +2474,12 @@ function summaryForStep(
 	if (builder.key === "transport") {
 		return transportSummaryForItems(builder.items);
 	}
+	if (builder.key === "context") {
+		const summary = firstMeaningfulDetail(builder.items);
+		return isContextBuilderProjectRead(builder) || isGenericContextReadSummary(summary)
+			? PROJECT_CONTEXT_SUMMARY
+			: summary || "已读取项目上下文。";
+	}
 	if (builder.key === "receipt" || builder.key === "plan") {
 		return firstMeaningfulDetail(builder.items);
 	}
@@ -2425,6 +2495,13 @@ function pendingMutationCount(snapshot: AgentTrajectorySnapshot, builder: StepBu
 		(!filePaths.size || filePaths.has(mutation.targetPath))
 	).length;
 	return count || filePaths.size;
+}
+
+function isContextBuilderProjectRead(builder: StepBuilder): boolean {
+	return builder.items.some((item) =>
+		isProjectContextTool(item.tool) ||
+		isProjectContextRuntimeText(`${item.title || ""} ${item.detail || ""} ${item.targetPath || ""}`)
+	);
 }
 
 function firstMeaningfulDetail(items: AgentTrajectoryItem[]): string {
@@ -2472,12 +2549,12 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 		: item.kind === "transport"
 			? transportSummaryForItems([item])
 			: cleanText(item.detail);
+	const label = stepEventActionLabel(item);
+	const detail = stepEventActionDetail(item, narrationDetail);
 	return {
 		id: item.id,
-		label: item.status === "cancelled" ? "已停止处理" : sanitizeTimelineSummary(item.title) || "FRIDAY 正在处理",
-		detail: item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
-			? item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n")
-			: sanitizeTimelineSummary(narrationDetail),
+		label,
+		detail,
 		kind: "event",
 		tone: itemTone(item.status),
 		status: item.status,
@@ -2485,6 +2562,28 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 		...(item.targetPath ? { targetPath: item.targetPath } : {}),
 		...(item.rawEventType ? { rawEventType: item.rawEventType } : {}),
 	};
+}
+
+function stepEventActionLabel(item: AgentTrajectoryItem): string {
+	if (item.status === "cancelled") {
+		return "已停止处理";
+	}
+	const raw = sanitizeTimelineSummary(item.title);
+	if (semanticStepKey(item) === "context" && (isProjectContextTool(item.tool) || isGenericContextReadSummary(raw))) {
+		return "读取项目现状";
+	}
+	return raw || "FRIDAY 正在处理";
+}
+
+function stepEventActionDetail(item: AgentTrajectoryItem, narrationDetail: string): string {
+	if (item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0) {
+		return item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n");
+	}
+	const detail = sanitizeTimelineSummary(narrationDetail);
+	if (semanticStepKey(item) === "context" && (isProjectContextTool(item.tool) || isGenericContextReadSummary(detail))) {
+		return PROJECT_CONTEXT_SUMMARY;
+	}
+	return detail;
 }
 
 function toStepControlAction(action: AgentProcessActionView): AgentProcessStepActionView {
@@ -2552,6 +2651,7 @@ function buildResultArtifacts(snapshot: AgentTrajectorySnapshot): AgentProcessAr
 			path: mutation.targetPath,
 			name: filenameForPath(mutation.targetPath),
 			extension: extensionForPath(mutation.targetPath),
+			fileType: fileTypeForPath(mutation.targetPath),
 			metadata: metadataForPath(mutation.targetPath),
 			status: artifactStatusForMutation(mutation),
 			summary: mutationDisplaySummary(mutation.summary || mutation.reason),
@@ -2575,6 +2675,7 @@ function buildDiffSummary(artifacts: AgentProcessArtifactView[]): AgentProcessDi
 		files: artifacts.map((artifact) => ({
 			path: artifact.path,
 			summary: artifact.summary,
+			fileType: artifact.fileType,
 		})),
 	};
 }
@@ -2775,6 +2876,20 @@ function extensionForPath(pathValue: string): string {
 	return dotIndex >= 0 ? name.slice(dotIndex + 1).toLowerCase() : "";
 }
 
+function fileTypeForPath(pathValue: string): AgentProcessFileType {
+	const extension = extensionForPath(pathValue);
+	if (extension === "md") {
+		return "markdown";
+	}
+	if (extension === "canvas") {
+		return "canvas";
+	}
+	if (isCodeFileExtension(extension)) {
+		return "code";
+	}
+	return "note";
+}
+
 function metadataForPath(pathValue: string): string {
 	const extension = extensionForPath(pathValue);
 	if (extension === "md") {
@@ -2783,7 +2898,29 @@ function metadataForPath(pathValue: string): string {
 	if (extension === "canvas") {
 		return "画布 · Canvas";
 	}
+	if (isCodeFileExtension(extension)) {
+		return extension ? `代码 · ${extension.toUpperCase()}` : "代码";
+	}
 	return extension ? `文件 · ${extension.toUpperCase()}` : "文件";
+}
+
+function isCodeFileExtension(extension: string): boolean {
+	return [
+		"html",
+		"htm",
+		"css",
+		"js",
+		"jsx",
+		"ts",
+		"tsx",
+		"mjs",
+		"cjs",
+		"json",
+		"yaml",
+		"yml",
+		"xml",
+		"svg",
+	].includes(extension);
 }
 
 function artifactStatusForMutation(mutation: AgentTrajectoryMutation): AgentProcessArtifactView["status"] {
