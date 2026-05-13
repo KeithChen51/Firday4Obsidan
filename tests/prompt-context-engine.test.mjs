@@ -161,6 +161,49 @@ test("prompt context engine demonstrates model-owned task bar steps for workspac
 	assert.match(result.prompt, /"title":"Verify the canvas output"/);
 });
 
+test("prompt context engine prefers Obsidian structure tools after loading matching skills", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "agent",
+		depth: 1,
+		permissionMode: "standard",
+		runtimeProfileId: "native",
+		userPrompt: "读取工作区全部文件，整理成白板展示各文件间的关系",
+		agentProfile: "FRIDAY",
+		agentMode: "ask",
+	});
+
+	assert.match(result.prompt, /canvas_apply/);
+	assert.match(result.prompt, /validate_canvas/);
+	assert.match(result.prompt, /markdown_outline/);
+	assert.match(result.prompt, /frontmatter_update/);
+	assert.match(result.prompt, /json-canvas/);
+	assert.match(result.prompt, /obsidian-markdown/);
+	assert.match(result.prompt, /write\/edit.*low-level fallback/i);
+});
+
+test("prompt context engine keeps Obsidian structure tools out of unrelated prompt-mode budgets", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "agent",
+		depth: 1,
+		permissionMode: "standard",
+		runtimeProfileId: "native",
+		userPrompt: "Summarize the current project risks before answering.",
+		agentProfile: "FRIDAY",
+		agentMode: "ask",
+	});
+
+	assert.doesNotMatch(result.prompt, /canvas_apply/);
+	assert.doesNotMatch(result.prompt, /canvas_read/);
+	assert.doesNotMatch(result.prompt, /frontmatter_update/);
+	assert.doesNotMatch(result.prompt, /markdown_insert_reference/);
+	assert.match(result.prompt, /read_many/);
+	assert.match(result.prompt, /search_and_read/);
+});
+
 test("prompt context engine omits active file lines by default even when an editor file exists elsewhere", async () => {
 	const mod = await loadPromptContextEngineModule();
 	const engine = new mod.PromptContextEngine();

@@ -62,17 +62,35 @@ test("Obsidian tool adapter threads mutation review identifiers to write edit an
 			threaded.push(["delete", args, agentId, toolCallId]);
 			return { status: "pending_review" };
 		},
+		toolCanvasApply: async (args, agentId, toolCallId) => {
+			threaded.push(["canvas_apply", args, agentId, toolCallId]);
+			return { status: "pending_review" };
+		},
+		toolFrontmatterUpdate: async (args, agentId, toolCallId) => {
+			threaded.push(["frontmatter_update", args, agentId, toolCallId]);
+			return { status: "pending_review" };
+		},
+		toolMarkdownInsertReference: async (args, agentId, toolCallId) => {
+			threaded.push(["markdown_insert_reference", args, agentId, toolCallId]);
+			return { status: "pending_review" };
+		},
 	};
 	const adapter = new ObsidianToolAdapter(handlers);
 
 	await adapter.runToolByName("write", { path: "a.md", content: "new" }, "agent-a", "tool-call-1");
 	await adapter.runToolByName("edit", { path: "a.md", edits: [] }, "agent-a", "tool-call-2");
 	await adapter.runToolByName("delete", { path: "a.md" }, "agent-a", "tool-call-3");
+	await adapter.runToolByName("canvas_apply", { path: "a.canvas", nodes: [] }, "agent-a", "tool-call-4");
+	await adapter.runToolByName("frontmatter_update", { path: "a.md", set: {} }, "agent-a", "tool-call-5");
+	await adapter.runToolByName("markdown_insert_reference", { path: "a.md", reference: "[[B]]" }, "agent-a", "tool-call-6");
 
 	assert.deepEqual(threaded, [
 		["write", { path: "a.md", content: "new" }, "agent-a", "tool-call-1"],
 		["edit", { path: "a.md", edits: [] }, "agent-a", "tool-call-2"],
 		["delete", { path: "a.md" }, "agent-a", "tool-call-3"],
+		["canvas_apply", { path: "a.canvas", nodes: [] }, "agent-a", "tool-call-4"],
+		["frontmatter_update", { path: "a.md", set: {} }, "agent-a", "tool-call-5"],
+		["markdown_insert_reference", { path: "a.md", reference: "[[B]]" }, "agent-a", "tool-call-6"],
 	]);
 });
 

@@ -114,6 +114,23 @@ test("json canvas builtin skill follows the JSON Canvas spec instead of inventin
 	assert.equal(markdown.includes("Preserve existing IDs when editing an existing canvas"), true);
 	assert.equal(markdown.includes("z-index"), true);
 	assert.equal(markdown.includes("16-character lowercase hex"), false);
+	assert.equal(markdown.includes("canvas_read"), true);
+	assert.equal(markdown.includes("canvas_apply"), true);
+	assert.equal(markdown.includes("validate_canvas"), true);
+	assert.equal(markdown.includes("validate_outputs"), true);
+	assert.equal(markdown.includes("Do not default to raw write/edit for Canvas JSON"), true);
+});
+
+test("obsidian markdown builtin skill points models to structured FRIDAY markdown tools", async () => {
+	const mod = await loadBuiltinPack();
+	const markdown = mod.getBuiltinSkillMarkdown("obsidian-markdown");
+
+	assert.equal(markdown.includes("markdown_outline"), true);
+	assert.equal(markdown.includes("frontmatter_update"), true);
+	assert.equal(markdown.includes("markdown_insert_reference"), true);
+	assert.equal(markdown.includes("validate_markdown"), true);
+	assert.equal(markdown.includes("validate_outputs"), true);
+	assert.equal(markdown.includes("Use write/edit only as a low-level fallback"), true);
 });
 
 test("obsidian bases builtin skill covers embedded bases and safe editing workflow", async () => {
@@ -123,6 +140,8 @@ test("obsidian bases builtin skill covers embedded bases and safe editing workfl
 	assert.equal(markdown.includes("Parse the YAML first"), true);
 	assert.equal(markdown.includes("Preserve unrelated sections"), true);
 	assert.equal(markdown.includes("formula.X"), true);
+	assert.equal(markdown.includes("base_apply"), false);
+	assert.equal(markdown.includes("validate_base"), false);
 });
 
 test("builtin review notes describe the changed obsidian skills with original problem and fix sections", async () => {

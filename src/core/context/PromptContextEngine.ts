@@ -8,6 +8,7 @@ import {
 	buildPromptToolArgumentLinesFromRegistry,
 	buildPromptToolNameUnionFromRegistry,
 	type AgentMode,
+	type ToolListOptions,
 } from "../tools/ToolRegistry";
 import {
 	normalizeActiveFileContext,
@@ -69,6 +70,44 @@ export interface PromptContextBuildResult {
 	summary: PromptContextSummary;
 }
 
+const OBSIDIAN_STRUCTURE_TOOL_NAMES = new Set([
+	"canvas_read",
+	"canvas_apply",
+	"markdown_outline",
+	"frontmatter_update",
+	"markdown_insert_reference",
+	"validate_canvas",
+	"validate_markdown",
+	"validate_outputs",
+]);
+
+const OBSIDIAN_STRUCTURE_KEYWORDS = [
+	".canvas",
+	"canvas",
+	"whiteboard",
+	"frontmatter",
+	"markdown",
+	"wikilink",
+	"embed",
+	"callout",
+	"yaml",
+	"properties",
+	"json-canvas",
+	"obsidian-markdown",
+	"白板",
+	"画布",
+	"关系图",
+	"结构图",
+	"双链",
+	"嵌入",
+	"属性",
+	"元数据",
+	"标签",
+	"引用",
+	"标题",
+	"链接",
+];
+
 export class PromptContextEngine {
 	private readonly contextAssembler = new ContextAssembler();
 
@@ -79,12 +118,39 @@ export class PromptContextEngine {
 		const memoryContext = input.memoryContext?.trim() ?? "";
 		const mentionContextText = this.formatMentionContext(input.mentionContext);
 		const activeFileContext = normalizeActiveFileContext(input.activeFileContext);
-		const toolListOptions = {
+		const includeObsidianStructureTools = this.shouldIncludeObsidianStructureTools(
+			input,
+			autoSkillContext,
+			activeFileContext,
+		);
+		const toolListOptions: ToolListOptions = {
 			agentMode: input.agentMode ?? "ask",
 			enableExecTool: input.enableExecTool ?? false,
+			disabledTools: includeObsidianStructureTools ? null : OBSIDIAN_STRUCTURE_TOOL_NAMES,
 		};
 		const toolNameUnion = buildPromptToolNameUnionFromRegistry(toolListOptions);
 		const toolArgumentLines = buildPromptToolArgumentLinesFromRegistry(toolListOptions);
+		const obsidianStructureRules = includeObsidianStructureTools
+			? [
+					"- Obsidian Canvas: load json-canvas when useful; prefer canvas_read/canvas_apply/validate_canvas over raw JSON writes.",
+					"- Obsidian Markdown: load obsidian-markdown when useful; prefer markdown_outline/frontmatter_update/markdown_insert_reference/validate_markdown.",
+					"- Validate changed .canvas/.md outputs before final response; write/edit are low-level fallback tools for structured Obsidian files.",
+				]
+			: [];
+		const obsidianStructureExamples = includeObsidianStructureTools
+			? [
+					"User: create a relationship canvas from workspace files after loading json-canvas",
+					'Assistant: {"type":"tool_call","assistant":"Create the Canvas through the structured canvas tool.","tool":{"name":"canvas_apply","args":{"path":"workspace/relationships.canvas","mode":"upsert","nodes":[...],"edges":[...]}}}',
+					'Assistant follow-up: {"type":"tool_call","assistant":"Validate the created canvas before finalizing.","tool":{"name":"validate_canvas","args":{"path":"workspace/relationships.canvas"}}}',
+					"",
+					"User: update note properties and add a related note after loading obsidian-markdown",
+					'Assistant: {"type":"tool_call","assistant":"Inspect structure, update metadata/reference, then validate.","tool":{"name":"markdown_outline","args":{"path":"workspace/project.md"}}}',
+					'Assistant follow-up: {"type":"tool_call","tool":{"name":"frontmatter_update","args":{"path":"workspace/project.md","set":{"status":"active"}}}}',
+					'Assistant follow-up: {"type":"tool_call","tool":{"name":"markdown_insert_reference","args":{"path":"workspace/project.md","reference":"[[Related Note]]"}}}',
+					'Assistant follow-up: {"type":"tool_call","tool":{"name":"validate_markdown","args":{"path":"workspace/project.md"}}}',
+					"",
+				]
+			: [];
 		const lines = [
 			"You are FRIDAY Agent Runtime.",
 			"You must output strict JSON only. Do not output Markdown.",
@@ -109,6 +175,7 @@ export class PromptContextEngine {
 			"- Prefer tool evidence first; do not hallucinate filesystem facts.",
 			"- In native tool mode, you may return plan_write plus multiple read-only, concurrency-safe tool calls in one step; runtime applies plan_write first and preserves tool result order.",
 			"- Prefer composite read-only tools when they reduce loops: project_tree for an overview, read_many for related files, and search_and_read for search plus snippets.",
+			...obsidianStructureRules,
 			"- SkillCatalog is summary-only metadata. If a skill clearly helps, call use_skill first to load its full instructions.",
 			"- use_skill only loads skill instructions; after TOOL_RESULT from use_skill, continue execution with the loaded skill context.",
 			"- Use memory only for durable facts that should survive future turns.",
@@ -151,6 +218,7 @@ export class PromptContextEngine {
 			"User: read every workspace file and create a whiteboard showing relationships",
 			'Assistant: {"type":"tool_call","assistant":"Create visible Task Bar steps first.","intake":{"interactionRoute":"task_with_process","statement":"I will read the workspace, extract relationships, and create a canvas.","shouldShowProcess":true,"shouldUseVisiblePlan":true},"tool":{"name":"plan_write","args":{"visibility":"task_bar","reason":"Create a relationship whiteboard.","tasks":[{"id":"map","title":"Map workspace files","status":"in_progress"},{"id":"read","title":"Read relevant files","status":"pending"},{"id":"relate","title":"Extract file relationships","status":"pending"},{"id":"canvas","title":"Create the canvas","status":"pending"},{"id":"verify","title":"Verify the canvas output","status":"pending"}]}}}',
 			"",
+			...obsidianStructureExamples,
 			"User: TOOL_RESULT failed with recovery.suggestedArgs",
 			'Assistant: {"type":"tool_call","assistant":"Retry with the suggested normalized path.","tool":{"name":"read","args":{"path":"<projectRoot>/workspace/test.md"}}}',
 			"",
@@ -224,6 +292,32 @@ export class PromptContextEngine {
 			prompt: lines.join("\n"),
 			summary,
 		};
+	}
+
+	private shouldIncludeObsidianStructureTools(
+		input: PromptContextBuildInput,
+		autoSkillContext: string,
+		activeFileContext: ActiveFileContext,
+	): boolean {
+		const mentionParts = input.mentionContext?.entries.flatMap((entry) => [
+			entry.title,
+			entry.target,
+			entry.body,
+		]) ?? [];
+		const sourceMapParts = input.mentionContext?.sourceMap?.map((entry) => entry.target) ?? [];
+		const haystack = [
+			input.userPrompt,
+			input.focusPaths,
+			activeFileContext.path,
+			autoSkillContext,
+			...mentionParts,
+			...sourceMapParts,
+		]
+			.filter(Boolean)
+			.join("\n")
+			.toLowerCase();
+
+		return OBSIDIAN_STRUCTURE_KEYWORDS.some((keyword) => haystack.includes(keyword.toLowerCase()));
 	}
 
 	private formatMentionContext(mentionContext?: PromptMentionContext): string {

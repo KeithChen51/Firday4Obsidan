@@ -62,8 +62,8 @@ const requiredAgentUxCopy = {
 		en: "FRIDAY needs to run an organizing action that will update content.",
 	},
 	"approval.description.generic": {
-		zh: "FRIDAY 需要执行一个高风险操作，确认后才会继续。",
-		en: "FRIDAY needs to perform a higher-risk action. It will continue only after you confirm.",
+		zh: "FRIDAY 需要先确认这个操作，确认后才会继续。",
+		en: "FRIDAY needs your confirmation before continuing this action.",
 	},
 	"approval.composerTitle": {
 		zh: "需要你确认后继续",

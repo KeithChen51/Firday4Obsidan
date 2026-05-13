@@ -112,6 +112,22 @@ export function summarizeForUserFallback(payload: ToolResultPayload | null | und
 		}
 		return `I mapped ${entries.length} visible ${plural(entries.length, "entry")} under ${scope}:\n${formatPreviewList(entries)}`;
 	}
+	if (payload.tool === "canvas_read") {
+		const data = payload.data as { nodeCount?: number; edgeCount?: number; issues?: unknown[]; path?: string } | undefined;
+		return `I inspected ${data?.path ?? "the canvas"}: ${data?.nodeCount ?? 0} node(s), ${data?.edgeCount ?? 0} edge(s), ${(data?.issues ?? []).length} issue(s).`;
+	}
+	if (payload.tool === "markdown_outline") {
+		const data = payload.data as { headings?: unknown[]; wikilinks?: unknown[]; embeds?: unknown[]; path?: string } | undefined;
+		return `I outlined ${data?.path ?? "the note"}: ${(data?.headings ?? []).length} heading(s), ${(data?.wikilinks ?? []).length} link(s), ${(data?.embeds ?? []).length} embed(s).`;
+	}
+	if (payload.tool === "validate_canvas" || payload.tool === "validate_markdown") {
+		const data = payload.data as { ok?: boolean; summary?: string } | undefined;
+		return data?.summary?.trim() || (data?.ok ? "Validation passed." : "Validation found issues.");
+	}
+	if (payload.tool === "validate_outputs") {
+		const data = payload.data as { summary?: string } | undefined;
+		return data?.summary?.trim() || "Output validation completed.";
+	}
 	if (payload.tool === "exec") {
 		return "The command finished. Check the process details for command output and exit status.";
 	}
@@ -125,6 +141,9 @@ export function summarizeForUserFallback(payload: ToolResultPayload | null | und
 	}
 	if (payload.tool === "plan_write") {
 		return "";
+	}
+	if (payload.tool === "canvas_apply" || payload.tool === "frontmatter_update" || payload.tool === "markdown_insert_reference") {
+		return "Structured Obsidian file changes are prepared for review before anything is written.";
 	}
 	if (payload.tool === "write" || payload.tool === "edit" || payload.tool === "delete") {
 		return "File changes are prepared for review before anything is written to Obsidian.";
@@ -180,6 +199,24 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 		const payload = data as { entries?: unknown[] };
 		return `project_tree listed ${payload.entries?.length ?? 0} entry(s)`;
 	}
+	if (tool === "canvas_read") {
+		const payload = data as { nodeCount?: number; edgeCount?: number };
+		return `canvas_read found ${payload.nodeCount ?? 0} node(s), ${payload.edgeCount ?? 0} edge(s)`;
+	}
+	if (tool === "markdown_outline") {
+		const payload = data as { headings?: unknown[]; wikilinks?: unknown[]; embeds?: unknown[] };
+		return `markdown_outline found ${payload.headings?.length ?? 0} heading(s), ${payload.wikilinks?.length ?? 0} link(s), ${payload.embeds?.length ?? 0} embed(s)`;
+	}
+	if (tool === "validate_canvas" || tool === "validate_markdown") {
+		const payload = data as { ok?: boolean; items?: unknown[] };
+		return `${tool} ${payload.ok ? "passed" : "found"} ${payload.items?.length ?? 0} issue(s)`;
+	}
+	if (tool === "validate_outputs") {
+		const payload = data as { results?: Array<{ ok?: boolean; items?: unknown[] }> };
+		const results = Array.isArray(payload.results) ? payload.results : [];
+		const issueSets = results.filter((result) => result.ok === false || (Array.isArray(result.items) && result.items.length > 0)).length;
+		return `validate_outputs checked ${results.length} output(s), ${issueSets} issue set(s)`;
+	}
 	if (tool === "plan_write") {
 		const payload = data as { eventType?: string; taskCount?: number } | undefined;
 		return `${payload?.eventType ?? "plan_update"} wrote ${payload?.taskCount ?? 0} task(s)`;
@@ -210,6 +247,17 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 			});
 		}
 		return `Write completed ${payload.path ?? ""}`.trim();
+	}
+	if (tool === "canvas_apply" || tool === "frontmatter_update" || tool === "markdown_insert_reference") {
+		const payload = data as { path?: string; status?: string; type?: string; changeType?: string };
+		if (isPendingFileMutationStatus(payload.status)) {
+			return formatPendingFileMutationSummary({
+				operation: tool,
+				targetPath: payload.path,
+				changeType: payload.changeType ?? payload.type ?? "update",
+			});
+		}
+		return `${tool} completed ${payload.path ?? ""}`.trim();
 	}
 	if (tool === "delete") {
 		const payload = data as { path?: string; deletedType?: string; status?: string };

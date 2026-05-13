@@ -27,6 +27,7 @@ import { I18nParams, LocaleCode } from "../i18n/types";
 import { ProjectBoundaryService } from "../services/ProjectBoundaryService";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 import type { PluginUpdateService } from "../services/PluginUpdateService";
+import type { GroupModelCatalogService } from "../services/GroupModelCatalogService";
 import type { LocalStateRootService } from "../services/LocalStateRootService";
 import type { SoulStore } from "../services/SoulStore";
 import type { RuntimeStateStore } from "../services/RuntimeStateStore";
@@ -70,6 +71,7 @@ export interface FridayPluginApi {
 	syncRuntimeStore: SyncRuntimeStore;
 	projectBoundaryService: ProjectBoundaryService;
 	pluginUpdateService: PluginUpdateService;
+	groupModelCatalogService: GroupModelCatalogService;
 	officialContentService: OfficialContentServiceApi;
 	onboardingService: OnboardingService;
 	localStateRootService: LocalStateRootService;

@@ -4,6 +4,9 @@ import { normalizePath, TFile, TFolder } from "obsidian";
 import type { AgentActionType } from "../../types/action";
 import type { MemoryWriteInput } from "../../core/memory/MemoryTypes";
 import { resolveAgentWritableVaultPath } from "../../utils/projectWorkspacePolicy";
+import { applyCanvasDocument, summarizeCanvasDocument } from "../../core/obsidian-structure/canvas";
+import { insertMarkdownReference, outlineMarkdown, updateFrontmatter, validateMarkdownDocument } from "../../core/obsidian-structure/markdown";
+import { validateOutputDocument, validateOutputs } from "../../core/obsidian-structure/validation";
 import type { ObsidianToolContext } from "./ObsidianToolContext";
 
 const MAX_TOOL_RESULT_ITEM = 80;
@@ -371,6 +374,138 @@ export class ObsidianToolHandlers {
 		};
 	}
 
+	async toolCanvasRead(args: Record<string, unknown>): Promise<unknown> {
+		const pathValue = this.context.getRequiredStringArg(args, "path");
+		const file = await this.readVaultFile(pathValue);
+		return summarizeCanvasDocument(file.content, file.path, (vaultPath) => this.vaultReferenceExists(vaultPath));
+	}
+
+	async toolCanvasApply(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
+		const pathValue = this.context.getRequiredStringArg(args, "path");
+		const effectivePath = this.resolveWritablePath(pathValue);
+		const existing = this.context.vault.getAbstractFileByPath(effectivePath);
+		const mode = this.context.getStringArg(args, "mode").toLowerCase() || "upsert";
+		if (mode === "update" && !(existing instanceof TFile)) {
+			throw new Error(`Vault file does not exist: ${effectivePath}`);
+		}
+		const beforeContent = existing instanceof TFile ? await this.context.vault.cachedRead(existing) : "";
+		const result = applyCanvasDocument(beforeContent, {
+			mode: mode === "create" || mode === "update" ? mode : "upsert",
+			nodes: this.getRecordArrayArg(args, "nodes"),
+			edges: this.getRecordArrayArg(args, "edges"),
+			autoLayout: this.context.getBooleanArg(args, "autoLayout", true),
+		});
+		if (!result.validation.ok) {
+			throw new Error(`canvas_apply produced invalid canvas: ${result.validation.summary}`);
+		}
+		return this.recordStructuredMutation({
+			agentId,
+			toolCallId,
+			tool: "canvas_apply",
+			path: effectivePath,
+			beforeContent,
+			afterContent: result.content,
+			changeType: existing instanceof TFile ? "update" : "create",
+			extra: {
+				nodeCount: result.document.nodes.length,
+				edgeCount: result.document.edges.length,
+				validation: result.validation,
+			},
+		});
+	}
+
+	async toolMarkdownOutline(args: Record<string, unknown>): Promise<unknown> {
+		const file = await this.readVaultFile(this.context.getRequiredStringArg(args, "path"));
+		return {
+			path: file.path,
+			...outlineMarkdown(file.content),
+		};
+	}
+
+	async toolFrontmatterUpdate(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
+		const pathValue = this.context.getRequiredStringArg(args, "path");
+		const file = await this.readVaultFile(pathValue);
+		this.context.assertAgentWritableVaultPath(file.path);
+		const afterContent = updateFrontmatter(file.content, {
+			set: this.getRecordArg(args, "set"),
+			remove: this.getStringArrayArg(args, "remove"),
+		});
+		return this.recordStructuredMutation({
+			agentId,
+			toolCallId,
+			tool: "frontmatter_update",
+			path: file.path,
+			beforeContent: file.content,
+			afterContent,
+			changeType: "update",
+			extra: {
+				validation: validateMarkdownDocument(file.path, afterContent, (vaultPath) => this.vaultReferenceExists(vaultPath)),
+			},
+		});
+	}
+
+	async toolMarkdownInsertReference(args: Record<string, unknown>, agentId: string, toolCallId?: string): Promise<unknown> {
+		const pathValue = this.context.getRequiredStringArg(args, "path");
+		const file = await this.readVaultFile(pathValue);
+		this.context.assertAgentWritableVaultPath(file.path);
+		const afterContent = insertMarkdownReference(file.content, {
+			reference: this.context.getRequiredStringArg(args, "reference"),
+			placement: this.normalizeReferencePlacement(this.context.getStringArg(args, "placement")),
+			heading: this.context.getStringArg(args, "heading") || undefined,
+			dedupe: this.context.getBooleanArg(args, "dedupe", true),
+		});
+		return this.recordStructuredMutation({
+			agentId,
+			toolCallId,
+			tool: "markdown_insert_reference",
+			path: file.path,
+			beforeContent: file.content,
+			afterContent,
+			changeType: "update",
+			extra: {
+				validation: validateMarkdownDocument(file.path, afterContent, (vaultPath) => this.vaultReferenceExists(vaultPath)),
+			},
+		});
+	}
+
+	async toolValidateCanvas(args: Record<string, unknown>): Promise<unknown> {
+		const file = await this.readVaultFile(this.context.getRequiredStringArg(args, "path"));
+		const result = validateOutputDocument(file.path, file.content, (vaultPath) => this.vaultReferenceExists(vaultPath));
+		return result;
+	}
+
+	async toolValidateMarkdown(args: Record<string, unknown>): Promise<unknown> {
+		const file = await this.readVaultFile(this.context.getRequiredStringArg(args, "path"));
+		return validateOutputDocument(file.path, file.content, (vaultPath) => this.vaultReferenceExists(vaultPath));
+	}
+
+	async toolValidateOutputs(args: Record<string, unknown>): Promise<unknown> {
+		const paths = this.getStringArrayArg(args, "paths");
+		if (paths.length === 0) {
+			throw new Error("validate_outputs requires at least one path.");
+		}
+		const docs = new Map<string, string>();
+		for (const inputPath of paths) {
+			try {
+				const file = await this.readVaultFile(inputPath);
+				docs.set(file.path, file.content);
+			} catch {
+				// validateOutputs reports missing files using the resolved path/existence host.
+			}
+		}
+		return validateOutputs(paths, {
+			read: (targetPath) => {
+				try {
+					const resolvedPath = this.context.resolveVaultFilePath(targetPath);
+					return docs.get(resolvedPath) ?? null;
+				} catch {
+					return null;
+				}
+			},
+			exists: (targetPath) => this.vaultReferenceExists(targetPath),
+		});
+	}
+
 	async toolCompileWiki(args: Record<string, unknown>): Promise<unknown> {
 		const mode = this.context.getStringArg(args, "mode").toLowerCase();
 		if (mode === "all") {
@@ -542,6 +677,116 @@ export class ObsidianToolHandlers {
 		return raw
 			.map((item) => typeof item === "string" ? item.trim() : "")
 			.filter((item) => item.length > 0);
+	}
+
+	private getRecordArg(args: Record<string, unknown>, key: string): Record<string, unknown> {
+		const raw = args[key];
+		return raw && typeof raw === "object" && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+	}
+
+	private getRecordArrayArg(args: Record<string, unknown>, key: string): Record<string, unknown>[] {
+		const raw = args[key];
+		if (!Array.isArray(raw)) {
+			return [];
+		}
+		return raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item));
+	}
+
+	private async readVaultFile(pathValue: string): Promise<{ path: string; content: string }> {
+		if (this.context.resolveScope(pathValue) === "external") {
+			throw new Error(`${pathValue} is outside the Vault. Obsidian structure tools only support Vault files.`);
+		}
+		const targetPath = this.context.resolveVaultFilePath(pathValue);
+		if (!this.context.workspaceAccessService.canReadVaultPath(targetPath)) {
+			throw new Error(this.context.buildVaultScopeDeniedError(targetPath, "read"));
+		}
+		const file = this.context.vault.getAbstractFileByPath(targetPath);
+		if (!(file instanceof TFile)) {
+			throw new Error(`Vault file does not exist: ${targetPath}`);
+		}
+		return {
+			path: targetPath,
+			content: await this.context.vault.cachedRead(file),
+		};
+	}
+
+	private resolveWritablePath(pathValue: string): string {
+		if (this.context.resolveScope(pathValue) === "external") {
+			throw new Error("Obsidian structure tools only support Vault-relative writes.");
+		}
+		const activeProjectRoot = this.context.projectBoundaryService.getActiveProjectRoot();
+		const normalizedPath = activeProjectRoot
+			? resolveAgentWritableVaultPath(activeProjectRoot, pathValue)
+			: normalizePath(pathValue);
+		const resolvedExistingPath = this.context.resolveExistingVaultFilePath(normalizedPath);
+		const effectivePath = resolvedExistingPath ?? normalizedPath;
+		this.context.assertAgentWritableVaultPath(effectivePath);
+		return effectivePath;
+	}
+
+	private async recordStructuredMutation(input: {
+		agentId: string;
+		toolCallId?: string;
+		tool: string;
+		path: string;
+		beforeContent: string;
+		afterContent: string;
+		changeType: "create" | "update";
+		extra?: Record<string, unknown>;
+	}): Promise<unknown> {
+		const diffSegments = this.context.inlineEditService.computeLineDiff(input.beforeContent, input.afterContent);
+		const editPlanId = await this.context.recordEditPlan({
+			agentId: input.agentId,
+			toolCallId: input.toolCallId,
+			tool: input.tool,
+			path: input.path,
+			before: input.beforeContent,
+			after: input.afterContent,
+			changeType: input.changeType,
+		});
+		const applied = await this.context.maybeAutoApplyEditPlan(editPlanId);
+		return {
+			editPlanId,
+			path: input.path,
+			type: input.changeType,
+			status: applied ? "applied" : "pending_review",
+			planned: !applied,
+			applied,
+			diff: this.context.makeSimpleDiffSummary(input.beforeContent, input.afterContent),
+			diffPreview: this.context.inlineEditService.formatDiffForModel(diffSegments),
+			...(input.extra ?? {}),
+		};
+	}
+
+	private vaultReferenceExists(targetPath: string): boolean {
+		const normalized = normalizePath(targetPath.replace(/\\/g, "/").trim());
+		if (!normalized) {
+			return true;
+		}
+		try {
+			const resolved = this.context.resolveVaultFilePath(normalized);
+			if (this.context.vault.getAbstractFileByPath(resolved)) {
+				return true;
+			}
+		} catch {
+			// Fall through to direct and basename checks.
+		}
+		if (this.context.vault.getAbstractFileByPath(normalized)) {
+			return true;
+		}
+		if (!/\.[A-Za-z0-9]+$/.test(normalized) && this.context.vault.getAbstractFileByPath(`${normalized}.md`)) {
+			return true;
+		}
+		const basename = path.posix.basename(normalized, path.posix.extname(normalized));
+		return this.context.vault.getFiles().some((file) => file.basename === basename || file.path === normalized || file.path === `${normalized}.md`);
+	}
+
+	private normalizeReferencePlacement(value: string): "append" | "after_heading" | "before_heading" {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === "after_heading" || normalized === "before_heading") {
+			return normalized;
+		}
+		return "append";
 	}
 
 	private buildLineSnippet(content: string, oneBasedLine: number, maxChars: number): string {

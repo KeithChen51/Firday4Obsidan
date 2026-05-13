@@ -25,6 +25,7 @@ import { ToolApprovalService } from "./services/ToolApprovalService";
 import { WorkspaceAccessService } from "./services/WorkspaceAccessService";
 import { ProjectBoundaryService } from "./services/ProjectBoundaryService";
 import { PluginUpdateService } from "./services/PluginUpdateService";
+import { GroupModelCatalogService } from "./services/GroupModelCatalogService";
 import { OfficialContentService } from "./services/OfficialContentService";
 import { OnboardingService } from "./services/OnboardingService";
 import { ProjectContentService, RawSourceContext } from "./services/ProjectContentService";
@@ -229,6 +230,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	syncStatusBar!: SyncStatusBar;
 	fridaySettingTab!: FridaySettingTab;
 	pluginUpdateService!: PluginUpdateService;
+	groupModelCatalogService!: GroupModelCatalogService;
 	officialContentService!: FridayPluginApi["officialContentService"];
 	onboardingService!: OnboardingService;
 	localStateRootService!: LocalStateRootService;
@@ -316,6 +318,13 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					remove(path: string): Promise<void>;
 					rename(path: string, newPath: string): Promise<void>;
 				},
+				getGitRuntimeStatus: () => this.getGitRuntimeStatus(),
+				getUserCredential: () => this.getUserGitCredential(),
+				getUserGitEmail: () => this.settings.user.gitUserEmail,
+			});
+			this.groupModelCatalogService = new GroupModelCatalogService({
+				getSettings: () => this.settings,
+				saveSettings: () => this.saveSettings(),
 				getGitRuntimeStatus: () => this.getGitRuntimeStatus(),
 				getUserCredential: () => this.getUserGitCredential(),
 				getUserGitEmail: () => this.settings.user.gitUserEmail,
@@ -496,6 +505,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			if (this.settings.update.checkOnStartup) {
 				void this.runStartupPluginUpdateCheck();
 			}
+			if (this.settings.groupModelCatalog.checkOnStartup) {
+				void this.runStartupGroupModelCatalogCheck();
+			}
 			if (this.settings.officialContent.checkOnStartup) {
 				void this.runStartupOfficialContentCheck();
 			}
@@ -560,6 +572,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				...(migrated.officialContent ?? {}),
 				catalog: migrated.officialContent?.catalog ?? [],
 				channels: migrated.officialContent?.channels ?? {},
+			},
+			groupModelCatalog: {
+				...DEFAULT_SETTINGS.groupModelCatalog,
+				...(migrated.groupModelCatalog ?? {}),
+				models: migrated.groupModelCatalog?.models ?? [],
+				defaults: migrated.groupModelCatalog?.defaults ?? {},
 			},
 			agentRuntime: {
 				...DEFAULT_SETTINGS.agentRuntime,
@@ -1123,6 +1141,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		};
 		const rawWorkbench = (raw.workbench ?? {}) as Partial<FridaySettings["workbench"]>;
 		const rawOfficialContent = (raw.officialContent ?? {}) as Partial<FridaySettings["officialContent"]>;
+		const rawGroupModelCatalog = (raw.groupModelCatalog ?? {}) as Partial<FridaySettings["groupModelCatalog"]>;
 		const migratedSyncMode =
 			rawSync.mode ??
 			(rawSync.autoPush ? "continuous_auto" : (rawSync.syncInterval ?? 0) > 0 ? "idle_auto" : "manual");
@@ -1187,6 +1206,64 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					]),
 			),
 		};
+		const migratedGroupModelCatalog = {
+			...DEFAULT_SETTINGS.groupModelCatalog,
+			enabled:
+				typeof rawGroupModelCatalog.enabled === "boolean"
+					? rawGroupModelCatalog.enabled
+					: DEFAULT_SETTINGS.groupModelCatalog.enabled,
+			checkOnStartup:
+				typeof rawGroupModelCatalog.checkOnStartup === "boolean"
+					? rawGroupModelCatalog.checkOnStartup
+					: DEFAULT_SETTINGS.groupModelCatalog.checkOnStartup,
+			startupDelayMs:
+				typeof rawGroupModelCatalog.startupDelayMs === "number"
+					? rawGroupModelCatalog.startupDelayMs
+					: DEFAULT_SETTINGS.groupModelCatalog.startupDelayMs,
+			repoUrl:
+				typeof rawGroupModelCatalog.repoUrl === "string" && rawGroupModelCatalog.repoUrl.trim()
+					? rawGroupModelCatalog.repoUrl.trim()
+					: DEFAULT_SETTINGS.groupModelCatalog.repoUrl,
+			branch:
+				typeof rawGroupModelCatalog.branch === "string" && rawGroupModelCatalog.branch.trim()
+					? rawGroupModelCatalog.branch.trim()
+					: DEFAULT_SETTINGS.groupModelCatalog.branch,
+			filePath:
+				typeof rawGroupModelCatalog.filePath === "string" && rawGroupModelCatalog.filePath.trim()
+					? rawGroupModelCatalog.filePath.trim()
+					: DEFAULT_SETTINGS.groupModelCatalog.filePath,
+			lastCheckedAt:
+				typeof rawGroupModelCatalog.lastCheckedAt === "string" ? rawGroupModelCatalog.lastCheckedAt : "",
+			lastCatalogVersion:
+				typeof rawGroupModelCatalog.lastCatalogVersion === "string" ? rawGroupModelCatalog.lastCatalogVersion : "",
+			lastResult:
+				rawGroupModelCatalog.lastResult === "updated" ||
+				rawGroupModelCatalog.lastResult === "up-to-date" ||
+				rawGroupModelCatalog.lastResult === "error"
+					? rawGroupModelCatalog.lastResult
+					: DEFAULT_SETTINGS.groupModelCatalog.lastResult,
+			lastError:
+				typeof rawGroupModelCatalog.lastError === "string" ? rawGroupModelCatalog.lastError : "",
+			providerId:
+				typeof rawGroupModelCatalog.providerId === "string" ? rawGroupModelCatalog.providerId.trim() : "",
+			providerName:
+				typeof rawGroupModelCatalog.providerName === "string" ? rawGroupModelCatalog.providerName.trim() : "",
+			models: Array.isArray(rawGroupModelCatalog.models)
+				? rawGroupModelCatalog.models
+					.filter((model) => Boolean(model?.id?.trim()))
+					.map((model) => ({
+						id: model.id.trim(),
+						label: model.label?.trim() || model.id.trim(),
+						enabled: model.enabled !== false,
+						capabilities: model.capabilities && typeof model.capabilities === "object"
+							? { ...model.capabilities }
+							: {},
+					}))
+				: [],
+			defaults: rawGroupModelCatalog.defaults && typeof rawGroupModelCatalog.defaults === "object"
+				? { ...rawGroupModelCatalog.defaults }
+				: {},
+		};
 
 		return {
 			...raw,
@@ -1195,6 +1272,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			sync: migratedSync,
 			workbench: migratedWorkbench,
 			officialContent: migratedOfficialContent,
+			groupModelCatalog: migratedGroupModelCatalog,
 			projects: normalizedProjects,
 			projectGroups: migratedGroups,
 			activeProjectId,
@@ -1678,6 +1756,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				console.error("[Friday] Startup official content check failed:", error);
 			});
 		}, this.settings.officialContent.startupDelayMs);
+	}
+
+	private async runStartupGroupModelCatalogCheck(): Promise<void> {
+		window.setTimeout(() => {
+			void this.groupModelCatalogService.runStartupCheck().catch((error) => {
+				console.error("[Friday] Startup group model catalog check failed:", error);
+			});
+		}, this.settings.groupModelCatalog.startupDelayMs);
 	}
 
 	private startAutoSync(): void {

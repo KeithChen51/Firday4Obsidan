@@ -1,7 +1,7 @@
 ---
 title: FRIDAY Native Kit Migration Map
 status: draft
-updated: 2026-05-12
+updated: 2026-05-13
 tags:
   - friday/design
   - friday/migration
@@ -32,6 +32,12 @@ tags:
 - 设置组件只迁移已经明确的 Native Kit 形态，不做大范围品牌化。
 - `项目状态组` 暂缓，不进入首批迁移。
 
+补充扫描候选：
+
+- 跨组件元组件先沉淀为命名和样式规则：状态徽标、文件类型图标、低强调事件行、运行中表面、浮层列表项、控制按钮组。
+- 新增组件候选已进 HTML 画板：设置页状态反馈、变更审阅 Diff、首次引导步骤、运行状态提示组、能力控制中心、对话记录抽屉、同步冲突差异。
+- 这些候选不改变当前 `native-kit-catalog-decisions.json` 的 14/0/1 选择计数；需要用户在画板中确认后再进入正式迁移计数。
+
 ## 当前代码锚点
 
 静态搜索下，首批迁移主要会碰到这些文件：
@@ -39,6 +45,9 @@ tags:
 - `src/views/DailyBoardView.ts`
 - `src/views/agentTrajectoryRenderer.ts`
 - `src/views/agentProcessPanelViewModel.ts`
+- `src/views/components/MentionComposer.ts`
+- `src/views/components/MentionDropdown.ts`
+- `src/views/skillReviewNotePopoverPlacement.ts`
 - `src/settings/FridaySettingTab.ts`
 - `src/ui/obsidian-native/SettingsKit.ts`
 - `styles.css`
@@ -52,6 +61,38 @@ tags:
 - `tests/settings-project-ui-regression.test.mjs`
 
 ## 首批迁移顺序
+
+### 0. 跨组件元组件
+
+原因：
+
+- 多个新增候选都在重复表达状态、文件、事件、浮层和控制按钮。
+- 先统一元组件，后续迁移不用在每个 Kit 里重写一遍基础样式。
+
+主要文件：
+
+- `styles.css`
+- `src/ui/obsidian-native/SettingsKit.ts`
+- `src/views/agentTrajectoryRenderer.ts`
+- `src/views/components/MentionComposer.ts`
+- `src/views/components/MentionDropdown.ts`
+
+迁移点：
+
+- 状态徽标统一 ready、waiting、active、warning 等语义。
+- 文件类型图标统一支持 Markdown、Canvas、HTML/代码、普通笔记。
+- 工具调用、同步日志和后台记录复用低强调事件行。
+- 运行中表面只用弱背景和低幅度动画，并遵守 `prefers-reduced-motion`。
+- 低强调事件行和运行中表面共用等高的一行信息条；主内容单行截断，宽度不足时省略多余信息。
+- Skill、`@` 文件、会话菜单复用浮层列表项。
+- 模型、权限、`@`、`+Skill`、搜索、刷新、设置复用控制按钮组。
+- 工具统一行动类 icon，Skill 统一技能/组件类 icon，会话行暂不做差异化 icon。
+
+验证：
+
+- 静态测试覆盖元组件 class 存在。
+- 静态测试同时阻止大组件继续使用旧局部 class，例如旧状态徽标、旧文件类型 icon、局部工具 icon、局部浮层项和局部运行条。
+- 手动检查明暗主题、紧凑密度和 reduced motion。
 
 ### 1. 对话输入区 + Task Bar
 
@@ -210,6 +251,7 @@ tags:
 - 设置页框架。
 - 设置行状态。
 - 危险操作设置行。
+- 设置页状态反馈。
 - 前置条件列表。
 - 空状态。
 - 行内提醒。
@@ -218,6 +260,33 @@ tags:
 
 - 继续使用现有设置页回归测试。
 - 手动检查设置页在明暗主题下的密度和层级。
+
+### 7. 新增扫描候选
+
+原因：
+
+- 本轮扫描发现多个已有代码 surface 尚未进入 Native Kit。
+- 它们不是都要立刻迁移，但需要先进入画板，避免后续继续各自演化。
+
+候选组件：
+
+- 变更审阅 Diff：来自 `friday-mutation-review-*`，应并入审批信息系统。
+- 首次引导步骤：来自 `friday-onboarding-*`，应保持配置缺口列表风格。
+- 运行状态提示组：覆盖后台 Agent、输入排队和临时覆盖条。
+- 能力控制中心：来自 `friday-control-center-*`，包含工具权限、Skill 分组和审阅说明。
+- 对话记录抽屉：来自 `friday-ai-session-*`，包含搜索、分组、批量选择、重命名和空状态。
+- 同步冲突差异：来自同步冲突和 diff surface，可独立于暂缓的项目状态组先定义。
+
+迁移点：
+
+- 先在 HTML 画板中评审，不直接改运行时代码。
+- 能组合元组件的地方必须先组合元组件。
+- `项目状态组` 仍保持暂缓；同步冲突差异不是解除项目状态组暂缓。
+
+验证：
+
+- 静态测试确认这些候选出现在 HTML 和规范文档。
+- 用户确认画板选择后，再更新 `native-kit-catalog-decisions.json` 和迁移优先级。
 
 ## 暂缓范围
 

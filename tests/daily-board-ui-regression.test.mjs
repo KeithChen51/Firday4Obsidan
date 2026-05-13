@@ -281,6 +281,30 @@ test("ordinary approval cards expose only user-level allow or reject decisions",
 	assert.doesNotMatch(cardBlock, /\$\{item\.request\.tool\}/);
 });
 
+test("ordinary approval cards explain the specific consequence and target", async () => {
+	const source = readViewSource();
+	const describeMatch = source.match(/private describeApprovalRequest\(item: PendingApproval\): string \{([\s\S]*?)\n\t\}\n\n\tprivate addApprovalDecisionButton/);
+	assert.ok(describeMatch, "describeApprovalRequest block should exist");
+	const describeBlock = describeMatch[1] ?? "";
+
+	assert.match(describeBlock, /item\.request\.description/);
+	assert.match(describeBlock, /item\.request\.targetPath/);
+	assert.match(describeBlock, /approval\.description\.withTarget/);
+	assert.doesNotMatch(describeBlock, /高风险操作/);
+});
+
+test("runtime elapsed timer does not keep refreshing while waiting for a user decision", async () => {
+	const source = readViewSource();
+	const timerBlock = source.match(/private scheduleRuntimeElapsedTimer\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate clearRuntimeElapsedTimer/);
+	assert.ok(timerBlock, "scheduleRuntimeElapsedTimer block should exist");
+	const helperBlock = source.match(/private shouldRefreshRuntimeElapsed\(snapshot: AgentTrajectorySnapshot \| null\): boolean \{([\s\S]*?)\n\t\}\n\n\tprivate scheduleRuntimeElapsedTimer/);
+	assert.ok(helperBlock, "shouldRefreshRuntimeElapsed helper should exist");
+
+	assert.match(timerBlock[1] ?? "", /shouldRefreshRuntimeElapsed/);
+	assert.match(helperBlock[1] ?? "", /snapshot\.status === "running"/);
+	assert.doesNotMatch(helperBlock[1] ?? "", /waiting_for_approval|waiting_for_user/);
+});
+
 test("mutation review uses pending-language buttons and notices", async () => {
 	const source = readViewSource();
 	const itemMatch = source.match(/private renderEditPlanReviewItem\(containerEl: HTMLElement, plan: EditPlanRecord\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderEditPlanDiffPreview/);

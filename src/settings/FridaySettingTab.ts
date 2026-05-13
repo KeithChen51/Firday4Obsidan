@@ -36,6 +36,7 @@ import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode }
 import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
+import type { GroupModelCatalogModel } from "../types/groupModelCatalog";
 import type { SoulTonePreset } from "../types/soul";
 import type { LocaleCode } from "../i18n/types";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
@@ -60,15 +61,15 @@ type RemoteBootstrapResolution = "unset" | "direct" | "create_child";
 const BUILTIN_GROUP_MODELS = [
 	"glm-4.7",
 	"kimi-k2.5",
-	"MiniMax-M2.1",
-	"glm-5",
-	"MiniMax-M2.5",
+	"glm-5.1",
+	"MiniMax/MiniMax-M2.7",
 	"qwen3-coder-plus",
-	"Deepseek-V3.2-Exp",
-	"qwen3.5-plus",
-	"Qwen3-Max-Preview",
-	"qwen3.5-flash",
-	"Qwen3-Max",
+	"deepseek-v4-pro",
+	"qwen3.6-plus",
+	"qwen3-max-preview",
+	"qwen3.5-flash-2026-02-23",
+	"qwen3-vl-235b-a22b-instruct",
+	"qwen3-max-2026-01-23",
 ];
 
 interface ModelPresetResult {
@@ -122,6 +123,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private gitRuntimeStatus: GitRuntimeStatus | null = null;
 	private gitRuntimeStatusLoading = false;
 	private pluginUpdateActionPending = false;
+	private groupModelCatalogActionPending = false;
 	private ignoreManagerProjectId = "";
 	private ignoreManagerCandidates: GitIgnoreCandidate[] = [];
 	private ignoreManagerError = "";
@@ -940,6 +942,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						),
 					);
 			}
+			this.renderGroupModelCatalogSetting(statusGroup);
 		}
 
 		new Setting(connectionGroup)
@@ -2274,6 +2277,11 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.modelPresetResult = loaded;
 			return loaded;
 		}
+		const syncedCatalog = this.loadModelPresetsFromGroupModelCatalog();
+		if (syncedCatalog) {
+			this.modelPresetResult = syncedCatalog;
+			return syncedCatalog;
+		}
 
 		this.modelPresetResult = {
 			models: [...BUILTIN_GROUP_MODELS],
@@ -2290,7 +2298,10 @@ export class FridaySettingTab extends PluginSettingTab {
 		const snapshot = this.readOpencodeSnapshot();
 		const groupConfig = readModeConfig(this.host.settings.llm, "group");
 		const groupProvider = selectOpencodeProvider(snapshot, groupConfig.opencodeProviderId);
-		return buildAgentModelCatalogFromSettings(this.host.settings.llm, groupProvider?.models ?? []);
+		return buildAgentModelCatalogFromSettings(
+			this.host.settings.llm,
+			groupProvider?.models ?? this.getGroupModelCatalogOptions(),
+		);
 	}
 
 	private loadModelPresetsFromOpencodeConfig(): ModelPresetResult | null {
@@ -2309,6 +2320,36 @@ export class FridaySettingTab extends PluginSettingTab {
 			providers: snapshot.providers,
 			activeProvider,
 		};
+	}
+
+	private loadModelPresetsFromGroupModelCatalog(): ModelPresetResult | null {
+		const models = this.getGroupModelCatalogOptions();
+		if (models.length === 0) {
+			return null;
+		}
+		const catalog = this.host.settings.groupModelCatalog;
+		const version = catalog.lastCatalogVersion || this.t("common.notSet", "未设置");
+		return {
+			models: models.map((item) => item.id),
+			modelLabels: Object.fromEntries(models.map((item) => [item.id, item.label])),
+			source: this.t("settings.llm.groupModelCatalog.source", "集团模型目录：{version}", { version }),
+			editablePaths: [catalog.filePath],
+			providers: [],
+			activeProvider: null,
+		};
+	}
+
+	private getGroupModelCatalogOptions(): Array<{ id: string; label: string }> {
+		const catalog = this.host.settings.groupModelCatalog;
+		if (!catalog.enabled) {
+			return [];
+		}
+		return catalog.models
+			.filter((model: GroupModelCatalogModel) => model.enabled && model.id.trim())
+			.map((model) => ({
+				id: model.id.trim(),
+				label: model.label.trim() || model.id.trim(),
+			}));
 	}
 
 	private readOpencodeSnapshot() {
@@ -2362,6 +2403,97 @@ export class FridaySettingTab extends PluginSettingTab {
 			3000,
 		);
 		this.display();
+	}
+
+	private renderGroupModelCatalogSetting(containerEl: HTMLElement): void {
+		const catalog = this.host.settings.groupModelCatalog;
+		const modelCount = catalog.models.filter((model) => model.enabled).length;
+		const lastChecked = catalog.lastCheckedAt || this.t("common.never", "从未同步");
+		const sourceDesc = this.t(
+			"settings.llm.groupModelCatalog.desc",
+			"最近检查：{checkedAt} | 可用模型：{count}",
+			{
+				checkedAt: lastChecked,
+				count: modelCount,
+			},
+		);
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.groupModelCatalog.name", "集团模型目录"))
+			.setDesc(sourceDesc)
+			.addToggle((toggle) =>
+				toggle
+					.setValue(catalog.enabled)
+					.onChange(async (value) => {
+						catalog.enabled = value;
+						this.modelPresetResult = null;
+						await this.host.saveSettings();
+						this.display();
+					}),
+			)
+			.addButton((button) =>
+				button
+					.setButtonText(
+						this.groupModelCatalogActionPending
+							? this.t("settings.llm.groupModelCatalog.refreshing", "刷新中...")
+							: this.t("settings.llm.groupModelCatalog.refresh", "刷新模型目录"),
+					)
+					.setDisabled(this.groupModelCatalogActionPending || !catalog.enabled)
+					.onClick(async () => {
+						await this.refreshGroupModelCatalog();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.groupModelCatalog.repoUrl.name", "模型目录仓库"))
+			.setDesc(this.t("settings.llm.groupModelCatalog.repoUrl.desc", "只读取模型与能力目录；个人 baseURL/API Key 仍来自 OpenCode 或下方连接配置。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("https://gitee.example.com/org/friday-model-catalog.git")
+					.setValue(catalog.repoUrl)
+					.onChange(async (value) => {
+						catalog.repoUrl = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+
+		new Setting(containerEl)
+			.setName(this.t("settings.llm.groupModelCatalog.branch.name", "模型目录分支"))
+			.setDesc(this.t("settings.llm.groupModelCatalog.branch.desc", "推荐使用 friday-model-catalog，分支里只放 model-catalog.json。"))
+			.addText((text) =>
+				text
+					.setPlaceholder("friday-model-catalog")
+					.setValue(catalog.branch)
+					.onChange(async (value) => {
+						catalog.branch = value.trim();
+						await this.host.saveSettings();
+					}),
+			);
+	}
+
+	private async refreshGroupModelCatalog(): Promise<void> {
+		this.groupModelCatalogActionPending = true;
+		try {
+			const result = await this.host.groupModelCatalogService.refreshCatalog();
+			this.modelPresetResult = null;
+			if (!result.success) {
+				new Notice(
+					this.t("settings.llm.groupModelCatalog.refreshFailed", "模型目录刷新失败：{error}", {
+						error: result.error || this.t("common.unknownError", "未知错误"),
+					}),
+					6000,
+				);
+				return;
+			}
+			new Notice(
+				this.t("settings.llm.groupModelCatalog.refreshSuccess", "已刷新集团模型目录：{count} 个模型。", {
+					count: result.modelCount,
+				}),
+				4000,
+			);
+		} finally {
+			this.groupModelCatalogActionPending = false;
+			this.display();
+		}
 	}
 
 	private markLlmStatusDirty(): void {

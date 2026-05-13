@@ -609,16 +609,25 @@ export class DailyBoardView extends ItemView {
 
 	private describeApprovalRequest(item: PendingApproval): string {
 		const tool = item.request.tool.trim().toLowerCase();
+		const targetPath = item.request.targetPath?.trim() ?? "";
+		const requestDescription = productizeRuntimeText(item.request.description) || item.request.description?.trim() || "";
+		let description: string;
 		if (tool === "exec") {
-			return this.t("approval.description.exec", "FRIDAY 需要运行一个本地命令来检查结果。");
+			description = this.t("approval.description.exec", "FRIDAY 需要运行一个本地命令来检查结果。");
+		} else if (item.request.scope === "external") {
+			description = this.t("approval.description.external", "FRIDAY 需要访问当前 Obsidian 范围之外的位置。");
+		} else if (tool === "compile_wiki") {
+			description = this.t("approval.description.compile", "FRIDAY 需要执行一次会更新资料的整理操作。");
+		} else {
+			description = requestDescription || this.t("approval.description.generic", "FRIDAY 需要先确认这个操作，确认后才会继续。");
 		}
-		if (item.request.scope === "external") {
-			return this.t("approval.description.external", "FRIDAY 需要访问当前 Obsidian 范围之外的位置。");
+		if (targetPath) {
+			return this.t("approval.description.withTarget", "{description}\n目标：{target}", {
+				description,
+				target: targetPath,
+			});
 		}
-		if (tool === "compile_wiki") {
-			return this.t("approval.description.compile", "FRIDAY 需要执行一次会更新资料的整理操作。");
-		}
-		return this.t("approval.description.generic", "FRIDAY 需要执行一个高风险操作，确认后才会继续。");
+		return description;
 	}
 
 	private addApprovalDecisionButton(
@@ -4609,13 +4618,20 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
+	private shouldRefreshRuntimeElapsed(snapshot: AgentTrajectorySnapshot | null): boolean {
+		if (!snapshot) {
+			return false;
+		}
+		return snapshot.status === "running";
+	}
+
 	private scheduleRuntimeElapsedTimer(): void {
-		if (this.aiRuntimeElapsedTimer != null || !this.aiRuntimeTrajectorySnapshot) {
+		if (this.aiRuntimeElapsedTimer != null || !this.shouldRefreshRuntimeElapsed(this.aiRuntimeTrajectorySnapshot)) {
 			return;
 		}
 		this.aiRuntimeElapsedTimer = window.setTimeout(() => {
 			this.aiRuntimeElapsedTimer = null;
-			if (!this.aiRuntimeTrajectorySnapshot) {
+			if (!this.shouldRefreshRuntimeElapsed(this.aiRuntimeTrajectorySnapshot)) {
 				return;
 			}
 			const refreshedSnapshot = this.aiRuntimeTrajectoryStore.refreshElapsed();
@@ -4623,7 +4639,9 @@ export class DailyBoardView extends ItemView {
 			this.bindRuntimeSnapshotToLatestUserMessage(this.aiRuntimeTrajectorySnapshot);
 			this.syncComposerTaskBar();
 			this.syncLiveRuntimeElapsedProcess();
-			this.scheduleRuntimeElapsedTimer();
+			if (this.shouldRefreshRuntimeElapsed(this.aiRuntimeTrajectorySnapshot)) {
+				this.scheduleRuntimeElapsedTimer();
+			}
 		}, 1000);
 	}
 
@@ -4656,8 +4674,10 @@ export class DailyBoardView extends ItemView {
 			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
 			this.aiRuntimeTrajectorySnapshot = null;
 			this.clearRuntimeElapsedTimer();
-		} else {
+		} else if (this.shouldRefreshRuntimeElapsed(nextSnapshot)) {
 			this.scheduleRuntimeElapsedTimer();
+		} else {
+			this.clearRuntimeElapsedTimer();
 		}
 		const forceRender = (
 			(event.phase === "narration" && event.narration?.kind === "stage_report") ||
@@ -5143,10 +5163,21 @@ export class DailyBoardView extends ItemView {
 	private getAvailableAgentModelOptions() {
 		const snapshot = this.readOpencodeSnapshot();
 		const groupProvider = selectOpencodeProvider(snapshot, this.plugin.settings.llm.groupConfig.opencodeProviderId);
+		const catalogModels = this.plugin.settings.groupModelCatalog.enabled
+			? this.plugin.settings.groupModelCatalog.models
+				.filter((model) => model.enabled && model.id.trim())
+				.map((model) => ({
+					id: model.id.trim(),
+					label: model.label.trim() || model.id.trim(),
+				}))
+			: [];
 		const fallbackGroupModels = this.plugin.settings.llm.groupConfig.model?.trim()
 			? [{ id: this.plugin.settings.llm.groupConfig.model.trim(), label: this.plugin.settings.llm.groupConfig.model.trim() }]
 			: [];
-		return buildAgentModelCatalogFromSettings(this.plugin.settings.llm, groupProvider?.models ?? fallbackGroupModels);
+		return buildAgentModelCatalogFromSettings(
+			this.plugin.settings.llm,
+			groupProvider?.models ?? (catalogModels.length > 0 ? catalogModels : fallbackGroupModels),
+		);
 	}
 
 	private buildModelOptions(

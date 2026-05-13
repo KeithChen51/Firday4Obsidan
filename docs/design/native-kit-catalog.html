@@ -794,31 +794,6 @@
 			background: var(--background-primary);
 		}
 
-		.status-pill {
-			display: inline-flex;
-			align-items: center;
-			min-height: 22px;
-			padding: 0 8px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: 999px;
-			color: var(--text-muted);
-			font-size: 0.74rem;
-			font-weight: 750;
-			white-space: nowrap;
-		}
-
-		.status-pill.is-ready {
-			border-color: color-mix(in srgb, var(--color-green) 34%, var(--background-modifier-border));
-			background: color-mix(in srgb, var(--color-green) 9%, var(--background-primary));
-			color: var(--text-normal);
-		}
-
-		.status-pill.is-waiting {
-			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
-			background: color-mix(in srgb, var(--color-orange) 9%, var(--background-primary));
-			color: var(--text-normal);
-		}
-
 		.friday-approval-card {
 			padding: var(--space-3) var(--space-4);
 			border: 1px solid color-mix(in srgb, var(--color-yellow) 30%, var(--background-modifier-border));
@@ -1548,38 +1523,12 @@
 			background: transparent;
 		}
 
-		.assistant-output-block.is-tool {
-			display: flex;
-			flex-wrap: wrap;
-			align-items: center;
-			gap: var(--space-1) var(--space-2);
-			padding: 2px 0;
-			border-color: transparent;
-			background: transparent;
-			color: var(--text-muted);
-			font-size: 0.82rem;
-		}
-
 		.assistant-output-block.is-artifact {
 			background: var(--background-primary-alt);
 		}
 
 		.assistant-tool-call-v5 {
 			min-height: 24px;
-		}
-
-		.assistant-tool-icon-v5 {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 18px;
-			height: 18px;
-			color: var(--text-faint);
-		}
-
-		.assistant-tool-icon-v5 svg {
-			width: 15px;
-			height: 15px;
 		}
 
 		.assistant-tool-name-v5 {
@@ -1593,11 +1542,6 @@
 			text-overflow: ellipsis;
 			white-space: nowrap;
 			color: var(--text-muted);
-		}
-
-		.assistant-tool-state-v5 {
-			color: var(--text-faint);
-			font-size: 0.74rem;
 		}
 
 		.assistant-block-title {
@@ -1681,7 +1625,7 @@
 			min-width: 0;
 		}
 
-		.assistant-control-button {
+		.kit-control-button-v1 {
 			display: inline-flex;
 			align-items: center;
 			min-height: 28px;
@@ -1694,16 +1638,16 @@
 			font-weight: 700;
 		}
 
-		.assistant-control-button.is-model {
+		.kit-control-button-v1.is-model {
 			color: var(--text-normal);
 		}
 
-		.assistant-control-button.is-permission {
+		.kit-control-button-v1.is-permission {
 			border-color: color-mix(in srgb, var(--text-warning) 38%, var(--background-modifier-border));
 		}
 
-		.assistant-control-button.is-context,
-		.assistant-control-button.is-skill {
+		.kit-control-button-v1.is-context,
+		.kit-control-button-v1.is-skill {
 			background: var(--background-primary-alt);
 		}
 
@@ -1916,33 +1860,6 @@
 			gap: var(--space-1);
 		}
 
-		.composer-skill-option-v5 {
-			display: grid;
-			gap: 3px;
-			width: 100%;
-			padding: 8px 9px;
-			border: 1px solid transparent;
-			border-radius: var(--radius-s);
-			background: color-mix(in srgb, var(--background-primary) 82%, transparent);
-			color: var(--text-normal);
-			text-align: left;
-		}
-
-		.composer-skill-option-v5.is-active {
-			border-color: color-mix(in srgb, var(--interactive-accent) 26%, var(--background-modifier-border));
-			background: var(--background-primary);
-			box-shadow: var(--shadow-s);
-		}
-
-		.composer-skill-option-v5 strong {
-			font-size: 0.82rem;
-		}
-
-		.composer-skill-option-v5 span {
-			color: var(--text-muted);
-			font-size: 0.72rem;
-		}
-
 		.composer-mention-popover-demo-v5 {
 			display: grid;
 			gap: var(--space-2);
@@ -1962,29 +1879,6 @@
 			border-color: color-mix(in srgb, var(--color-cyan) 22%, var(--background-modifier-border));
 		}
 
-		.composer-mention-option-v5 {
-			display: grid;
-			grid-template-columns: 30px minmax(0, 1fr);
-			align-items: center;
-			gap: var(--space-2);
-			width: 100%;
-			padding: 8px 9px;
-			border: 1px solid transparent;
-			border-radius: var(--radius-s);
-			background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
-			color: var(--text-normal);
-			text-align: left;
-		}
-
-		.composer-mention-option-v5.is-active {
-			border-color: color-mix(in srgb, var(--color-cyan) 34%, var(--background-modifier-border));
-			background: color-mix(in srgb, var(--color-cyan) 10%, var(--background-secondary));
-		}
-
-		.composer-mention-option-v5 strong {
-			font-size: 0.82rem;
-		}
-
 		.composer-mention-copy-v5 {
 			display: grid;
 			gap: 3px;
@@ -1995,38 +1889,6 @@
 			color: var(--text-muted);
 			font-size: 0.72rem;
 			word-break: break-all;
-		}
-
-		.composer-file-type-icon-v5 {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			border: 1px solid var(--background-modifier-border);
-			background: var(--background-primary);
-			color: var(--text-muted);
-			flex: 0 0 auto;
-		}
-
-		.composer-file-type-icon-v5 {
-			width: 28px;
-			height: 28px;
-			border-radius: var(--radius-s);
-		}
-
-		.composer-file-type-icon-v5.is-note {
-			color: var(--color-green);
-		}
-
-		.composer-file-type-icon-v5.is-html {
-			color: var(--color-orange);
-		}
-
-		.composer-file-type-icon-v5.is-markdown {
-			color: var(--interactive-accent);
-		}
-
-		.composer-file-type-icon-v5.is-canvas {
-			color: var(--color-cyan);
 		}
 
 		.composer-mention-anchor-v5 {
@@ -2152,10 +2014,6 @@
 			overflow-wrap: anywhere;
 		}
 
-		.agent-running-surface-v5 {
-			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary)) !important;
-		}
-
 		.agent-artifact-grid-v3 {
 			display: grid;
 			grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2187,30 +2045,6 @@
 			color: var(--text-muted);
 			font-family: var(--font-monospace);
 			font-size: 0.76rem;
-		}
-
-		.artifact-type-icon {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			width: 28px;
-			height: 28px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary);
-			color: var(--text-muted);
-		}
-
-		.artifact-type-icon.is-markdown {
-			color: var(--interactive-accent);
-		}
-
-		.artifact-type-icon.is-canvas {
-			color: var(--color-cyan);
-		}
-
-		.artifact-type-icon.is-note {
-			color: var(--color-green);
 		}
 
 		.friday-project-panel-v2 {
@@ -2447,6 +2281,489 @@
 			font-size: 0.8rem;
 		}
 
+		.foundation-grid-v1,
+		.scan-component-grid-v1 {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: var(--space-3);
+		}
+
+		.foundation-card-v1,
+		.scan-panel-v1 {
+			min-width: 0;
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.foundation-card-v1 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.foundation-card-v1 > strong,
+		.scan-panel-title-v1 {
+			font-size: 0.86rem;
+			font-weight: 760;
+		}
+
+		.foundation-card-v1 > span,
+		.scan-panel-subtitle-v1 {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.foundation-sample-row-v1,
+		.kit-inline-cluster-v1 {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.kit-soft-chip-v1 {
+			display: inline-flex;
+			align-items: center;
+			min-height: 24px;
+			padding: 0 9px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 730;
+			white-space: nowrap;
+		}
+
+		.kit-soft-chip-v1.is-active {
+			border-color: color-mix(in srgb, var(--interactive-accent) 38%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 12%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.kit-soft-chip-v1.is-warning {
+			border-color: color-mix(in srgb, var(--color-orange) 38%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 9%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.kit-icon-button-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 32px;
+			height: 32px;
+			padding: 0;
+		}
+
+		.kit-file-type-icon-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px;
+			height: 28px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+		}
+
+		.kit-file-type-icon-v1.is-markdown {
+			color: var(--color-cyan);
+		}
+
+		.kit-file-type-icon-v1.is-canvas {
+			color: var(--interactive-accent);
+		}
+
+		.kit-file-type-icon-v1.is-code {
+			color: var(--color-orange);
+		}
+
+		.kit-file-type-icon-v1.is-note {
+			color: var(--text-muted);
+		}
+
+		.kit-tool-icon-v1,
+		.kit-skill-icon-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 28px;
+			height: 28px;
+			color: var(--text-muted);
+		}
+
+		.kit-skill-icon-v1 {
+			color: var(--interactive-accent);
+		}
+
+		.kit-event-row-v1 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-height: var(--kit-event-row-height, 40px);
+			padding: 5px 10px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary-alt) 62%, transparent);
+		}
+
+		.kit-event-row-v1.kit-running-surface-v1 {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.kit-event-row-main-v1 {
+			display: flex;
+			align-items: baseline;
+			gap: 4px;
+			min-width: 0;
+			overflow: hidden;
+			white-space: nowrap;
+		}
+
+		.kit-event-row-main-v1 strong,
+		.kit-event-row-main-v1 span,
+		.kit-event-row-main-v1 code {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			overflow-wrap: normal;
+		}
+
+		.kit-event-row-main-v1 strong {
+			flex: 0 0 auto;
+			max-width: min(52%, 260px);
+		}
+
+		.kit-event-row-v1 span,
+		.kit-event-row-v1 code {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.kit-event-row-v1 > :last-child {
+			white-space: nowrap;
+		}
+
+		.kit-running-surface-v1 {
+			position: relative;
+			overflow: hidden;
+			border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+		}
+
+		.kit-running-surface-v1::after {
+			content: "";
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+			background: linear-gradient(
+				90deg,
+				transparent 0%,
+				color-mix(in srgb, var(--interactive-accent) 10%, transparent) 50%,
+				transparent 100%
+			);
+			transform: translateX(-100%);
+			animation: friday-kit-running-sheen 1600ms ease-in-out infinite;
+		}
+
+		@keyframes friday-kit-running-sheen {
+			from {
+				transform: translateX(-100%);
+			}
+			to {
+				transform: translateX(100%);
+			}
+		}
+
+		.kit-popover-list-v1 {
+			display: grid;
+			gap: var(--space-1);
+			padding: var(--space-2);
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+			border-radius: var(--radius-l);
+			background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+		}
+
+		.kit-popover-item-v1 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: var(--space-2);
+			align-items: center;
+			padding: 8px;
+			border: 1px solid transparent;
+			border-radius: var(--radius-m);
+			background: transparent;
+		}
+
+		button.kit-popover-item-v1 {
+			width: 100%;
+			color: var(--text-normal);
+			text-align: left;
+		}
+
+		.kit-popover-item-v1.is-text-only {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.kit-popover-item-v1.is-active {
+			border-color: color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 9%, var(--background-primary));
+		}
+
+		.kit-popover-item-v1 strong {
+			font-size: 0.82rem;
+		}
+
+		.kit-popover-item-v1 span,
+		.kit-list-subtitle-v1 {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.scan-list-v1 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.scan-panel-v1 {
+			display: grid;
+			gap: var(--space-3);
+		}
+
+		.scan-row-v1 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 9px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.scan-row-v1.is-text-only {
+			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.scan-row-v1.is-muted {
+			background: color-mix(in srgb, var(--background-primary-alt) 66%, transparent);
+		}
+
+		.scan-row-v1.is-selected,
+		.scan-row-v1.is-active {
+			border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+		}
+
+		.scan-row-copy-v1 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.scan-row-copy-v1 strong,
+		.scan-row-copy-v1 span,
+		.scan-row-copy-v1 code {
+			overflow-wrap: anywhere;
+		}
+
+		.scan-row-copy-v1 span,
+		.scan-row-copy-v1 code {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.session-drawer-kit-v1 {
+			display: grid;
+			gap: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+			padding: var(--space-3);
+		}
+
+		.session-drawer-head-v1,
+		.scan-panel-head-v1 {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-3);
+			min-width: 0;
+		}
+
+		.session-search-v1 {
+			min-height: 32px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+			padding: 6px 10px;
+		}
+
+		.control-center-kit-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+			gap: var(--space-3);
+		}
+
+		.control-group-v1 {
+			display: grid;
+			gap: var(--space-2);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.diff-preview-kit-v1 {
+			display: grid;
+			gap: 1px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			overflow: hidden;
+			background: var(--background-modifier-border);
+			font-family: var(--font-monospace);
+			font-size: 0.78rem;
+		}
+
+		.diff-line-v1 {
+			display: grid;
+			grid-template-columns: 28px minmax(0, 1fr);
+			gap: var(--space-2);
+			padding: 6px 10px;
+			background: var(--background-primary);
+		}
+
+		.diff-line-v1.is-add {
+			background: color-mix(in srgb, var(--color-green) 10%, var(--background-primary));
+		}
+
+		.diff-line-v1.is-remove {
+			background: color-mix(in srgb, var(--color-red) 9%, var(--background-primary));
+		}
+
+		.onboarding-steps-v1 {
+			display: grid;
+			gap: var(--space-2);
+			counter-reset: onboarding-step;
+		}
+
+		.onboarding-step-v1 {
+			counter-increment: onboarding-step;
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.onboarding-step-v1::before {
+			content: counter(onboarding-step);
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 24px;
+			height: 24px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 999px;
+			color: var(--text-muted);
+			font-size: 0.76rem;
+			font-weight: 760;
+		}
+
+		.onboarding-step-action-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			justify-self: end;
+			min-width: 58px;
+			min-height: 32px;
+			padding: 0 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+			color: var(--text-normal);
+			font-weight: 700;
+			white-space: nowrap;
+		}
+
+		.onboarding-step-action-v1.is-primary,
+		.onboarding-step-action-v1.is-done {
+			border-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary));
+		}
+
+		.onboarding-step-action-v1.is-done {
+			color: var(--text-muted);
+		}
+
+		.runtime-stack-v1 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.sync-conflict-layout-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+			gap: var(--space-2);
+		}
+
+		.sync-side-v1 {
+			display: grid;
+			gap: var(--space-2);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.settings-status-stack-v1 {
+			display: grid;
+			gap: var(--space-2);
+		}
+
+		.settings-status-row-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 10px 12px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.settings-progress-v1 {
+			position: relative;
+			height: 6px;
+			border-radius: 999px;
+			background: var(--background-secondary);
+			overflow: hidden;
+		}
+
+		.settings-progress-v1 span {
+			position: absolute;
+			inset: 0 42% 0 0;
+			border-radius: inherit;
+			background: color-mix(in srgb, var(--interactive-accent) 58%, var(--background-secondary));
+		}
+
+		@media (prefers-reduced-motion: reduce) {
+			.kit-running-surface-v1::after {
+				animation: none;
+				opacity: 0;
+			}
+		}
+
 		@media (max-width: 980px) {
 			.catalog-layout {
 				grid-template-columns: 1fr;
@@ -2474,6 +2791,13 @@
 				grid-template-columns: 1fr;
 			}
 
+			.foundation-grid-v1,
+			.scan-component-grid-v1,
+			.control-center-kit-v1,
+			.sync-conflict-layout-v1 {
+				grid-template-columns: 1fr;
+			}
+
 			.brand-asset-grid {
 				grid-template-columns: 1fr;
 			}
@@ -2496,7 +2820,11 @@
 			.assistant-artifact-row-v4,
 			.project-focus-signal-v4,
 			.composer-state-grid-v5,
-			.composer-live-combo-grid-v5 {
+			.composer-live-combo-grid-v5,
+			.kit-event-row-v1,
+			.scan-row-v1,
+			.onboarding-step-v1,
+			.settings-status-row-v1 {
 				grid-template-columns: 1fr;
 			}
 
@@ -2505,8 +2833,16 @@
 			.component-choice,
 			.workbench-tools-v2,
 			.composer-control-row-v5,
-			.project-focus-actions-v4 {
+			.project-focus-actions-v4,
+			.session-drawer-head-v1,
+			.scan-panel-head-v1 {
 				justify-content: flex-start;
+			}
+
+			.session-drawer-head-v1,
+			.scan-panel-head-v1 {
+				align-items: flex-start;
+				flex-direction: column;
 			}
 
 			.workbench-project-v2 {
@@ -2580,6 +2916,21 @@
 			<path d="M8 8h8"></path>
 			<path d="M8 12h8"></path>
 		</symbol>
+		<symbol id="icon-file" viewBox="0 0 24 24">
+			<path d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"></path>
+			<path d="M14 2v5h5"></path>
+		</symbol>
+		<symbol id="icon-tool-action" viewBox="0 0 24 24">
+			<path d="M5 12h12"></path>
+			<path d="m13 6 6 6-6 6"></path>
+		</symbol>
+		<symbol id="icon-skill" viewBox="0 0 24 24">
+			<rect x="4" y="4" width="7" height="7" rx="1.5"></rect>
+			<rect x="13" y="4" width="7" height="7" rx="1.5"></rect>
+			<rect x="4" y="13" width="7" height="7" rx="1.5"></rect>
+			<path d="M14 16h5"></path>
+			<path d="M16.5 13.5v5"></path>
+		</symbol>
 	</svg>
 	<div class="catalog-frame">
 		<header class="catalog-header">
@@ -2612,14 +2963,16 @@
 			<aside class="catalog-sidebar">
 				<h2>组件区域</h2>
 				<nav class="catalog-nav" aria-label="组件区域">
+					<a href="#foundation">元组件 <span class="nav-count">6</span></a>
 					<a href="#brand">品牌识别 <span class="nav-count">3</span></a>
-					<a href="#settings">设置组件 <span class="nav-count">3</span></a>
+					<a href="#settings">设置组件 <span class="nav-count">4</span></a>
 					<a href="#feedback">反馈组件 <span class="nav-count">3</span></a>
-					<a href="#actions">审批操作 <span class="nav-count">1</span></a>
-					<a href="#shell">工作台外壳 <span class="nav-count">1</span></a>
-					<a href="#ai">助手组件 <span class="nav-count">2</span></a>
+					<a href="#actions">审批操作 <span class="nav-count">2</span></a>
+					<a href="#shell">工作台外壳 <span class="nav-count">3</span></a>
+					<a href="#control">能力控制 <span class="nav-count">1</span></a>
+					<a href="#ai">助手组件 <span class="nav-count">3</span></a>
 					<a href="#agent">执行过程 <span class="nav-count">1</span></a>
-					<a href="#project">项目组件 <span class="nav-count">1</span></a>
+					<a href="#project">项目组件 <span class="nav-count">2</span></a>
 				</nav>
 				<div class="selection-summary">
 					<strong>本页选择</strong>
@@ -2632,6 +2985,198 @@
 			</aside>
 
 			<main class="catalog-main">
+				<section class="kit-section" id="foundation">
+					<div class="section-head">
+						<div>
+							<h2>跨组件元组件</h2>
+							<p>这些不是某一个页面独有的组件，而是按钮、状态、文件、浮层和运行态的通用语法，后续 Kit 都应该优先复用。</p>
+						</div>
+						<span class="section-mode">基础零件</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen" data-component="状态徽标" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">状态徽标</h3>
+									<div class="specimen-meta">用于设置、Task Bar、审批、同步和会话列表的低密度状态表达</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="foundation-card-v1">
+									<strong>同一套状态词，不按页面重新发明</strong>
+									<div class="foundation-sample-row-v1">
+										<span class="kit-soft-chip-v1 is-active">已同步</span>
+										<span class="kit-soft-chip-v1">未开始</span>
+										<span class="kit-soft-chip-v1 is-warning">需确认</span>
+										<span class="kit-soft-chip-v1 is-active">完成</span>
+									</div>
+									<span>只表达状态，不承载解释；解释放在所在行或面板正文里。</span>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="文件类型图标元件" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">文件类型图标元件</h3>
+									<div class="specimen-meta">用于产物、@ 文件选择、Diff、同步冲突和会话附件</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="foundation-card-v1">
+									<div class="foundation-sample-row-v1">
+										<span class="kit-file-type-icon-v1 is-markdown" aria-label="Markdown"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+										<span class="kit-file-type-icon-v1 is-canvas" aria-label="Canvas"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+										<span class="kit-file-type-icon-v1 is-code" aria-label="HTML"><span class="friday-icon"><svg><use href="#icon-code"></use></svg></span></span>
+										<span class="kit-file-type-icon-v1 is-note" aria-label="Note"><span class="friday-icon"><svg><use href="#icon-file"></use></svg></span></span>
+									</div>
+									<span>已选中的 @ token 不带文件图标；列表、产物和冲突行才需要图标帮助扫描。</span>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="低强调事件行" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">低强调事件行</h3>
+									<div class="specimen-meta">工具调用、后台记录、同步日志和执行过程共享的轻量信息行</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="kit-event-row-v1">
+									<span class="friday-icon"><svg><use href="#icon-code"></use></svg></span>
+									<div class="kit-event-row-main-v1">
+										<strong>read_file</strong>
+										<span>docs/design/native-kit-catalog.html</span>
+									</div>
+									<span class="kit-soft-chip-v1">完成</span>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="运行中表面" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">运行中表面</h3>
+									<div class="specimen-meta">用于当前执行步骤、同步刷新、后台 Agent 活动和长任务进度</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="kit-event-row-v1 kit-running-surface-v1">
+									<div class="kit-event-row-main-v1">
+										<strong>正在整理 Native Kit 候选</strong>
+										<span>CSS 背景扫光只表达进行中，不抢正文注意力</span>
+									</div>
+									<span>18s</span>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="浮层列表项" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">浮层列表项</h3>
+									<div class="specimen-meta">Skill、@ 文件、会话菜单和项目选择器共用的候选项结构</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="kit-popover-list-v1">
+									<div class="kit-popover-item-v1 is-active">
+										<span class="kit-file-type-icon-v1 is-canvas"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+										<div>
+											<strong>json-canvas</strong>
+											<span>创建和编辑 Obsidian .canvas 文件</span>
+										</div>
+									</div>
+									<div class="kit-popover-item-v1">
+										<span class="kit-file-type-icon-v1 is-markdown"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+										<div>
+											<strong>friday-native-kit</strong>
+											<span>docs/design/friday-native-kit.md</span>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="控制按钮组" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">控制按钮组</h3>
+									<div class="specimen-meta">模型、权限、@、Skill、搜索、刷新和设置共享的控制密度</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增元组件</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 候选</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="foundation-card-v1">
+									<div class="foundation-sample-row-v1">
+										<button type="button" class="kit-control-button-v1 is-model">模型 GPT-5</button>
+										<button type="button" class="kit-control-button-v1 is-permission">权限 需确认</button>
+										<button type="button" class="kit-icon-button-v1" aria-label="引用文件">@</button>
+										<button type="button" class="kit-control-button-v1 is-skill">+Skill</button>
+										<button type="button" class="kit-icon-button-v1" aria-label="搜索"><span class="friday-icon"><svg><use href="#icon-search"></use></svg></span></button>
+									</div>
+									<span>普通控制保持 Obsidian 原生，不因 FRIDAY 品牌而变成大按钮。</span>
+								</div>
+							</div>
+						</article>
+
+					</div>
+				</section>
+
 				<section class="kit-section" id="brand">
 					<div class="section-head">
 						<div>
@@ -2814,7 +3359,7 @@
 										</div>
 										<div class="setting-item-control">
 											<input class="native-input" type="password" value="sk-000000000000" aria-label="API key">
-											<span class="status-pill is-ready">就绪</span>
+											<span class="kit-soft-chip-v1 is-active">就绪</span>
 										</div>
 									</div>
 								</div>
@@ -2847,6 +3392,49 @@
 								</div>
 							</div>
 						</article>
+
+						<article class="component-specimen is-wide" data-component="设置页状态反馈" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">设置页状态反馈</h3>
+									<div class="specimen-meta">LLM 连接状态、错误详情、后台刷新进度和风险确认共用一套设置页反馈语法</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">SettingsKit 扩展</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="settings-status-stack-v1">
+									<div class="settings-status-row-v1">
+										<div>
+											<strong>模型连接</strong>
+											<div class="kit-list-subtitle-v1">GPT-5 可用，权限策略为确认后执行。</div>
+										</div>
+										<span class="kit-soft-chip-v1 is-active">已连接</span>
+									</div>
+									<div class="settings-status-row-v1">
+										<div>
+											<strong>官方内容刷新</strong>
+											<div class="settings-progress-v1" aria-label="刷新进度"><span></span></div>
+										</div>
+										<span class="kit-soft-chip-v1 is-active">42%</span>
+									</div>
+									<div class="friday-inline-alert">
+										<div>
+											<strong>路径包含未同步文件</strong>
+											<p>风险说明使用行内提醒，不把每个错误都做成单独大卡片。</p>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
 					</div>
 				</section>
 
@@ -2933,9 +3521,9 @@
 							</div>
 							<div class="specimen-body">
 								<ul class="prereq-list">
-									<li><span>已选择当前项目</span><span class="status-pill is-ready">就绪</span></li>
-									<li><span>已启用写入审批</span><span class="status-pill is-ready">就绪</span></li>
-									<li><span>配置可用模型</span><span class="status-pill is-waiting">缺失</span></li>
+									<li><span>已选择当前项目</span><span class="kit-soft-chip-v1 is-active">就绪</span></li>
+									<li><span>已启用写入审批</span><span class="kit-soft-chip-v1 is-active">就绪</span></li>
+									<li><span>配置可用模型</span><span class="kit-soft-chip-v1 is-warning">缺失</span></li>
 								</ul>
 							</div>
 						</article>
@@ -2982,15 +3570,63 @@
 									</div>
 									<div class="composer-control-row-v5">
 										<div class="composer-control-group-v5">
-											<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
-											<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
-											<button type="button" class="assistant-control-button is-context">@</button>
-											<button type="button" class="assistant-control-button is-skill">+Skill</button>
+											<button type="button" class="kit-control-button-v1 is-model">模型 GPT-5</button>
+											<button type="button" class="kit-control-button-v1 is-permission">权限 需确认</button>
+											<button type="button" class="kit-control-button-v1 is-context">@</button>
+											<button type="button" class="kit-control-button-v1 is-skill">+Skill</button>
 										</div>
 									</div>
 								</div>
 							</div>
 						</article>
+
+						<article class="component-specimen is-wide" data-component="变更审阅 Diff" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">变更审阅 Diff</h3>
+									<div class="specimen-meta">审批前的文件修改预览，和审批强提醒共用动作语法，但 Diff 自己需要标准化</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Mutation Review</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="scan-panel-v1">
+									<div class="scan-panel-head-v1">
+										<div>
+											<div class="scan-panel-title-v1">待应用文件修改</div>
+											<div class="scan-panel-subtitle-v1">先让用户看清文件、范围和风险，再做确认。</div>
+										</div>
+										<div class="kit-inline-cluster-v1">
+											<button type="button" class="mod-cta">应用修改</button>
+											<button type="button">查看完整 Diff</button>
+										</div>
+									</div>
+									<div class="scan-list-v1">
+										<div class="scan-row-v1">
+											<span class="kit-file-type-icon-v1 is-markdown"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+											<div class="scan-row-copy-v1">
+												<strong>friday-native-kit.md</strong>
+												<span>新增 3 段规范，修改 1 个验收项</span>
+											</div>
+											<span class="kit-soft-chip-v1 is-warning">需确认</span>
+										</div>
+										<div class="diff-preview-kit-v1" aria-label="Diff preview">
+											<div class="diff-line-v1 is-remove"><span>-</span><span>项目状态组进入首批迁移</span></div>
+											<div class="diff-line-v1 is-add"><span>+</span><span>项目状态组继续暂缓，先沉淀同步冲突和 Diff 组件</span></div>
+											<div class="diff-line-v1"><span></span><span>其余组件维持 Native Kit 变量体系</span></div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
 					</div>
 				</section>
 
@@ -3039,10 +3675,183 @@
 										</select>
 									</label>
 									<div class="workbench-tools-v2" role="toolbar" aria-label="工作台工具">
-										<span class="status-pill is-ready">已同步</span>
+										<span class="kit-soft-chip-v1 is-active">已同步</span>
 										<button type="button">搜索</button>
 										<button type="button">刷新</button>
 										<button type="button">设置</button>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="首次引导步骤" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">首次引导步骤</h3>
+									<div class="specimen-meta">项目注册、模型配置、权限准备等配置缺口，不做欢迎页营销化</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Onboarding</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="onboarding-steps-v1">
+									<div class="onboarding-step-v1">
+										<div class="scan-row-copy-v1">
+											<strong>注册当前项目</strong>
+											<span>让 FRIDAY 知道上下文边界。</span>
+										</div>
+										<button type="button" class="onboarding-step-action-v1 is-primary">注册</button>
+									</div>
+									<div class="onboarding-step-v1">
+										<div class="scan-row-copy-v1">
+											<strong>配置模型</strong>
+											<span>选择模型与执行权限。</span>
+										</div>
+										<span class="onboarding-step-action-v1 is-done">完成</span>
+									</div>
+									<div class="onboarding-step-v1">
+										<div class="scan-row-copy-v1">
+											<strong>检查技能</strong>
+											<span>确认 builtin skills 可用。</span>
+										</div>
+										<button type="button" class="onboarding-step-action-v1">检查</button>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen" data-component="运行状态提示组" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">运行状态提示组</h3>
+									<div class="specimen-meta">后台 Agent、输入排队、临时覆盖条和刷新进度的轻量入口</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Runtime Status</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="runtime-stack-v1">
+									<div class="kit-event-row-v1 kit-running-surface-v1">
+										<div class="kit-event-row-main-v1">
+											<strong>后台 Agent 正在执行</strong>
+											<span>整理 Native Kit 候选，当前窗口可继续浏览。</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-active">运行中</span>
+									</div>
+									<div class="kit-event-row-v1">
+										<div class="kit-event-row-main-v1">
+											<strong>输入已排队</strong>
+											<span>当前任务结束后会继续处理 2 条补充要求。</span>
+										</div>
+										<button type="button">查看</button>
+									</div>
+									<div class="kit-event-row-v1">
+										<div class="kit-event-row-main-v1">
+											<strong>临时覆盖上下文</strong>
+											<span>本轮仅引用 docs/design 目录。</span>
+										</div>
+										<button type="button">清除</button>
+									</div>
+								</div>
+							</div>
+						</article>
+					</div>
+				</section>
+
+				<section class="kit-section" id="control">
+					<div class="section-head">
+						<div>
+							<h2>能力控制组件</h2>
+							<p>工具开关、Skill 分组、审阅说明和权限策略是 FRIDAY 的能力面板，不应混成普通设置行。</p>
+						</div>
+						<span class="section-mode">能力管理</span>
+					</div>
+					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="能力控制中心" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">能力控制中心</h3>
+									<div class="specimen-meta">扫描到 friday-control-center-*：工具可用性、Skill 分组、启用状态和审阅说明需要独立规范</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Control Center</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="control-center-kit-v1">
+									<div class="control-group-v1">
+										<div class="scan-panel-head-v1">
+											<div>
+												<div class="scan-panel-title-v1">工具权限</div>
+												<div class="scan-panel-subtitle-v1">高风险工具使用明确开关和短解释。</div>
+											</div>
+											<span class="kit-soft-chip-v1 is-warning">需确认</span>
+										</div>
+										<div class="scan-list-v1">
+											<div class="scan-row-v1 is-active">
+												<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+												<div class="scan-row-copy-v1">
+													<strong>写入文件</strong>
+													<span>修改 Obsidian 文件前触发审批。</span>
+												</div>
+												<span class="toggle" aria-hidden="true"></span>
+											</div>
+											<div class="scan-row-v1">
+												<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+												<div class="scan-row-copy-v1">
+													<strong>刷新索引</strong>
+													<span>允许后台读取项目结构。</span>
+												</div>
+												<span class="toggle" aria-hidden="true"></span>
+											</div>
+										</div>
+									</div>
+									<div class="control-group-v1">
+										<div class="scan-panel-head-v1">
+											<div>
+												<div class="scan-panel-title-v1">Skill 组</div>
+												<div class="scan-panel-subtitle-v1">显示技能名，不显示 Skill 前缀。</div>
+											</div>
+											<button type="button">管理</button>
+										</div>
+										<div class="scan-list-v1">
+											<div class="scan-row-v1">
+												<span class="kit-skill-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-skill"></use></svg></span></span>
+												<div class="scan-row-copy-v1">
+													<strong>json-canvas</strong>
+													<span>创建和编辑 .canvas 文件</span>
+												</div>
+												<span class="kit-soft-chip-v1 is-active">启用</span>
+											</div>
+											<div class="scan-row-v1 is-muted">
+												<span class="kit-skill-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-skill"></use></svg></span></span>
+												<div class="scan-row-copy-v1">
+													<strong>obsidian-markdown</strong>
+													<span>审阅说明浮层可解释使用范围</span>
+												</div>
+												<button type="button">说明</button>
+											</div>
+										</div>
 									</div>
 								</div>
 							</div>
@@ -3104,11 +3913,13 @@
 													</div>
 													<p>我会先读取当前项目的设计规范，再给出最小可迁移的组件候选。</p>
 												</section>
-												<div class="assistant-output-block is-tool assistant-tool-call-v5">
-													<span class="assistant-tool-icon-v5" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
-													<span class="assistant-tool-name-v5">read_file</span>
-													<span class="assistant-tool-detail-v5">docs/design/obsidian-plugin-ui-contract.md</span>
-													<span class="assistant-tool-state-v5">已运行 1 条命令</span>
+												<div class="kit-event-row-v1 assistant-tool-call-v5">
+													<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+													<div class="kit-event-row-main-v1">
+														<strong class="assistant-tool-name-v5">read_file</strong>
+														<span class="assistant-tool-detail-v5">docs/design/obsidian-plugin-ui-contract.md</span>
+													</div>
+													<span class="kit-soft-chip-v1">已运行 1 条命令</span>
 												</div>
 												<section class="assistant-output-block is-artifact">
 													<div class="assistant-block-title">
@@ -3117,12 +3928,12 @@
 													</div>
 													<div class="assistant-artifact-list-v4">
 														<div class="assistant-artifact-row-v4">
-															<span class="artifact-type-icon is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+															<span class="kit-file-type-icon-v1 is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
 															<strong>UI 差异报告</strong>
 															<code>friday-ui-ux-gap.md</code>
 														</div>
 														<div class="assistant-artifact-row-v4">
-															<span class="artifact-type-icon is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+															<span class="kit-file-type-icon-v1 is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
 															<strong>组件白板</strong>
 															<code>native-kit-map.canvas</code>
 														</div>
@@ -3161,7 +3972,7 @@
 													<span class="composer-taskbar-step-v5">2/4</span>
 													<span class="composer-taskbar-title-v5">排查 Native Kit 差异</span>
 													<span class="composer-taskbar-elapsed-v5">18s</span>
-													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-file"></use></svg></span>
 												</button>
 											</div>
 										</div>
@@ -3172,7 +3983,7 @@
 													<span class="composer-taskbar-step-v5">2/4</span>
 													<span class="composer-taskbar-title-v5">排查 Native Kit 差异</span>
 													<span class="composer-taskbar-elapsed-v5">18s</span>
-													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+													<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-file"></use></svg></span>
 												</button>
 												<div class="composer-taskbar-list-v5">
 													<div class="composer-taskbar-task-v5 is-completed">
@@ -3210,7 +4021,7 @@
 																<span class="composer-taskbar-step-v5">2/4</span>
 																<span class="composer-taskbar-title-v5">整理 Native Kit 候选</span>
 																<span class="composer-taskbar-elapsed-v5">18s</span>
-																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-file"></use></svg></span>
 															</button>
 														</div>
 													</div>
@@ -3220,10 +4031,10 @@
 														</div>
 														<div class="composer-control-row-v5">
 															<div class="composer-control-group-v5">
-																<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
-																<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
-																<button type="button" class="assistant-control-button is-context">@</button>
-																<button type="button" class="assistant-control-button is-skill">+Skill</button>
+																<button type="button" class="kit-control-button-v1 is-model">模型 GPT-5</button>
+																<button type="button" class="kit-control-button-v1 is-permission">权限 需确认</button>
+																<button type="button" class="kit-control-button-v1 is-context">@</button>
+																<button type="button" class="kit-control-button-v1 is-skill">+Skill</button>
 															</div>
 															<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
 														</div>
@@ -3240,7 +4051,7 @@
 																<span class="composer-taskbar-step-v5">2/4</span>
 																<span class="composer-taskbar-title-v5">整理 Native Kit 候选</span>
 																<span class="composer-taskbar-elapsed-v5">18s</span>
-																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-note"></use></svg></span>
+																<span class="friday-icon" aria-hidden="true"><svg><use href="#icon-file"></use></svg></span>
 															</button>
 															<div class="composer-taskbar-list-v5">
 																<div class="composer-taskbar-task-v5 is-completed">
@@ -3276,10 +4087,10 @@
 														</div>
 														<div class="composer-control-row-v5">
 															<div class="composer-control-group-v5">
-																<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
-																<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
-																<button type="button" class="assistant-control-button is-context">@</button>
-																<button type="button" class="assistant-control-button is-skill">+Skill</button>
+																<button type="button" class="kit-control-button-v1 is-model">模型 GPT-5</button>
+																<button type="button" class="kit-control-button-v1 is-permission">权限 需确认</button>
+																<button type="button" class="kit-control-button-v1 is-context">@</button>
+																<button type="button" class="kit-control-button-v1 is-skill">+Skill</button>
 															</div>
 															<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
 														</div>
@@ -3296,10 +4107,10 @@
 											</div>
 											<div class="composer-control-row-v5">
 												<div class="composer-control-group-v5">
-													<button type="button" class="assistant-control-button is-model">模型 GPT-5</button>
-													<button type="button" class="assistant-control-button is-permission">权限 需确认</button>
-													<button type="button" class="assistant-control-button is-context">@</button>
-													<button type="button" class="assistant-control-button is-skill">+Skill</button>
+													<button type="button" class="kit-control-button-v1 is-model">模型 GPT-5</button>
+													<button type="button" class="kit-control-button-v1 is-permission">权限 需确认</button>
+													<button type="button" class="kit-control-button-v1 is-context">@</button>
+													<button type="button" class="kit-control-button-v1 is-skill">+Skill</button>
 												</div>
 												<button type="button" class="mod-cta" aria-label="发送"><span class="friday-icon"><svg><use href="#icon-send"></use></svg></span></button>
 											</div>
@@ -3308,30 +4119,30 @@
 									<div class="composer-state-card-v5">
 										<div class="composer-state-label-v5">@ 引用文件选择</div>
 										<div class="composer-mention-popover-demo-v5">
-											<div class="composer-mention-picker-v5 is-above-input">
-												<button type="button" class="composer-mention-option-v5">
-													<span class="composer-file-type-icon-v5 is-note" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-note"></use></svg></span></span>
+											<div class="composer-mention-picker-v5 kit-popover-list-v1 is-above-input">
+												<button type="button" class="kit-popover-item-v1">
+													<span class="kit-file-type-icon-v1 is-note" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file"></use></svg></span></span>
 													<span class="composer-mention-copy-v5">
 														<strong>当前笔记</strong>
 														<span>发送时引用当前打开的笔记</span>
 													</span>
 												</button>
-												<button type="button" class="composer-mention-option-v5 is-active">
-													<span class="composer-file-type-icon-v5 is-html" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-code"></use></svg></span></span>
+												<button type="button" class="kit-popover-item-v1 is-active">
+													<span class="kit-file-type-icon-v1 is-code" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-code"></use></svg></span></span>
 													<span class="composer-mention-copy-v5">
 														<strong>native-kit-catalog</strong>
 														<span>docs/design/native-kit-catalog.html</span>
 													</span>
 												</button>
-												<button type="button" class="composer-mention-option-v5">
-													<span class="composer-file-type-icon-v5 is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+												<button type="button" class="kit-popover-item-v1">
+													<span class="kit-file-type-icon-v1 is-markdown" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
 													<span class="composer-mention-copy-v5">
 														<strong>obsidian-plugin-ui-contract</strong>
 														<span>docs/design/obsidian-plugin-ui-contract.md</span>
 													</span>
 												</button>
-												<button type="button" class="composer-mention-option-v5">
-													<span class="composer-file-type-icon-v5 is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
+												<button type="button" class="kit-popover-item-v1">
+													<span class="kit-file-type-icon-v1 is-canvas" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span></span>
 													<span class="composer-mention-copy-v5">
 														<strong>组件关系白板</strong>
 														<span>docs/design/native-kit-map.canvas</span>
@@ -3363,16 +4174,16 @@
 													<strong>/skills</strong>
 													<span>List available skills</span>
 												</div>
-												<div class="composer-skill-list-v5">
-													<button type="button" class="composer-skill-option-v5 is-active">
+												<div class="composer-skill-list-v5 kit-popover-list-v1">
+													<button type="button" class="kit-popover-item-v1 is-text-only is-active">
 														<strong>json-canvas</strong>
 														<span>创建和编辑 Obsidian .canvas 文件，支持节点、连线、分组和布局校验。</span>
 													</button>
-													<button type="button" class="composer-skill-option-v5">
+													<button type="button" class="kit-popover-item-v1 is-text-only">
 														<strong>obsidian-bases</strong>
 														<span>创建和编辑 Obsidian .base 文件，支持 YAML schema、筛选、公式和视图。</span>
 													</button>
-													<button type="button" class="composer-skill-option-v5">
+													<button type="button" class="kit-popover-item-v1 is-text-only">
 														<strong>obsidian-cli</strong>
 														<span>操作正在运行的 Obsidian Vault，并通过 Obsidian CLI 调试插件与主题。</span>
 													</button>
@@ -3383,6 +4194,61 @@
 													<span class="composer-placeholder-v5">/</span>
 												</div>
 											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+						<article class="component-specimen is-wide" data-component="对话记录抽屉" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">对话记录抽屉</h3>
+									<div class="specimen-meta">扫描到 friday-ai-session-*：搜索、分组、选择、重命名、菜单、空状态都需要统一</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Session Drawer</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="session-drawer-kit-v1">
+									<div class="session-drawer-head-v1">
+										<div>
+											<div class="scan-panel-title-v1">对话记录</div>
+											<div class="scan-panel-subtitle-v1">抽屉是管理工具，不使用大渐变或强品牌装饰。</div>
+										</div>
+										<div class="kit-inline-cluster-v1">
+											<button type="button">新建</button>
+											<button type="button">批量</button>
+										</div>
+									</div>
+									<div class="session-search-v1">搜索会话、项目或文件</div>
+									<div class="scan-list-v1">
+										<div class="scan-row-v1 is-selected is-text-only">
+											<div class="scan-row-copy-v1">
+												<strong>整理 Native Kit 候选</strong>
+												<span>今天 · 当前项目 · 3 个相关文件</span>
+											</div>
+											<button type="button" aria-label="更多操作">...</button>
+										</div>
+										<div class="scan-row-v1 is-text-only">
+											<div class="scan-row-copy-v1">
+												<strong>设置页迁移检查</strong>
+												<span>昨天 · FridaySettingTab.ts</span>
+											</div>
+											<span class="kit-soft-chip-v1">归档</span>
+										</div>
+										<div class="scan-row-v1 is-muted is-text-only">
+											<div class="scan-row-copy-v1">
+												<strong>空搜索状态</strong>
+												<span>无结果时复用空状态元件，给一个恢复动作。</span>
+											</div>
+											<button type="button">清除</button>
 										</div>
 									</div>
 								</div>
@@ -3423,14 +4289,14 @@
 											<strong>排查 Native Kit 差异</strong>
 											<span class="inline-status">正在检查 DailyBoardView.ts 和 styles.css</span>
 										</div>
-										<span class="status-pill is-waiting">运行中</span>
+										<span class="kit-soft-chip-v1 is-warning">运行中</span>
 									</div>
 									<div class="agent-timeline">
 										<div class="timeline-item">
 											<strong>读取规范</strong>
 											<span>DESIGN.md 和 obsidian-plugin-ui-contract.md</span>
 										</div>
-										<div class="timeline-item is-active agent-running-surface-v5">
+										<div class="timeline-item is-active kit-running-surface-v1">
 											<strong>扫描 UI surface</strong>
 											<span>查找重复 class、硬编码样式和局部 helper</span>
 										</div>
@@ -3441,7 +4307,7 @@
 									</div>
 									<div class="agent-artifact-grid-v3" aria-label="执行产物">
 										<div class="artifact-card-v3">
-											<span class="artifact-type-icon is-markdown" aria-hidden="true">
+											<span class="kit-file-type-icon-v1 is-markdown" aria-hidden="true">
 												<span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span>
 											</span>
 											<div>
@@ -3450,7 +4316,7 @@
 											</div>
 										</div>
 										<div class="artifact-card-v3">
-											<span class="artifact-type-icon is-canvas" aria-hidden="true">
+											<span class="kit-file-type-icon-v1 is-canvas" aria-hidden="true">
 												<span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span>
 											</span>
 											<div>
@@ -3459,8 +4325,8 @@
 											</div>
 										</div>
 										<div class="artifact-card-v3">
-											<span class="artifact-type-icon is-note" aria-hidden="true">
-												<span class="friday-icon"><svg><use href="#icon-note"></use></svg></span>
+											<span class="kit-file-type-icon-v1 is-note" aria-hidden="true">
+												<span class="friday-icon"><svg><use href="#icon-file"></use></svg></span>
 											</span>
 											<div>
 												<strong>实施笔记</strong>
@@ -3483,6 +4349,62 @@
 						<span class="section-mode">原生管理</span>
 					</div>
 					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="同步冲突差异" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">同步冲突差异</h3>
+									<div class="specimen-meta">同步冲突不等于项目状态组；它更像文件差异与来源确认组件，可以先独立定义</div>
+									<div class="component-version">
+										<span class="adjustment-badge">新增扫描候选</span>
+										<span class="adjustment-badge is-version">Sync Conflict</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="scan-panel-v1">
+									<div class="scan-panel-head-v1">
+										<div>
+											<div class="scan-panel-title-v1">2 个文件需要确认来源</div>
+											<div class="scan-panel-subtitle-v1">文件类型、冲突范围和动作需要比项目摘要更清楚。</div>
+										</div>
+										<div class="kit-inline-cluster-v1">
+											<button type="button" class="mod-cta">采用本地</button>
+											<button type="button">采用远端</button>
+										</div>
+									</div>
+									<div class="scan-row-v1 is-active">
+										<span class="kit-file-type-icon-v1 is-markdown"><span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span></span>
+										<div class="scan-row-copy-v1">
+											<strong>friday-native-kit.md</strong>
+											<span>本地和远端都修改了组件清单。</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">冲突</span>
+									</div>
+									<div class="sync-conflict-layout-v1">
+										<div class="sync-side-v1">
+											<strong>本地</strong>
+											<div class="diff-preview-kit-v1">
+												<div class="diff-line-v1 is-add"><span>+</span><span>新增能力控制中心</span></div>
+												<div class="diff-line-v1"><span></span><span>保留项目状态组暂缓</span></div>
+											</div>
+										</div>
+										<div class="sync-side-v1">
+											<strong>远端</strong>
+											<div class="diff-preview-kit-v1">
+												<div class="diff-line-v1 is-add"><span>+</span><span>新增对话记录抽屉</span></div>
+												<div class="diff-line-v1"><span></span><span>项目状态组未修改</span></div>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
 						<article class="component-specimen is-wide" data-component="项目状态组" data-adjusted-candidate="true">
 							<div class="specimen-head">
 								<div>
@@ -3512,7 +4434,7 @@
 													<strong>Friday-beta-evm</strong>
 													<span>12 个文件 · 索引刚刚更新</span>
 												</div>
-												<span class="status-pill is-ready">当前</span>
+												<span class="kit-soft-chip-v1 is-active">当前</span>
 											</div>
 											<div class="project-mini-row">
 												<div>

@@ -288,6 +288,46 @@ test("standard review delete creates one high-risk mutation review without a sep
 	assert.ok(!result.turnEvents.some((event) => event.type === "tool_approval_requested"));
 });
 
+test("standard review Obsidian structure writes create mutation review without a separate tool approval", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "standard review canvas apply mutation",
+		files: {},
+		settings: {
+			agentRuntime: {
+				toolPermissionMode: "standard",
+				fileMutationMode: "review",
+			},
+		},
+		modelSteps: [
+			{
+				tool: {
+					name: "canvas_apply",
+					args: {
+						path: "Project/workspace/relations.canvas",
+						mode: "create",
+						nodes: [
+							{ id: "a", type: "text", text: "A", x: 0, y: 0, width: 240, height: 120 },
+							{ id: "b", type: "text", text: "B", x: 360, y: 0, width: 240, height: 120 },
+						],
+						edges: [
+							{ id: "a-to-b", fromNode: "a", toNode: "b" },
+						],
+					},
+				},
+			},
+			{ assistant: "Prepared the canvas for review." },
+		],
+	});
+
+	assert.equal(result.approvalRequests.length, 0);
+	assert.equal(result.turnEventSummary.approvals.requested, 0);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.pendingMutations[0].operation, "canvas_apply");
+	assert.equal(result.pendingMutations[0].targetPath, "Project/workspace/relations.canvas");
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+	assert.ok(!result.turnEvents.some((event) => event.type === "tool_approval_requested"));
+});
+
 test("standard review create write edit and delete summaries stay prepared until review is applied", async () => {
 	const cases = [
 		{

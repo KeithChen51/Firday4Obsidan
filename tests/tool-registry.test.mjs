@@ -35,7 +35,7 @@ test("tool registry owns complete tool contracts with unique names", async () =>
 		assert.equal(typeof tool.capability, "string", `${tool.name} missing capability`);
 		assert.equal(typeof tool.handlerName, "string", `${tool.name} missing handlerName`);
 		assert.equal(tool.parameters.type, "object", `${tool.name} missing object schema`);
-		assert.ok(["low", "medium", "high"].includes(tool.riskLevel), `${tool.name} missing risk level`);
+	assert.ok(["low", "medium", "high"].includes(tool.riskLevel), `${tool.name} missing risk level`);
 		assert.ok(["read", "write", "delete", "system", "memory", "skill", "knowledge", "planning"].includes(tool.category));
 		assert.equal(typeof tool.concurrencySafe, "boolean", `${tool.name} missing concurrencySafe`);
 		assert.equal(typeof tool.idempotent, "boolean", `${tool.name} missing idempotent`);
@@ -76,7 +76,7 @@ test("tool contracts mark observation tools concurrency-safe and mutation tools 
 	const { registry } = await loadModules();
 	const toolRegistry = registry.ToolRegistry.getInstance();
 
-	for (const name of ["read", "ls", "grep", "search_text", "glob", "read_many", "search_and_read", "project_tree"]) {
+	for (const name of ["read", "ls", "grep", "search_text", "glob", "read_many", "search_and_read", "project_tree", "canvas_read", "markdown_outline", "validate_canvas", "validate_markdown", "validate_outputs"]) {
 		const tool = toolRegistry.get(name);
 		assert.equal(tool?.readOnly, true, `${name} should be read-only`);
 		assert.equal(tool?.concurrencySafe, true, `${name} should be safe to run concurrently`);
@@ -87,7 +87,7 @@ test("tool contracts mark observation tools concurrency-safe and mutation tools 
 		assert.ok(tool?.outputBudget > 0, `${name} should declare an output budget`);
 	}
 
-	for (const name of ["write", "edit", "delete", "exec", "memory", "compile_wiki"]) {
+	for (const name of ["write", "edit", "delete", "exec", "memory", "compile_wiki", "canvas_apply", "frontmatter_update", "markdown_insert_reference"]) {
 		const tool = toolRegistry.get(name);
 		if (!tool) {
 			continue;
@@ -97,6 +97,40 @@ test("tool contracts mark observation tools concurrency-safe and mutation tools 
 	}
 
 	assert.equal(toolRegistry.get("use_skill")?.concurrencySafe, false);
+});
+
+test("Obsidian structure tools are registered with skill links and expected safety boundaries", async () => {
+	const { registry } = await loadModules();
+	const toolRegistry = registry.ToolRegistry.getInstance();
+	const readOnlyTools = ["canvas_read", "markdown_outline", "validate_canvas", "validate_markdown", "validate_outputs"];
+	const mutationTools = ["canvas_apply", "frontmatter_update", "markdown_insert_reference"];
+
+	for (const name of readOnlyTools) {
+		const tool = toolRegistry.get(name);
+		assert.ok(tool, `${name} should be registered`);
+		assert.equal(tool.readOnly, true, `${name} should be read-only`);
+		assert.equal(tool.concurrencySafe, true, `${name} should be concurrency-safe`);
+		assert.equal(tool.idempotent, true, `${name} should be idempotent`);
+		assert.equal(tool.cacheable, true, `${name} should be cacheable`);
+		assert.equal(tool.mutatesVault, false, `${name} should not mutate vault state`);
+		assert.equal(tool.mutatesExternal, false, `${name} should not mutate external state`);
+	}
+
+	for (const name of mutationTools) {
+		const tool = toolRegistry.get(name);
+		assert.ok(tool, `${name} should be registered`);
+		assert.equal(tool.readOnly, false, `${name} should not be read-only`);
+		assert.equal(tool.concurrencySafe, false, `${name} should not run concurrently`);
+		assert.equal(tool.cacheable, false, `${name} should not be cacheable`);
+		assert.equal(tool.mutatesVault, true, `${name} should mutate vault state`);
+		assert.equal(tool.mutatesExternal, false, `${name} should not mutate external state`);
+	}
+
+	assert.equal(toolRegistry.get("canvas_read")?.relatedSkillCommand, "json-canvas");
+	assert.equal(toolRegistry.get("canvas_apply")?.relatedSkillCommand, "json-canvas");
+	assert.equal(toolRegistry.get("markdown_outline")?.relatedSkillCommand, "obsidian-markdown");
+	assert.equal(toolRegistry.get("frontmatter_update")?.relatedSkillCommand, "obsidian-markdown");
+	assert.equal(toolRegistry.get("markdown_insert_reference")?.relatedSkillCommand, "obsidian-markdown");
 });
 
 test("composite read-only tools are available to normal agent modes", async () => {

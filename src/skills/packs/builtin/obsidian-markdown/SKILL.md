@@ -12,6 +12,14 @@ executionMode: agent_orchestrated
 
 Generate valid Obsidian Flavored Markdown. Standard Markdown still applies, but this skill focuses on Obsidian-specific syntax and safe editing behavior for existing notes.
 
+## FRIDAY tool usage
+
+- Use `markdown_outline` before structural edits so you can inspect headings, frontmatter, wikilinks, embeds, and Markdown links.
+- Use `frontmatter_update` for note properties instead of rewriting the whole note.
+- Use `markdown_insert_reference` for wikilinks, embeds, and local Markdown links.
+- Use `validate_markdown` after changing one note, or `validate_outputs` when checking several generated files.
+- Use write/edit only as a low-level fallback when the structured Markdown tools cannot express the requested change.
+
 ## Prefer these constructs
 
 ### Frontmatter

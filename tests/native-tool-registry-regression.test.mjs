@@ -22,11 +22,15 @@ test("native tool definitions are built from registry contracts", async () => {
 	const read = definitions.find((tool) => tool.name === "read");
 	const write = definitions.find((tool) => tool.name === "write");
 	const planWrite = definitions.find((tool) => tool.name === "plan_write");
+	const canvasApply = definitions.find((tool) => tool.name === "canvas_apply");
+	const validateOutputs = definitions.find((tool) => tool.name === "validate_outputs");
 
 	assert.equal(read?.description, registry.get("read")?.description);
 	assert.deepEqual(read?.parameters, registry.get("read")?.parameters);
 	assert.deepEqual(write?.parameters.required, ["path", "content"]);
 	assert.ok(planWrite, "model-native tool definitions should include plan_write");
+	assert.ok(canvasApply, "normal native tool definitions should include canvas_apply");
+	assert.ok(validateOutputs, "normal native tool definitions should include validate_outputs");
 	assert.ok(!definitions.some((tool) => tool.name === "exec"));
 });
 
@@ -48,7 +52,7 @@ test("native filesystem tool descriptions align with project-relative path norma
 	const registry = mod.ToolRegistry.getInstance();
 	const definitions = registry.buildNativeToolDefinitions({ agentMode: "developer", enableExecTool: true });
 	const byName = new Map(definitions.map((tool) => [tool.name, tool]));
-	const filesystemTools = ["ls", "read", "grep", "search_text", "glob", "write", "edit", "delete"];
+	const filesystemTools = ["ls", "read", "grep", "search_text", "glob", "write", "edit", "delete", "canvas_read", "canvas_apply", "markdown_outline", "frontmatter_update", "markdown_insert_reference", "validate_canvas", "validate_markdown"];
 
 	for (const name of filesystemTools) {
 		const tool = byName.get(name);
@@ -63,4 +67,7 @@ test("native filesystem tool descriptions align with project-relative path norma
 	assert.match(byName.get("read").description, /allowed external/i);
 	assert.match(byName.get("write").description, /active project workspace/i);
 	assert.match(byName.get("delete").description, /canonical vault path/i);
+	assert.match(byName.get("validate_outputs")?.description ?? "", /project-relative paths/i);
+	assert.equal(typeof byName.get("validate_outputs")?.parameters.properties.paths?.description, "string");
+	assert.match(byName.get("validate_outputs")?.parameters.properties.paths?.description, /project-relative/i);
 });

@@ -986,8 +986,32 @@ export class AgentRuntimeService {
 				status: "planned",
 			});
 		}
+		if (normalizedTool === "canvas_apply") {
+			return formatFileMutationEventSummary({
+				operation: normalizedTool,
+				targetPath,
+				changeType: "update",
+				status: "planned",
+			});
+		}
+		if (normalizedTool === "frontmatter_update") {
+			return formatFileMutationEventSummary({
+				operation: normalizedTool,
+				targetPath,
+				changeType: "update",
+				status: "planned",
+			});
+		}
+		if (normalizedTool === "markdown_insert_reference") {
+			return formatFileMutationEventSummary({
+				operation: normalizedTool,
+				targetPath,
+				changeType: "update",
+				status: "planned",
+			});
+		}
 		void args;
-		return "FRIDAY needs permission for a higher-risk action before continuing.";
+		return "FRIDAY needs permission before continuing with this action.";
 	}
 
 	private describeToolApprovalResolution(tool: string, approved: boolean): string {
@@ -1841,9 +1865,17 @@ export class AgentRuntimeService {
 			{ action: "tool:use_skill", effect: "allow", source: "global" },
 			{ action: "tool:ls", effect: resolveEffect("ls", readEffect), source: "global" },
 			{ action: "tool:read", effect: resolveEffect("read", readEffect), source: "global" },
+			{ action: "tool:read_many", effect: resolveEffect("read_many", readEffect), source: "global" },
 			{ action: "tool:grep", effect: resolveEffect("grep", readEffect), source: "global" },
 			{ action: "tool:search_text", effect: resolveEffect("search_text", readEffect), source: "global" },
+			{ action: "tool:search_and_read", effect: resolveEffect("search_and_read", readEffect), source: "global" },
 			{ action: "tool:glob", effect: resolveEffect("glob", readEffect), source: "global" },
+			{ action: "tool:project_tree", effect: resolveEffect("project_tree", readEffect), source: "global" },
+			{ action: "tool:canvas_read", effect: resolveEffect("canvas_read", readEffect), source: "global" },
+			{ action: "tool:markdown_outline", effect: resolveEffect("markdown_outline", readEffect), source: "global" },
+			{ action: "tool:validate_canvas", effect: resolveEffect("validate_canvas", readEffect), source: "global" },
+			{ action: "tool:validate_markdown", effect: resolveEffect("validate_markdown", readEffect), source: "global" },
+			{ action: "tool:validate_outputs", effect: resolveEffect("validate_outputs", readEffect), source: "global" },
 			...(WIKI_FEATURE_ENABLED
 				? [{ action: "tool:compile_wiki", effect: resolveEffect("compile_wiki", nonFileRiskEffect), source: "global" } as PolicyRule]
 				: []),
@@ -1851,6 +1883,9 @@ export class AgentRuntimeService {
 			{ action: "tool:write", effect: resolveEffect("write", fileChangeEffect), source: "global" },
 			{ action: "tool:edit", effect: resolveEffect("edit", fileChangeEffect), source: "global" },
 			{ action: "tool:delete", effect: resolveEffect("delete", fileChangeEffect), source: "global" },
+			{ action: "tool:canvas_apply", effect: resolveEffect("canvas_apply", fileChangeEffect), source: "global" },
+			{ action: "tool:frontmatter_update", effect: resolveEffect("frontmatter_update", fileChangeEffect), source: "global" },
+			{ action: "tool:markdown_insert_reference", effect: resolveEffect("markdown_insert_reference", fileChangeEffect), source: "global" },
 			{ action: "tool:exec", effect: resolveEffect("exec", nonFileRiskEffect), source: "global" },
 		];
 	}
@@ -2440,7 +2475,22 @@ export class AgentRuntimeService {
 		const scope = this.resolveScope(targetPath);
 		const settings = this.getSettings();
 		const gatewayPolicy = this.resolveToolPolicy(name);
-		const approvalEligible = !["use_skill", "ls", "read", "read_many", "grep", "search_text", "search_and_read", "glob", "project_tree"].includes(name);
+		const approvalEligible = ![
+			"use_skill",
+			"ls",
+			"read",
+			"read_many",
+			"grep",
+			"search_text",
+			"search_and_read",
+			"glob",
+			"project_tree",
+			"canvas_read",
+			"markdown_outline",
+			"validate_canvas",
+			"validate_markdown",
+			"validate_outputs",
+		].includes(name);
 		const shouldRequestToolApproval = approvalEligible && gatewayPolicy.effect === "ask";
 		const shouldReportApproval = shouldRequestToolApproval || (approvalEligible && gatewayPolicy.effect === "deny");
 		const approvalDescription = this.describeToolApprovalConsequence(name, args, targetPath);

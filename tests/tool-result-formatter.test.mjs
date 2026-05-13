@@ -223,6 +223,8 @@ test("summarizeForTrace matches current runtime summaries for existing tools", a
 	assert.equal(summarizeForTrace("write", { path: "Project/a.md", status: "pending_review" }), "已准备文件修改，确认后才会写入 Obsidian：Project/a.md");
 	assert.equal(summarizeForTrace("delete", { path: "Project", deletedType: "folder" }), "Delete completed folder Project");
 	assert.equal(summarizeForTrace("edit", { path: "Project/a.md", appliedEdits: 2 }), "Edited Project/a.md (2 replacement(s))");
+	assert.equal(summarizeForTrace("canvas_read", { nodeCount: 2, edgeCount: 1 }), "canvas_read found 2 node(s), 1 edge(s)");
+	assert.equal(summarizeForTrace("validate_outputs", { results: [{ ok: true }, { ok: false }] }), "validate_outputs checked 2 output(s), 1 issue set(s)");
 	assert.equal(summarizeForTrace("exec", { exitCode: 0 }), "Exec completed (exit code 0)");
 	assert.equal(summarizeForTrace("unknown_tool", {}), "unknown_tool completed");
 });

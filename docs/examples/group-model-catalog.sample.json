@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "2026-05-13.1",
+  "updatedAt": "2026-05-13T00:00:00+08:00",
+  "recommendedBranch": "friday-model-catalog",
+  "providerId": "aliyun",
+  "providerName": "汽车售后服务事业部",
+  "models": [
+    {
+      "id": "glm-4.7",
+      "label": "GLM-4.7",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "kimi-k2.5",
+      "label": "KIMI-2.5",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "glm-5.1",
+      "label": "GLM-5.1",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "MiniMax/MiniMax-M2.7",
+      "label": "MiniMax/MiniMax-M2.7",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "qwen3-coder-plus",
+      "label": "qwen3-coder-plus",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "deepseek-v4-pro",
+      "label": "deepseek-v4-pro",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "qwen3.6-plus",
+      "label": "qwen3.6-plus",
+      "enabled": true,
+      "capabilities": {
+        "text": true,
+        "image": true
+      }
+    },
+    {
+      "id": "qwen3-max-preview",
+      "label": "Qwen3-Max-Preview",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "qwen3.5-flash-2026-02-23",
+      "label": "qwen3.5-flash-2026-02-23",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    },
+    {
+      "id": "qwen3-vl-235b-a22b-instruct",
+      "label": "qwen3-vl-235b-a22b-instruct",
+      "enabled": true,
+      "capabilities": {
+        "text": true,
+        "image": true
+      }
+    },
+    {
+      "id": "qwen3-max-2026-01-23",
+      "label": "qwen3-max-2026-01-23",
+      "enabled": true,
+      "capabilities": {
+        "text": true
+      }
+    }
+  ],
+  "defaults": {
+    "chat": "qwen3.6-plus",
+    "agent": "qwen3-coder-plus",
+    "vision": "qwen3-vl-235b-a22b-instruct",
+    "fallback": "glm-5.1"
+  }
+}

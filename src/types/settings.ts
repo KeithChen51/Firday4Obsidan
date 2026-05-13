@@ -2,7 +2,14 @@ import { ProjectEntry, ProjectGroupEntry } from "./project";
 import { AgentRuntimeSettings } from "./agent";
 import { LocaleCode } from "../i18n/types";
 import { OFFICIAL_CONTENT_STARTUP_DELAY_MS } from "../constants/officialContent";
+import {
+	GROUP_MODEL_CATALOG_BRANCH,
+	GROUP_MODEL_CATALOG_FILE_PATH,
+	GROUP_MODEL_CATALOG_REPO_URL,
+	GROUP_MODEL_CATALOG_STARTUP_DELAY_MS,
+} from "../constants/groupModelCatalog";
 import { OfficialContentCatalogEntry } from "./officialContent";
+import type { GroupModelCatalogDefaults, GroupModelCatalogModel } from "./groupModelCatalog";
 
 export interface SlashCommandTemplate {
 	id: string;
@@ -100,6 +107,22 @@ export interface FridaySettings {
 			lastAppliedVersion: string;
 			path: string;
 		}>;
+	};
+	groupModelCatalog: {
+		enabled: boolean;
+		checkOnStartup: boolean;
+		startupDelayMs: number;
+		repoUrl: string;
+		branch: string;
+		filePath: string;
+		lastCheckedAt: string;
+		lastCatalogVersion: string;
+		lastResult: "idle" | "updated" | "up-to-date" | "error";
+		lastError: string;
+		providerId: string;
+		providerName: string;
+		models: GroupModelCatalogModel[];
+		defaults: GroupModelCatalogDefaults;
 	};
 	projectGroups: ProjectGroupEntry[];
 	projects: ProjectEntry[];
@@ -205,6 +228,22 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 		lastCatalogVersion: "",
 		catalog: [],
 		channels: {},
+	},
+	groupModelCatalog: {
+		enabled: true,
+		checkOnStartup: true,
+		startupDelayMs: GROUP_MODEL_CATALOG_STARTUP_DELAY_MS,
+		repoUrl: GROUP_MODEL_CATALOG_REPO_URL,
+		branch: GROUP_MODEL_CATALOG_BRANCH,
+		filePath: GROUP_MODEL_CATALOG_FILE_PATH,
+		lastCheckedAt: "",
+		lastCatalogVersion: "",
+		lastResult: "idle",
+		lastError: "",
+		providerId: "",
+		providerName: "",
+		models: [],
+		defaults: {},
 	},
 	projectGroups: [],
 	projects: [],

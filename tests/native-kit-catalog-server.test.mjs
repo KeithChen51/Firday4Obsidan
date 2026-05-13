@@ -191,12 +191,12 @@ test("native kit catalog reflects the reviewed v2 component direction", async ()
 		"assistant-document-flow-v3",
 		"assistant-user-bubble-v3",
 		"assistant-output-block is-prose",
-		"assistant-output-block is-tool",
+		"kit-event-row-v1 assistant-tool-call-v5",
 	]) {
 		assert.match(html, new RegExp(className, "u"));
 	}
 
-	for (const className of ["artifact-type-icon is-markdown", "artifact-type-icon is-canvas", "artifact-type-icon is-note"]) {
+	for (const className of ["kit-file-type-icon-v1 is-markdown", "kit-file-type-icon-v1 is-canvas", "kit-file-type-icon-v1 is-note"]) {
 		assert.match(html, new RegExp(className, "u"));
 	}
 
@@ -216,10 +216,11 @@ test("native kit catalog includes assistant process taskbar system refinements",
 
 	for (const className of [
 		"assistant-output-block is-prose",
-		"assistant-output-block is-tool",
 		"assistant-output-block is-artifact",
+		"kit-event-row-v1 assistant-tool-call-v5",
 		"assistant-tool-call-v5",
-		"assistant-tool-icon-v5",
+		"kit-tool-icon-v1",
+		"icon-tool-action",
 		"assistant-tool-name-v5",
 		"composer-input-kit-v5 is-empty",
 		"composer-input-kit-v5 is-skill",
@@ -238,16 +239,16 @@ test("native kit catalog includes assistant process taskbar system refinements",
 		"composer-skill-anchor-v5",
 		"composer-skill-query-v5",
 		"composer-skill-list-v5",
-		"composer-skill-option-v5",
+		"kit-popover-item-v1 is-text-only",
 		"composer-mention-popover-demo-v5",
 		"composer-mention-picker-v5",
-		"composer-mention-picker-v5 is-above-input",
-		"composer-mention-option-v5",
+		"composer-mention-picker-v5 kit-popover-list-v1 is-above-input",
+		"kit-popover-item-v1",
 		"composer-mention-copy-v5",
-		"composer-file-type-icon-v5 is-note",
-		"composer-file-type-icon-v5 is-html",
-		"composer-file-type-icon-v5 is-markdown",
-		"composer-file-type-icon-v5 is-canvas",
+		"kit-file-type-icon-v1 is-note",
+		"kit-file-type-icon-v1 is-code",
+		"kit-file-type-icon-v1 is-markdown",
+		"kit-file-type-icon-v1 is-canvas",
 		"icon-code",
 		"composer-mention-anchor-v5",
 		"composer-token-v5 is-context",
@@ -258,10 +259,10 @@ test("native kit catalog includes assistant process taskbar system refinements",
 		"composer-taskbar-kit-v5 is-expanded",
 		"friday-composer-task-bar",
 		"friday-ai-composer-task-bar-host",
-		"assistant-control-button is-model",
-		"assistant-control-button is-permission",
-		"assistant-control-button is-context",
-		"assistant-control-button is-skill",
+		"kit-control-button-v1 is-model",
+		"kit-control-button-v1 is-permission",
+		"kit-control-button-v1 is-context",
+		"kit-control-button-v1 is-skill",
 		"Skill 列表沿用 friday-mention-dropdown，向输入框上方展开",
 		"@ 引用文件选择",
 		"审批强提醒",
@@ -300,4 +301,127 @@ test("native kit catalog includes assistant process taskbar system refinements",
 	const projectMarkup = html.match(/data-project-variant="compact"[\s\S]*?data-project-variant="inspector"/u)?.[0] || "";
 	assert.match(projectMarkup, /project-focus-strip-v4/);
 	assert.match(projectMarkup, /project-health-meter-v4/);
+});
+
+test("native kit catalog includes scanned components and reusable primitives", async () => {
+	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
+	const specPath = path.resolve("docs", "design", "friday-native-kit.md");
+	const migrationMapPath = path.resolve("docs", "design", "friday-native-kit-migration-map.md");
+	const html = await readFile(htmlPath, "utf8");
+	const spec = await readFile(specPath, "utf8");
+	const migrationMap = await readFile(migrationMapPath, "utf8");
+
+	for (const component of [
+		"状态徽标",
+		"文件类型图标元件",
+		"低强调事件行",
+		"运行中表面",
+		"浮层列表项",
+		"控制按钮组",
+		"设置页状态反馈",
+		"变更审阅 Diff",
+		"首次引导步骤",
+		"运行状态提示组",
+		"能力控制中心",
+		"对话记录抽屉",
+		"同步冲突差异",
+	]) {
+		assert.match(html, new RegExp(`data-component="${component}"`, "u"));
+		assert.match(spec, new RegExp(component.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+	}
+
+	for (const className of [
+		"foundation-grid-v1",
+		"kit-soft-chip-v1",
+		"kit-file-type-icon-v1",
+		"kit-event-row-v1",
+		"kit-event-row-main-v1",
+		"kit-running-surface-v1",
+		"kit-popover-list-v1",
+		"kit-tool-icon-v1",
+		"kit-skill-icon-v1",
+		"settings-status-stack-v1",
+		"diff-preview-kit-v1",
+		"onboarding-step-action-v1",
+		"onboarding-steps-v1",
+		"runtime-stack-v1",
+		"control-center-kit-v1",
+		"session-drawer-kit-v1",
+		"sync-conflict-layout-v1",
+		"scan-row-v1 is-text-only",
+		"friday-kit-running-sheen",
+		"prefers-reduced-motion",
+		"--kit-event-row-height, 40px",
+		"text-overflow: ellipsis",
+		"white-space: nowrap",
+		"icon-file",
+		"icon-tool-action",
+		"icon-skill",
+	]) {
+		assert.match(html, new RegExp(className, "u"));
+	}
+
+	const sections = new Map(
+		[...html.matchAll(/<section class="kit-section" id="([^"]+)"[\s\S]*?(?=<section class="kit-section" id=|<\/main>)/gu)]
+			.map((match) => [match[1], match[0]]),
+	);
+	assert.match(sections.get("foundation") || "", /data-component="状态徽标"/u);
+	assert.match(sections.get("settings") || "", /data-component="设置页状态反馈"/u);
+	assert.match(sections.get("actions") || "", /data-component="变更审阅 Diff"/u);
+	assert.match(sections.get("shell") || "", /data-component="首次引导步骤"/u);
+	assert.match(sections.get("control") || "", /data-component="能力控制中心"/u);
+	assert.match(sections.get("ai") || "", /data-component="对话记录抽屉"/u);
+	assert.match(sections.get("project") || "", /data-component="同步冲突差异"/u);
+
+	const runningSurfaceMarkup = html.match(/data-component="运行中表面"[\s\S]*?<\/article>/u)?.[0] || "";
+	assert.match(runningSurfaceMarkup, /CSS 背景扫光/u);
+	assert.doesNotMatch(runningSurfaceMarkup, /icon-refresh/u);
+
+	const controlCenterMarkup = sections.get("control") || "";
+	assert.match(controlCenterMarkup, /icon-tool-action/u);
+	assert.match(controlCenterMarkup, /icon-skill/u);
+
+	const sessionDrawerMarkup = html.match(/data-component="对话记录抽屉"[\s\S]*?<\/article>/u)?.[0] || "";
+	assert.match(sessionDrawerMarkup, /scan-row-v1 is-selected is-text-only/u);
+	assert.doesNotMatch(sessionDrawerMarkup, /kit-file-type-icon-v1/u);
+	assert.doesNotMatch(sessionDrawerMarkup, /friday-mark is-contained/u);
+
+	for (const requiredMapText of [
+		"跨组件元组件",
+		"新增组件候选已进 HTML 画板",
+		"这些候选不改变当前 `native-kit-catalog-decisions.json` 的 14/0/1 选择计数",
+		"同步冲突差异不是解除项目状态组暂缓",
+	]) {
+		assert.match(migrationMap, new RegExp(requiredMapText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
+	}
+});
+
+test("native kit catalog applies reusable primitives to downstream component examples", async () => {
+	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
+	const html = await readFile(htmlPath, "utf8");
+
+	for (const legacyClass of [
+		"status-pill",
+		"artifact-type-icon",
+		"composer-file-type-icon-v5",
+		"assistant-tool-icon-v5",
+		"runtime-strip-v1",
+		"agent-running-surface-v5",
+		"composer-mention-option-v5",
+		"composer-skill-option-v5",
+		"assistant-control-button",
+	]) {
+		assert.doesNotMatch(html, new RegExp(legacyClass, "u"), `${legacyClass} should be folded into kit primitives`);
+	}
+
+	for (const primitiveClass of [
+		"kit-control-button-v1",
+		"kit-popover-item-v1 is-text-only",
+		"kit-event-row-v1 kit-running-surface-v1",
+		"kit-tool-icon-v1",
+		"kit-file-type-icon-v1",
+		"kit-soft-chip-v1",
+	]) {
+		assert.match(html, new RegExp(primitiveClass, "u"));
+	}
 });

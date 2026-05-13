@@ -38,6 +38,13 @@ Operate on Obsidian `.canvas` files, which are JSON documents with top-level `no
 1. Keep layout readable: avoid overlap and use consistent spacing.
 2. Prefer minimal edits over full regeneration when updating an existing canvas.
 
+## FRIDAY tool usage
+
+- Use `canvas_read` before editing an existing canvas so you can inspect nodes, edges, file references, and validation issues.
+- Use `canvas_apply` to create or update `.canvas` files from structured nodes and edges. It preserves existing IDs, unknown fields, and unrelated graph data when updating.
+- Use `validate_canvas` after changing one canvas, or `validate_outputs` when checking several generated files.
+- Do not default to raw write/edit for Canvas JSON. Use low-level file tools only when the structured canvas tools cannot express the requested change.
+
 ## Common operations
 
 ### Create a canvas
