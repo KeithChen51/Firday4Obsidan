@@ -6,6 +6,7 @@ import {
 	type AgentProcessActionView,
 	type AgentProcessArtifactView,
 	type AgentProcessDiffSummaryView,
+	type AgentProcessFileType,
 	type AgentProcessTimelineActionView,
 	type AgentProcessTimelineItemView,
 	type AgentProcessTimelineView,
@@ -15,6 +16,7 @@ type TranslateParams = Record<string, string | number | boolean | null | undefin
 type AgentProcessChevronIcon = "chevron-right" | "chevron-up";
 type AgentProcessStatusIcon = "check" | "loader" | "circle" | "minus" | "pause" | "x";
 type RenderAgentProcessIcon = (containerEl: HTMLElement, icon: AgentProcessChevronIcon | AgentProcessStatusIcon) => void;
+const RENDER_AGENT_PROCESS_DEBUG_DETAILS = false;
 
 export interface RenderAgentTrajectoryCardOptions {
 	containerEl: HTMLElement;
@@ -219,8 +221,9 @@ function renderTimelineProcess(
 		renderIcon?: RenderAgentProcessIcon;
 	},
 ): void {
-	const { variant, expanded, onToggle, onAction, renderAssistantAvatar, renderIcon } = options;
+	const { variant, expanded, onToggle, onAction, renderIcon } = options;
 	const canToggle = timeline.canExpand;
+	const isRunningSurface = isTimelineRunningSurfaceStatus(timeline.status);
 	const shellEl = containerEl.createDiv({
 		cls: `friday-agent-process friday-agent-process-shell is-${timeline.status} is-${variant} is-${expanded ? "expanded" : "collapsed"}`,
 		attr: {
@@ -229,7 +232,7 @@ function renderTimelineProcess(
 		},
 	});
 	const disclosureEl = shellEl.createDiv({
-		cls: `friday-agent-process-disclosure friday-agent-process-header is-${timeline.status}${canToggle ? " is-clickable" : ""}`,
+		cls: `friday-agent-process-disclosure friday-agent-process-header kit-event-row-v1 is-${timeline.status}${isRunningSurface ? " kit-running-surface-v1" : ""}${canToggle ? " is-clickable" : ""}`,
 		attr: {
 			...(canToggle ? {
 				role: "button",
@@ -248,11 +251,11 @@ function renderTimelineProcess(
 			onToggle();
 		};
 	}
-	const iconEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-icon friday-agent-process-avatar" });
-	renderAssistantAvatar(iconEl);
-	const titleEl = disclosureEl.createDiv({ cls: "friday-agent-process-disclosure-title" });
+	const titleEl = disclosureEl.createDiv({
+		cls: "friday-agent-process-disclosure-title kit-event-row-main-v1",
+	});
 	titleEl.createDiv({ cls: "friday-agent-process-headline", text: displayTimelineText(timeline.title) });
-	if (timeline.collapsedSummary) {
+	if (timeline.collapsedSummary && !isRunningSurface) {
 		titleEl.createDiv({ cls: "friday-agent-process-disclosure-summary", text: timeline.collapsedSummary });
 	}
 	if (!expanded) {
@@ -294,12 +297,8 @@ function renderTimelinePanel(
 	});
 	renderTimelineStatusBar(panelEl, timeline);
 	const timelineEl = panelEl.createDiv({ cls: "friday-agent-process-timeline" });
-	if (timeline.groups.length > 0) {
-		renderTimelineGroups(timelineEl, timeline, onAction);
-	} else {
-		for (const item of timeline.items) {
-			renderTimelineItem(timelineEl, item, timeline.actions, onAction);
-		}
+	for (const item of timeline.items) {
+		renderTimelineItem(timelineEl, item, timeline.actions, onAction);
 	}
 }
 
@@ -310,14 +309,16 @@ function renderTimelineStatusBar(
 	if (!timeline.statusBar) {
 		return;
 	}
+	const isRunningSurface = isTimelineRunningSurfaceStatus(timeline.statusBar.status);
 	const statusBarEl = containerEl.createDiv({
-		cls: `friday-agent-process-statusbar is-${timeline.statusBar.status}`,
+		cls: `friday-agent-process-statusbar kit-event-row-v1${isRunningSurface ? " kit-running-surface-v1" : ""} is-${timeline.statusBar.status}`,
 		attr: {
 			"data-status": timeline.statusBar.status,
 		},
 	});
-	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-phase", text: displayTimelineText(timeline.statusBar.phase) });
-	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-action", text: displayTimelineText(timeline.statusBar.action) });
+	const mainEl = statusBarEl.createDiv({ cls: "friday-agent-process-statusbar-main kit-event-row-main-v1" });
+	mainEl.createEl("strong", { cls: "friday-agent-process-statusbar-phase", text: displayTimelineText(timeline.statusBar.phase) });
+	mainEl.createSpan({ cls: "friday-agent-process-statusbar-action", text: displayTimelineText(timeline.statusBar.action) });
 	statusBarEl.createSpan({ cls: "friday-agent-process-statusbar-elapsed", text: timeline.statusBar.elapsed });
 }
 
@@ -385,10 +386,11 @@ function renderTimelineItem(
 	const railEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-rail", attr: { "aria-hidden": "true" } });
 	railEl.createDiv({ cls: "friday-agent-process-timeline-marker" });
 	const contentEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-content" });
-	const titleRowEl = contentEl.createDiv({ cls: "friday-agent-process-timeline-title-row" });
+	const eventRowEl = contentEl.createDiv({ cls: `friday-agent-process-timeline-event-row kit-event-row-v1 is-${item.kind}` });
+	const titleRowEl = eventRowEl.createDiv({ cls: "friday-agent-process-timeline-title-row kit-event-row-main-v1" });
 	titleRowEl.createDiv({ cls: "friday-agent-process-timeline-title", text: displayTimelineText(item.title) });
 	if (item.meta) {
-		titleRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
+		eventRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
 	}
 	createTypewriterText(
 		contentEl,
@@ -397,7 +399,9 @@ function renderTimelineItem(
 		`${item.id}:summary`,
 	);
 	renderTimelineItemNotes(contentEl, item);
-	renderTimelineItemDetail(contentEl, item);
+	if (RENDER_AGENT_PROCESS_DEBUG_DETAILS) {
+		renderTimelineItemDetail(contentEl, item);
+	}
 	if (item.actionRefs && item.actionRefs.length > 0) {
 		const itemActions = actions.filter((action) => item.actionRefs?.includes(action.id));
 		renderTimelineActions(contentEl, itemActions, onAction, "friday-agent-process-timeline-actions");
@@ -575,6 +579,7 @@ function renderResultArtifacts(
 		summaryEl.createDiv({ cls: "friday-agent-artifact-diff-title", text: diffSummary.summary });
 		for (const file of diffSummary.files) {
 			const fileEl = summaryEl.createDiv({ cls: "friday-agent-artifact-diff-file" });
+			renderFileTypeIcon(fileEl, file.fileType, "friday-agent-artifact-diff-icon");
 			fileEl.createSpan({ cls: "friday-agent-artifact-diff-path", text: file.path });
 			if (file.summary) {
 				fileEl.createSpan({ cls: "friday-agent-artifact-diff-meta", text: file.summary });
@@ -594,7 +599,7 @@ function renderArtifactCard(
 			"data-path": artifact.path,
 		},
 	});
-	cardEl.createDiv({ cls: "friday-agent-artifact-icon", text: artifact.extension === "canvas" ? "Canvas" : "MD" });
+	renderFileTypeIcon(cardEl, artifact.fileType, "friday-agent-artifact-icon");
 	const bodyEl = cardEl.createDiv({ cls: "friday-agent-artifact-body" });
 	bodyEl.createDiv({ cls: "friday-agent-artifact-name", text: artifact.name });
 	bodyEl.createDiv({ cls: "friday-agent-artifact-meta", text: artifact.metadata });
@@ -607,4 +612,67 @@ function renderArtifactCard(
 	});
 	buttonEl.type = "button";
 	buttonEl.onclick = () => onOpenArtifact?.(artifact.path);
+}
+
+function renderFileTypeIcon(containerEl: HTMLElement, fileType: AgentProcessFileType, className: string): HTMLElement {
+	return containerEl.createSpan({
+		cls: `${className} kit-file-type-icon-v1 ${fileTypeIconClass(fileType)}`,
+		text: fileTypeIconText(fileType),
+		attr: {
+			"aria-label": fileTypeIconLabel(fileType),
+		},
+	});
+}
+
+function fileTypeIconClass(fileType: AgentProcessFileType): string {
+	switch (fileType) {
+		case "markdown":
+			return "is-markdown";
+		case "canvas":
+			return "is-canvas";
+		case "code":
+			return "is-code";
+		case "note":
+			return "is-note";
+	}
+	return assertUnhandledFileType(fileType);
+}
+
+function fileTypeIconText(fileType: AgentProcessFileType): string {
+	switch (fileType) {
+		case "markdown":
+			return "MD";
+		case "canvas":
+			return "Canvas";
+		case "code":
+			return "Code";
+		case "note":
+			return "File";
+	}
+	return assertUnhandledFileType(fileType);
+}
+
+function fileTypeIconLabel(fileType: AgentProcessFileType): string {
+	switch (fileType) {
+		case "markdown":
+			return "Markdown";
+		case "canvas":
+			return "Canvas";
+		case "code":
+			return "Code";
+		case "note":
+			return "File";
+	}
+	return assertUnhandledFileType(fileType);
+}
+
+function assertUnhandledFileType(fileType: never): never {
+	throw new Error(`Unhandled file type: ${String(fileType)}`);
+}
+
+function isTimelineRunningSurfaceStatus(status: AgentProcessTimelineView["status"]): boolean {
+	return status === "running" ||
+		status === "waiting" ||
+		status === "retrying" ||
+		status === "recovering";
 }
