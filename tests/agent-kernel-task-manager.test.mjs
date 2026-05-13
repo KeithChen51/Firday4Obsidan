@@ -174,3 +174,46 @@ test("AgentTaskManager marks pending mutations as approval wait without string-o
 	assert.equal(waiting.pendingMutationCount, 1);
 	assert.equal(context.snapshotEvents().at(-1).payload.status, "waiting_for_approval");
 });
+
+test("AgentTaskManager records loop-control safe stops without maximum-iteration wording", async () => {
+	const { AgentTaskManager, AgentExecutionContext, AgentTaskStore } = await loadModules();
+	const store = new AgentTaskStore({ now: () => new Date("2026-05-03T00:00:00.000Z") });
+	const manager = new AgentTaskManager({ taskStore: store });
+	const context = createContext(AgentExecutionContext);
+	const assistantText = "FRIDAY 重复检查了相同内容，没有获得新信息，已暂停本轮操作。你可以换一个更具体的范围，或让 FRIDAY 基于已读内容直接总结。";
+
+	await manager.beginTurn({
+		agentId: "agent-i",
+		conversationId: "conversation-i",
+		turnId: "turn-i-task",
+		userPrompt: "Read everything",
+		conversation: [],
+		mode: "ask",
+	}, context);
+	const failed = await manager.completeTurn({
+		turnId: context.turnId,
+		taskId: context.taskId,
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "safe_stopped",
+		assistantText,
+		events: [{
+			type: "loop_control_stop",
+			turnId: context.turnId,
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			agentId: context.agentId,
+			at: "2026-05-03T00:00:00.000Z",
+			status: "safe_stopped",
+			payload: { reason: "no_progress", status: "safe_stopped" },
+		}],
+		traces: [],
+		rawFinalReply: "",
+	}, context);
+
+	assert.equal(failed.status, "failed");
+	assert.equal(failed.summary, assistantText);
+	assert.equal(failed.failureReason, assistantText);
+	assert.equal(failed.summary.includes("maximum tool iteration"), false);
+	assert.equal(failed.summary.includes("最大工具"), false);
+});

@@ -8,9 +8,14 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
+const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
 
 function readViewSource() {
 	return fs.readFileSync(viewPath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readRendererSource() {
+	return fs.readFileSync(rendererPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function extractMethod(source, name, nextName) {
@@ -156,6 +161,66 @@ test("runtime progress refreshes an existing live process without rebuilding the
 	assert.ok(progressInPlaceIndex >= 0, "runtime progress should attempt in-place live process refresh");
 	assert.ok(progressFallbackIndex > progressInPlaceIndex, "runtime progress should only rebuild after in-place refresh cannot handle the update");
 	assert.match(progressBlock, /!terminalProgress && nextView\.shouldRenderProcessPanel && this\.syncLiveRuntimeProgressProcess\(\)/);
+});
+
+test("live process expansion is keyed by turn so later task ids do not collapse it", () => {
+	const source = readViewSource();
+	const keyBlock = extractMethod(source, "buildTrajectorySnapshotKey", "getSnapshotProjectId");
+
+	assert.match(keyBlock, /const stableWorkId = normalizedTurnId \|\| normalizedTaskId/);
+	assert.match(keyBlock, /if \(!normalizedConversationId \|\| !stableWorkId\)/);
+	assert.match(keyBlock, /\$\{normalizedProjectId\}::\$\{normalizedConversationId\}::\$\{stableWorkId\}/);
+	assert.doesNotMatch(keyBlock, /\$\{normalizedTurnId\}::\$\{normalizedTaskId\}/);
+});
+
+test("expanded live process keeps user intent and typewrites newly appended timeline text", () => {
+	const source = readViewSource();
+	const rendererSource = readRendererSource();
+	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
+	const liveShellBlock = extractMethod(source, "syncAiLiveChatShell", "syncAiRuntimeShell");
+	const toggleBlock = extractMethod(source, "toggleProcessExpanded", "findLastAssistantMessageIndex");
+	const typewriterBlock = extractMethod(source, "syncLiveProcessTypewriter", "markLiveProcessTypewriterTextSeen");
+
+	assert.match(source, /private aiProcessTypewriterSeenKeys = new Set<string>\(\)/);
+	assert.match(source, /private aiSkipNextProcessTypewriter = false/);
+	assert.match(progressRefreshBlock, /this\.syncLiveProcessTypewriter\(processEl\)/);
+	assert.match(liveShellBlock, /this\.syncLiveProcessTypewriter\(\)/);
+	assert.match(toggleBlock, /this\.aiSkipNextProcessTypewriter = true/);
+	assert.match(typewriterBlock, /data-process-typewriter-key/);
+	assert.match(typewriterBlock, /prefers-reduced-motion: reduce/);
+	assert.match(rendererSource, /data-process-typewriter-key/);
+	assert.match(rendererSource, /data-process-typewriter-text/);
+});
+
+test("runtime progress preserves the currently expanded live process while syncing new records", () => {
+	const source = readViewSource();
+	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
+	const renderCardBlock = extractMethod(source, "renderTrajectoryCard", "handleTrajectoryAction");
+
+	assert.match(source, /private isProcessElementExpanded\(/);
+	assert.match(source, /private rememberProcessExpandedState\(/);
+	assert.match(renderCardBlock, /forcedExpanded\?: boolean/);
+	assert.match(renderCardBlock, /expanded: forcedExpanded \?\? this\.isProcessExpanded\(snapshot\)/);
+	assert.match(progressRefreshBlock, /const preserveExpanded = this\.isProcessElementExpanded\(processEl\)/);
+	assert.match(progressRefreshBlock, /this\.rememberProcessExpandedState\(this\.aiRuntimeTrajectorySnapshot, true\)/);
+	assert.match(progressRefreshBlock, /this\.renderTrajectoryCard\(scratchEl, this\.aiRuntimeTrajectorySnapshot, "live", preserveExpanded \? true : undefined\)/);
+});
+
+test("runtime progress preserves opened phase and technical detail disclosures", () => {
+	const source = readViewSource();
+	const rendererSource = readRendererSource();
+	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
+	const liveShellBlock = extractMethod(source, "syncAiLiveChatShell", "syncAiRuntimeShell");
+
+	assert.match(rendererSource, /data-process-disclosure-key/);
+	assert.match(rendererSource, /`phase:\$\{group\.id\}`/);
+	assert.match(rendererSource, /`\$\{item\.id\}:detail`/);
+	assert.match(source, /private captureProcessDisclosureState\(/);
+	assert.match(source, /private applyProcessDisclosureState\(/);
+	assert.match(progressRefreshBlock, /const disclosureState = this\.captureProcessDisclosureState\(processEl\)/);
+	assert.match(progressRefreshBlock, /this\.applyProcessDisclosureState\(nextProcessEl, disclosureState\)/);
+	assert.match(liveShellBlock, /const disclosureState = this\.captureCurrentLiveProcessDisclosureState\(\)/);
+	assert.match(liveShellBlock, /this\.applyCurrentLiveProcessDisclosureState\(disclosureState\)/);
 });
 
 test("runtime stage reports update process state without rendering temporary assistant replies", () => {

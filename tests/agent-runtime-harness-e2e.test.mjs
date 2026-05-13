@@ -310,13 +310,14 @@ test("low max tool iterations still allows loop-control safe stop", async () => 
 		modelSteps: [
 			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
 			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
+			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
 		],
 	});
 
 	assertNoRawMaxToolIterationText(result.assistantText);
-	assert.equal(result.traces.length, 2);
-	assert.deepEqual(result.traces.map((trace) => trace.tool), ["read", "read"]);
-	assert.equal(result.modelCalls.total, 2);
+	assert.equal(result.traces.length, 3);
+	assert.deepEqual(result.traces.map((trace) => trace.tool), ["read", "read", "read"]);
+	assert.equal(result.modelCalls.total, 3);
 	assertEventTypesInclude(result, ["assistant_final"]);
 	assertPersistedReplay(result, ["loop_control_stop", "turn_completed"], { status: "safe_stopped" });
 	assert.equal(countTurnEvents(result, "max_tool_iterations"), 0);

@@ -114,6 +114,15 @@ export class AgentTaskManager {
 			this.emitTask(context, task);
 			return task;
 		}
+		if (result.status === "safe_stopped") {
+			const safeStopText = result.failure?.userMessage ?? result.assistantText ?? "FRIDAY 已安全暂停本轮操作。";
+			const task = await this.options.taskStore.markFailed(taskId, {
+				summary: this.truncate(safeStopText, 240),
+				failureReason: result.failure?.technicalMessage ?? safeStopText,
+			});
+			this.emitTask(context, task);
+			return task;
+		}
 		const completed = await this.options.taskStore.markCompleted(taskId, {
 			summary: "Final answer delivered.",
 		});
@@ -291,7 +300,8 @@ export class AgentTaskManager {
 	}
 
 	private isMaxToolIterationStop(result: AgentTurnResult): boolean {
-		return result.status === "safe_stopped" || containsRawMaxToolIterationText(result.assistantText);
+		return Boolean(result.events?.some((event) => event.type === "max_tool_iterations")) ||
+			containsRawMaxToolIterationText(result.assistantText);
 	}
 
 	private truncate(value: string, maxLength: number): string {

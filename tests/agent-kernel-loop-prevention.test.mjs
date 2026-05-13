@@ -409,12 +409,13 @@ test("AgentLoopController blocks duplicate failed calls returned as native assis
 	assert.match(modelRequests[2].messages.at(-1).content, /duplicate_failed_tool_call/);
 });
 
-test("AgentLoopController safe-stops repeated unchanged successful native observation calls", async () => {
+test("AgentLoopController asks the model to finalize repeated unchanged native observations before safe-stopping", async () => {
 	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
 		jiti.import(kernelPath),
 		jiti.import(loopPath),
 	]);
 	const toolExecutions = [];
+	const modelRequests = [];
 	const controller = new AgentLoopController({
 		contextEngine: {
 			async buildContext() {
@@ -430,6 +431,7 @@ test("AgentLoopController safe-stops repeated unchanged successful native observ
 				throw new Error("prompt path should not be used");
 			},
 			async requestWithTools(input) {
+				modelRequests.push(input);
 				if (input.step <= 2) {
 					return {
 						assistantText: "",
@@ -484,15 +486,112 @@ test("AgentLoopController safe-stops repeated unchanged successful native observ
 		mode: "ask",
 	});
 
-	assert.equal(result.status, "safe_stopped");
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Listed twice.");
+	assert.equal(modelRequests.length, 3);
 	assert.equal(toolExecutions.length, 2);
 	assert.deepEqual(result.traces.map((trace) => trace.status), ["ok", "ok"]);
+	const reminder = modelRequests[2].messages.at(-1);
+	assert.equal(reminder.role, "system");
+	assert.match(reminder.content, /already received unchanged results/i);
+	assert.match(reminder.content, /final answer/i);
+	const loopControlStop = result.events.find((event) => event.type === "loop_control_stop");
+	assert.equal(loopControlStop, undefined);
+	assert.equal(result.events.some((event) => event.type === "max_tool_iterations"), false);
+	const terminal = result.events.at(-1);
+	assert.equal(terminal.type, "turn_completed");
+	assert.equal(terminal.status, "completed");
+});
+
+test("AgentLoopController safe-stops repeated unchanged native observations after the finalization reminder is ignored", async () => {
+	const [{ AgentKernel }, { AgentLoopController }] = await Promise.all([
+		jiti.import(kernelPath),
+		jiti.import(loopPath),
+	]);
+	const toolExecutions = [];
+	const modelRequests = [];
+	const controller = new AgentLoopController({
+		contextEngine: {
+			async buildContext() {
+				return {
+					toolCallingMode: "native",
+					maxIterations: 4,
+					messages: [{ role: "user", content: "List too many times" }],
+				};
+			},
+		},
+		modelDriver: {
+			async requestText() {
+				throw new Error("prompt path should not be used");
+			},
+			async requestWithTools(input) {
+				modelRequests.push(input);
+				if (input.step <= 3) {
+					return {
+						assistantText: "",
+						toolCalls: [{ id: `call-${input.step}`, name: "ls", args: { path: "Project" } }],
+						finishReason: "tool_calls",
+					};
+				}
+				return { assistantText: "Listed too many times.", toolCalls: [], finishReason: "stop" };
+			},
+		},
+		toolExecution: {
+			async listNativeTools() {
+				return [{ name: "ls", description: "List files", parameters: { type: "object" } }];
+			},
+			async executeTool(input) {
+				toolExecutions.push(input);
+				return {
+					trace: {
+						runId: `ls-ok-${input.step}`,
+						step: input.step,
+						tool: input.tool.name,
+						scope: "vault",
+						targetPath: input.tool.args.path,
+						approved: true,
+						approvalReason: "No approval required",
+						persistedRule: false,
+						viaRule: false,
+						status: "ok",
+						ok: true,
+						summary: "Listed Project",
+					},
+					payload: {
+						ok: true,
+						tool: "ls",
+						status: "ok",
+						data: { path: "Project", entries: ["a.md", "b.md"] },
+						trace: { targetPath: "Project" },
+					},
+					modelResultText: 'TOOL_RESULT {"ok":true,"tool":"ls","status":"ok","data":{"entries":["a.md","b.md"]}}',
+				};
+			},
+		},
+	});
+
+	const result = await new AgentKernel(controller).runTurn({
+		turnId: "turn-success-repeat-ignored",
+		traceId: "trace-success-repeat-ignored",
+		conversationId: "conversation-success-repeat-ignored",
+		agentId: "agent-success-repeat-ignored",
+		conversation: [],
+		userPrompt: "List too many times",
+		mode: "ask",
+	});
+
+	assert.equal(result.status, "safe_stopped");
+	assert.equal(modelRequests.length, 3);
+	assert.equal(toolExecutions.length, 3);
+	assert.deepEqual(result.traces.map((trace) => trace.status), ["ok", "ok", "ok"]);
+	assert.match(result.assistantText, /重复检查了相同内容/);
+	assert.equal(result.assistantText.includes("请调整路径、关键词"), false);
 	const loopControlStop = result.events.find((event) => event.type === "loop_control_stop");
 	assert.ok(loopControlStop);
 	assert.equal(loopControlStop.payload.reason, "no_progress");
 	assert.equal(loopControlStop.payload.repetitionKind, "repeated_unchanged_observation");
 	assert.equal(loopControlStop.payload.tool, "ls");
-	assert.equal(loopControlStop.payload.step, 2);
+	assert.equal(loopControlStop.payload.step, 3);
 	assert.equal(loopControlStop.payload.previousStep, 1);
 	assert.equal(result.events.some((event) => event.type === "max_tool_iterations"), false);
 	const terminal = result.events.at(-1);

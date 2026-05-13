@@ -248,6 +248,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		const loopControl = new AgentLoopControlTracker();
+		const noProgressFinalizationReminders = new Set<string>();
 		let finalReply = "";
 		let lastToolUserFallback = "";
 		let step = startStep;
@@ -370,6 +371,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 					}],
 					safetyReason: "Prompt tool result appended to model messages.",
 				});
+				if (await this.deferRepeatedObservationForFinalAnswer(
+					input,
+					context,
+					"prompt",
+					step,
+					maxIterations,
+					modelMessages,
+					traces,
+					executed.loopRepetition,
+					noProgressFinalizationReminders,
+				)) {
+					step += 1;
+					continue;
+				}
 				const loopControlStop = this.buildLoopControlStopResult(
 					input,
 					context,
@@ -419,6 +434,7 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 		const traces: RuntimeToolTrace[] = initialState.traces?.map((trace) => ({ ...trace })) ?? [];
 		const modelMessages = [...contextPackage.messages];
 		const loopControl = new AgentLoopControlTracker();
+		const noProgressFinalizationReminders = new Set<string>();
 		const tools = await this.options.toolExecution.listNativeTools({ input, context, allowedTools: input.allowedTools });
 		if (tools.length === 0) {
 			return this.makeResult(input, context, {
@@ -494,6 +510,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				if (resolution.kind === "continue") {
 					lastToolPayload = resolution.lastToolPayload;
 					lastToolUserFallback = resolution.lastToolUserFallback?.trim() || lastToolUserFallback;
+					if (await this.deferRepeatedObservationForFinalAnswer(
+						input,
+						context,
+						"native",
+						step,
+						maxIterations,
+						modelMessages,
+						traces,
+						resolution.loopRepetition,
+						noProgressFinalizationReminders,
+					)) {
+						step += 1;
+						continue;
+					}
 					const loopControlStop = this.buildLoopControlStopResult(
 						input,
 						context,
@@ -595,6 +625,20 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 				completedToolCalls,
 				safetyReason: "Native tool result appended to model messages.",
 			});
+			if (await this.deferRepeatedObservationForFinalAnswer(
+				input,
+				context,
+				"native",
+				step,
+				maxIterations,
+				modelMessages,
+				traces,
+				loopRepetition,
+				noProgressFinalizationReminders,
+			)) {
+				step += 1;
+				continue;
+			}
 			const loopControlStop = this.buildLoopControlStopResult(
 				input,
 				context,
@@ -1320,6 +1364,53 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			this.emitToolStageReport(input, context, result.trace);
 		}
 		return loopRepetition ? { ...result, loopRepetition } : result;
+	}
+
+	private async deferRepeatedObservationForFinalAnswer(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		channel: "native" | "prompt",
+		step: number,
+		maxIterations: number,
+		modelMessages: AgentChatMessage[],
+		traces: RuntimeToolTrace[],
+		repetition: AgentLoopRepetition | undefined,
+		reminderKeys: Set<string>,
+	): Promise<boolean> {
+		if (!repetition || repetition.kind !== "repeated_unchanged_observation") {
+			return false;
+		}
+		const reminderKey = repetition.fingerprint.resultIdentity ?? repetition.fingerprint.invocationIdentity;
+		if (reminderKeys.has(reminderKey)) {
+			return false;
+		}
+		reminderKeys.add(reminderKey);
+		modelMessages.push({
+			role: "system",
+			content: this.buildRepeatedObservationFinalizationReminder(repetition),
+		});
+		await this.saveCheckpoint(input, context, {
+			boundary: "after_tool_result",
+			channel,
+			step,
+			nextStep: step + 1,
+			maxIterations,
+			modelMessages,
+			traces,
+			safetyReason: "Repeated unchanged observation detected; hidden finalization reminder appended before loop-control safe stop.",
+		});
+		return true;
+	}
+
+	private buildRepeatedObservationFinalizationReminder(repetition: AgentLoopRepetition): string {
+		const tool = repetition.fingerprint.tool;
+		const previousStep = repetition.previous.result.trace.step;
+		return [
+			`You already received unchanged results from the same read-only observation tool (${tool}) at step ${previousStep}.`,
+			"Do not call that same observation tool and target again in this turn.",
+			"Use the evidence already present in the TOOL_RESULT messages to write the final answer for the user now.",
+			"If the evidence is insufficient, explain what is missing and ask for a narrower scope instead of repeating the same tool call.",
+		].join(" ");
 	}
 
 	private withToolResultChannels(result: ToolExecutionResult): ToolExecutionResult {

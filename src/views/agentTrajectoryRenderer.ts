@@ -336,6 +336,7 @@ function renderTimelineGroups(
 			cls: `friday-agent-process-phase-group is-${group.status}`,
 			attr: {
 				"data-phase-id": group.id,
+				"data-process-disclosure-key": `phase:${group.id}`,
 				"data-status": group.status,
 				...(group.defaultExpanded ? { open: "true" } : {}),
 			},
@@ -389,7 +390,12 @@ function renderTimelineItem(
 	if (item.meta) {
 		titleRowEl.createDiv({ cls: "friday-agent-process-timeline-meta", text: item.meta });
 	}
-	contentEl.createDiv({ cls: "friday-agent-process-timeline-summary", text: item.summary });
+	createTypewriterText(
+		contentEl,
+		"friday-agent-process-timeline-summary",
+		item.summary,
+		`${item.id}:summary`,
+	);
 	renderTimelineItemNotes(contentEl, item);
 	renderTimelineItemDetail(contentEl, item);
 	if (item.actionRefs && item.actionRefs.length > 0) {
@@ -398,16 +404,36 @@ function renderTimelineItem(
 	}
 }
 
+function createTypewriterText(
+	containerEl: HTMLElement,
+	className: string,
+	text: string,
+	key: string,
+): HTMLElement {
+	const displayText = displayTimelineText(text);
+	return containerEl.createDiv({
+		cls: className,
+		text: displayText,
+		attr: {
+			"data-process-typewriter-key": key,
+			"data-process-typewriter-text": displayText,
+		},
+	});
+}
+
 function renderTimelineItemNotes(containerEl: HTMLElement, item: AgentProcessTimelineItemView): void {
 	if (!item.notes || item.notes.length === 0) {
 		return;
 	}
 	const notesEl = containerEl.createDiv({ cls: "friday-agent-process-timeline-notes" });
-	for (const note of item.notes) {
-		notesEl.createDiv({
-			cls: `friday-agent-process-timeline-note is-${note.tone}`,
-			text: note.text,
-		});
+	for (const [index, note] of item.notes.entries()) {
+		const noteEl = createTypewriterText(
+			notesEl,
+			`friday-agent-process-timeline-note is-${note.tone}`,
+			note.text,
+			`${item.id}:note:${index}`,
+		);
+		noteEl.setAttribute("data-tone", note.tone);
 	}
 }
 
@@ -418,6 +444,7 @@ function renderTimelineItemDetail(containerEl: HTMLElement, item: AgentProcessTi
 	const detailEl = containerEl.createEl("details", {
 		cls: "friday-agent-process-timeline-detail",
 		attr: {
+			"data-process-disclosure-key": `${item.id}:detail`,
 			...(item.detail.initiallyExpanded ? { open: "true" } : {}),
 		},
 	});
@@ -425,8 +452,13 @@ function renderTimelineItemDetail(containerEl: HTMLElement, item: AgentProcessTi
 		cls: "friday-agent-process-timeline-detail-title",
 		text: item.detail.title || "技术细节",
 	});
-	for (const line of item.detail.lines) {
-		detailEl.createDiv({ cls: "friday-agent-process-timeline-detail-line", text: line });
+	for (const [index, line] of item.detail.lines.entries()) {
+		createTypewriterText(
+			detailEl,
+			"friday-agent-process-timeline-detail-line",
+			line,
+			`${item.id}:detail:${index}`,
+		);
 	}
 }
 

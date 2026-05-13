@@ -440,6 +440,7 @@
       "files": { "Project/workspace/a.md": "alpha" },
       "modelSteps": [
         { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } },
+        { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } },
         { "tool": { "name": "read", "args": { "path": "Project/workspace/a.md" } } }
       ],
       "expect": {
@@ -447,9 +448,9 @@
         "safeStopEvent": "loop_control_stop",
         "safeStopReason": "no_progress",
         "assistantExcludes": ["Maximum tool-iteration limit reached"],
-        "traceTools": ["read", "read"],
-        "traceStatuses": ["ok", "ok"],
-        "modelCalls": { "native": 2, "prompt": 0 },
+        "traceTools": ["read", "read", "read"],
+        "traceStatuses": ["ok", "ok", "ok"],
+        "modelCalls": { "native": 3, "prompt": 0 },
         "loopPreventionTimelineIncludes": [
           {
             "event": "loop_control_stop",

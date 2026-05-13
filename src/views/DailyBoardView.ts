@@ -170,6 +170,9 @@ export class DailyBoardView extends ItemView {
 	private aiProcessSnapshotProjectIds = new WeakMap<AgentTrajectorySnapshot, string>();
 	private aiProcessExpandedKeys = new Set<string>();
 	private aiProcessCollapsedKeys = new Set<string>();
+	private aiProcessTypewriterSeenKeys = new Set<string>();
+	private aiProcessTypewriterTimers = new Map<string, number>();
+	private aiSkipNextProcessTypewriter = false;
 	private aiComposerTaskBarExpanded = false;
 	private aiComposerTaskBarHostEl: HTMLElement | null = null;
 	private aiComposerBodyEl: HTMLElement | null = null;
@@ -249,6 +252,7 @@ export class DailyBoardView extends ItemView {
 			this.refreshTimer = null;
 		}
 		this.clearRuntimeElapsedTimer();
+		this.clearProcessTypewriterTimers();
 		this.cleanupSkillReviewNotePopovers();
 		this.composer?.destroy();
 		this.composer = null;
@@ -2682,6 +2686,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeSawIntake = false;
 		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
+		this.resetProcessTypewriterState();
 		this.aiAgentTasks = [];
 		this.aiProcessSnapshotsByKey.clear();
 		this.aiSessionId = this.plugin.conversationService.createSessionId();
@@ -2736,6 +2741,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeSawIntake = false;
 		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
+		this.resetProcessTypewriterState();
 		this.aiSessionNavCollapsed = true;
 		this.aiSessionManageMode = false;
 		this.aiSessionSelection.clear();
@@ -3274,10 +3280,11 @@ export class DailyBoardView extends ItemView {
 		const normalizedConversationId = conversationId?.trim() || "";
 		const normalizedTurnId = turnId?.trim() || "";
 		const normalizedTaskId = taskId?.trim() || "";
-		if (!normalizedConversationId || (!normalizedTurnId && !normalizedTaskId)) {
+		const stableWorkId = normalizedTurnId || normalizedTaskId;
+		if (!normalizedConversationId || !stableWorkId) {
 			return "";
 		}
-		return `${normalizedProjectId}::${normalizedConversationId}::${normalizedTurnId}::${normalizedTaskId}`;
+		return `${normalizedProjectId}::${normalizedConversationId}::${stableWorkId}`;
 	}
 
 	private getSnapshotProjectId(snapshot: AgentTrajectorySnapshot | null): string {
@@ -3320,17 +3327,35 @@ export class DailyBoardView extends ItemView {
 		return Boolean(view.timeline?.defaultExpanded);
 	}
 
+	private rememberProcessExpandedState(snapshot: AgentTrajectorySnapshot | null, expanded: boolean): void {
+		const key = this.getTrajectorySnapshotKey(snapshot);
+		if (!key) {
+			return;
+		}
+		if (expanded) {
+			this.aiProcessCollapsedKeys.delete(key);
+			this.aiProcessExpandedKeys.add(key);
+			return;
+		}
+		this.aiProcessExpandedKeys.delete(key);
+		this.aiProcessCollapsedKeys.add(key);
+	}
+
 	private toggleProcessExpanded(snapshot: AgentTrajectorySnapshot | null): void {
 		const key = this.getTrajectorySnapshotKey(snapshot);
 		if (!key) {
 			return;
 		}
-		if (this.isProcessExpanded(snapshot)) {
+		const wasExpanded = this.isProcessExpanded(snapshot);
+		if (wasExpanded) {
 			this.aiProcessExpandedKeys.delete(key);
 			this.aiProcessCollapsedKeys.add(key);
 		} else {
 			this.aiProcessCollapsedKeys.delete(key);
 			this.aiProcessExpandedKeys.add(key);
+			if (snapshot?.status === "running") {
+				this.aiSkipNextProcessTypewriter = true;
+			}
 		}
 		this.renderBoard();
 	}
@@ -3445,8 +3470,15 @@ export class DailyBoardView extends ItemView {
 		if (this.activePage !== "chat" || !this.aiMessageListEl?.isConnected) {
 			return;
 		}
+		const disclosureState = this.captureCurrentLiveProcessDisclosureState();
+		const currentProcessEl = this.findCurrentLiveProcessElement();
+		if (this.isProcessElementExpanded(currentProcessEl)) {
+			this.rememberProcessExpandedState(this.aiRuntimeTrajectorySnapshot, true);
+		}
 		this.captureAiMessageListScrollState(this.aiMessageListEl);
 		this.renderAiMessageList(this.aiMessageListEl);
+		this.applyCurrentLiveProcessDisclosureState(disclosureState);
+		this.syncLiveProcessTypewriter();
 		this.restoreAiMessageListScrollState(this.aiMessageListEl);
 		this.syncAiErrorRegion();
 		this.syncAiQueueHint();
@@ -3621,6 +3653,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeSawIntake = false;
 		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
+		this.resetProcessTypewriterState();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.forgetTrajectorySnapshotsForTask(taskId);
 		this.removeAssistantMessagesForTask(taskId);
@@ -3887,12 +3920,13 @@ export class DailyBoardView extends ItemView {
 		containerEl: HTMLElement,
 		snapshot: AgentTrajectorySnapshot,
 		variant: "live" | "completed",
+		forcedExpanded?: boolean,
 	): void {
 		renderAgentTrajectoryCard({
 			containerEl,
 			snapshot,
 			variant,
-			expanded: this.isProcessExpanded(snapshot),
+			expanded: forcedExpanded ?? this.isProcessExpanded(snapshot),
 			onToggle: () => this.toggleProcessExpanded(snapshot),
 			onAction: (action) => this.handleTrajectoryAction(snapshot, action),
 			translate: (key, fallback, params) => this.t(key, fallback, params),
@@ -4116,6 +4150,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeSawIntake = false;
 		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
+		this.resetProcessTypewriterState();
 		this.aiRuntimeProgressTaskIds.clear();
 		this.aiBusy = true;
 		this.aiActiveTurnTarget = turnTarget;
@@ -4292,6 +4327,7 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeSawIntake = false;
 		this.aiRuntimeModelRequestStarted = false;
 		this.clearRuntimeElapsedTimer();
+		this.resetProcessTypewriterState();
 		this.aiForceScrollToBottomOnce = true;
 		this.renderBoard();
 
@@ -4548,6 +4584,216 @@ export class DailyBoardView extends ItemView {
 		return interactiveTags.has(targetEl.tagName) || interactiveTags.has(templateEl.tagName);
 	}
 
+	private isProcessElementExpanded(processEl: Element | null): boolean {
+		if (!this.isDomElement(processEl)) {
+			return false;
+		}
+		return processEl.getAttribute("data-expanded") === "true" ||
+			processEl.classList.contains("is-expanded");
+	}
+
+	private isDomElement(value: unknown): value is Element {
+		const candidate = value as Partial<Element> | null;
+		return candidate !== null &&
+			candidate !== undefined &&
+			typeof candidate.getAttribute === "function" &&
+			typeof candidate.setAttribute === "function" &&
+			typeof candidate.hasAttribute === "function" &&
+			typeof candidate.removeAttribute === "function";
+	}
+
+	private findCurrentLiveProcessElement(): HTMLElement | null {
+		if (!this.aiMessageListEl?.isConnected || typeof this.aiMessageListEl.querySelector !== "function") {
+			return null;
+		}
+		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+		return this.isDomElement(processEl) ? processEl as HTMLElement : null;
+	}
+
+	private captureCurrentLiveProcessDisclosureState(): Map<string, boolean> {
+		return this.captureProcessDisclosureState(this.findCurrentLiveProcessElement());
+	}
+
+	private applyCurrentLiveProcessDisclosureState(disclosureState: Map<string, boolean>): void {
+		this.applyProcessDisclosureState(this.findCurrentLiveProcessElement(), disclosureState);
+	}
+
+	private captureProcessDisclosureState(rootEl: ParentNode | null): Map<string, boolean> {
+		const result = new Map<string, boolean>();
+		if (!rootEl || typeof rootEl.querySelectorAll !== "function") {
+			return result;
+		}
+		const details = Array.from(rootEl.querySelectorAll("details[data-process-disclosure-key]"));
+		for (const detailEl of details) {
+			if (!this.isDomElement(detailEl)) {
+				continue;
+			}
+			const key = detailEl.getAttribute("data-process-disclosure-key")?.trim() || "";
+			if (!key) {
+				continue;
+			}
+			result.set(key, detailEl.hasAttribute("open"));
+		}
+		return result;
+	}
+
+	private applyProcessDisclosureState(rootEl: ParentNode | null, disclosureState: Map<string, boolean>): void {
+		if (!rootEl || disclosureState.size === 0 || typeof rootEl.querySelectorAll !== "function") {
+			return;
+		}
+		const details = Array.from(rootEl.querySelectorAll("details[data-process-disclosure-key]"));
+		for (const detailEl of details) {
+			if (!this.isDomElement(detailEl)) {
+				continue;
+			}
+			const key = detailEl.getAttribute("data-process-disclosure-key")?.trim() || "";
+			if (!key || !disclosureState.has(key)) {
+				continue;
+			}
+			const expanded = disclosureState.get(key) === true;
+			if (expanded) {
+				detailEl.setAttribute("open", "true");
+			} else {
+				detailEl.removeAttribute("open");
+			}
+			if (typeof HTMLDetailsElement !== "undefined" && detailEl instanceof HTMLDetailsElement) {
+				detailEl.open = expanded;
+			}
+		}
+	}
+
+	private syncLiveProcessTypewriter(rootEl: ParentNode | null = this.aiMessageListEl): void {
+		const processEl = this.findLiveProcessTypewriterRoot(rootEl);
+		if (!processEl) {
+			return;
+		}
+		const seenKeys = this.ensureProcessTypewriterSeenKeys();
+		const textEls = Array.from(processEl.querySelectorAll<HTMLElement>("[data-process-typewriter-key]"));
+		if (textEls.length === 0) {
+			return;
+		}
+		const prefersReducedMotion = typeof window.matchMedia === "function" &&
+			window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		if (this.aiSkipNextProcessTypewriter || prefersReducedMotion) {
+			this.markLiveProcessTypewriterTextSeen(textEls);
+			this.aiSkipNextProcessTypewriter = false;
+			return;
+		}
+		for (const textEl of textEls) {
+			const key = textEl.getAttribute("data-process-typewriter-key")?.trim() || "";
+			const text = textEl.getAttribute("data-process-typewriter-text") ?? textEl.textContent ?? "";
+			if (!key || !text) {
+				continue;
+			}
+			if (seenKeys.has(key)) {
+				this.clearProcessTypewriterTimer(key);
+				textEl.removeClass("is-typewriting");
+				if (textEl.textContent !== text) {
+					textEl.setText(text);
+				}
+				continue;
+			}
+			seenKeys.add(key);
+			this.startProcessTypewriter(textEl, key, text);
+		}
+	}
+
+	private markLiveProcessTypewriterTextSeen(textEls: HTMLElement[]): void {
+		const seenKeys = this.ensureProcessTypewriterSeenKeys();
+		for (const textEl of textEls) {
+			const key = textEl.getAttribute("data-process-typewriter-key")?.trim() || "";
+			const text = textEl.getAttribute("data-process-typewriter-text") ?? textEl.textContent ?? "";
+			if (!key) {
+				continue;
+			}
+			this.clearProcessTypewriterTimer(key);
+			textEl.removeClass("is-typewriting");
+			seenKeys.add(key);
+			if (textEl.textContent !== text) {
+				textEl.setText(text);
+			}
+		}
+	}
+
+	private findLiveProcessTypewriterRoot(rootEl: ParentNode | null): HTMLElement | null {
+		if (!rootEl) {
+			return null;
+		}
+		const candidate = rootEl as ParentNode & {
+			matches?: (selector: string) => boolean;
+		};
+		if (typeof candidate.matches === "function" && candidate.matches(".friday-agent-process-shell.is-live.is-expanded")) {
+			return rootEl as HTMLElement;
+		}
+		if (typeof rootEl.querySelector !== "function") {
+			return null;
+		}
+		const processEl = rootEl.querySelector(".friday-agent-process-shell.is-live.is-expanded");
+		return processEl ? processEl as HTMLElement : null;
+	}
+
+	private startProcessTypewriter(textEl: HTMLElement, key: string, text: string): void {
+		const timers = this.ensureProcessTypewriterTimers();
+		this.clearProcessTypewriterTimer(key);
+		const chunkSize = Math.max(2, Math.min(12, Math.ceil(text.length / 28)));
+		let index = 0;
+		textEl.addClass("is-typewriting");
+		textEl.setText("");
+		const tick = () => {
+			if (!textEl.isConnected) {
+				this.clearProcessTypewriterTimer(key);
+				return;
+			}
+			index = Math.min(text.length, index + chunkSize);
+			textEl.setText(text.slice(0, index));
+			if (index >= text.length) {
+				textEl.removeClass("is-typewriting");
+				timers.delete(key);
+				return;
+			}
+			const timer = window.setTimeout(tick, 18);
+			timers.set(key, timer);
+		};
+		tick();
+	}
+
+	private clearProcessTypewriterTimer(key: string): void {
+		const timers = this.ensureProcessTypewriterTimers();
+		const timer = timers.get(key);
+		if (timer != null) {
+			window.clearTimeout(timer);
+			timers.delete(key);
+		}
+	}
+
+	private clearProcessTypewriterTimers(): void {
+		const timers = this.ensureProcessTypewriterTimers();
+		for (const timer of timers.values()) {
+			window.clearTimeout(timer);
+		}
+		timers.clear();
+	}
+
+	private resetProcessTypewriterState(): void {
+		this.clearProcessTypewriterTimers();
+		this.ensureProcessTypewriterSeenKeys().clear();
+		this.aiSkipNextProcessTypewriter = false;
+	}
+
+	private ensureProcessTypewriterSeenKeys(): Set<string> {
+		if (!this.aiProcessTypewriterSeenKeys) {
+			this.aiProcessTypewriterSeenKeys = new Set<string>();
+		}
+		return this.aiProcessTypewriterSeenKeys;
+	}
+
+	private ensureProcessTypewriterTimers(): Map<string, number> {
+		if (!this.aiProcessTypewriterTimers) {
+			this.aiProcessTypewriterTimers = new Map<string, number>();
+		}
+		return this.aiProcessTypewriterTimers;
+	}
+
 	private syncLiveRuntimeProgressProcess(): boolean {
 		if (this.activePage !== "chat") {
 			this.syncBackgroundAgentStatus();
@@ -4560,13 +4806,20 @@ export class DailyBoardView extends ItemView {
 		if (!(processEl instanceof HTMLElement)) {
 			return false;
 		}
+		const preserveExpanded = this.isProcessElementExpanded(processEl);
+		if (preserveExpanded) {
+			this.rememberProcessExpandedState(this.aiRuntimeTrajectorySnapshot, true);
+		}
+		const disclosureState = this.captureProcessDisclosureState(processEl);
 		const scratchEl = document.createElement("div");
-		this.renderTrajectoryCard(scratchEl, this.aiRuntimeTrajectorySnapshot, "live");
+		this.renderTrajectoryCard(scratchEl, this.aiRuntimeTrajectorySnapshot, "live", preserveExpanded ? true : undefined);
 		const nextProcessEl = scratchEl.querySelector(".friday-agent-process-shell.is-live");
 		if (!(nextProcessEl instanceof HTMLElement)) {
 			return false;
 		}
+		this.applyProcessDisclosureState(nextProcessEl, disclosureState);
 		this.syncElementFromTemplate(processEl, nextProcessEl);
+		this.syncLiveProcessTypewriter(processEl);
 		this.syncAiErrorRegion();
 		this.syncAiQueueHint();
 		this.syncComposerDecisionPanel();
