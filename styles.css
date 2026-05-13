@@ -236,41 +236,50 @@
 }
 
 .friday-native-settings-group {
-	margin: 8px 0 20px;
-	border: 1px solid var(--background-modifier-border);
-	border-radius: 12px;
+	margin: 0 0 16px;
+	padding: 20px;
+	border: 0;
+	border-radius: var(--setting-items-radius, 12px);
 	overflow: hidden;
-	background: var(--background-primary-alt);
+	background: var(--setting-items-background, var(--background-secondary));
 }
 
 .friday-native-settings-group-header {
-	padding: 18px 20px 12px;
+	margin: 0;
+	padding: 0 0 16px;
 }
 
 .friday-native-settings-group-title {
-	font-size: 1em;
-	font-weight: 700;
-	line-height: 1.35;
+	font-size: var(--font-ui-medium);
+	font-weight: 650;
+	line-height: 1.3;
 	text-align: left;
 }
 
 .friday-native-settings-group-description {
 	margin-top: 4px;
-	font-size: 0.84em;
-	line-height: 1.5;
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
 	color: var(--text-muted);
 	text-align: left;
 }
 
 .friday-native-settings-group .setting-item {
 	margin: 0;
-	padding: 18px 20px;
-	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	padding: 16px 0;
+	border-top: 1px solid var(--background-modifier-border);
+	border-radius: 0;
+	background: transparent;
 }
 
 .friday-native-settings-group > .setting-item:first-child,
 .friday-native-settings-group > .friday-native-settings-group-header + .setting-item {
+	padding-top: 0;
 	border-top: none;
+}
+
+.friday-native-settings-group > .setting-item:last-child {
+	padding-bottom: 0;
 }
 
 .friday-native-settings-group .setting-item-info,
@@ -283,8 +292,9 @@
 .friday-native-settings-group > pre,
 .friday-native-settings-group > .friday-ai-error {
 	margin: 0;
-	padding: 18px 20px;
-	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	padding: 16px 0;
+	border-top: 1px solid var(--background-modifier-border);
+	background: transparent;
 }
 
 .friday-plugin-update-group {
@@ -1164,6 +1174,7 @@
 	border-radius: 8px;
 	padding: 3px 6px 4px;
 	background: color-mix(in srgb, var(--background-secondary) 45%, transparent);
+	cursor: pointer;
 }
 
 .friday-mention-item.is-active {
@@ -2252,8 +2263,8 @@
 .friday-agent-process-panel {
 	display: flex;
 	flex-direction: column;
-	gap: 8px;
-	padding: 4px 0 0 30px;
+	gap: 6px;
+	padding: 2px 0 0;
 	border: 0;
 	border-radius: 0;
 	background: transparent;
@@ -2265,31 +2276,42 @@
 	justify-content: flex-start;
 	gap: 6px;
 	width: 100%;
-	min-height: 30px;
-	padding: 2px 0;
-	border-color: transparent;
-	background: transparent;
+	min-height: 34px;
+	padding: 5px 8px;
+	border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	border-radius: var(--friday-kit-radius-panel, 6px);
+	background: color-mix(in srgb, var(--background-secondary) 56%, transparent);
+	box-shadow: none;
 	color: var(--text-muted);
 	font-size: 0.86em;
 	font-weight: 650;
 	text-align: left;
+	overflow: hidden;
 	cursor: default;
 }
 
 .friday-agent-process-disclosure-title {
 	display: flex;
 	flex: 1 1 auto;
-	flex-direction: column;
-	gap: 2px;
+	align-items: baseline;
+	flex-direction: row;
+	gap: 4px;
 	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
 }
 
 .friday-agent-process-disclosure-summary {
+	flex: 1 1 auto;
+	min-width: 0;
 	color: var(--text-muted);
 	font-size: 0.92em;
 	font-weight: 500;
-	line-height: 1.45;
-	overflow-wrap: anywhere;
+	line-height: 1.35;
+	overflow: hidden;
+	overflow-wrap: normal;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .friday-agent-process-disclosure-actions {
@@ -2361,16 +2383,21 @@
 
 .friday-agent-process-status.is-completed,
 .friday-agent-process-status.is-safe_stopped {
-	border-color: color-mix(in srgb, var(--color-green) 42%, var(--background-modifier-border));
-	color: var(--text-normal);
+	border-color: color-mix(in srgb, var(--background-modifier-border) 88%, var(--text-muted));
+	background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+	color: var(--text-muted);
 }
 
 .friday-agent-process-headline {
+	flex: 0 1 auto;
 	font-size: 0.92em;
 	font-weight: 700;
 	line-height: 1.35;
 	min-width: 0;
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	overflow-wrap: normal;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .friday-agent-process-summary,
@@ -2473,8 +2500,8 @@
 }
 
 .friday-agent-process-timeline-panel {
-	margin-top: 8px;
-	padding: 2px 0 0 22px;
+	margin-top: 6px;
+	padding: 0;
 	border: 0;
 	background: transparent;
 }
@@ -2518,7 +2545,7 @@
 }
 
 .friday-agent-process-timeline {
-	gap: 14px;
+	gap: 6px;
 }
 
 .friday-agent-process-phase-groups {
@@ -2582,30 +2609,20 @@
 
 .friday-agent-process-timeline-item {
 	display: grid;
-	grid-template-columns: 20px minmax(0, 1fr);
+	grid-template-columns: minmax(0, 1fr);
 	align-items: start;
-	gap: 10px;
+	gap: 0;
 	min-width: 0;
 	color: var(--text-normal);
 }
 
 .friday-agent-process-timeline-rail {
-	position: relative;
-	display: flex;
-	justify-content: center;
-	min-height: 100%;
-	padding-top: 2px;
+	display: none;
 }
 
 .friday-agent-process-timeline-rail::before {
-	content: "";
-	position: absolute;
-	top: 18px;
-	bottom: -14px;
-	left: 50%;
-	width: 1px;
-	transform: translateX(-50%);
-	background: var(--friday-process-rail);
+	content: none;
+	display: none;
 }
 
 .friday-agent-process-timeline-item:last-child .friday-agent-process-timeline-rail::before {
@@ -2615,18 +2632,18 @@
 .friday-agent-process-timeline-marker {
 	position: relative;
 	z-index: 1;
-	width: 12px;
-	height: 12px;
+	width: 8px;
+	height: 8px;
 	margin-top: 2px;
-	border: 2px solid var(--background-primary);
+	border: 1px solid var(--background-primary);
 	border-radius: 999px;
 	background: var(--text-faint);
 	box-shadow: 0 0 0 1px var(--background-modifier-border);
 }
 
 .friday-agent-process-timeline-item.is-done .friday-agent-process-timeline-marker {
-	background: var(--color-green);
-	box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-green) 38%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--text-muted) 42%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--background-modifier-border) 86%, transparent);
 }
 
 .friday-agent-process-timeline-item.is-running .friday-agent-process-timeline-marker {
@@ -2880,14 +2897,14 @@
 	}
 
 	.friday-agent-process-disclosure {
-		align-items: flex-start;
-		flex-wrap: wrap;
+		align-items: center;
+		flex-wrap: nowrap;
 	}
 
 	.friday-agent-process-disclosure-actions {
-		order: 3;
-		flex-basis: 100%;
-		margin-left: 28px;
+		order: initial;
+		flex-basis: auto;
+		margin-left: auto;
 		justify-content: flex-start;
 	}
 
@@ -2901,15 +2918,15 @@
 	}
 
 	.friday-agent-process-panel {
-		padding-left: 22px;
+		padding-left: 0;
 	}
 
 	.friday-agent-process-timeline-panel {
-		padding-left: 12px;
+		padding-left: 0;
 	}
 
 	.friday-agent-process-timeline {
-		gap: 12px;
+		gap: 6px;
 	}
 
 	.friday-agent-process-timeline-title-row {
@@ -3447,7 +3464,7 @@
 	gap: 8px;
 }
 
-.friday-ai-toolbar-select,
+.friday-ai-toolbar-select-button,
 .friday-ai-toolbar-button,
 .friday-ai-send-button {
 	min-height: 30px;
@@ -3458,9 +3475,117 @@
 	font-weight: 600;
 }
 
-.friday-ai-toolbar-select {
-	padding: 0 10px;
+.friday-ai-toolbar-select-host {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	min-width: 0;
 	max-width: 100%;
+	border-radius: 8px;
+	overflow: visible;
+}
+
+.friday-ai-toolbar-select-host.is-model {
+	flex: 1 1 220px;
+	max-width: 340px;
+}
+
+.friday-ai-toolbar-select-host.is-permission {
+	flex: 0 0 auto;
+	min-width: 104px;
+}
+
+.friday-ai-toolbar-select-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: flex-start;
+	gap: 7px;
+	width: 100%;
+	min-width: 0;
+	padding: 0 8px;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.friday-ai-toolbar-select-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+	pointer-events: none;
+}
+
+.friday-ai-toolbar-select-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.friday-ai-toolbar-select-label {
+	flex: 1 1 auto;
+	min-width: 0;
+	color: var(--text-normal);
+	font-weight: 600;
+	line-height: 1.2;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 100%;
+	text-align: left;
+}
+
+.friday-ai-toolbar-select-chevron {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+}
+
+.friday-ai-toolbar-select-chevron svg {
+	width: 13px;
+	height: 13px;
+}
+
+.friday-ai-toolbar-choice-menu {
+	left: 0;
+	right: auto;
+	bottom: calc(100% + 5px);
+	min-width: 100%;
+	width: max-content;
+	max-width: min(360px, calc(100vw - 24px));
+}
+
+.friday-ai-toolbar-select-host.is-model .friday-ai-toolbar-choice-menu {
+	min-width: min(340px, 100%);
+}
+
+.friday-ai-toolbar-select-host.is-permission .friday-ai-toolbar-choice-menu {
+	min-width: 132px;
+}
+
+.friday-ai-toolbar-choice-group {
+	padding: 4px 7px 2px;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	line-height: 1.25;
+}
+
+button.friday-ai-toolbar-choice-item {
+	appearance: none;
+	width: 100%;
+	min-width: 0;
+	border: 1px solid transparent;
+	box-shadow: none;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.friday-mention-item.is-text-only {
+	grid-template-columns: minmax(0, 1fr);
 }
 
 .friday-ai-toolbar-button {
@@ -3472,14 +3597,17 @@
 	cursor: pointer;
 }
 
+.friday-ai-toolbar-select-button:hover,
+.friday-ai-toolbar-select-host.is-open .friday-ai-toolbar-select-button,
 .friday-ai-toolbar-button:hover,
 .friday-ai-send-button:hover {
 	background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
 }
 
+.friday-ai-toolbar-select-button:focus-visible,
+.friday-ai-toolbar-choice-item:focus-visible,
 .friday-ai-toolbar-button:focus-visible,
-.friday-ai-send-button:focus-visible,
-.friday-ai-toolbar-select:focus-visible {
+.friday-ai-send-button:focus-visible {
 	outline: 2px solid color-mix(in srgb, var(--interactive-accent) 52%, transparent);
 	outline-offset: 2px;
 }
@@ -4356,4 +4484,1392 @@
 	.friday-onboarding-actions {
 		justify-content: flex-start;
 	}
+}
+
+/* Native Kit baseline compatibility */
+:root {
+	--friday-kit-radius: var(--radius-s, 4px);
+	--friday-kit-radius-panel: var(--radius-m, 6px);
+	--friday-kit-border: var(--background-modifier-border);
+	--friday-kit-surface: var(--background-primary);
+	--friday-kit-surface-muted: var(--background-secondary);
+	--friday-kit-hover: var(--background-modifier-hover);
+	--friday-kit-accent-soft: color-mix(in srgb, var(--interactive-accent) 8%, var(--background-primary));
+	--friday-kit-accent-border: color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+	--friday-kit-warning-soft: color-mix(in srgb, var(--color-orange) 8%, var(--background-primary));
+	--friday-kit-warning-border: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+}
+
+.kit-soft-chip-v1,
+.friday-ai-message-badge,
+.friday-ai-conn-status,
+.friday-composer-task-bar-item-status,
+.friday-agent-process-status,
+.friday-ai-queue-pill {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 5px;
+	min-height: 22px;
+	padding: 1px 7px;
+	border: 1px solid var(--friday-kit-border);
+	border-radius: 999px;
+	background: color-mix(in srgb, var(--friday-kit-surface-muted) 68%, transparent);
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	line-height: 1.35;
+	white-space: nowrap;
+}
+
+.kit-soft-chip-v1.is-active,
+.friday-ai-message-badge.is-skill,
+.friday-composer-task-bar-item-status.is-in_progress,
+.friday-agent-process-status.is-running,
+.friday-agent-process-status.is-reconnecting {
+	border-color: var(--friday-kit-accent-border);
+	background: var(--friday-kit-accent-soft);
+	color: var(--text-normal);
+}
+
+.kit-soft-chip-v1.is-warning,
+.friday-ai-conn-status.is-offline,
+.friday-agent-process-status.is-waiting {
+	border-color: var(--friday-kit-warning-border);
+	background: var(--friday-kit-warning-soft);
+	color: var(--text-normal);
+}
+
+.friday-ai-conn-status.is-online,
+.friday-composer-task-bar-item-status.is-completed,
+.friday-agent-process-status.is-completed,
+.friday-agent-process-status.is-safe_stopped {
+	border-color: color-mix(in srgb, var(--color-green) 30%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--color-green) 7%, var(--background-primary));
+	color: var(--text-normal);
+}
+
+.friday-agent-process-status.is-completed,
+.friday-agent-process-status.is-safe_stopped {
+	border-color: color-mix(in srgb, var(--background-modifier-border) 88%, var(--text-muted));
+	background: color-mix(in srgb, var(--background-secondary) 72%, transparent);
+	color: var(--text-muted);
+}
+
+.friday-ai-conn-dot {
+	width: 6px;
+	height: 6px;
+	box-shadow: none;
+}
+
+.kit-file-type-icon-v1,
+.friday-agent-artifact-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	min-height: 28px;
+	padding: 0;
+	border: 1px solid var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface-muted);
+	color: var(--text-muted);
+	box-shadow: none;
+	font-size: var(--font-ui-smaller);
+	font-weight: 650;
+	line-height: 1;
+}
+
+.friday-agent-artifact-icon {
+	width: auto;
+	min-width: 30px;
+	padding: 0 6px;
+}
+
+.kit-file-type-icon-v1 .friday-icon,
+.kit-file-type-icon-v1 svg {
+	width: 15px;
+	height: 15px;
+}
+
+.kit-file-type-icon-v1.is-markdown {
+	color: var(--color-cyan);
+}
+
+.kit-file-type-icon-v1.is-canvas {
+	color: var(--text-accent);
+}
+
+.kit-file-type-icon-v1.is-code {
+	color: var(--color-orange);
+}
+
+.kit-file-type-icon-v1.is-note {
+	color: var(--text-muted);
+}
+
+.kit-tool-icon-v1,
+.kit-skill-icon-v1 {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 28px;
+	color: var(--text-muted);
+}
+
+.kit-tool-icon-v1 svg,
+.kit-skill-icon-v1 svg {
+	width: 15px;
+	height: 15px;
+}
+
+.kit-skill-icon-v1 {
+	color: var(--interactive-accent);
+}
+
+.kit-event-row-v1,
+.friday-agent-process-statusbar,
+.friday-ai-queue-hint {
+	display: grid;
+	align-items: center;
+	gap: 8px;
+	min-height: 34px;
+	padding: 5px 8px;
+	border: 1px solid color-mix(in srgb, var(--friday-kit-border) 82%, transparent);
+	border-radius: var(--friday-kit-radius-panel);
+	background: color-mix(in srgb, var(--friday-kit-surface-muted) 56%, transparent);
+	box-shadow: none;
+	color: var(--text-normal);
+}
+
+.kit-event-row-v1 {
+	grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.friday-agent-process-statusbar {
+	grid-template-columns: auto minmax(0, 1fr) auto;
+	margin-bottom: 8px;
+}
+
+.friday-ai-queue-hint {
+	grid-template-columns: minmax(0, 1fr) auto;
+	border-top: 1px solid color-mix(in srgb, var(--friday-kit-border) 82%, transparent);
+	border-bottom: 0;
+}
+
+.kit-event-row-main-v1 {
+	display: flex;
+	align-items: baseline;
+	gap: 4px;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+}
+
+.kit-event-row-main-v1 strong,
+.kit-event-row-main-v1 span,
+.kit-event-row-main-v1 code,
+.kit-event-row-v1 span,
+.kit-event-row-v1 code {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.kit-event-row-v1 span,
+.kit-event-row-v1 code {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
+
+.kit-running-surface-v1,
+.friday-agent-process-statusbar,
+.friday-composer-task-bar.is-running {
+	position: relative;
+	overflow: hidden;
+	border-color: var(--friday-kit-accent-border);
+	background: color-mix(in srgb, var(--interactive-accent) 5%, var(--friday-kit-surface));
+}
+
+.kit-running-surface-v1::after,
+.friday-agent-process-statusbar::after,
+.friday-composer-task-bar.is-running::after {
+	content: "";
+	position: absolute;
+	inset: 1px auto 1px 0;
+	width: min(120px, 28%);
+	border-radius: inherit;
+	background: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+	opacity: 0.55;
+	pointer-events: none;
+	transform: translateX(-125%);
+	animation: friday-kit-running-line 1800ms ease-in-out infinite;
+}
+
+@keyframes friday-kit-running-line {
+	from {
+		transform: translateX(-125%);
+	}
+
+	to {
+		transform: translateX(430%);
+	}
+}
+
+.kit-popover-list-v1,
+.friday-mention-dropdown {
+	display: grid;
+	gap: 2px;
+	padding: 4px;
+	border: 1px solid var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+}
+
+.friday-mention-dropdown {
+	bottom: calc(100% + 6px);
+}
+
+.kit-popover-item-v1,
+.friday-mention-item {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 7px;
+	align-items: center;
+	min-width: 0;
+	padding: 5px 6px;
+	border: 1px solid transparent;
+	border-radius: var(--friday-kit-radius);
+	background: transparent;
+	color: var(--text-normal);
+}
+
+.kit-popover-item-v1.is-text-only {
+	grid-template-columns: minmax(0, 1fr);
+}
+
+button.kit-popover-item-v1 {
+	width: 100%;
+	text-align: left;
+	cursor: pointer;
+}
+
+.kit-popover-item-v1.is-active,
+.friday-mention-item.is-active,
+button.kit-popover-item-v1:hover,
+.friday-mention-item:hover {
+	border-color: color-mix(in srgb, var(--friday-kit-border) 82%, transparent);
+	background: var(--friday-kit-hover);
+}
+
+.kit-popover-item-v1 strong,
+.friday-mention-item-button {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	line-height: 1.35;
+}
+
+.kit-popover-item-v1 span,
+.kit-list-subtitle-v1,
+.friday-mention-item-description {
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+	line-height: 1.35;
+}
+
+.kit-control-button-v1,
+.friday-shell-icon-button,
+.friday-ai-meta-button,
+.friday-ai-toolbar-button,
+.friday-ai-toolbar-select-button,
+.friday-ai-send-button,
+.friday-agent-process-action,
+.friday-agent-artifact-open,
+.friday-ai-session-header-button,
+.friday-ai-session-bulkbutton,
+.friday-control-center-item-note-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 28px;
+	padding: 0 9px;
+	border: 1px solid var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	line-height: 1.2;
+	transform: none;
+	transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.kit-icon-button-v1,
+.friday-shell-icon-button,
+.friday-ai-toolbar-icon,
+.friday-ai-session-item-menu,
+.friday-control-center-item-note-button {
+	width: 28px;
+	height: 28px;
+	min-width: 28px;
+	padding: 0;
+	border-radius: var(--friday-kit-radius-panel);
+}
+
+.kit-control-button-v1:hover,
+.friday-shell-icon-button:hover,
+.friday-ai-meta-button:hover,
+.friday-ai-toolbar-button:hover,
+.friday-ai-send-button:hover,
+.friday-agent-process-action:hover:not(:disabled),
+.friday-agent-artifact-open:hover,
+.friday-ai-session-header-button:hover,
+.friday-ai-session-bulkbutton:hover,
+.friday-control-center-item-note-button:hover,
+.friday-ai-session-item-menu:hover {
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-hover);
+	color: var(--text-normal);
+	transform: none;
+}
+
+.kit-control-button-v1.is-model,
+.friday-ai-toolbar-select-host.is-model .friday-ai-toolbar-select-button {
+	color: var(--text-normal);
+}
+
+.kit-control-button-v1.is-permission,
+.friday-ai-toolbar-select-host.is-permission .friday-ai-toolbar-select-button {
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-surface-muted);
+	color: var(--text-normal);
+}
+
+.kit-control-button-v1.is-context,
+.kit-control-button-v1.is-skill,
+.friday-ai-toolbar-button {
+	background: var(--friday-kit-surface-muted);
+}
+
+.friday-ai-send-button {
+	width: 32px;
+	border-color: var(--friday-kit-accent-border);
+	background: var(--friday-kit-accent-soft);
+	color: var(--text-normal);
+}
+
+.friday-ai-send-button.is-stop {
+	border-color: color-mix(in srgb, var(--text-error) 30%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--text-error) 7%, var(--background-primary));
+	color: var(--text-error);
+}
+
+.friday-shell-header,
+.friday-ai-page-header,
+.friday-ai-chat-panel,
+.friday-ai-chat-shell,
+.friday-ai-composer-wrap,
+.friday-ai-composer,
+.friday-agent-process-panel,
+.friday-ai-session-nav,
+.friday-ai-session-drawer,
+.friday-control-center-item,
+.friday-policy-panel {
+	border-color: var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+}
+
+.friday-shell > .friday-shell-header {
+	padding: 6px 8px;
+	background: var(--background-primary-alt);
+}
+
+.friday-shell-project-select {
+	border-radius: var(--friday-kit-radius-panel);
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-surface);
+}
+
+.friday-daily-board .friday-ai-chat-shell {
+	border: 1px solid var(--friday-kit-border);
+	overflow: hidden;
+}
+
+.friday-ai-message-list {
+	gap: 8px;
+	padding: 10px 10px 8px;
+}
+
+.friday-ai-message {
+	gap: 6px;
+	padding: 8px 10px;
+	border-radius: var(--friday-kit-radius-panel);
+	border-color: color-mix(in srgb, var(--friday-kit-border) 86%, transparent);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+}
+
+.friday-ai-message.is-user {
+	border-color: var(--friday-kit-accent-border);
+	background: var(--friday-kit-accent-soft);
+}
+
+.friday-ai-message.is-assistant {
+	max-width: min(100%, 920px);
+	padding: 2px 0;
+	border-color: transparent;
+	background: transparent;
+	box-shadow: none;
+}
+
+.friday-ai-message.is-assistant.friday-ai-approval-message,
+.friday-ai-approval-message {
+	padding: 8px 10px;
+	border: 1px solid var(--friday-kit-warning-border);
+	border-left-width: 2px;
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-warning-soft);
+}
+
+.friday-agent-task-panel {
+	border-left-width: 2px;
+	border-radius: var(--friday-kit-radius-panel);
+	background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+}
+
+.friday-approval-card,
+.friday-agent-artifact-card,
+.friday-agent-artifact-diff-summary,
+.friday-mutation-review-diff {
+	border-radius: var(--friday-kit-radius-panel);
+	box-shadow: none;
+}
+
+.friday-approval-card {
+	padding: 9px 10px;
+	background: color-mix(in srgb, var(--color-orange) 6%, var(--background-primary));
+	border-color: var(--friday-kit-warning-border);
+}
+
+.friday-agent-artifact-card {
+	gap: 8px;
+	padding: 7px 8px;
+	background: var(--friday-kit-surface-muted);
+}
+
+.friday-ai-composer-wrap {
+	gap: 0;
+	padding: 8px 10px 10px;
+	border-top-color: var(--friday-kit-border);
+}
+
+.friday-ai-composer {
+	padding: 8px;
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-surface);
+}
+
+.friday-ai-composer-task-bar-host:not(:empty) {
+	margin-bottom: -1px;
+}
+
+.friday-ai-composer-task-bar-host:not(:empty) + .friday-ai-composer {
+	border-top-left-radius: 0;
+	border-top-right-radius: 0;
+}
+
+.friday-ai-composer-task-bar-host > .friday-composer-task-bar {
+	border-bottom-color: var(--friday-kit-border);
+	border-bottom-right-radius: 0;
+	border-bottom-left-radius: 0;
+}
+
+.friday-composer-task-bar {
+	margin-bottom: 0;
+	border-color: var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface-muted);
+	box-shadow: none;
+}
+
+.friday-composer-task-bar-summary {
+	min-height: 32px;
+	padding: 5px 8px;
+}
+
+.friday-composer-task-bar-item {
+	gap: 7px;
+	padding: 5px 8px;
+}
+
+.friday-composer-task-bar-item.is-in_progress {
+	background: color-mix(in srgb, var(--interactive-accent) 5%, transparent);
+}
+
+.friday-composer-task-bar-item-marker {
+	width: 16px;
+	height: 16px;
+	background: transparent;
+}
+
+.friday-composer-task-bar-item-marker.is-in_progress {
+	background: color-mix(in srgb, var(--interactive-accent) 8%, transparent);
+	color: var(--text-accent);
+}
+
+.friday-mention-composer-editor:focus-within {
+	background: transparent;
+	box-shadow: 0 0 0 1px var(--friday-kit-accent-border);
+}
+
+.friday-agent-process-panel {
+	gap: 6px;
+	padding: 2px 0 0;
+}
+
+.friday-agent-process-disclosure {
+	min-height: 34px;
+	padding: 5px 8px;
+	overflow: hidden;
+	color: var(--text-muted);
+}
+
+.friday-agent-process-timeline-panel {
+	margin-top: 6px;
+	padding: 0;
+}
+
+.friday-agent-process-timeline {
+	gap: 6px;
+}
+
+.friday-agent-process-timeline-item {
+	grid-template-columns: minmax(0, 1fr);
+	gap: 0;
+}
+
+.friday-agent-process-timeline-marker {
+	width: 8px;
+	height: 8px;
+	border-width: 1px;
+	box-shadow: 0 0 0 1px var(--friday-kit-border);
+}
+
+.friday-agent-process-timeline-item.is-running .friday-agent-process-timeline-marker {
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.friday-ai-session-drawer {
+	gap: 8px;
+	width: min(340px, calc(100% - 24px));
+	padding: 10px;
+}
+
+.friday-ai-session-list {
+	gap: 8px;
+}
+
+.friday-ai-session-group,
+.friday-ai-session-group-list {
+	gap: 6px;
+}
+
+.friday-ai-session-group-label {
+	color: var(--text-muted);
+	letter-spacing: 0.02em;
+}
+
+.friday-ai-session-item {
+	gap: 4px;
+	border-color: var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.friday-ai-session-item:hover,
+.friday-ai-session-item:focus-within {
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-hover);
+	box-shadow: none;
+	transform: none;
+}
+
+.friday-ai-session-item:focus-visible {
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.friday-ai-session-item.is-selected,
+.friday-ai-session-item.is-active {
+	border-color: var(--friday-kit-accent-border);
+	background: var(--friday-kit-accent-soft);
+	box-shadow: none;
+}
+
+.friday-ai-session-item::before {
+	top: 8px;
+	bottom: 8px;
+	width: 2px;
+}
+
+.friday-ai-session-item-row {
+	gap: 8px;
+	padding: 8px 8px 8px 10px;
+}
+
+.friday-ai-session-item-menu {
+	box-shadow: none;
+}
+
+.friday-control-center-section,
+.friday-control-center-group,
+.friday-control-center-list,
+.friday-control-center-list.is-grid {
+	gap: 8px;
+}
+
+.friday-control-center-list.is-grid {
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.friday-control-center-item {
+	gap: 8px;
+	padding: 8px 10px;
+}
+
+.friday-control-center-item-meta {
+	gap: 4px;
+}
+
+.friday-control-center-item-note-button {
+	border-color: var(--friday-kit-border);
+	background: var(--friday-kit-surface);
+}
+
+.friday-control-center-item-note-popover {
+	padding: 10px;
+	border-color: var(--friday-kit-border);
+	border-radius: var(--friday-kit-radius-panel);
+	background: var(--friday-kit-surface);
+	box-shadow: none;
+}
+
+@media (max-width: 760px) {
+	.kit-event-row-v1,
+	.friday-agent-process-statusbar,
+	.friday-ai-queue-hint,
+	.kit-popover-item-v1 {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.friday-agent-process-panel {
+		padding-left: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.kit-running-surface-v1::after,
+	.friday-agent-process-statusbar::after,
+	.friday-composer-task-bar.is-running::after {
+		animation: none;
+		opacity: 0;
+	}
+
+	.kit-control-button-v1,
+	.kit-icon-button-v1,
+	.friday-shell-icon-button,
+	.friday-ai-toolbar-button,
+	.friday-ai-send-button,
+	.friday-agent-process-action,
+	.friday-ai-session-item {
+		transition: none;
+	}
+}
+
+/* Native Kit live visual correction: keep the real Obsidian plugin closer to the catalog. */
+.friday-shell {
+	gap: 8px;
+}
+
+.friday-shell > .friday-shell-header {
+	min-height: 36px;
+	padding: 5px 6px;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-shell-project-mark {
+	width: 18px;
+	height: 18px;
+	flex-basis: 18px;
+	opacity: 0.78;
+}
+
+.friday-shell .friday-shell-project-mark svg {
+	width: 16px;
+	height: 16px;
+}
+
+.friday-shell .friday-shell-project-brand.friday-wordmark {
+	font-size: var(--font-ui-small);
+	letter-spacing: 0.14em;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-shell-project-inline-label {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-shell-project-select {
+	min-height: 28px;
+	min-width: 132px;
+	max-width: min(220px, 48vw);
+	padding: 3px 26px 3px 8px;
+	border-color: var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.friday-shell .friday-top-nav {
+	gap: 4px;
+	padding: 3px;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+	border-radius: 8px;
+	background: var(--background-secondary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-nav-button {
+	min-height: 28px;
+	padding: 3px 8px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.friday-shell .friday-nav-button:hover {
+	border-color: var(--background-modifier-border-hover);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.friday-shell .friday-nav-button.is-active {
+	border-color: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+	color: var(--text-normal);
+	box-shadow: none;
+}
+
+.friday-shell .friday-nav-button-icon svg {
+	width: 15px;
+	height: 15px;
+}
+
+.friday-shell .friday-page-content {
+	gap: 10px;
+}
+
+.friday-shell .friday-page-header {
+	gap: 8px;
+}
+
+.friday-shell .friday-page-header h3 {
+	margin: 0;
+	font-size: var(--font-ui-large);
+	line-height: 1.35;
+}
+
+.friday-shell .friday-tools-page-intro {
+	margin: -2px 0 10px;
+	font-size: var(--font-ui-small);
+	line-height: 1.45;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-tools-page-body {
+	gap: 12px;
+}
+
+.friday-daily-board .friday-ai-chat-shell {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+}
+
+.friday-shell .friday-ai-message-list {
+	gap: 10px;
+	padding: 8px 4px 6px;
+}
+
+.friday-shell .friday-ai-message {
+	padding: 7px 9px;
+	border-color: var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-message.is-user {
+	max-width: min(72%, 420px);
+	border-color: color-mix(in srgb, var(--background-modifier-border) 86%, var(--text-muted) 14%);
+	background: var(--background-secondary);
+}
+
+.friday-shell .friday-ai-message.is-assistant {
+	max-width: 100%;
+	padding: 0;
+	border-color: transparent;
+	background: transparent;
+}
+
+.friday-shell .friday-ai-message-role {
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	letter-spacing: 0;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-ai-answer-flow {
+	gap: 7px;
+	max-width: 100%;
+}
+
+.friday-shell .friday-ai-answer-content {
+	line-height: 1.5;
+	color: var(--text-normal);
+}
+
+.friday-shell .friday-ai-answer-content p,
+.friday-shell .friday-ai-answer-content ul,
+.friday-shell .friday-ai-answer-content ol {
+	margin-block: 0.45em;
+}
+
+.friday-shell .friday-agent-process-disclosure {
+	min-height: 34px;
+	padding: 5px 8px;
+	overflow: hidden;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-agent-process-avatar {
+	width: 16px;
+	height: 16px;
+	flex-basis: 16px;
+	opacity: 0.72;
+}
+
+.friday-shell .friday-agent-process-avatar svg {
+	width: 13px;
+	height: 13px;
+}
+
+.friday-shell .friday-agent-process-headline {
+	font-size: var(--font-ui-small);
+	font-weight: 650;
+	color: var(--text-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.friday-shell .friday-ai-composer-wrap {
+	padding: 8px 8px 9px;
+	border-top-color: var(--background-modifier-border);
+	background: var(--background-primary);
+}
+
+.friday-shell .friday-ai-composer {
+	padding: 7px 8px;
+	border-color: var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-session-drawer {
+	gap: 6px;
+	width: min(320px, calc(100% - 20px));
+	padding: 8px;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-session-drawer-header {
+	min-height: 30px;
+	padding: 0 2px 4px;
+	border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+}
+
+.friday-shell .friday-ai-session-drawer-header h4 {
+	font-size: var(--font-ui-small);
+	font-weight: 650;
+	letter-spacing: 0;
+}
+
+.friday-shell .friday-ai-session-search-wrap {
+	min-height: 30px;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+	border-radius: 7px;
+	background: var(--background-secondary);
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-session-search {
+	min-height: 28px;
+	font-size: var(--font-ui-small);
+}
+
+.friday-shell .friday-ai-session-list {
+	gap: 3px;
+	padding: 0 2px 0 0;
+}
+
+.friday-shell .friday-ai-session-group,
+.friday-shell .friday-ai-session-group-list {
+	gap: 2px;
+}
+
+.friday-shell .friday-ai-session-group-label {
+	padding: 7px 6px 3px;
+	font-size: var(--font-ui-smaller);
+	font-weight: 600;
+	letter-spacing: 0;
+	color: var(--text-faint);
+}
+
+.friday-shell .friday-ai-session-item {
+	gap: 0;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	overflow: hidden;
+	transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.friday-shell .friday-ai-session-item:hover,
+.friday-shell .friday-ai-session-item:focus-within {
+	border-color: transparent;
+	background: var(--background-modifier-hover);
+	box-shadow: none;
+	transform: none;
+}
+
+.friday-shell .friday-ai-session-item.is-selected,
+.friday-shell .friday-ai-session-item.is-active {
+	border-color: color-mix(in srgb, var(--interactive-accent) 13%, transparent);
+	background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-session-item::before {
+	top: 7px;
+	bottom: 7px;
+	width: 2px;
+	opacity: 0.72;
+}
+
+.friday-shell .friday-ai-session-item-row {
+	align-items: center;
+	gap: 6px;
+	min-height: 36px;
+	padding: 5px 6px 5px 8px;
+}
+
+.friday-shell .friday-ai-session-item-body {
+	gap: 2px;
+	padding: 0;
+}
+
+.friday-shell .friday-ai-session-item-title {
+	display: block;
+	width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--font-ui-small);
+	font-weight: 520;
+	line-height: 1.32;
+	letter-spacing: 0;
+	color: var(--text-normal);
+}
+
+.friday-shell .friday-ai-session-item-meta {
+	font-size: var(--font-ui-smaller);
+	line-height: 1.25;
+	color: var(--text-faint);
+}
+
+.friday-shell .friday-ai-session-item-actions {
+	flex: 0 0 auto;
+}
+
+.friday-shell .friday-ai-session-item-menu {
+	width: 24px;
+	height: 24px;
+	margin-top: 0;
+	border-color: transparent;
+	border-radius: 5px;
+	background: transparent;
+	box-shadow: none;
+}
+
+.friday-shell .friday-ai-session-item-menu svg {
+	width: 13px;
+	height: 13px;
+}
+
+.friday-shell .friday-mention-composer-root {
+	gap: 4px;
+}
+
+.friday-shell .friday-mention-composer-editor {
+	min-height: 34px;
+	border-radius: 6px;
+	line-height: 1.45;
+	font-size: var(--font-ui-small);
+}
+
+.friday-shell .friday-mention-composer-editor .ProseMirror {
+	min-height: 32px;
+}
+
+.friday-shell .friday-mention-composer-editor:focus-within {
+	background: transparent;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--interactive-accent) 18%, var(--background-modifier-border));
+}
+
+.friday-shell .friday-ai-composer-toolbar {
+	gap: 7px;
+	padding-top: 7px;
+	border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+}
+
+.friday-shell .friday-ai-toolbar-select-button,
+.friday-shell .friday-ai-toolbar-button,
+.friday-shell .friday-ai-send-button,
+.friday-shell .friday-shell-icon-button,
+.friday-shell .friday-agent-process-action,
+.friday-shell .friday-agent-artifact-open {
+	min-height: 28px;
+	border-color: var(--background-modifier-border);
+	border-radius: 6px;
+	background: var(--background-primary);
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.friday-shell .friday-ai-toolbar-select-host {
+	min-height: 28px;
+}
+
+.friday-shell .friday-ai-toolbar-select-host.is-model {
+	flex: 1 1 220px;
+	max-width: 340px;
+}
+
+.friday-shell .friday-ai-toolbar-select-host.is-permission {
+	flex: 0 0 auto;
+	min-width: 106px;
+}
+
+.friday-shell .friday-ai-toolbar-select-button {
+	min-height: 26px;
+	padding: 0 8px;
+	justify-content: flex-start;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+	background: var(--background-secondary);
+	box-shadow: none;
+	color: var(--text-normal);
+	font-size: var(--font-ui-small);
+}
+
+.friday-shell .friday-ai-toolbar-select-icon svg {
+	width: 13px;
+	height: 13px;
+}
+
+.friday-shell .friday-ai-toolbar-button {
+	min-width: 32px;
+	background: var(--background-secondary);
+}
+
+.friday-shell .friday-ai-send-button {
+	width: 30px;
+	min-width: 30px;
+	padding: 0;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-ai-toolbar-select-button:hover,
+.friday-shell .friday-ai-toolbar-select-host.is-open .friday-ai-toolbar-select-button,
+.friday-shell .friday-ai-toolbar-button:hover,
+.friday-shell .friday-ai-send-button:hover:not(:disabled),
+.friday-shell .friday-shell-icon-button:hover,
+.friday-shell .friday-agent-process-action:hover:not(:disabled),
+.friday-shell .friday-agent-artifact-open:hover {
+	transform: none;
+	border-color: var(--background-modifier-border-hover);
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.friday-shell .friday-ai-toolbar-choice-menu {
+	bottom: calc(100% + 4px);
+	border-color: var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.friday-shell .friday-ai-toolbar-choice-group {
+	padding: 4px 7px 1px;
+	letter-spacing: 0;
+	text-transform: none;
+}
+
+.friday-shell .friday-mention-dropdown {
+	bottom: calc(100% + 4px);
+	border-color: var(--background-modifier-border);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: var(--shadow-s);
+}
+
+.friday-shell .friday-mention-dropdown-list {
+	gap: 2px;
+	padding: 4px;
+}
+
+.friday-shell .friday-mention-item {
+	display: grid;
+	grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+	align-items: center;
+	column-gap: 8px;
+	padding: 5px 7px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+}
+
+.friday-shell .friday-mention-item.is-active,
+.friday-shell .friday-mention-item:hover {
+	border-color: color-mix(in srgb, var(--interactive-accent) 16%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--interactive-accent) 5%, var(--background-primary));
+}
+
+.friday-shell .friday-mention-item-button {
+	min-height: 24px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	box-shadow: none;
+	font-size: var(--font-ui-small);
+	font-weight: 650;
+}
+
+.friday-shell .friday-mention-item-description {
+	font-size: var(--font-ui-smaller);
+	line-height: 1.35;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-control-center-list.is-grid {
+	grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+	gap: 8px;
+}
+
+.friday-shell .friday-control-center-item {
+	align-items: flex-start;
+	gap: 10px;
+	min-height: 74px;
+	padding: 9px 10px;
+	border-color: color-mix(in srgb, var(--background-modifier-border) 68%, transparent);
+	border-radius: 6px;
+	background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+	box-shadow: none;
+}
+
+.friday-shell .friday-control-center-item-meta {
+	flex: 1 1 auto;
+	gap: 4px;
+}
+
+.friday-shell .friday-control-center-item-title-row {
+	gap: 7px;
+	align-items: center;
+}
+
+.friday-shell .friday-control-center-item-title-row .kit-tool-icon-v1,
+.friday-shell .friday-control-center-item-title-row .kit-skill-icon-v1 {
+	flex: 0 0 auto;
+	width: 18px;
+	height: 18px;
+	min-width: 18px;
+	min-height: 18px;
+	margin-left: -1px;
+	color: var(--text-muted);
+	opacity: 0.72;
+}
+
+.friday-shell .friday-control-center-item-title-row .kit-tool-icon-v1 svg,
+.friday-shell .friday-control-center-item-title-row .kit-skill-icon-v1 svg {
+	width: 14px;
+	height: 14px;
+}
+
+.friday-shell .friday-control-center-item.is-skill .kit-skill-icon-v1 {
+	color: color-mix(in srgb, var(--interactive-accent) 34%, var(--text-muted));
+	opacity: 0.82;
+}
+
+.friday-shell .friday-control-center-item-title {
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+	line-height: 1.35;
+}
+
+.friday-shell .friday-control-center-item-desc,
+.friday-shell .friday-control-center-item-relation {
+	font-size: var(--font-ui-smaller);
+	line-height: 1.42;
+	color: var(--text-muted);
+}
+
+.friday-shell .friday-control-center-item-note-button {
+	width: 26px;
+	height: 26px;
+	border-color: var(--background-modifier-border);
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+}
+
+.friday-shell .checkbox-container {
+	box-shadow: none;
+}
+
+.friday-shell .checkbox-container.is-enabled {
+	background-color: color-mix(in srgb, var(--interactive-accent) 42%, var(--background-modifier-border));
+}
+
+.friday-shell .friday-control-toggle-host .checkbox-container {
+	transform: scale(0.78);
+	transform-origin: center;
+}
+
+.friday-shell .friday-control-toggle-host {
+	padding-top: 3px;
+}
+
+.friday-shell .friday-card,
+.friday-shell .friday-sync-card,
+.friday-shell .friday-project-sync-card {
+	border-color: color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+	border-radius: 8px;
+	background: var(--background-primary);
+	box-shadow: none;
+}
+
+.modal.mod-settings .friday-native-settings-group {
+	margin: 0 0 16px;
+	padding: 20px;
+	border: 0;
+	border-radius: var(--setting-items-radius, 12px);
+	background: var(--setting-items-background, var(--background-secondary));
+	box-shadow: none;
+}
+
+.modal.mod-settings .friday-native-settings-group-header {
+	margin: 0;
+	padding: 0 0 16px;
+}
+
+.modal.mod-settings .friday-native-settings-group .setting-item {
+	padding: 16px 0;
+	border-top: 1px solid var(--background-modifier-border);
+	border-radius: 0;
+	background: transparent;
+}
+
+.modal.mod-settings .friday-native-settings-group > .setting-item:first-child,
+.modal.mod-settings .friday-native-settings-group > .friday-native-settings-group-header + .setting-item {
+	padding-top: 0;
+	border-top: 0;
+}
+
+.modal.mod-settings .friday-native-settings-group > .setting-item:last-child {
+	padding-bottom: 0;
+}
+
+.modal.mod-settings .friday-native-settings-group-title {
+	font-size: var(--font-ui-medium);
+	font-weight: 650;
+}
+
+.modal.mod-settings .friday-native-settings-group-description,
+.modal.mod-settings .setting-item-description {
+	line-height: 1.42;
+}
+
+.modal.mod-settings .friday-top-nav {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin: 0 0 14px;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+}
+
+.modal.mod-settings .friday-nav-button {
+	min-height: 30px;
+	padding: 4px 10px;
+	border: 1px solid transparent;
+	border-radius: 6px;
+	background: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	font-size: var(--font-ui-small);
+	font-weight: 600;
+}
+
+.modal.mod-settings .friday-nav-button:hover {
+	border-color: transparent;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.modal.mod-settings .friday-nav-button.is-active {
+	border-color: transparent;
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+	box-shadow: none;
 }

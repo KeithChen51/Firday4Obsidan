@@ -159,6 +159,61 @@ test("agent process chevron toggle suppresses native button frame", () => {
 	assert.match(toggleBlock, /box-shadow\s*:\s*none/);
 });
 
+test("agent process disclosure is a compact single-line Native Kit event row", () => {
+	const styles = read(stylesPath);
+	const disclosureBlock = lastCssBlock(styles, ".friday-agent-process-disclosure");
+	const titleBlock = lastCssBlock(styles, ".friday-agent-process-disclosure-title");
+	const headlineBlock = lastCssBlock(styles, ".friday-agent-process-headline");
+	const summaryBlock = lastCssBlock(styles, ".friday-agent-process-disclosure-summary");
+
+	assert.ok(disclosureBlock, "process disclosure style should exist");
+	assert.match(disclosureBlock, /min-height:\s*34px/);
+	assert.match(disclosureBlock, /padding:\s*5px\s+8px/);
+	assert.match(disclosureBlock, /overflow:\s*hidden/);
+	assert.match(titleBlock, /flex-direction:\s*row/);
+	for (const [label, block] of [
+		["headline", headlineBlock],
+		["summary", summaryBlock],
+	]) {
+		assert.ok(block, `${label} style should exist`);
+		assert.match(block, /min-width:\s*0/);
+		assert.match(block, /overflow:\s*hidden/);
+		assert.match(block, /text-overflow:\s*ellipsis/);
+		assert.match(block, /white-space:\s*nowrap/);
+		assert.doesNotMatch(block, /overflow-wrap:\s*anywhere/);
+	}
+});
+
+test("agent process timeline visuals are flattened without rail weight", () => {
+	const styles = read(stylesPath);
+	const panelBlock = lastCssBlock(styles, ".friday-agent-process-panel");
+	const timelinePanelBlock = lastCssBlock(styles, ".friday-agent-process-timeline-panel");
+	const timelineBlock = lastCssBlock(styles, ".friday-agent-process-timeline");
+	const itemBlock = lastCssBlock(styles, ".friday-agent-process-timeline-item");
+	const railBlock = lastCssBlock(styles, ".friday-agent-process-timeline-rail");
+	const railLineBlock = lastCssBlock(styles, ".friday-agent-process-timeline-rail::before");
+
+	assert.match(panelBlock, /padding:\s*2px\s+0\s+0/);
+	assert.doesNotMatch(panelBlock, /padding:\s*[^;]*\s(?:1[2-9]|[2-9][0-9])px/);
+	assert.match(timelinePanelBlock, /padding:\s*0/);
+	assert.match(timelineBlock, /gap:\s*6px/);
+	assert.match(itemBlock, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(railBlock, /display:\s*none/);
+	assert.match(railLineBlock, /display:\s*none/);
+	assert.doesNotMatch(railLineBlock, /background:/);
+});
+
+test("Native Kit running process animation is disabled for reduced motion", () => {
+	const styles = read(stylesPath);
+	const reducedMotionBlocks = [...styles.matchAll(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/g)]
+		.map((match) => match[0])
+		.join("\n");
+
+	assert.match(styles, /\.kit-running-surface-v1::after[\s\S]*animation:\s*friday-kit-running-line/);
+	assert.match(reducedMotionBlocks, /\.kit-running-surface-v1::after[\s\S]*animation:\s*none/);
+	assert.match(reducedMotionBlocks, /\.kit-running-surface-v1::after[\s\S]*opacity:\s*0/);
+});
+
 test("agent process renderer no longer requires old runtime-card classes", () => {
 	const renderer = read(rendererPath);
 
@@ -175,8 +230,31 @@ test("agent process renderer no longer requires old runtime-card classes", () =>
 	assert.doesNotMatch(renderer, /renderCurrent|friday-agent-process-current/);
 });
 
+test("agent process renderer exposes Native Kit timeline and file type hooks", () => {
+	const renderer = read(rendererPath);
+
+	for (const className of [
+		"kit-event-row-v1",
+		"kit-running-surface-v1",
+		"kit-event-row-main-v1",
+		"kit-file-type-icon-v1",
+		"is-markdown",
+		"is-canvas",
+		"is-code",
+		"is-note",
+	]) {
+		assert.match(renderer, new RegExp(className), `${className} should be emitted by the renderer`);
+	}
+});
+
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function lastCssBlock(styles, selector) {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const matches = [...styles.matchAll(new RegExp(`^${escaped}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm"))];
+	return matches.at(-1)?.[1] ?? "";
 }
 
 function extractProcessCss(styles) {

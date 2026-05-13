@@ -11,7 +11,6 @@ const stylesPath = path.join(projectRoot, "styles.css");
 const dropdownPath = path.join(projectRoot, "src/views/components/MentionDropdown.ts");
 const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
-
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
@@ -21,9 +20,19 @@ function cssBlock(styles, selector) {
 	return styles.match(new RegExp(`^${escaped}\\s*\\{([\\s\\S]*?)\\n\\}`, "m"))?.[1] ?? "";
 }
 
+function lastCssBlock(styles, selector) {
+	const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const matches = [...styles.matchAll(new RegExp(`^${escaped}\\s*\\{([\\s\\S]*?)\\n\\}`, "gm"))];
+	return matches.at(-1)?.[1] ?? "";
+}
+
 function numericPxProperty(block, property) {
 	const match = block.match(new RegExp(`${property}:\\s*([0-9]+)px`));
-	return match ? Number.parseInt(match[1], 10) : null;
+	if (match) {
+		return Number.parseInt(match[1], 10);
+	}
+	const tokenFallbackMatch = block.match(new RegExp(`${property}:\\s*var\\([^,]+,\\s*([0-9]+)px\\)`));
+	return tokenFallbackMatch ? Number.parseInt(tokenFallbackMatch[1], 10) : null;
 }
 
 test("ordinary plugin surfaces stay flat and Obsidian-native", () => {
@@ -68,6 +77,7 @@ test("ordinary plugin surface radii follow DESIGN.md limits", () => {
 	const controls = [
 		".friday-nav-button",
 		".friday-shell-icon-button",
+		".friday-ai-toolbar-select-host",
 		".friday-ai-toolbar-button",
 		".friday-ai-send-button",
 		".friday-control-center-item-note-button",
@@ -93,6 +103,23 @@ test("core design selectors have one source of truth", () => {
 		const matches = styles.match(new RegExp(`^${escaped}\\s*\\{`, "gm")) ?? [];
 		assert.equal(matches.length, 1, `${selector} should not have duplicate top-level rules`);
 	}
+});
+
+test("agent process completion indicators avoid saturated success green", () => {
+	const styles = read(stylesPath);
+	const completedTimelineMarker = lastCssBlock(
+		styles,
+		".friday-agent-process-timeline-item.is-done .friday-agent-process-timeline-marker",
+	);
+	const completedStatus = lastCssBlock(
+		styles,
+		".friday-agent-process-status.is-completed,\n.friday-agent-process-status.is-safe_stopped",
+	);
+
+	assert.ok(completedTimelineMarker, "completed timeline marker should be styled");
+	assert.doesNotMatch(completedTimelineMarker, /var\(--color-green\)/);
+	assert.match(completedTimelineMarker, /var\(--text-faint\)|var\(--text-muted\)|var\(--background-modifier-border\)/);
+	assert.doesNotMatch(completedStatus, /var\(--color-green\)\s*(?:[4-9][0-9]|100)%/);
 });
 
 test("compact icon controls keep accessible hit areas", () => {
