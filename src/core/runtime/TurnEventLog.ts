@@ -9,6 +9,8 @@ export type TurnEventType =
 	| "plan_revise"
 	| "plan_complete"
 	| "plan_skip"
+	| "task_bar_created"
+	| "task_bar_suppressed"
 	| "narration_report"
 	| "context_built"
 	| "model_requested"
@@ -45,6 +47,7 @@ export type TurnEventType =
 	| "turn_failed"
 	| "fallback"
 	| "parse_error"
+	| "loop_control_stop"
 	| "max_tool_iterations";
 
 export interface TurnEventRef {

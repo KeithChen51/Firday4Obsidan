@@ -12,6 +12,10 @@ const settingsModelPath = path.join(projectRoot, "src/types/settings.ts");
 const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
 const settingsKitPath = path.join(projectRoot, "src/ui/obsidian-native/SettingsKit.ts");
+const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
+const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
+const studioBasicConfigPath = path.join(projectRoot, "src/content/studio/Start Here · 从这里开始/02 基础配置.md");
+const studioGeneratedPath = path.join(projectRoot, "src/content/studio/generated.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
@@ -25,6 +29,38 @@ test("settings tab exposes a shared native settings group helper", () => {
 	assert.match(kitSource, /friday-native-settings-group-header/);
 	assert.match(kitSource, /friday-native-settings-group-title/);
 	assert.match(kitSource, /friday-native-settings-group-description/);
+});
+
+test("agent runtime settings hide max tool iterations emergency fuse from user-facing UI", () => {
+	const settingsSource = read(settingsPath);
+	const en = read(enLocalePath);
+	const zh = read(zhLocalePath);
+	const studioBasicConfig = read(studioBasicConfigPath);
+	const studioGenerated = read(studioGeneratedPath);
+
+	assert.doesNotMatch(settingsSource, /settings\.agent\.maxToolIterations/);
+	assert.doesNotMatch(settingsSource, /maxToolIterations\.name/);
+	assert.doesNotMatch(settingsSource, /maxToolIterations\.desc/);
+	assert.doesNotMatch(en, /settings\.agent\.maxToolIterations/);
+	assert.doesNotMatch(zh, /settings\.agent\.maxToolIterations/);
+
+	for (const source of [settingsSource, en, zh, studioBasicConfig, studioGenerated]) {
+		assert.doesNotMatch(source, /单轮最大工具步数/);
+		assert.doesNotMatch(source, /限制单次对话中的工具循环次数/);
+		assert.doesNotMatch(source, /Advanced emergency fuse/);
+		assert.doesNotMatch(source, /工具循环紧急保险/);
+	}
+});
+
+test("agent runtime settings hide exec controls from user-facing UI", () => {
+	const settingsSource = read(settingsPath);
+
+	assert.doesNotMatch(settingsSource, /settings\.agent\.enableExec\.name/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.enableExec\.desc/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.execTimeout\.name/);
+	assert.doesNotMatch(settingsSource, /settings\.agent\.execTimeout\.desc/);
+	assert.doesNotMatch(settingsSource, /enableExecTool\)\.onChange/);
+	assert.doesNotMatch(settingsSource, /agentRuntime\.execTimeout\s*=/);
 });
 
 test("sync llm and soul sections render settings inside native groups", () => {

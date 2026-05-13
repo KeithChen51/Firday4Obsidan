@@ -296,9 +296,9 @@ test("standard delete creates mutation review -> no file change", async () => {
 	assert.equal(result.turnEventSummary.mutations.planned, 1);
 });
 
-test("max tool iterations -> safe stop", async () => {
+test("low max tool iterations still allows loop-control safe stop", async () => {
 	const result = await runAgentRuntimeScenario({
-		name: "max tool iterations -> safe stop",
+		name: "low max tool iterations still allows loop-control safe stop",
 		files: {
 			"Project/workspace/a.md": "alpha",
 		},
@@ -309,18 +309,24 @@ test("max tool iterations -> safe stop", async () => {
 		},
 		modelSteps: [
 			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
-			{ assistant: "This step should not be consumed." },
+			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
 		],
 	});
 
 	assertNoRawMaxToolIterationText(result.assistantText);
-	assert.equal(result.traces.length, 1);
-	assert.equal(result.modelCalls.total, 1);
-	assertEventTypesInclude(result, ["max_tool_iterations", "assistant_final"]);
-	assertPersistedReplay(result, ["max_tool_iterations", "turn_completed"], { status: "safe_stopped" });
-	const maxIterationEvent = result.turnEvents.find((event) => event.type === "max_tool_iterations");
-	assert.equal(maxIterationEvent?.payload.status, "safe_stopped");
-	assertNoRawMaxToolIterationText(maxIterationEvent?.payload);
+	assert.equal(result.traces.length, 2);
+	assert.deepEqual(result.traces.map((trace) => trace.tool), ["read", "read"]);
+	assert.equal(result.modelCalls.total, 2);
+	assertEventTypesInclude(result, ["assistant_final"]);
+	assertPersistedReplay(result, ["loop_control_stop", "turn_completed"], { status: "safe_stopped" });
+	assert.equal(countTurnEvents(result, "max_tool_iterations"), 0);
+	const loopControlEvent = findTurnEvent(result, "loop_control_stop");
+	assert.equal(loopControlEvent?.payload.status, "safe_stopped");
+	assert.equal(loopControlEvent?.payload.reason, "no_progress");
+	assert.equal(loopControlEvent?.payload.repetitionKind, "repeated_unchanged_observation");
+	assert.deepEqual(result.turnEventSummary.loopPreventionTimeline.map((item) => item.event), ["loop_control_stop"]);
+	assert.deepEqual(result.turnEventSummary.loopPreventionTimeline.map((item) => item.reason), ["no_progress"]);
+	assertNoRawMaxToolIterationText(loopControlEvent?.payload);
 	const assistantFinalEvent = result.events.find((event) => event.type === "assistant_final");
 	assertNoRawMaxToolIterationText(assistantFinalEvent?.payload);
 	assertNoRawMaxToolIterationText(result.turnEventSummary.finalAnswerSummary);

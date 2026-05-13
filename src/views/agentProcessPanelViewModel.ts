@@ -139,6 +139,7 @@ export type AgentProcessTimelineStatus =
 	| "retrying"
 	| "recovering"
 	| "failed"
+	| "cancelled"
 	| "completed";
 
 export type AgentProcessTimelineItemKind =
@@ -322,7 +323,10 @@ export function buildAgentProcessPanelViewModel(
 	}
 
 	const visibleItems = snapshot.items.filter((item) =>
-		isRenderableTrajectoryItem(item) && !isStageReportNarrationItem(item)
+		isRenderableTrajectoryItem(item) &&
+		!isStageReportNarrationItem(item) &&
+		!isTaskBarPlanProcessItem(snapshot, item) &&
+		!isGenericLiveModelLifecycleItem(snapshot, item)
 	);
 	const actions = buildActionViews(snapshot);
 	const mutations = buildMutations(snapshot);
@@ -442,8 +446,49 @@ function isLifecycleOnlyItem(item: AgentTrajectoryItem): boolean {
 
 function isRenderableTrajectoryItem(item: AgentTrajectoryItem): boolean {
 	return !isLifecycleOnlyItem(item) &&
-		!(item.kind === "plan" && item.rawEventType === "plan_create") &&
+		item.kind !== "plan" &&
+		!(item.kind === "narration" && item.narrationKind === "plan_declared") &&
 		!isInternalPreflightItem(item);
+}
+
+function isTaskBarPlanProcessItem(snapshot: AgentTrajectorySnapshot, item: AgentTrajectoryItem): boolean {
+	if (!hasTaskBarPlan(snapshot)) {
+		return false;
+	}
+	if (item.kind === "narration" && item.narrationKind === "plan_declared") {
+		return true;
+	}
+	return (item.kind === "reasoning" || item.kind === "model") &&
+		isGenericLifecycleReasoningText(lifecycleItemText(item));
+}
+
+function isGenericLiveModelLifecycleItem(snapshot: AgentTrajectorySnapshot, item: AgentTrajectoryItem): boolean {
+	if (snapshot.privacy.source !== "live") {
+		return false;
+	}
+	if (item.kind !== "model" && item.kind !== "reasoning") {
+		return false;
+	}
+	if (item.targetPath || item.evidenceRef || item.tool) {
+		return false;
+	}
+	const text = lifecycleItemText(item);
+	if (item.rawEventType === "model_request") {
+		return true;
+	}
+	const generic = isGenericLifecycleReasoningText(text) ||
+		isGenericLifecycleContextText(text) ||
+		/requesting model decision|model response received/i.test(text) ||
+		/FRIDAY\s*正在理解你的请求|正在理解你的请求|理解请求|完成理解|已整理当前判断/.test(text);
+	if (item.reasoningProvider || item.reasoningRawFormat) {
+		return generic;
+	}
+	return generic;
+}
+
+function hasTaskBarPlan(snapshot: AgentTrajectorySnapshot): boolean {
+	const plan = snapshot.plan;
+	return Boolean(plan && isTaskBarPlanVisibility(plan.visibility) && plan.tasks.length > 0);
 }
 
 function isInternalPreflightItem(item: AgentTrajectoryItem): boolean {
@@ -646,7 +691,7 @@ function statusLabel(status: AgentTrajectoryStatus, tone: AgentProcessTone): str
 		case "failed":
 			return "运行遇到问题";
 		case "cancelled":
-			return "已取消";
+			return "已停止";
 		case "safe_stopped":
 			return "已安全停止";
 		case "completed":
@@ -800,8 +845,8 @@ function buildComposerTaskBar(
 	snapshot: AgentTrajectorySnapshot,
 	durationSeconds: number,
 ): AgentComposerTaskBarView | null {
-	const plan = snapshot.plan;
-	if (!plan || !isTaskBarPlanVisibility(plan.visibility) || plan.tasks.length === 0) {
+	const plan = composerTaskBarPlan(snapshot);
+	if (!plan) {
 		return null;
 	}
 	const currentTask = plan.tasks.find((task) => task.id === plan.currentTaskId) ??
@@ -828,6 +873,81 @@ function buildComposerTaskBar(
 	};
 }
 
+type ComposerTaskBarPlan = NonNullable<AgentTrajectorySnapshot["plan"]>;
+
+function composerTaskBarPlan(snapshot: AgentTrajectorySnapshot): ComposerTaskBarPlan | null {
+	const plan = snapshot.plan;
+	if (!plan || !isTaskBarPlanVisibility(plan.visibility) || plan.tasks.length === 0) {
+		return null;
+	}
+	if (
+		snapshot.privacy.source === "live" &&
+		snapshot.planSource &&
+		snapshot.planSource !== "model" &&
+		snapshot.planSource !== "legacy"
+	) {
+		return null;
+	}
+	if (snapshot.status === "running") {
+		return coercePlanRunning(plan);
+	}
+	if (snapshot.status === "failed") {
+		return coercePlanFailed(plan);
+	}
+	return plan;
+}
+
+function coercePlanRunning(plan: ComposerTaskBarPlan): ComposerTaskBarPlan {
+	if (plan.status !== "completed" && plan.tasks.some((task) => task.status === "in_progress" || task.status === "blocked")) {
+		return plan;
+	}
+	const currentTaskId = selectCurrentPlanTaskId(plan);
+	if (!currentTaskId) {
+		return { ...plan, status: "running", completedAt: undefined };
+	}
+	return {
+		...plan,
+		status: "running",
+		currentTaskId,
+		completedAt: undefined,
+		tasks: plan.tasks.map((task) =>
+			task.id === currentTaskId && task.status !== "blocked"
+				? { ...task, status: "in_progress", completedAt: undefined }
+				: task
+		),
+	};
+}
+
+function coercePlanFailed(plan: ComposerTaskBarPlan): ComposerTaskBarPlan {
+	if (plan.status === "failed" || plan.tasks.some((task) => task.status === "failed")) {
+		return plan;
+	}
+	const currentTaskId = selectCurrentPlanTaskId(plan);
+	if (!currentTaskId) {
+		return { ...plan, status: "failed", completedAt: undefined };
+	}
+	return {
+		...plan,
+		status: "failed",
+		currentTaskId,
+		completedAt: undefined,
+		tasks: plan.tasks.map((task) =>
+			task.id === currentTaskId && task.status !== "blocked"
+				? { ...task, status: "failed", completedAt: undefined }
+				: task
+		),
+	};
+}
+
+function selectCurrentPlanTaskId(plan: ComposerTaskBarPlan): string {
+	return plan.currentTaskId ||
+		plan.tasks.find((task) => task.status === "in_progress")?.id ||
+		plan.tasks.find((task) => task.status === "blocked")?.id ||
+		plan.tasks.find((task) => task.status === "pending")?.id ||
+		plan.tasks.at(-1)?.id ||
+		"";
+}
+
 function isTaskBarPlanVisibility(visibility: NonNullable<AgentTrajectorySnapshot["plan"]>["visibility"]): boolean {
 	return visibility === "task_bar" || visibility === "visible";
 }
@@ -843,7 +963,7 @@ function composerTaskBarStatusLabel(
 		return "已完成";
 	}
 	if (snapshotStatus === "cancelled") {
-		return "已取消";
+		return "已停止";
 	}
 	return "正在执行";
 }
@@ -869,7 +989,10 @@ function timelineStatus(
 	if (snapshot.status === "running" && hasRecoverableToolWarning(snapshot)) {
 		return "recovering";
 	}
-	if (snapshot.status === "failed" || snapshot.status === "cancelled" || snapshot.status === "safe_stopped" || context.recovery) {
+	if (snapshot.status === "cancelled") {
+		return "cancelled";
+	}
+	if (snapshot.status === "failed" || snapshot.status === "safe_stopped" || context.recovery) {
 		return "failed";
 	}
 	if (snapshot.status === "completed") {
@@ -894,6 +1017,8 @@ function timelineTitle(status: AgentProcessTimelineStatus, durationSeconds: numb
 			return `正在恢复请求 ${duration}`;
 		case "failed":
 			return "运行遇到问题";
+		case "cancelled":
+			return "已停止处理";
 		case "running":
 			return `正在处理 ${duration}`;
 		case "thinking":
@@ -930,6 +1055,9 @@ function collapsedTimelineSummary(
 	}
 	if (status === "failed") {
 		return sanitizeTimelineSummary(context.recovery?.summary || snapshot.failure?.message || snapshotProcessSummary(snapshot) || "运行遇到问题，可以重试。");
+	}
+	if (status === "cancelled") {
+		return "已停止本次任务。";
 	}
 	if (status === "completed") {
 		return "";
@@ -1255,6 +1383,9 @@ function shouldAddReceiptItem(context: TimelineBuildContext): boolean {
 }
 
 function receiptSummary(snapshot: AgentTrajectorySnapshot): string {
+	if (snapshot.status === "cancelled") {
+		return "FRIDAY 已收到任务，开始按当前上下文处理。";
+	}
 	const summary = sanitizeTimelineSummary(snapshotProcessHeadline(snapshot) || snapshotProcessSummary(snapshot) || "");
 	if (!summary || /^Agent\b/i.test(summary)) {
 		return "FRIDAY 已收到任务，开始按当前上下文处理。";
@@ -1364,6 +1495,9 @@ function timelineTitleForStep(
 	step: AgentProcessStepView,
 	kind: AgentProcessTimelineItemKind,
 ): string {
+	if (kind === "blocked" && step.status === "cancelled") {
+		return "已停止处理";
+	}
 	if (kind === "receipt") {
 		return step.title || "收到任务";
 	}
@@ -2248,7 +2382,7 @@ function titleForStep(builder: StepBuilder, status: AgentProcessStepStatus): str
 		case "transport":
 			return "恢复请求";
 		case "failure":
-			return status === "retryable" ? "运行遇到问题，可重试" : "运行遇到问题";
+			return status === "cancelled" ? "已停止处理" : status === "retryable" ? "运行遇到问题，可重试" : "运行遇到问题";
 		default:
 			return "处理请求";
 	}
@@ -2266,7 +2400,9 @@ function summaryForStep(
 			: "FRIDAY 需要你确认后继续。";
 	}
 	if (builder.key === "failure") {
-		return firstMeaningfulDetail(builder.items) || snapshot.failure?.message || "运行失败。";
+		return status === "cancelled"
+			? "已停止本次任务。"
+			: firstMeaningfulDetail(builder.items) || snapshot.failure?.message || "运行失败。";
 	}
 	if (builder.key === "file_change") {
 		return firstMeaningfulDetail(builder.items);
@@ -2338,7 +2474,7 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 			: cleanText(item.detail);
 	return {
 		id: item.id,
-		label: sanitizeTimelineSummary(item.title) || "FRIDAY 正在处理",
+		label: item.status === "cancelled" ? "已停止处理" : sanitizeTimelineSummary(item.title) || "FRIDAY 正在处理",
 		detail: item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
 			? item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n")
 			: sanitizeTimelineSummary(narrationDetail),
@@ -2449,6 +2585,14 @@ function buildRecovery(
 ): AgentProcessRecoveryView | null {
 	const failedMutation = mutations.find((mutation) => mutation.event === "conflicted" || mutation.event === "apply_failed");
 	if (snapshot.failure) {
+		if (snapshot.failure.class === "cancelled") {
+			return {
+				title: "已停止处理",
+				summary: sanitizeTimelineSummary(snapshot.failure.message),
+				retryable: false,
+				recoverable: false,
+			};
+		}
 		return {
 			title: snapshot.failure.recoverable ? "可以恢复" : "运行已停止",
 			summary: sanitizeTimelineSummary(snapshot.failure.message),

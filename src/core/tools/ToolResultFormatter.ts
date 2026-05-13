@@ -2,6 +2,12 @@ import type { ToolResultFormatOptions, ToolResultPayload } from "./ToolResultCon
 
 export const DEFAULT_MAX_MODEL_RESULT_CHARS = 5000;
 
+export interface ToolResultChannels {
+	modelContent: string;
+	traceSummary: string;
+	userFallback: string;
+}
+
 export function formatForModel(payload: ToolResultPayload, options: ToolResultFormatOptions = {}): string {
 	const maxChars = options.maxChars ?? DEFAULT_MAX_MODEL_RESULT_CHARS;
 	if (payload.tool === "use_skill" && payload.ok) {
@@ -29,6 +35,110 @@ export function formatForModel(payload: ToolResultPayload, options: ToolResultFo
 	return `TOOL_RESULT ${safeStringify(payload, maxChars)}`;
 }
 
+export function formatToolResultChannels(payload: ToolResultPayload, options: ToolResultFormatOptions = {}): ToolResultChannels {
+	return {
+		modelContent: formatForModel(payload, options),
+		traceSummary: summarizePayloadForTrace(payload),
+		userFallback: summarizeForUserFallback(payload),
+	};
+}
+
+export function summarizeForUserFallback(payload: ToolResultPayload | null | undefined): string {
+	if (!payload) {
+		return "";
+	}
+	if (!payload.ok) {
+		return `I couldn't complete the ${payload.tool} step. Check the process details for the error and recovery suggestions.`;
+	}
+	if (payload.tool === "read") {
+		const data = payload.data as { path?: string; content?: string } | undefined;
+		const path = data?.path?.trim();
+		if (!path) {
+			return "";
+		}
+		const content = typeof data?.content === "string" ? truncateText(data.content.trim(), 320) : "";
+		return content
+			? `I read ${path}. Here is the relevant excerpt:\n${content}`
+			: `I read ${path}, but the file is empty.`;
+	}
+	if (payload.tool === "read_many") {
+		const data = payload.data as { files?: Array<{ ok?: boolean; path?: string; inputPath?: string }> } | undefined;
+		const files = Array.isArray(data?.files) ? data.files : [];
+		const readable = files.filter((file) => file.ok !== false);
+		if (readable.length === 0) {
+			return "I could not read any of the requested files. Check the process details for per-file errors.";
+		}
+		return `I read ${readable.length} ${plural(readable.length, "file")}:\n${formatPreviewList(readable.map((file) => file.path || file.inputPath || "(unknown)"))}`;
+	}
+	if (payload.tool === "ls" || payload.tool === "list_files") {
+		const data = payload.data as { path?: string; items?: string[] } | undefined;
+		const items = normalizeStringList(data?.items);
+		const scope = data?.path?.trim() || "the current project";
+		if (items.length === 0) {
+			return `${scope} has no visible items.`;
+		}
+		return `${scope} contains ${items.length} visible ${plural(items.length, "item")}:\n${formatPreviewList(items)}`;
+	}
+	if (payload.tool === "grep" || payload.tool === "search_text") {
+		const data = payload.data as { matches?: unknown[] } | undefined;
+		const count = Array.isArray(data?.matches) ? data.matches.length : 0;
+		if (count === 0) {
+			return "I did not find matching text.";
+		}
+		return `I found ${count} text ${plural(count, "match")}. Narrow the search or choose a file to inspect next.`;
+	}
+	if (payload.tool === "search_and_read") {
+		const data = payload.data as { matches?: unknown[] } | undefined;
+		const count = Array.isArray(data?.matches) ? data.matches.length : 0;
+		if (count === 0) {
+			return "I did not find matching text.";
+		}
+		return `I found and excerpted ${count} text ${plural(count, "match")}.`;
+	}
+	if (payload.tool === "glob") {
+		const data = payload.data as { files?: string[] } | undefined;
+		const files = normalizeStringList(data?.files);
+		if (files.length === 0) {
+			return "I did not find matching files.";
+		}
+		return `I found ${files.length} matching ${plural(files.length, "file")}:\n${formatPreviewList(files)}`;
+	}
+	if (payload.tool === "project_tree") {
+		const data = payload.data as { entries?: string[]; path?: string } | undefined;
+		const entries = normalizeStringList(data?.entries);
+		const scope = data?.path?.trim() || "the current project";
+		if (entries.length === 0) {
+			return `${scope} has no visible tree entries.`;
+		}
+		return `I mapped ${entries.length} visible ${plural(entries.length, "entry")} under ${scope}:\n${formatPreviewList(entries)}`;
+	}
+	if (payload.tool === "exec") {
+		return "The command finished. Check the process details for command output and exit status.";
+	}
+	if (payload.tool === "memory") {
+		const data = payload.data as { summary?: string } | undefined;
+		return data?.summary?.trim() || "Memory was updated.";
+	}
+	if (payload.tool === "use_skill") {
+		const data = payload.data as { command?: string; summary?: string } | undefined;
+		return data?.summary?.trim() || `Loaded skill ${data?.command ?? ""}`.trim();
+	}
+	if (payload.tool === "plan_write") {
+		return "";
+	}
+	if (payload.tool === "write" || payload.tool === "edit" || payload.tool === "delete") {
+		return "File changes are prepared for review before anything is written to Obsidian.";
+	}
+	return "I completed the tool step, but the model did not provide a user-facing final answer. Check the process details for the tool output.";
+}
+
+function summarizePayloadForTrace(payload: ToolResultPayload): string {
+	if (!payload.ok) {
+		return payload.status === "denied" ? `${payload.tool} blocked` : `${payload.tool} failed`;
+	}
+	return summarizeForTrace(payload.tool, payload.data);
+}
+
 export function summarizeForTrace(tool: string, data: unknown): string {
 	if (tool === "use_skill") {
 		const payload = data as { command?: string; summary?: string } | undefined;
@@ -37,6 +147,10 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 	if (tool === "read") {
 		const payload = data as { path?: string; truncated?: boolean };
 		return `Read ${payload.path ?? ""}${payload.truncated ? " (truncated)" : ""}`.trim();
+	}
+	if (tool === "read_many") {
+		const payload = data as { files?: unknown[] };
+		return `Read ${payload.files?.length ?? 0} file(s)`;
 	}
 	if (tool === "memory") {
 		const payload = data as { summary?: string } | undefined;
@@ -54,9 +168,21 @@ export function summarizeForTrace(tool: string, data: unknown): string {
 		const payload = data as { matches?: unknown[] };
 		return `search_text matched ${payload.matches?.length ?? 0} result(s)`;
 	}
+	if (tool === "search_and_read") {
+		const payload = data as { matches?: unknown[] };
+		return `search_and_read matched ${payload.matches?.length ?? 0} result(s)`;
+	}
 	if (tool === "glob") {
 		const payload = data as { files?: unknown[] };
 		return `glob matched ${payload.files?.length ?? 0} file(s)`;
+	}
+	if (tool === "project_tree") {
+		const payload = data as { entries?: unknown[] };
+		return `project_tree listed ${payload.entries?.length ?? 0} entry(s)`;
+	}
+	if (tool === "plan_write") {
+		const payload = data as { eventType?: string; taskCount?: number } | undefined;
+		return `${payload?.eventType ?? "plan_update"} wrote ${payload?.taskCount ?? 0} task(s)`;
 	}
 	if (tool === "compile_wiki") {
 		const payload = data as {
@@ -180,6 +306,26 @@ function fileMutationLabel(input: FileMutationSummaryInput): string {
 function withTarget(summary: string, targetPath: string | undefined): string {
 	const target = targetPath?.trim();
 	return target ? `${summary}：${target}` : summary;
+}
+
+function normalizeStringList(value: unknown): string[] {
+	return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+function plural(count: number, singular: string): string {
+	if (singular === "match") {
+		return count === 1 ? "match" : "matches";
+	}
+	if (singular.endsWith("y")) {
+		return count === 1 ? singular : `${singular.slice(0, -1)}ies`;
+	}
+	return count === 1 ? singular : `${singular}s`;
+}
+
+function formatPreviewList(items: string[]): string {
+	const preview = items.slice(0, 8).map((item) => `- ${item}`).join("\n");
+	const remaining = items.length - 8;
+	return remaining > 0 ? `${preview}\n- ${remaining} more omitted` : preview;
 }
 
 function safeStringify(value: unknown, maxChars: number): string {

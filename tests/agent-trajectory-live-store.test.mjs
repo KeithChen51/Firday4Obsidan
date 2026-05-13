@@ -133,6 +133,26 @@ test("LiveTrajectoryStore freezes a completed snapshot", async () => {
 	assert.ok(store.getCompletedSnapshot()?.items.some((item) => item.kind === "final"));
 });
 
+test("LiveTrajectoryStore reset clears stale completed snapshots before a fresh retry", async () => {
+	const { LiveTrajectoryStore } = await loadStore();
+	const store = new LiveTrajectoryStore();
+
+	store.appendProgress(startEvent("turn-retry-old"));
+	store.completeFromProgress({
+		phase: "done",
+		depth: 0,
+		message: "Old run completed.",
+		turnId: "turn-retry-old",
+	});
+
+	assert.equal(store.getCompletedSnapshot()?.identity.turnId, "turn-retry-old");
+
+	store.reset();
+
+	assert.equal(store.getSnapshot(), null);
+	assert.equal(store.getCompletedSnapshot(), null);
+});
+
 test("LiveTrajectoryStore terminal errors clear running state but keep replayable items", async () => {
 	const { LiveTrajectoryStore } = await loadStore();
 	const store = new LiveTrajectoryStore();

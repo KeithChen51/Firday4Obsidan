@@ -56,6 +56,7 @@ test("Agent Kernel contracts export stable statuses, event types, and failure ca
 		"safe_stopped",
 	]);
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_started"));
+	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("loop_control_stop"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("max_tool_iterations"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_completed"));
 	assert.ok(contracts.AGENT_TURN_EVENT_TYPES.includes("turn_failed"));
@@ -98,7 +99,10 @@ test("AgentFailureClassifier maps legacy failure signals into kernel taxonomy", 
 	const { AgentFailureClassifier } = await jiti.import(classifierPath);
 	const classifier = new AgentFailureClassifier();
 
-	assert.equal(classifier.classify(new DOMException("The turn was aborted.", "AbortError")).category, "cancelled");
+	const cancelled = classifier.classify(new DOMException("The turn was aborted.", "AbortError"));
+	assert.equal(cancelled.category, "cancelled");
+	assert.equal(cancelled.userMessage, "已停止本次任务。");
+	assert.doesNotMatch(cancelled.userMessage, /Agent|turn|cancelled|Error/i);
 	assert.equal(classifier.classify(new Error("Maximum tool-iteration limit reached.")).category, "max_iterations");
 	assert.equal(classifier.classify(new Error("504 Gateway Timeout from model gateway")).category, "model_transport");
 	assert.equal(classifier.classify(new Error("Tool denied by policy: exec")).category, "tool_denied");

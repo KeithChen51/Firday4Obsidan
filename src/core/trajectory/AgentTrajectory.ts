@@ -136,6 +136,7 @@ export interface AgentTrajectorySnapshot {
 	actions: AgentTrajectoryAction[];
 	mutations: AgentTrajectoryMutation[];
 	plan?: AgentTrajectoryPlanState;
+	planSource?: "model" | "runtime" | "fallback" | "legacy" | string;
 	failure?: AgentTrajectoryFailure;
 	privacy: {
 		redacted: boolean;

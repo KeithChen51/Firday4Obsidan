@@ -18,12 +18,14 @@ export class CapabilityRegistry {
 	private readonly toolCapabilities: ToolCapabilityDefinition[];
 
 	private constructor() {
-		this.toolCapabilities = TOOL_MANIFESTS.map((tool) => ({
-			...tool,
-			id: tool.capability,
-			kind: "tool" as const,
-			userVisible: true as const,
-		}));
+		this.toolCapabilities = TOOL_MANIFESTS
+			.filter((tool) => tool.name !== "exec")
+			.map((tool) => ({
+				...tool,
+				id: tool.capability,
+				kind: "tool" as const,
+				userVisible: true as const,
+			}));
 	}
 
 	static getInstance(): CapabilityRegistry {
@@ -42,6 +44,13 @@ export class CapabilityRegistry {
 			name: tool.name,
 			capability: tool.capability,
 			readOnly: tool.readOnly,
+			concurrencySafe: tool.concurrencySafe,
+			idempotent: tool.idempotent,
+			cacheable: tool.cacheable,
+			mutatesVault: tool.mutatesVault,
+			mutatesExternal: tool.mutatesExternal,
+			resultKind: tool.resultKind,
+			outputBudget: tool.outputBudget,
 			primary: tool.primary,
 			relatedSkillCommand: tool.relatedSkillCommand,
 		}));

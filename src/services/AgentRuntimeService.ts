@@ -211,7 +211,11 @@ export interface RuntimeProgressEvent {
 	targetPath?: string;
 	status?: "ok" | "failed" | "denied";
 	summary?: string;
+	turnId?: string;
 	taskId?: string;
+	traceId?: string;
+	conversationId?: string;
+	agentId?: string;
 	transport?: RuntimeTransportProgress;
 	checkpoint?: RuntimeCheckpointProgress;
 	narration?: AgentNarrationPayload;
@@ -727,14 +731,19 @@ export class AgentRuntimeService {
 	}
 
 	private reportProgress(input: RuntimeTurnInput, event: RuntimeProgressEvent): void {
-		const eventWithTask = this.activeTaskId && !event.taskId
-			? { ...event, taskId: this.activeTaskId }
-			: event;
+		const eventWithIdentity: RuntimeProgressEvent = {
+			...event,
+			...(this.activeTurnId ? { turnId: this.activeTurnId } : {}),
+			...(this.activeConversationId ? { conversationId: this.activeConversationId } : {}),
+			...(this.activeTraceId ? { traceId: this.activeTraceId } : {}),
+			...(this.activeTaskId ? { taskId: this.activeTaskId } : {}),
+			...(input.agentId ? { agentId: input.agentId } : {}),
+		};
 		if (this.activeTurnStateMachine) {
-			this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, eventWithTask);
+			this.turnOrchestrator.appendProgress(this.activeTurnStateMachine, eventWithIdentity);
 		}
 		try {
-			input.onProgress?.(eventWithTask);
+			input.onProgress?.(eventWithIdentity);
 		} catch {
 			// Ignore observer errors to avoid blocking runtime execution.
 		}
@@ -2431,7 +2440,7 @@ export class AgentRuntimeService {
 		const scope = this.resolveScope(targetPath);
 		const settings = this.getSettings();
 		const gatewayPolicy = this.resolveToolPolicy(name);
-		const approvalEligible = !["use_skill", "ls", "read", "grep", "search_text", "glob"].includes(name);
+		const approvalEligible = !["use_skill", "ls", "read", "read_many", "grep", "search_text", "search_and_read", "glob", "project_tree"].includes(name);
 		const shouldRequestToolApproval = approvalEligible && gatewayPolicy.effect === "ask";
 		const shouldReportApproval = shouldRequestToolApproval || (approvalEligible && gatewayPolicy.effect === "deny");
 		const approvalDescription = this.describeToolApprovalConsequence(name, args, targetPath);

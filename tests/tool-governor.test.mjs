@@ -43,5 +43,6 @@ test("tool governor detects retryable transport failures separately", async () =
 	assert.equal(governor.isRetryableTransportFailure("504 Gateway Timeout"), true);
 	assert.equal(governor.isRetryableTransportFailure("ERR_CONNECTION_RESET"), true);
 	assert.equal(governor.isRetryableTransportFailure("Error: net::ERR_CONNECTION_CLOSED"), true);
+	assert.equal(governor.isRetryableTransportFailure("Error: net::ERR_HTTP2_PROTOCOL_ERROR"), true);
 	assert.equal(governor.isRetryableTransportFailure("400 unsupported tool schema"), false);
 });

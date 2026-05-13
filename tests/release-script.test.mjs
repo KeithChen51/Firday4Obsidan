@@ -154,3 +154,61 @@ test("release script skips the legacy bridge tree after the bridge version", asy
 	assert.equal(fs.existsSync(path.join(tempRoot, "release", "latest.json")), false);
 	assert.equal(fs.existsSync(path.join(tempRoot, "release", "friday-obsidian-plugin", "main.js")), false);
 });
+
+test("release script preserves existing publishedAt when release feed content is unchanged", async () => {
+	const { syncReleaseArtifacts } = await loadReleaseScript();
+	const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-release-idempotent-"));
+	const manifest = {
+		id: "friday-obsidian-plugin",
+		name: "F.R.I.D.A.Y",
+		version: "0.2.0",
+		minAppVersion: "1.0.0",
+		description: "demo",
+		author: "demo",
+		isDesktopOnly: true,
+	};
+
+	fs.writeFileSync(path.join(tempRoot, "main.js"), "console.log('release');\n", "utf8");
+	fs.writeFileSync(path.join(tempRoot, "styles.css"), ".demo { color: red; }\n", "utf8");
+	fs.writeFileSync(path.join(tempRoot, "manifest.json"), JSON.stringify(manifest, null, "\t"), "utf8");
+	fs.writeFileSync(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\n\n## 0.2.0\n\n- Stable release notes.\n", "utf8");
+
+	const writeZip = (sourceDir, zipPath) => {
+		fs.writeFileSync(zipPath, "zip-placeholder", "utf8");
+	};
+
+	syncReleaseArtifacts({
+		projectRoot: tempRoot,
+		publishedAt: "2026-04-18T00:00:00.000Z",
+		legacyBridgeVersion: "0.2.0",
+		zipWriter: writeZip,
+	});
+	syncReleaseArtifacts({
+		projectRoot: tempRoot,
+		publishedAt: "2026-04-19T00:00:00.000Z",
+		legacyBridgeVersion: "0.2.0",
+		zipWriter: writeZip,
+	});
+
+	const namespacedLatest = JSON.parse(fs.readFileSync(path.join(tempRoot, "plugin", "latest.json"), "utf8"));
+	const legacyLatest = JSON.parse(fs.readFileSync(path.join(tempRoot, "release", "latest.json"), "utf8"));
+
+	assert.equal(namespacedLatest.publishedAt, "2026-04-18T00:00:00.000Z");
+	assert.equal(legacyLatest.publishedAt, "2026-04-18T00:00:00.000Z");
+
+	fs.writeFileSync(path.join(tempRoot, "CHANGELOG.md"), "# Changelog\n\n## 0.2.0\n\n- Changed release notes.\n", "utf8");
+	syncReleaseArtifacts({
+		projectRoot: tempRoot,
+		publishedAt: "2026-04-20T00:00:00.000Z",
+		legacyBridgeVersion: "0.2.0",
+		zipWriter: writeZip,
+	});
+
+	const changedNamespacedLatest = JSON.parse(fs.readFileSync(path.join(tempRoot, "plugin", "latest.json"), "utf8"));
+	const changedLegacyLatest = JSON.parse(fs.readFileSync(path.join(tempRoot, "release", "latest.json"), "utf8"));
+
+	assert.equal(changedNamespacedLatest.publishedAt, "2026-04-20T00:00:00.000Z");
+	assert.equal(changedNamespacedLatest.releaseNotes, "- Changed release notes.");
+	assert.equal(changedLegacyLatest.publishedAt, "2026-04-20T00:00:00.000Z");
+	assert.equal(changedLegacyLatest.releaseNotes, "- Changed release notes.");
+});

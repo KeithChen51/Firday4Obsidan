@@ -788,6 +788,33 @@ test("buildAgentProcessPanelViewModel exposes retryable failure recovery", async
 	assert.equal(view.visibleSteps.at(-1)?.status, "retryable");
 });
 
+test("buildAgentProcessPanelViewModel presents user cancellations as stopped work", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "cancelled",
+		headline: "Agent failed",
+		summary: "Agent turn cancelled.",
+		failure: {
+			class: "cancelled",
+			message: "Error: Task cancelled.",
+			retryable: false,
+			recoverable: false,
+		},
+		items: [
+			makeItem({ id: "failure", kind: "failure", title: "Run failed", detail: "Error: Task cancelled.", status: "cancelled" }),
+		],
+	}));
+
+	assert.equal(view.status.tone, "cancelled");
+	assert.equal(view.status.label, "已停止");
+	assert.equal(view.timeline?.status, "cancelled");
+	assert.equal(view.timeline?.title, "已停止处理");
+	assert.match(ordinaryProcessText(view), /已停止本次任务/);
+	assert.doesNotMatch(ordinaryProcessText(view), /运行遇到问题|Error:|Task cancelled|Agent turn cancelled|Run failed/i);
+	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "cancelled process view");
+});
+
 test("buildAgentProcessPanelViewModel exposes checkpoint resume recovery before retry", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -1073,9 +1100,9 @@ test("buildAgentProcessPanelViewModel groups process details by user-visible pha
 	assert.equal(view.timeline?.statusBar.phase, "执行");
 	assert.equal(view.timeline?.statusBar.action, "读取项目现状");
 	assert.equal(view.timeline?.statusBar.elapsed, "12s");
-	assert.deepEqual(view.timeline?.groups.map((group) => group.title), ["收到任务", "计划", "执行"]);
-	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false, false]);
-	assert.equal(view.timeline?.groups[2]?.items.length, 1);
+	assert.deepEqual(view.timeline?.groups.map((group) => group.title), ["收到任务", "执行"]);
+	assert.deepEqual(view.timeline?.groups.map((group) => group.defaultExpanded), [false, false]);
+	assert.equal(view.timeline?.groups[1]?.items.length, 1);
 });
 
 test("buildAgentProcessPanelViewModel status bar prefers the current visible plan task", async () => {
@@ -1379,16 +1406,14 @@ test("buildAgentProcessPanelViewModel keeps stage reports out of structured proc
 	assert.equal(view.mode, "stepped_process");
 	assert.deepEqual(view.visibleSteps.map((step) => step.title), [
 		"收到任务",
-		"整理方案",
 		"读取上下文",
 	]);
 	assert.deepEqual(view.timeline?.items.map((item) => item.title), [
 		"收到任务",
-		"整理方案",
 		"读取项目现状",
 	]);
 	assert.equal(view.timeline?.items[0]?.summary, "需要把过程叙事放进线性时间线。");
-	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "读取相关代码");
+	assert.equal(view.timeline?.items[1]?.detail?.lines[0], "Read process view model.");
 	assert.equal(view.timeline?.items.some((item) => item.kind === "stage_report"), false);
 	const contextItem = view.timeline?.items.find((item) => item.kind === "context");
 	assert.deepEqual(contextItem?.notes, [
@@ -1460,6 +1485,47 @@ test("buildAgentProcessPanelViewModel keeps technical detail from repeating the 
 	assert.ok(reasoningItem, "reasoning timeline item should exist");
 	assert.equal(reasoningItem.summary, "Checked the request and selected the document update path.");
 	assert.equal(reasoningItem.detail, undefined);
+});
+
+test("buildAgentProcessPanelViewModel hides generic live model reasoning so it does not look like a plan", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		privacy: { redacted: true, source: "live" },
+		items: [
+			makeItem({
+				id: "model-request",
+				kind: "model",
+				title: "理解请求",
+				detail: "FRIDAY 正在理解你的请求。",
+				status: "running",
+				rawEventType: "model_request",
+			}),
+			makeItem({
+				id: "generic-reasoning",
+				kind: "reasoning",
+				title: "FRIDAY 的思路",
+				detail: "FRIDAY received model reasoning and summarized it safely.",
+				status: "ok",
+				rawEventType: "model_response",
+				reasoningProvider: "zenmux",
+			}),
+			makeItem({
+				id: "tool-project-tree",
+				kind: "tool",
+				title: "project_tree",
+				detail: "project_tree listed 14 entry(s)",
+				status: "ok",
+				tool: "project_tree",
+				targetPath: "workspace",
+				rawEventType: "tool_result",
+			}),
+		],
+	}));
+
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context"]);
+	assert.doesNotMatch(JSON.stringify(view), /整理方案|计划|received model reasoning|正在理解你的请求/);
 });
 
 test("buildAgentProcessPanelViewModel hides context checkpoint implementation wording", async () => {
@@ -1600,6 +1666,96 @@ test("buildAgentProcessPanelViewModel exposes completed composer task bar from v
 	assert.equal(view.composerTaskBar.collapsed.stepLabel, "2/2");
 	assert.equal(view.composerTaskBar.collapsed.taskTitle, "Run replay tests");
 	assert.equal(view.composerTaskBar.collapsed.elapsed, "12s");
+});
+
+test("buildAgentProcessPanelViewModel keeps a prematurely completed live plan active", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		plan: {
+			planId: "plan-premature-completed",
+			visibility: "visible",
+			status: "completed",
+			currentTaskId: "task-2",
+			tasks: [
+				{ id: "task-1", title: "Read workspace context", status: "completed" },
+				{ id: "task-2", title: "Answer from results", status: "completed" },
+			],
+		},
+	}));
+
+	assert.ok(view.composerTaskBar, "live visible plan should still drive the composer task bar");
+	assert.equal(view.composerTaskBar.collapsed.statusLabel, "正在执行");
+	assert.equal(view.composerTaskBar.collapsed.stepLabel, "2/2");
+	assert.equal(view.composerTaskBar.collapsed.taskTitle, "Answer from results");
+	assert.deepEqual(view.composerTaskBar.expandedTasks.map((task) => task.status), [
+		"completed",
+		"in_progress",
+	]);
+});
+
+test("buildAgentProcessPanelViewModel keeps visible plan narration out of the process timeline", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		plan: {
+			planId: "plan-task-bar-only",
+			visibility: "visible",
+			status: "running",
+			currentTaskId: "task-1",
+			tasks: [
+				{ id: "task-1", title: "Read workspace context", status: "in_progress" },
+				{ id: "task-2", title: "Answer from results", status: "pending" },
+			],
+		},
+		items: [
+			makeItem({
+				id: "intake",
+				kind: "intake",
+				title: "I will inspect the workspace.",
+				detail: "I will inspect the workspace.",
+				status: "ok",
+				rawEventType: "intake_decision",
+				intakeInteractionRoute: "task_with_process",
+				intakeShouldShowProcess: true,
+				intakeShouldUseVisiblePlan: true,
+			}),
+			makeItem({
+				id: "plan-narration",
+				kind: "narration",
+				title: "Model plan",
+				detail: "Read workspace context; answer from results.",
+				status: "ok",
+				narrationKind: "plan_declared",
+				rawEventType: "narration_report",
+			}),
+			makeItem({
+				id: "generic-reasoning",
+				kind: "reasoning",
+				title: "FRIDAY reasoning",
+				detail: "received model reasoning",
+				status: "ok",
+				rawEventType: "model_response",
+			}),
+			makeItem({
+				id: "tool-project-tree",
+				kind: "tool",
+				title: "project_tree",
+				detail: "project_tree listed 14 entries.",
+				status: "ok",
+				tool: "project_tree",
+				targetPath: "workspace",
+				rawEventType: "tool_result",
+			}),
+		],
+	}));
+
+	assert.ok(view.composerTaskBar, "visible plan should stay in the Task Bar");
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context"]);
+	assert.equal(view.timeline?.groups.some((group) => group.id === "plan"), false);
+	assert.doesNotMatch(JSON.stringify(view.timeline), /Read workspace context; answer from results|received model reasoning/);
 });
 
 test("buildAgentProcessPanelViewModel preserves blocked task state in composer task bar", async () => {

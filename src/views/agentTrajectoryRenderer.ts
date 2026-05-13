@@ -173,7 +173,7 @@ function formatComposerTaskStatus(status: AgentComposerTaskBarTaskView["status"]
 }
 
 function assertUnhandledComposerTaskStatus(status: never): never {
-	throw new Error(`Unhandled composer task status: ${status}`);
+	throw new Error(`Unhandled composer task status: ${String(status)}`);
 }
 
 export function renderAgentTrajectoryCard(options: RenderAgentTrajectoryCardOptions): void {

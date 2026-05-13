@@ -1547,12 +1547,11 @@ export class DailyBoardView extends ItemView {
 
 		const sendButton = toolbarEl.createEl("button", {
 			cls: "friday-ai-send-button",
-			text: this.getSendButtonLabel(),
 		});
 		sendButton.type = "button";
 		this.aiSendButtonEl = sendButton;
-		sendButton.onclick = (event) => {
-			this.handleSendButtonClick(event);
+		sendButton.onclick = () => {
+			this.handleSendButtonClick();
 		};
 
 		this.syncAiComposerControls();
@@ -1952,7 +1951,7 @@ export class DailyBoardView extends ItemView {
 				.map((item) => item.trim().toLowerCase())
 				.filter((item) => item.length > 0),
 		);
-		for (const tool of CapabilityRegistry.getInstance().listUserVisibleTools()) {
+		for (const tool of CapabilityRegistry.getInstance().listUserVisibleTools().filter((item) => this.isUserVisibleRuntimeTool(item.name))) {
 			const item = list.createDiv({ cls: "friday-control-center-item" });
 			const meta = item.createDiv({ cls: "friday-control-center-item-meta" });
 			meta.createDiv({ cls: "friday-control-center-item-title", text: tool.name });
@@ -1968,6 +1967,10 @@ export class DailyBoardView extends ItemView {
 				await this.toggleToolAvailability(tool.name, disabledTools.has(tool.name));
 			});
 		}
+	}
+
+	private isUserVisibleRuntimeTool(toolName: string): boolean {
+		return toolName !== "exec";
 	}
 
 	private createAvailabilityToggle(
@@ -1998,7 +2001,6 @@ export class DailyBoardView extends ItemView {
 			write: "Create or fully overwrite files inside the permitted scope.",
 			edit: "Apply targeted patches to existing files.",
 			delete: "Remove files that are explicitly approved for deletion.",
-			exec: "Run shell commands in the current runtime environment.",
 		};
 		return this.t(`policy.tools.desc.${tool.name}`, fallbackMap[tool.name] ?? tool.capability);
 	}
@@ -3035,7 +3037,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private normalizeDisplayedAssistantMessageContent(content: string): string {
-		if (/ERR_CONNECTION_CLOSED|ECONNCLOSED|Request failed|status\s+\d+|request_exhausted|transport|原始错误/i.test(content)) {
+		if (/Agent turn cancelled|Task cancelled|Run cancelled|Action cancelled|AbortError|aborted|cancelled|canceled|ERR_CONNECTION_CLOSED|ECONNCLOSED|ERR_HTTP2_PROTOCOL_ERROR|HTTP2_PROTOCOL|Request failed|status\s+\d+|request_exhausted|transport|原始错误/i.test(content)) {
 			const productizedContent = productizeRuntimeText(content);
 			if (productizedContent) {
 				return productizedContent;
@@ -3195,9 +3197,9 @@ export class DailyBoardView extends ItemView {
 			const uiMeta = message.uiMeta ?? {};
 			message.uiMeta = {
 				...uiMeta,
-				conversationId: uiMeta.conversationId?.trim() || snapshot.identity.conversationId || this.aiSessionId,
-				turnId: uiMeta.turnId?.trim() || snapshot.identity.turnId,
-				taskId: uiMeta.taskId?.trim() || snapshot.identity.taskId,
+				conversationId: snapshot.identity.conversationId || uiMeta.conversationId?.trim() || this.aiSessionId,
+				turnId: snapshot.identity.turnId || uiMeta.turnId?.trim(),
+				taskId: snapshot.identity.taskId || uiMeta.taskId?.trim(),
 			};
 			const key = this.getMessageTrajectorySnapshotKey(message);
 			if (key) {
@@ -3548,49 +3550,27 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiSendButtonEl?.isConnected) {
 			return;
 		}
-		this.aiSendButtonEl.textContent = this.getSendButtonLabel();
-		this.aiSendButtonEl.disabled = this.hasPendingComposerDecision() || this.isComposerDraftEmpty();
+		this.aiSendButtonEl.empty();
+		setIcon(this.aiSendButtonEl, this.resolveSendButtonIcon());
+		this.aiSendButtonEl.setAttribute("aria-label", this.getSendButtonLabel());
+		this.aiSendButtonEl.title = this.getSendButtonLabel();
+		this.aiSendButtonEl.toggleClass("is-stop", this.aiBusy && this.isComposerDraftEmpty());
+		this.aiSendButtonEl.disabled = this.hasPendingComposerDecision() || (!this.aiBusy && this.isComposerDraftEmpty());
 	}
 
-	private handleSendButtonClick(event: MouseEvent): void {
+	private handleSendButtonClick(): void {
+		if (this.aiBusy && this.isComposerDraftEmpty()) {
+			this.stopCurrentAiRun();
+			return;
+		}
 		if (this.isComposerDraftEmpty()) {
 			return;
 		}
-		if (!this.aiBusy || !this.aiSendAbortController) {
-			void this.submitAiPrompt();
-			return;
-		}
-		const menu = new Menu();
-		menu.addItem((item) =>
-			item
-				.setTitle(this.t("ai.queue.submit", "加入队列"))
-				.setIcon("list-plus")
-				.onClick(() => {
-					void this.submitAiPrompt();
-				}),
-		);
-		menu.addItem((item) =>
-			item
-				.setTitle(this.t("ai.queue.interrupt", "中断当前回复并立即发送"))
-				.setIcon("zap")
-				.onClick(() => {
-					this.interruptAndSubmitAiPrompt();
-				}),
-		);
-		menu.showAtMouseEvent(event);
+		void this.submitAiPrompt();
 	}
 
-	private interruptAndSubmitAiPrompt(): void {
-		if (!this.aiBusy || !this.aiSendAbortController) {
-			void this.submitAiPrompt();
-			return;
-		}
-		const draftSnapshot = this.getComposerSnapshot();
-		if (this.isPromptDocumentEmpty(this.getStructuredPromptDocument(draftSnapshot))) {
-			return;
-		}
-		this.enqueueAiPrompt(draftSnapshot, "front");
-		this.aiSendAbortController.abort();
+	private stopCurrentAiRun(): void {
+		this.aiSendAbortController?.abort();
 	}
 
 	private async handleAgentTaskRetry(taskId: string): Promise<void> {
@@ -3613,12 +3593,59 @@ export class DailyBoardView extends ItemView {
 		return createAgentTaskPanelActionHandlers(taskId, this.plugin.agentRuntimeService, {
 			abortCurrentRun: () => this.aiSendAbortController?.abort(),
 			getContinuePrompt: () => this.aiDraft.trim() || "Continue.",
+			beforeRuntimeRun: () => this.prepareTaskActionRuntimeRun(taskId),
 			onProgress: (event) => this.handleRuntimeProgress(event),
 			recordAgentTask: (task) => this.recordAgentTask(task),
 			afterMutationReview: () => this.refreshCompletedTrajectorySnapshotsForCurrentSession(),
 			render: () => this.renderBoard(),
 			signal: this.aiSendAbortController?.signal,
 		});
+	}
+
+	private prepareTaskActionRuntimeRun(taskId: string): void {
+		this.aiLastError = "";
+		this.aiLocalIntakePreview = "";
+		this.aiStreamingPreview = "";
+		this.aiStreamingTrajectorySnapshot = null;
+		this.aiRuntimeTrajectoryStore.reset();
+		this.aiRuntimeTrajectorySnapshot = null;
+		this.aiRuntimeSawIntake = false;
+		this.aiRuntimeModelRequestStarted = false;
+		this.clearRuntimeElapsedTimer();
+		this.aiRuntimeProgressTaskIds.clear();
+		this.forgetTrajectorySnapshotsForTask(taskId);
+		this.removeAssistantMessagesForTask(taskId);
+		this.aiForceScrollToBottomOnce = true;
+		this.syncAiRuntimeShell();
+	}
+
+	private forgetTrajectorySnapshotsForTask(taskId: string): void {
+		const normalizedTaskId = taskId.trim();
+		if (!normalizedTaskId) {
+			return;
+		}
+		for (const [key, snapshot] of this.aiProcessSnapshotsByKey.entries()) {
+			if (snapshot.identity.taskId?.trim() !== normalizedTaskId && !key.endsWith(`::${normalizedTaskId}`)) {
+				continue;
+			}
+			this.aiProcessSnapshotsByKey.delete(key);
+			this.aiProcessSnapshotProjectIds.delete(snapshot);
+			this.aiProcessExpandedKeys.delete(key);
+			this.aiProcessCollapsedKeys.delete(key);
+		}
+	}
+
+	private removeAssistantMessagesForTask(taskId: string): void {
+		const normalizedTaskId = taskId.trim();
+		if (!normalizedTaskId) {
+			return;
+		}
+		for (let index = this.aiConversation.length - 1; index >= 0; index -= 1) {
+			const message = this.aiConversation[index];
+			if (message?.role === "assistant" && message.uiMeta?.taskId?.trim() === normalizedTaskId) {
+				this.aiConversation.splice(index, 1);
+			}
+		}
 	}
 
 	private async hydrateAgentTasksForCurrentSession(): Promise<void> {
@@ -4088,6 +4115,7 @@ export class DailyBoardView extends ItemView {
 		this.aiSendAbortController?.abort();
 		const runAbortController = new AbortController();
 		this.aiSendAbortController = runAbortController;
+		this.syncAiSendButtonState();
 		this.aiForceScrollToBottomOnce = true;
 		if (this.isCurrentAiTurnTarget(turnTarget)) {
 			this.syncAiLiveChatShell();
@@ -4218,7 +4246,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private isBeforeIntakeConnectionFailure(message: string): boolean {
-		return /Request failed|status\s+\d+|模型服务|网关|request_exhausted|transport|ERR_CONNECTION_CLOSED/i.test(message);
+		return /Request failed|status\s+\d+|模型服务|网关|request_exhausted|transport|ERR_CONNECTION_CLOSED|ERR_HTTP2_PROTOCOL_ERROR|HTTP2_PROTOCOL/i.test(message);
 	}
 
 	private detachCurrentConversationFromBackgroundTurn(target: AiTurnTarget): void {
@@ -4782,10 +4810,14 @@ export class DailyBoardView extends ItemView {
 			return this.plugin.t("ai.send");
 		}
 		return this.isComposerDraftEmpty()
-			? this.t("ai.working", "工作中")
+			? this.t("ai.stopCurrentTask", "停止当前任务")
 			: this.aiSendAbortController
-				? this.t("ai.queue.options", "发送选项")
+				? this.t("ai.queue.submit", "加入队列")
 				: this.t("ai.queue.submit", "加入队列");
+	}
+
+	private resolveSendButtonIcon(): string {
+		return this.aiBusy && this.isComposerDraftEmpty() ? "square" : "send";
 	}
 
 	private buildPromptMentionContext(mentionResolution: MentionResolutionResult) {

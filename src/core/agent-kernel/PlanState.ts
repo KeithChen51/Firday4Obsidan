@@ -57,6 +57,7 @@ export interface PlanRevisionChange {
 export interface RuntimePlanProgress {
 	type: PlanProgressType;
 	state: PlanState;
+	source?: "model" | "runtime" | "fallback" | "legacy" | string;
 	taskId?: string;
 	message?: string;
 	reason?: string;

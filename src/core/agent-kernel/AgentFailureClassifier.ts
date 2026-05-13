@@ -100,7 +100,7 @@ function isRetryable(category: AgentFailureCategory): boolean {
 
 function buildUserMessage(category: AgentFailureCategory, message: string): string {
 	if (category === "cancelled") {
-		return "Agent turn cancelled.";
+		return "已停止本次任务。";
 	}
 	if (message.trim()) {
 		return message.trim();

@@ -3,7 +3,17 @@ import type { ToolDefinition } from "../../types/tools";
 
 export type AgentMode = "ask" | "research" | "write" | "organize" | "review" | "debug" | "developer";
 export type ToolRiskLevel = "low" | "medium" | "high";
-export type ToolCategory = "read" | "write" | "delete" | "system" | "memory" | "skill" | "knowledge";
+export type ToolCategory = "read" | "write" | "delete" | "system" | "memory" | "skill" | "knowledge" | "planning";
+export type ToolResultKind =
+	| "skill"
+	| "listing"
+	| "document"
+	| "search_results"
+	| "knowledge"
+	| "memory"
+	| "mutation"
+	| "command"
+	| "plan";
 
 export interface ToolParameterSchema {
 	[key: string]: unknown;
@@ -20,18 +30,35 @@ export interface ToolContract {
 	capability: string;
 	handlerName: string;
 	readOnly: boolean;
+	concurrencySafe: boolean;
+	idempotent: boolean;
+	cacheable: boolean;
+	mutatesVault: boolean;
+	mutatesExternal: boolean;
+	resultKind: ToolResultKind;
+	outputBudget: number;
 	primary: boolean;
 	category: ToolCategory;
 	riskLevel: ToolRiskLevel;
 	promptArgumentLine: string;
 	relatedSkillCommand?: string;
 	debugOnly?: boolean;
+	modelOnly?: boolean;
+	userVisible?: boolean;
+	bypassAllowedTools?: boolean;
 }
 
 export interface ToolManifestContract {
 	name: string;
 	capability: string;
 	readOnly: boolean;
+	concurrencySafe: boolean;
+	idempotent: boolean;
+	cacheable: boolean;
+	mutatesVault: boolean;
+	mutatesExternal: boolean;
+	resultKind: ToolResultKind;
+	outputBudget: number;
 	primary: boolean;
 	relatedSkillCommand?: string;
 }
@@ -68,10 +95,61 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "skill.load",
 		handlerName: "toolUseSkill",
 		readOnly: true,
+		concurrencySafe: false,
+		idempotent: true,
+		cacheable: false,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "skill",
+		outputBudget: 12000,
 		primary: true,
 		category: "skill",
 		riskLevel: "low",
 		promptArgumentLine: '- use_skill: {"command":"skill command from SkillCatalog","reason":"why the skill matches the current task"}',
+	},
+	{
+		name: "plan_write",
+		description: "Create or replace the model-authored visible task bar plan. Use before complex or multi-step work, and use again to keep task status synchronized.",
+		parameters: {
+			type: "object",
+			properties: {
+				visibility: { type: "string", enum: ["task_bar", "visible", "hidden", "internal"], default: "task_bar" },
+				reason: { type: "string", description: "Why the plan is being created or updated." },
+				tasks: {
+					type: "array",
+					items: {
+						type: "object",
+						properties: {
+							id: { type: "string" },
+							title: { type: "string" },
+							status: { type: "string", enum: ["pending", "in_progress", "completed", "skipped", "failed", "blocked"] },
+							summary: { type: "string" },
+						},
+						required: ["id", "title", "status"],
+						additionalProperties: false,
+					},
+				},
+			},
+			required: ["tasks"],
+			additionalProperties: false,
+		},
+		capability: "harness.plan.write",
+		handlerName: "toolPlanWrite",
+		readOnly: true,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "plan",
+		outputBudget: 2000,
+		primary: true,
+		category: "planning",
+		riskLevel: "low",
+		modelOnly: true,
+		userVisible: false,
+		bypassAllowedTools: true,
+		promptArgumentLine: '- plan_write: {"visibility":"task_bar","reason":"why this plan is needed","tasks":[{"id":"short-stable-id","title":"concrete task","status":"pending|in_progress|completed|skipped|failed|blocked","summary":"optional status detail"}]}',
 	},
 	{
 		name: "ls",
@@ -88,6 +166,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.list",
 		handlerName: "toolList",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "listing",
+		outputBudget: 6000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -108,10 +193,49 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.read",
 		handlerName: "toolRead",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "document",
+		outputBudget: 10000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
 		promptArgumentLine: '- read: {"path":"project-relative or canonical file path","maxChars":10000}',
+	},
+	{
+		name: "read_many",
+		description: "Read several files in one read-only batch from project-relative paths, canonical vault paths, or allowed external absolute paths when supported.",
+		parameters: {
+			type: "object",
+			properties: {
+				paths: {
+					type: "array",
+					items: { type: "string" },
+					description: "Project-relative or canonical file paths to read.",
+				},
+				maxFiles: { type: "number", default: 8 },
+				maxCharsPerFile: { type: "number", default: 6000 },
+			},
+			required: ["paths"],
+			additionalProperties: false,
+		},
+		capability: "filesystem.read_many",
+		handlerName: "toolReadMany",
+		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "document",
+		outputBudget: 16000,
+		primary: true,
+		category: "read",
+		riskLevel: "low",
+		promptArgumentLine: '- read_many: {"paths":["project-relative or canonical file path"],"maxFiles":8,"maxCharsPerFile":6000}',
 	},
 	{
 		name: "grep",
@@ -130,6 +254,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.search",
 		handlerName: "toolGrep",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "search_results",
+		outputBudget: 12000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
@@ -151,10 +282,48 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.search_text",
 		handlerName: "toolSearchText",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "search_results",
+		outputBudget: 12000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
 		promptArgumentLine: '- search_text: {"path":"optional project-relative directory or file path","query":"plain text query","maxMatches":40}',
+	},
+	{
+		name: "search_and_read",
+		description: "Search text or regex and return compact snippets from matching files, reducing repeated search-then-read loops.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
+				query: { type: "string", description: "Plain text query. Use this unless regex is required." },
+				pattern: { type: "string", description: "Regex pattern when mode is regex." },
+				mode: { type: "string", enum: ["text", "regex"], default: "text" },
+				flags: { type: "string", default: "i" },
+				maxMatches: { type: "number", default: 20 },
+				maxCharsPerMatch: { type: "number", default: 800 },
+			},
+			additionalProperties: false,
+		},
+		capability: "filesystem.search_and_read",
+		handlerName: "toolSearchAndRead",
+		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "search_results",
+		outputBudget: 18000,
+		primary: true,
+		category: "read",
+		riskLevel: "low",
+		promptArgumentLine: '- search_and_read: {"path":"optional project-relative directory or file path","query":"plain text query","mode":"text","maxMatches":20,"maxCharsPerMatch":800}',
 	},
 	{
 		name: "glob",
@@ -172,10 +341,44 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.glob",
 		handlerName: "toolGlob",
 		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "listing",
+		outputBudget: 6000,
 		primary: true,
 		category: "read",
 		riskLevel: "low",
 		promptArgumentLine: '- glob: {"path":"optional project-relative directory path","pattern":"*.md","maxMatches":80}',
+	},
+	{
+		name: "project_tree",
+		description: "Return a compact directory tree under the active project or selected project-relative path, excluding hidden and generated directories by default.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string", description: DISCOVERY_PATH_DESCRIPTION },
+				maxDepth: { type: "number", default: 3 },
+				maxEntries: { type: "number", default: 160 },
+			},
+			additionalProperties: false,
+		},
+		capability: "filesystem.project_tree",
+		handlerName: "toolProjectTree",
+		readOnly: true,
+		concurrencySafe: true,
+		idempotent: true,
+		cacheable: true,
+		mutatesVault: false,
+		mutatesExternal: false,
+		resultKind: "listing",
+		outputBudget: 8000,
+		primary: true,
+		category: "read",
+		riskLevel: "low",
+		promptArgumentLine: '- project_tree: {"path":"optional project-relative directory path","maxDepth":3,"maxEntries":160}',
 	},
 	{
 		name: "compile_wiki",
@@ -194,6 +397,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "knowledge.compile",
 		handlerName: "toolCompileWiki",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "knowledge",
+		outputBudget: 12000,
 		primary: true,
 		category: "knowledge",
 		riskLevel: "medium",
@@ -217,6 +427,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "memory.write",
 		handlerName: "toolMemory",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "memory",
+		outputBudget: 4000,
 		primary: true,
 		category: "memory",
 		riskLevel: "medium",
@@ -238,6 +455,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.write",
 		handlerName: "toolWrite",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
@@ -270,6 +494,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.patch",
 		handlerName: "toolEdit",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: true,
 		category: "write",
 		riskLevel: "medium",
@@ -289,6 +520,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "filesystem.delete",
 		handlerName: "toolDelete",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: false,
+		resultKind: "mutation",
+		outputBudget: 4000,
 		primary: false,
 		category: "delete",
 		riskLevel: "high",
@@ -313,6 +551,13 @@ const TOOL_CONTRACTS: ToolContract[] = [
 		capability: "system.exec",
 		handlerName: "toolExec",
 		readOnly: false,
+		concurrencySafe: false,
+		idempotent: false,
+		cacheable: false,
+		mutatesVault: true,
+		mutatesExternal: true,
+		resultKind: "command",
+		outputBudget: 12000,
 		primary: false,
 		category: "system",
 		riskLevel: "high",
@@ -359,7 +604,7 @@ export class ToolRegistry {
 			if (disabledTools.has(tool.name)) {
 				return false;
 			}
-			if (allowedTools.size > 0 && !allowedTools.has(tool.name)) {
+			if (allowedTools.size > 0 && !allowedTools.has(tool.name) && !tool.bypassAllowedTools) {
 				return false;
 			}
 			if (tool.debugOnly) {
@@ -387,11 +632,18 @@ export class ToolRegistry {
 
 	listManifests(): ToolManifestContract[] {
 		return this.list()
-			.filter((tool) => tool.name !== "use_skill")
+			.filter((tool) => tool.name !== "use_skill" && tool.userVisible !== false && !tool.modelOnly)
 			.map((tool) => ({
 				name: tool.name,
 				capability: tool.capability,
 				readOnly: tool.readOnly,
+				concurrencySafe: tool.concurrencySafe,
+				idempotent: tool.idempotent,
+				cacheable: tool.cacheable,
+				mutatesVault: tool.mutatesVault,
+				mutatesExternal: tool.mutatesExternal,
+				resultKind: tool.resultKind,
+				outputBudget: tool.outputBudget,
 				primary: tool.primary,
 				...(tool.relatedSkillCommand ? { relatedSkillCommand: tool.relatedSkillCommand } : {}),
 			}));

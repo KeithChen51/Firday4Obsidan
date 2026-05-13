@@ -36,7 +36,7 @@ export type ApprovalDecision = "allow_once" | "allow_session" | "allow_always" |
 export type ApprovalPromptFn = (request: ToolApprovalRequest) => Promise<ApprovalDecision>;
 
 const STORE_VERSION = 1;
-const READ_ONLY_TOOLS = new Set(["ls", "read", "grep", "search_text", "glob"]);
+const READ_ONLY_TOOLS = new Set(["ls", "read", "read_many", "grep", "search_text", "search_and_read", "glob", "project_tree"]);
 
 export class ToolApprovalService {
 	private promptFn: ApprovalPromptFn | null = null;

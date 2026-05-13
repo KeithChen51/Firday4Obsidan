@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-05-12T12:04:34.569Z",
+  "theme": "light",
+  "density": "comfortable",
+  "counts": {
+    "keep": 14,
+    "adjust": 0,
+    "hold": 1
+  },
+  "choices": {
+    "品牌页头": "keep",
+    "小尺寸标识": "keep",
+    "插件入口图标": "keep",
+    "设置页框架": "keep",
+    "设置行状态": "keep",
+    "危险操作设置行": "keep",
+    "空状态": "keep",
+    "行内提醒": "keep",
+    "前置条件列表": "keep",
+    "审批强提醒": "keep",
+    "工作台顶部栏": "keep",
+    "助手消息": "keep",
+    "对话输入区": "keep",
+    "执行过程时间线": "keep",
+    "项目状态组": "hold"
+  }
+}

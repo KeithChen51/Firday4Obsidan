@@ -53,11 +53,31 @@ test("streaming and runtime progress update the live chat shell without rebuildi
 	assert.doesNotMatch(source, /plugin\.aiService\.chatStream\(modelMessages/);
 });
 
-test("busy send affordance can either queue or interrupt the current turn", async () => {
+test("send affordance uses paper-plane and square states while preserving queue submit", async () => {
 	const source = readSource(viewPath);
-	assert.match(source, /new Menu\(\)/);
-	assert.match(source, /private interruptAndSubmitAiPrompt\(/);
-	assert.match(source, /this\.interruptAndSubmitAiPrompt\(\)/);
+	assert.match(source, /private resolveSendButtonIcon\(\): string/);
+	assert.match(source, /return this\.aiBusy && this\.isComposerDraftEmpty\(\)\s*\?\s*"square"\s*:\s*"send"/);
+	assert.match(source, /setIcon\(this\.aiSendButtonEl,\s*this\.resolveSendButtonIcon\(\)\)/);
+	assert.match(source, /this\.aiSendButtonEl\.setAttribute\("aria-label",\s*this\.getSendButtonLabel\(\)\)/);
+	assert.match(source, /this\.aiSendButtonEl\.disabled = this\.hasPendingComposerDecision\(\) \|\| \(!this\.aiBusy && this\.isComposerDraftEmpty\(\)\)/);
+	assert.match(source, /if \(this\.aiBusy && this\.isComposerDraftEmpty\(\)\) \{[\s\S]*?this\.stopCurrentAiRun\(\);[\s\S]*?return;/);
+	assert.match(source, /void this\.submitAiPrompt\(\);/);
+});
+
+test("send affordance resyncs immediately after a submitted prompt enters the running state", async () => {
+	const source = readSource(viewPath);
+	const submitBlock = source.match(/private async submitAiPrompt\([^)]*\): Promise<void> \{[\s\S]*?\n\t\}\n\n\tprivate async compileWikiByButton/)?.[0] ?? "";
+	assert.ok(submitBlock, "submitAiPrompt block should exist");
+
+	const clearComposerIndex = submitBlock.indexOf("this.aiComposerSnapshot = createEmptyMentionComposerSnapshot();");
+	const busyIndex = submitBlock.indexOf("this.aiBusy = true;", clearComposerIndex);
+	const syncIndex = submitBlock.indexOf("this.syncAiSendButtonState();", busyIndex);
+	const shellIndex = submitBlock.indexOf("this.syncAiLiveChatShell();", busyIndex);
+
+	assert.ok(clearComposerIndex >= 0, "submit should clear the composer snapshot");
+	assert.ok(busyIndex > clearComposerIndex, "submit should enter busy state after clearing the composer");
+	assert.ok(syncIndex > busyIndex, "submit should resync the send/stop affordance immediately after entering busy state");
+	assert.ok(shellIndex === -1 || syncIndex < shellIndex, "send button state should update before the broader chat shell refresh");
 });
 
 test("chat messages render skill and context badges from persisted ui metadata", async () => {

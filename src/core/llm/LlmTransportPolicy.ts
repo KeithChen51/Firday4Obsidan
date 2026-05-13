@@ -4,6 +4,8 @@ const RETRYABLE_PATTERNS: RegExp[] = [
 	/timed out/i,
 	/err_connection_reset/i,
 	/err_connection_closed/i,
+	/err_http2_protocol_error/i,
+	/http2_protocol/i,
 	/econnreset/i,
 	/econnclosed/i,
 	/socket hang up/i,

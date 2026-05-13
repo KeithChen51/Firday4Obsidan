@@ -21,6 +21,7 @@ export interface ToolExecutionResult {
 	trace: RuntimeToolTrace;
 	payload: ToolResultPayload;
 	modelResultText: string;
+	userFallback?: string;
 	loadedSkillContext?: string;
 }
 

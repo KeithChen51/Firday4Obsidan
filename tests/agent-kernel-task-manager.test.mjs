@@ -80,6 +80,67 @@ test("AgentTaskManager creates and completes task lifecycle from AgentExecutionC
 	}
 });
 
+test("AgentTaskManager ignores late failTurn for a completed task", async () => {
+	const { AgentTaskManager, AgentExecutionContext, AgentTaskStore } = await loadModules();
+	const store = new AgentTaskStore({ now: () => new Date("2026-05-03T00:00:00.000Z") });
+	const manager = new AgentTaskManager({ taskStore: store });
+	const context = createContext(AgentExecutionContext);
+
+	await manager.beginTurn({
+		agentId: "agent-i",
+		conversationId: "conversation-i",
+		turnId: "turn-i-task",
+		userPrompt: "Create a canvas",
+		conversation: [],
+		mode: "ask",
+	}, context);
+	await manager.completeTurn({
+		turnId: context.turnId,
+		taskId: context.taskId,
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "completed",
+		assistantText: "done",
+		events: context.snapshotEvents(),
+		traces: [],
+		rawFinalReply: "done",
+	}, context);
+
+	const afterLateFailure = await manager.failTurn(new Error("late replay persistence failure"), context);
+	const persisted = await store.get("task-i");
+
+	assert.equal(afterLateFailure?.status, "completed");
+	assert.equal(persisted?.status, "completed");
+	const taskEvents = context.snapshotEvents().filter((event) => event.type === "task_updated");
+	assert.deepEqual(taskEvents.map((event) => event.payload.status), ["created", "running", "completed"]);
+});
+
+test("AgentTaskManager re-emits an externally cancelled task during failTurn", async () => {
+	const { AgentTaskManager, AgentExecutionContext, AgentTaskStore } = await loadModules();
+	const store = new AgentTaskStore({ now: () => new Date("2026-05-03T00:00:00.000Z") });
+	const manager = new AgentTaskManager({ taskStore: store });
+	const context = createContext(AgentExecutionContext);
+
+	await manager.beginTurn({
+		agentId: "agent-i",
+		conversationId: "conversation-i",
+		turnId: "turn-i-task",
+		userPrompt: "Create a canvas",
+		conversation: [],
+		mode: "ask",
+	}, context);
+	await store.cancelTask("task-i", {
+		summary: "User cancelled task.",
+		failureReason: "User cancelled task.",
+	});
+
+	const afterLateFailure = await manager.failTurn(new Error("Task cancelled."), context);
+
+	assert.equal(afterLateFailure?.status, "cancelled");
+	const taskEvents = context.snapshotEvents().filter((event) => event.type === "task_updated");
+	assert.deepEqual(taskEvents.map((event) => event.payload.status), ["created", "running", "cancelled"]);
+});
+
 test("AgentTaskManager marks pending mutations as approval wait without string-only inference", async () => {
 	const { AgentTaskManager, AgentExecutionContext, AgentTaskStore } = await loadModules();
 	const store = new AgentTaskStore();

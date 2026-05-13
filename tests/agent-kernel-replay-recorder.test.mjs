@@ -77,6 +77,8 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 	});
 	context.emit({ type: "model_request", payload: { step: 1 } });
 	context.emit({ type: "model_response", payload: { step: 1 } });
+	context.emit({ type: "task_bar_suppressed", payload: { source: "runtime", reason: "missing_model_plan" } });
+	context.emit({ type: "task_bar_created", payload: { source: "model", reason: "model_plan_write" } });
 	context.emit({ type: "approval_requested", payload: { tool: "write", targetPath: "Note.md" } });
 	context.emit({ type: "approval_resolved", payload: { tool: "write", approved: true } });
 	context.emit({ type: "mutation_planned", payload: { id: "mutation-i", status: "pending", targetPath: "Note.md" } });
@@ -100,7 +102,9 @@ test("AgentReplayRecorder persists Kernel event stream with shared taskId and tr
 	const replay = await reader.readTurn({ conversationId: "conversation-i", turnId: "turn-i-replay" });
 	const summary = reader.summarize(replay);
 
-	assert.equal(records.length, 10);
+	assert.equal(records.length, 12);
+	assert.ok(replay.some((event) => event.type === "task_bar_suppressed"));
+	assert.ok(replay.some((event) => event.type === "task_bar_created"));
 	assert.equal(replay.every((event) => event.taskId === "task-i"), true);
 	assert.equal(replay.every((event) => event.payload.traceId === "trace-i"), true);
 	assert.equal(summary.status, "completed");
@@ -255,6 +259,8 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 		payload: {
 			channel: "native",
 			maxIterations: 2,
+			configuredMaxIterations: 1,
+			reason: "emergency_fuse",
 			status: "safe_stopped",
 			summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
 		},
@@ -298,11 +304,15 @@ test("AgentReplayRecorder persists tool recovery and max-iteration replay metada
 	}]);
 	assert.deepEqual(summary.loopPreventionTimeline, [{
 		event: "max_tool_iterations",
+		channel: "native",
 		step: 0,
 		tool: "",
 		toolCallId: "",
 		status: "safe_stopped",
 		summary: "工具调用次数过多，FRIDAY 已安全停止本轮操作。",
+		reason: "emergency_fuse",
+		maxIterations: 2,
+		configuredMaxIterations: 1,
 		at: summary.loopPreventionTimeline[0]?.at,
 	}]);
 	assertNoRawMaxToolIterationText(summary.finalAnswerSummary);

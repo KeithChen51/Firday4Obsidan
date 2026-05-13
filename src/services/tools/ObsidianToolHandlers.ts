@@ -10,6 +10,13 @@ const MAX_TOOL_RESULT_ITEM = 80;
 const DEFAULT_MAX_LIST = 120;
 const DEFAULT_MAX_READ_CHARS = 10000;
 const DEFAULT_MAX_GREP_MATCHES = 40;
+const DEFAULT_MAX_READ_MANY_FILES = 8;
+const DEFAULT_MAX_READ_MANY_CHARS = 6000;
+const DEFAULT_MAX_SEARCH_AND_READ_MATCHES = 20;
+const DEFAULT_MAX_SEARCH_AND_READ_CHARS = 800;
+const DEFAULT_MAX_TREE_DEPTH = 3;
+const DEFAULT_MAX_TREE_ENTRIES = 160;
+const GENERATED_TREE_SEGMENTS = new Set(["node_modules", ".git", ".obsidian", "dist", "build", "coverage", ".cache", ".tmp", "tmp"]);
 
 interface ExecVaultDeleteRedirect {
 	routedToDelete: true;
@@ -122,6 +129,50 @@ export class ObsidianToolHandlers {
 		};
 	}
 
+	async toolReadMany(args: Record<string, unknown>): Promise<unknown> {
+		const maxFiles = this.context.getPositiveIntArg(args, "maxFiles", DEFAULT_MAX_READ_MANY_FILES);
+		const maxCharsPerFile = this.context.getPositiveIntArg(args, "maxCharsPerFile", DEFAULT_MAX_READ_MANY_CHARS);
+		const paths = this.getStringArrayArg(args, "paths")
+			.slice(0, maxFiles);
+		if (paths.length === 0) {
+			throw new Error("read_many requires at least one path.");
+		}
+
+		const files = [];
+		for (const inputPath of paths) {
+			try {
+				const data = await this.toolRead({ path: inputPath, maxChars: maxCharsPerFile }) as {
+					scope?: string;
+					path?: string;
+					content?: string;
+					truncated?: boolean;
+				};
+				files.push({
+					ok: true,
+					inputPath,
+					scope: data.scope,
+					path: data.path,
+					content: data.content,
+					truncated: Boolean(data.truncated),
+				});
+			} catch (error) {
+				files.push({
+					ok: false,
+					inputPath,
+					error: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
+
+		return {
+			scope: "mixed",
+			requested: this.getStringArrayArg(args, "paths").length,
+			returned: files.length,
+			files,
+			truncated: this.getStringArrayArg(args, "paths").length > files.length,
+		};
+	}
+
 	async toolGrep(args: Record<string, unknown>): Promise<unknown> {
 		const pattern = this.context.getRequiredStringArg(args, "pattern");
 		const flags = this.context.getStringArg(args, "flags") || "i";
@@ -178,6 +229,61 @@ export class ObsidianToolHandlers {
 		});
 	}
 
+	async toolSearchAndRead(args: Record<string, unknown>): Promise<unknown> {
+		const mode = (this.context.getStringArg(args, "mode") || "text").toLowerCase();
+		const query = this.context.getStringArg(args, "query");
+		const rawPattern = this.context.getStringArg(args, "pattern");
+		const pattern = mode === "regex" ? rawPattern : this.context.escapeRegExp(query);
+		if (!pattern) {
+			throw new Error("search_and_read requires query for text mode or pattern for regex mode.");
+		}
+		const flags = this.context.getStringArg(args, "flags") || "i";
+		const maxMatches = this.context.getPositiveIntArg(args, "maxMatches", DEFAULT_MAX_SEARCH_AND_READ_MATCHES);
+		const maxCharsPerMatch = this.context.getPositiveIntArg(args, "maxCharsPerMatch", DEFAULT_MAX_SEARCH_AND_READ_CHARS);
+		const grepResult = await this.toolGrep({
+			path: this.context.getStringArg(args, "path"),
+			pattern,
+			flags,
+			maxMatches,
+		}) as {
+			scope?: string;
+			path?: string;
+			matches?: Array<{ path: string; line: number; text: string }>;
+			truncated?: boolean;
+		};
+		const matches = Array.isArray(grepResult.matches) ? grepResult.matches : [];
+		const textByPath = new Map<string, string>();
+		const enrichedMatches = [];
+		for (const match of matches) {
+			let content = textByPath.get(match.path);
+			if (content === undefined) {
+				try {
+					const readResult = await this.toolRead({ path: match.path, maxChars: 100000 }) as { content?: string };
+					content = typeof readResult.content === "string" ? readResult.content : "";
+				} catch {
+					content = "";
+				}
+				textByPath.set(match.path, content);
+			}
+			enrichedMatches.push({
+				path: match.path,
+				line: match.line,
+				text: match.text,
+				snippet: this.buildLineSnippet(content, match.line, maxCharsPerMatch),
+			});
+		}
+
+		return {
+			scope: grepResult.scope ?? this.context.resolveScope(this.context.getStringArg(args, "path")),
+			path: grepResult.path ?? this.context.getStringArg(args, "path") ?? "",
+			mode: mode === "regex" ? "regex" : "text",
+			query: mode === "regex" ? undefined : query,
+			pattern,
+			matches: enrichedMatches,
+			truncated: Boolean(grepResult.truncated),
+		};
+	}
+
 	async toolGlob(args: Record<string, unknown>): Promise<unknown> {
 		const pattern = this.context.getRequiredStringArg(args, "pattern");
 		const maxMatches = this.context.getPositiveIntArg(args, "maxMatches", MAX_TOOL_RESULT_ITEM);
@@ -226,6 +332,42 @@ export class ObsidianToolHandlers {
 			pattern,
 			files: matched,
 			truncated: matched.length >= maxMatches,
+		};
+	}
+
+	async toolProjectTree(args: Record<string, unknown>): Promise<unknown> {
+		const rawPath = this.context.getStringArg(args, "path");
+		const maxDepth = this.context.getPositiveIntArg(args, "maxDepth", DEFAULT_MAX_TREE_DEPTH);
+		const maxEntries = this.context.getPositiveIntArg(args, "maxEntries", DEFAULT_MAX_TREE_ENTRIES);
+		const scope = this.context.resolveScope(rawPath);
+		let basePath = "";
+		let rows: string[] = [];
+		if (scope === "external") {
+			if (!rawPath || !this.context.workspaceAccessService.canReadExternalPath(rawPath)) {
+				throw new Error(`No permission to read external path: ${rawPath || "(empty path)"}`);
+			}
+			basePath = rawPath;
+			rows = await this.context.listExternal(rawPath, true, maxEntries * 4);
+		} else {
+			basePath = this.context.resolveDefaultVaultSearchPath(rawPath);
+			if (basePath && !this.context.workspaceAccessService.canReadVaultPath(basePath)) {
+				throw new Error(this.context.buildVaultScopeDeniedError(basePath, "read"));
+			}
+			rows = this.context.listVault(basePath, true, maxEntries * 4);
+		}
+
+		const entries = rows
+			.map((entry) => this.toTreeEntry(entry, basePath, scope, maxDepth))
+			.filter((entry): entry is { path: string; relativePath: string; depth: number; label: string } => Boolean(entry))
+			.slice(0, maxEntries);
+
+		return {
+			scope,
+			path: basePath,
+			maxDepth,
+			entries: entries.map((entry) => entry.path),
+			tree: entries.map((entry) => `${"  ".repeat(Math.max(0, entry.depth - 1))}- ${entry.label}`).join("\n"),
+			truncated: rows.length > entries.length,
 		};
 	}
 
@@ -390,6 +532,59 @@ export class ObsidianToolHandlers {
 			failedReasons: editResult.failedReasons,
 			diffPreview: this.context.inlineEditService.formatDiffForModel(diffSegments),
 		};
+	}
+
+	private getStringArrayArg(args: Record<string, unknown>, key: string): string[] {
+		const raw = args[key];
+		if (!Array.isArray(raw)) {
+			return [];
+		}
+		return raw
+			.map((item) => typeof item === "string" ? item.trim() : "")
+			.filter((item) => item.length > 0);
+	}
+
+	private buildLineSnippet(content: string, oneBasedLine: number, maxChars: number): string {
+		if (!content) {
+			return "";
+		}
+		const lines = content.split(/\r?\n/);
+		const index = Math.max(0, oneBasedLine - 1);
+		const start = Math.max(0, index - 2);
+		const end = Math.min(lines.length, index + 3);
+		return this.context.truncateText(lines.slice(start, end).join("\n"), maxChars);
+	}
+
+	private toTreeEntry(
+		entryPath: string,
+		basePath: string,
+		scope: string,
+		maxDepth: number,
+	): { path: string; relativePath: string; depth: number; label: string } | null {
+		const normalizedEntry = normalizePath(entryPath);
+		const normalizedBase = normalizePath(basePath || "");
+		const relativePath = scope === "external"
+			? normalizePath(path.relative(normalizedBase, normalizedEntry))
+			: (normalizedBase ? normalizePath(path.posix.relative(normalizedBase, normalizedEntry)) : normalizedEntry);
+		const visibleRelative = relativePath && !relativePath.startsWith("..") ? relativePath : normalizedEntry;
+		const segments = visibleRelative.split("/").filter(Boolean);
+		if (segments.length === 0 || segments.length > maxDepth) {
+			return null;
+		}
+		if (segments.some((segment) => this.isGeneratedOrHiddenTreeSegment(segment))) {
+			return null;
+		}
+		return {
+			path: normalizedEntry,
+			relativePath: visibleRelative,
+			depth: segments.length,
+			label: segments[segments.length - 1] ?? normalizedEntry,
+		};
+	}
+
+	private isGeneratedOrHiddenTreeSegment(segment: string): boolean {
+		const normalized = segment.trim().toLowerCase();
+		return normalized.startsWith(".") || GENERATED_TREE_SEGMENTS.has(normalized);
 	}
 
 	async toolExec(args: Record<string, unknown>): Promise<unknown> {

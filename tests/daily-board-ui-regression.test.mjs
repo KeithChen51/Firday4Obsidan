@@ -213,6 +213,19 @@ test("tools page is dedicated to tool and skill management only", async () => {
 	assert.doesNotMatch(block, /friday-ai-chat-panel/);
 });
 
+test("tools page hides exec from user-visible tool controls", async () => {
+	const source = readViewSource();
+	const match = source.match(/private renderToolControlSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate createAvailabilityToggle/);
+	assert.ok(match, "renderToolControlSection block should exist");
+	const block = match[1] ?? "";
+
+	assert.match(block, /isUserVisibleRuntimeTool/);
+	assert.match(source, /private isUserVisibleRuntimeTool\(toolName: string\): boolean \{/);
+	assert.match(source, /toolName !== "exec"/);
+	assert.doesNotMatch(block, /tool\.name === "exec"/);
+	assert.doesNotMatch(block, /exec: "Run shell commands/);
+});
+
 test("pending approvals occupy the composer body instead of only a transcript card", async () => {
 	const source = readViewSource();
 	const renderMatch = source.match(/private renderAiPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerTaskBarView/);

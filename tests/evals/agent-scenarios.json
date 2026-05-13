@@ -435,7 +435,7 @@
     },
     {
       "id": "tool-iteration-limit-safe-stop",
-      "name": "tool iteration limit safe stop",
+      "name": "low maxToolIterations remains an emergency fuse while loop control stops repeated observations",
       "settings": { "agentRuntime": { "maxToolIterations": 1 } },
       "files": { "Project/workspace/a.md": "alpha" },
       "modelSteps": [
@@ -444,17 +444,22 @@
       ],
       "expect": {
         "safeStopped": true,
+        "safeStopEvent": "loop_control_stop",
+        "safeStopReason": "no_progress",
         "assistantExcludes": ["Maximum tool-iteration limit reached"],
-        "traceTools": ["read"],
-        "traceStatuses": ["ok"],
+        "traceTools": ["read", "read"],
+        "traceStatuses": ["ok", "ok"],
+        "modelCalls": { "native": 2, "prompt": 0 },
         "loopPreventionTimelineIncludes": [
           {
-            "event": "max_tool_iterations",
+            "event": "loop_control_stop",
+            "tool": "read",
             "status": "safe_stopped",
-            "summary": "工具调用次数过多，FRIDAY 已安全停止本轮操作。"
+            "reason": "no_progress",
+            "repetitionKind": "repeated_unchanged_observation"
           }
         ],
-        "turnEventsInclude": ["max_tool_iterations", "turn_completed"]
+        "turnEventsInclude": ["loop_control_stop", "turn_completed"]
       }
     }
   ]

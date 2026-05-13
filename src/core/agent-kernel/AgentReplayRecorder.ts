@@ -42,6 +42,8 @@ export class AgentReplayRecorder {
 			case "plan_revise":
 			case "plan_complete":
 			case "plan_skip":
+			case "task_bar_created":
+			case "task_bar_suppressed":
 				return [this.replayEvent(event, event.type, payload)];
 			case "narration":
 				return [this.replayEvent(event, "narration_report", payload)];
@@ -80,6 +82,8 @@ export class AgentReplayRecorder {
 				return this.mapTaskEvent(event, payload);
 			case "fallback":
 				return [this.replayEvent(event, "fallback", payload)];
+			case "loop_control_stop":
+				return [this.replayEvent(event, "loop_control_stop", payload)];
 			case "max_tool_iterations":
 				return [this.replayEvent(event, "max_tool_iterations", payload)];
 			case "turn_failed":

@@ -1460,22 +1460,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.maxToolIterations.name", "单轮最大工具步数"))
-			.setDesc(this.t("settings.agent.maxToolIterations.desc", "限制单次对话中的工具循环次数，防止无限调用。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("6")
-					.setValue(String(this.host.settings.agentRuntime.maxToolIterations))
-					.onChange(async (value) => {
-						const parsed = this.parseOptionalPositiveInt(value);
-						if (parsed != null) {
-							this.host.settings.agentRuntime.maxToolIterations = parsed;
-							await this.host.saveSettings();
-						}
-					}),
-			);
-
-		new Setting(runtimeGroup)
 			.setName(this.t("settings.agent.permissionMode.name", "工具权限模式"))
 			.setDesc(
 				this.t(
@@ -1505,35 +1489,6 @@ export class FridaySettingTab extends PluginSettingTab {
 				),
 			});
 			this.renderProjectPolicyEditor(policyGroup);
-		}
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.enableExec.name", "启用命令执行 (exec)"))
-			.setDesc(this.t("settings.agent.enableExec.desc", "⚠️ 允许 Agent 在系统中执行 shell 命令（spawn 模式）。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.agentRuntime.enableExecTool).onChange(async (value) => {
-					this.host.settings.agentRuntime.enableExecTool = value;
-					await this.host.saveSettings();
-					this.display();
-				}),
-			);
-
-		if (this.host.settings.agentRuntime.enableExecTool) {
-			new Setting(runtimeGroup)
-				.setName(this.t("settings.agent.execTimeout.name", "命令超时（秒）"))
-				.setDesc(this.t("settings.agent.execTimeout.desc", "单条命令执行的最大等待时间。"))
-				.addText((text) =>
-					text
-						.setPlaceholder("30")
-						.setValue(String(this.host.settings.agentRuntime.execTimeout))
-						.onChange(async (value) => {
-							const parsed = this.parseOptionalPositiveInt(value);
-							if (parsed != null) {
-								this.host.settings.agentRuntime.execTimeout = parsed;
-								await this.host.saveSettings();
-							}
-						}),
-				);
 		}
 
 		this.renderPathListSetting(

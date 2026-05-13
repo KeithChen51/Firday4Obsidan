@@ -29,6 +29,11 @@ test("tool manifest catalog includes search_text as read-only retrieval tool", a
 	const item = manifest.findToolManifest("search_text");
 	assert.equal(item?.capability, "filesystem.search_text");
 	assert.equal(item?.readOnly, true);
+	assert.equal(item?.concurrencySafe, true);
+	assert.equal(item?.mutatesVault, false);
+	assert.equal(item?.mutatesExternal, false);
+	assert.equal(item?.resultKind, "search_results");
+	assert.ok(item?.outputBudget > 0);
 });
 
 test("tool manifest catalog exposes memory and no longer exposes subagent", async () => {
@@ -37,6 +42,8 @@ test("tool manifest catalog exposes memory and no longer exposes subagent", asyn
 	const subagent = manifest.findToolManifest("subagent");
 	assert.equal(memory?.capability, "memory.write");
 	assert.equal(memory?.readOnly, false);
+	assert.equal(memory?.concurrencySafe, false);
+	assert.equal(memory?.mutatesVault, true);
 	assert.equal(subagent, null);
 });
 
