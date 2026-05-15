@@ -63,12 +63,12 @@ test("FRIDAY wordmark and Obsidian icons use the current brand system", () => {
 	assert.match(view, /cls:\s*"friday-shell-project-brand friday-wordmark"/);
 	assert.doesNotMatch(view, /friday-shell-project-subtitle/);
 	assert.doesNotMatch(view, /shell\.subtitle/);
-	assert.match(view, /cls:\s*"friday-ai-message-role friday-wordmark"/);
 	assert.match(view, /renderAgentAnswerFlow/);
 	assert.match(renderer, /friday-ai-answer-flow/);
-	assert.match(renderer, /cls:\s*"friday-ai-message-role friday-wordmark"/);
+	assert.match(renderer, /assistant-source-mark-v3/);
 	assert.match(view, /projectBrandEl\.style\.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;/);
-	assert.match(view, /roleEl\.style\.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;/);
+	assert.doesNotMatch(renderer, /assistant-meta-v2 friday-ai-answer-meta/);
+	assert.doesNotMatch(renderer, /metaEl\.createSpan\(\{ cls: "friday-ai-message-role friday-wordmark", text: "FRIDAY" \}\)/);
 
 	assert.doesNotMatch(zhLocale, /"shell\.subtitle"/);
 	assert.doesNotMatch(enLocale, /"shell\.subtitle"/);

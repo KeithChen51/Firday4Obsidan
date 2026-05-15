@@ -18,6 +18,7 @@ test("chat model selector groups models by source and renders only short model n
 	assert.match(source, /private buildGroupedModelOptions\(/);
 	assert.match(source, /OpenAI协议/);
 	assert.match(source, /集团集采/);
-	assert.match(source, /createEl\("optgroup", \{ attr: \{ label: group\.label \} \}\)/);
+	assert.match(source, /friday-ai-toolbar-choice-group/);
+	assert.match(source, /openAiToolbarChoiceMenu/);
 	assert.match(source, /extractModelOptionShortLabel/);
 });

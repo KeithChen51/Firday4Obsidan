@@ -263,10 +263,37 @@ test("composer approval body keeps model permission skill and context chrome ava
 
 	assert.match(renderBlock, /this\.syncComposerDecisionPanel\(\)/);
 	assert.match(syncBlock, /this\.renderComposerDecisionPanel\(this\.aiComposerBodyEl/);
-	assert.match(renderBlock, /const modelSelect = toolbarEl\.createEl\("select"/);
-	assert.match(renderBlock, /const permissionSelect = toolbarEl\.createEl\("select"/);
+	assert.match(renderBlock, /const modelSelectHost = toolbarEl\.createSpan\(\{ cls: "friday-ai-toolbar-select-host is-model" \}\)/);
+	assert.match(renderBlock, /cls: "friday-ai-toolbar-select-button kit-control-button-v1"/);
+	assert.match(renderBlock, /setIcon\(modelSelectIcon, "settings-2"\)/);
+	assert.match(renderBlock, /this\.openAiToolbarChoiceMenu\(/);
+	assert.doesNotMatch(renderBlock, /const modelSelect = modelSelectHost\.createEl\("select"/);
+	assert.match(renderBlock, /const permissionSelectHost = toolbarEl\.createSpan\(\{ cls: "friday-ai-toolbar-select-host is-permission" \}\)/);
+	assert.match(renderBlock, /setIcon\(permissionSelectIcon, "shield"\)/);
+	assert.doesNotMatch(renderBlock, /const permissionSelect = permissionSelectHost\.createEl\("select"/);
+	assert.doesNotMatch(source, /🚀|🛡|🔒/);
 	assert.match(renderBlock, /text: this\.t\("ai\.skill\.button", "\+Skill"\)/);
 	assert.match(renderBlock, /text: "@"/);
+});
+
+test("pending approvals keep strong visual in composer while chat uses a low-emphasis record", async () => {
+	const source = readViewSource();
+	const renderListMatch = source.match(/private renderAiMessageList\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate shouldRenderAgentTaskPanel/);
+	assert.ok(renderListMatch, "renderAiMessageList block should exist");
+	const renderListBlock = renderListMatch[1] ?? "";
+	const approvalMessageMatch = source.match(/private renderApprovalMessage\(containerEl: HTMLElement, item: PendingApproval\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderRuntimeExecutionPreview/);
+	assert.ok(approvalMessageMatch, "renderApprovalMessage block should exist");
+	const approvalMessageBlock = approvalMessageMatch[1] ?? "";
+
+	assert.match(source, /friday-composer-decision-panel/);
+	assert.match(renderListBlock, /renderApprovalMessage\(containerEl, item\)/);
+	assert.doesNotMatch(renderListBlock, /renderApprovalCard\(/);
+	assert.match(approvalMessageBlock, /friday-ai-approval-record kit-event-row-v1/);
+	assert.match(approvalMessageBlock, /kit-event-row-v1/);
+	assert.doesNotMatch(approvalMessageBlock, /friday-approval-card/);
+	assert.doesNotMatch(approvalMessageBlock, /friday-ai-approval-message/);
+	assert.doesNotMatch(approvalMessageBlock, /friday-ai-approval-title/);
+	assert.doesNotMatch(approvalMessageBlock, /renderAssistantAvatar/);
 });
 
 test("ordinary approval cards expose only user-level allow or reject decisions", async () => {
@@ -630,6 +657,55 @@ test("skill descriptions can prefer chinese localized metadata", async () => {
 	assert.match(builtinSource, /descriptionZh:/);
 });
 
+test("skill names render without Skill slash prefixes across ordinary Daily Board surfaces", async () => {
+	const source = readViewSource();
+	const messageSegmentMatch = source.match(/private buildUserMessageSegments\([\s\S]*?\): ChatMessageUiSegment\[\] \{([\s\S]*?)\n\t\}\n\n\tprivate normalizeUserMessageSegments/);
+	assert.ok(messageSegmentMatch, "buildUserMessageSegments block should exist");
+	const messageSegmentBlock = messageSegmentMatch[1] ?? "";
+	const skillItemMatch = source.match(/private renderSkillControlItem\([\s\S]*?\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSkillReviewNote/);
+	assert.ok(skillItemMatch, "renderSkillControlItem block should exist");
+	const skillItemBlock = skillItemMatch[1] ?? "";
+	const catalogMatch = source.match(/private buildSkillCatalogReply\(skills: SkillDescriptor\[\]\): string \{([\s\S]*?)\n\t\}\n\n\tprivate getComposerSnapshot/);
+	assert.ok(catalogMatch, "buildSkillCatalogReply block should exist");
+	const catalogBlock = catalogMatch[1] ?? "";
+	const relationMatch = source.match(/private resolveToolSkillRelationship\(tool: ToolManifest\): string \{([\s\S]*?)\n\t\}\n\n\tprivate formatSkillDisplayName/);
+	assert.ok(relationMatch, "resolveToolSkillRelationship block should exist");
+	const relationBlock = relationMatch[1] ?? "";
+
+	assert.match(source, /private formatSkillDisplayName\(command: string\): string/);
+	assert.match(messageSegmentBlock, /label:\s*this\.formatSkillDisplayName\(skillName\)/);
+	assert.match(skillItemBlock, /text:\s*this\.formatSkillDisplayName\(skill\.command\)/);
+	assert.match(catalogBlock, /this\.formatSkillDisplayName\(skill\.command\)/);
+	assert.match(relationBlock, /policy\.tools\.relation\.sameNameSkillNative/);
+	assert.doesNotMatch(messageSegmentBlock, /Skill \//);
+	assert.doesNotMatch(skillItemBlock, /`\/\$\{skill\.command\}`/);
+	assert.doesNotMatch(catalogBlock, /`- \/\$\{skill\.command\}/);
+	assert.doesNotMatch(relationBlock, /policy\.tools\.relation\.sameNameSkill"/);
+});
+
+test("control center uses Native Kit tool and skill icons without per-capability icons", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const toolMatch = source.match(/private renderToolControlSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate isUserVisibleRuntimeTool/);
+	assert.ok(toolMatch, "renderToolControlSection block should exist");
+	const toolBlock = toolMatch[1] ?? "";
+	const skillItemMatch = source.match(/private renderSkillControlItem\([\s\S]*?\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSkillReviewNote/);
+	assert.ok(skillItemMatch, "renderSkillControlItem block should exist");
+	const skillItemBlock = skillItemMatch[1] ?? "";
+
+	assert.match(toolBlock, /const titleRow = meta\.createDiv\(\{ cls: "friday-control-center-item-title-row" \}\)/);
+	assert.match(toolBlock, /kit-tool-icon-v1/);
+	assert.match(skillItemBlock, /kit-skill-icon-v1/);
+	assert.match(toolBlock, /setIcon\(iconEl, "arrow-right"\)/);
+	assert.match(skillItemBlock, /setIcon\(iconEl, "layout-grid"\)/);
+	assert.doesNotMatch(toolBlock, /setIcon\(iconEl, "wrench"\)/);
+	assert.doesNotMatch(skillItemBlock, /setIcon\(iconEl, "blocks"\)/);
+	assert.doesNotMatch(toolBlock, /setIcon\([^,]+,\s*tool\.name/);
+	assert.doesNotMatch(skillItemBlock, /setIcon\([^,]+,\s*skill\.command/);
+	assert.match(styles, /\.kit-tool-icon-v1,\s*\n\.kit-skill-icon-v1\s*\{/);
+	assert.match(styles, /\.friday-shell \.friday-control-center-item-title-row \.kit-tool-icon-v1,\s*\n\.friday-shell \.friday-control-center-item-title-row \.kit-skill-icon-v1\s*\{/);
+});
+
 test("slash and mention dropdown floats above composer without resizing it", async () => {
 	const styles = readStylesSource();
 	const dropdownBlock = styles.match(/\.friday-mention-dropdown\s*\{([\s\S]*?)\}/)?.[1] ?? "";
@@ -709,15 +785,26 @@ test("chat composer styles include visible keyboard focus and inline mention rem
 
 test("slash skill suggestions are inserted as removable tokens instead of plain text", async () => {
 	const source = readViewSource();
+	const suggestionsMatch = source.match(/private async buildComposerSuggestions\(query: MentionComposerQuery\): Promise<MentionSuggestion\[\]> \{([\s\S]*?)\n\t\}\n\n\tprivate buildMentionSuggestionItems/);
+	assert.ok(suggestionsMatch, "buildComposerSuggestions block should exist");
+	const suggestionsBlock = suggestionsMatch[1] ?? "";
+	const skillBranchMatch = suggestionsBlock.match(/if \(item\.kind === "skill" && item\.command\) \{([\s\S]*?)\n\t\t\t\t\}\n\t\t\t\treturn \{/);
+	assert.ok(skillBranchMatch, "skill suggestion branch should exist");
+	const skillBranchBlock = skillBranchMatch[1] ?? "";
+
 	assert.match(source, /kind === "skill"/);
 	assert.match(source, /this\.createMentionToken\("skill", item\.command\)/);
 	assert.match(source, /trigger:\s*"\/"\s+as const,[\s\S]*token:\s*this\.createMentionToken\("skill", item\.command\)/);
+	assert.match(skillBranchBlock, /label:\s*this\.formatSkillDisplayName\(item\.command\)/);
+	assert.doesNotMatch(skillBranchBlock, /label:\s*`\/\$\{this\.formatSkillDisplayName\(item\.command\)\}`/);
+	assert.doesNotMatch(skillBranchBlock, /label:\s*item\.label/);
 });
 
 test("chat model selector groups openai and group models under source headers instead of repeating long prefixes", async () => {
 	const source = readViewSource();
 	assert.match(source, /private buildGroupedModelOptions\(/);
-	assert.match(source, /createEl\("optgroup", \{ attr: \{ label: group\.label \} \}\)/);
+	assert.match(source, /friday-ai-toolbar-choice-group/);
+	assert.match(source, /openAiToolbarChoiceMenu/);
 	assert.match(source, /OpenAI协议/);
 	assert.match(source, /集团集采/);
 	assert.doesNotMatch(source, /text:\s*optionValue\.label/);
@@ -729,6 +816,42 @@ test("chat composer layout keeps the editable surface full-width and placeholder
 	assert.match(styles, /\.friday-mention-composer-editor\s*\{[\s\S]*width:\s*100%;/);
 	assert.match(styles, /\.friday-mention-composer-editor \.ProseMirror\s*\{[\s\S]*width:\s*100%;/);
 	assert.match(styles, /\.friday-mention-composer-editor\.is-empty::before\s*\{[\s\S]*right:\s*0;/);
+});
+
+test("queue and temporary override bars use Native Kit low-emphasis event rows", async () => {
+	const source = readViewSource();
+	const syncQueueMatch = source.match(/private syncAiQueueHint\(\): void \{([\s\S]*?)\n\t\}\n\n\tprivate syncComposerDecisionPanel/);
+	assert.ok(syncQueueMatch, "syncAiQueueHint block should exist");
+	const syncQueueBlock = syncQueueMatch[1] ?? "";
+	const queueMatch = source.match(/private renderAiQueueHint\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderAiOverrideBar/);
+	assert.ok(queueMatch, "renderAiQueueHint block should exist");
+	const queueBlock = queueMatch[1] ?? "";
+	const overrideMatch = source.match(/private renderAiOverrideBar\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate resolveUserDisplayName/);
+	assert.ok(overrideMatch, "renderAiOverrideBar block should exist");
+	const overrideBlock = overrideMatch[1] ?? "";
+
+	assert.match(syncQueueBlock, /friday-ai-queue-hint kit-event-row-v1/);
+	assert.match(syncQueueBlock, /friday-ai-queue-pill kit-soft-chip-v1/);
+	assert.match(queueBlock, /friday-ai-queue-hint kit-event-row-v1/);
+	assert.match(queueBlock, /friday-ai-queue-pill kit-soft-chip-v1/);
+	assert.match(overrideBlock, /friday-ai-override-bar kit-event-row-v1/);
+	assert.match(overrideBlock, /friday-ai-override-clear kit-control-button-v1/);
+});
+
+test("workbench top bar keeps brand lockup project selector and compact native-kit action buttons", async () => {
+	const source = readViewSource();
+	const headerMatch = source.match(/private renderShellHeader\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderTopNav/);
+	assert.ok(headerMatch, "renderShellHeader block should exist");
+	const headerBlock = headerMatch[1] ?? "";
+	const iconButtonMatch = source.match(/private createIconButton\([\s\S]*?\): HTMLButtonElement \{([\s\S]*?)\n\t\}\n\n\tprivate renderToolsPage/);
+	assert.ok(iconButtonMatch, "createIconButton block should exist");
+	const iconButtonBlock = iconButtonMatch[1] ?? "";
+
+	assert.match(headerBlock, /friday-shell-project-mark/);
+	assert.match(headerBlock, /friday-shell-project-brand friday-wordmark/);
+	assert.match(headerBlock, /friday-shell-project-select/);
+	assert.match(iconButtonBlock, /button\.addClass\("kit-control-button-v1"\)/);
+	assert.doesNotMatch(headerBlock, /friday-shell-hero-icon|friday-shell-icon-container/);
 });
 
 test("chat message meta uses the configured display name for user messages and FRIDAY avatar for assistant messages", async () => {

@@ -30,9 +30,10 @@ export function buildSlashSuggestions(
 	];
 
 	for (const skill of input.skills) {
+		const displayName = skill.command.trim().replace(/^\/+/, "") || "skill";
 		items.push({
 			value: `/skill ${skill.command} `,
-			label: `Skill · /${skill.command}`,
+			label: displayName,
 			description: skill.description,
 			kind: "skill",
 			command: skill.command,

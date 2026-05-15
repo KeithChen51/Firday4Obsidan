@@ -53,7 +53,7 @@ import type { SyncConflictRecord } from "../types/sync";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { SkillRegistry } from "../core/execution/SkillRegistry";
 import { resolveBuiltinSkillReviewNote, type ResolvedBuiltinSkillReviewNote } from "../skills/packs/builtin/reviewNotes";
-import type { MentionSuggestion } from "./components/MentionDropdown";
+import type { MentionFileTypeIconKind, MentionSuggestion } from "./components/MentionDropdown";
 import {
 	computeSkillReviewNotePopoverLayout,
 	computeSkillReviewNotePopoverPosition,
@@ -97,6 +97,33 @@ export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
 
+const CODE_MENTION_FILE_EXTENSIONS = new Set([
+	"c",
+	"cc",
+	"cpp",
+	"cs",
+	"css",
+	"go",
+	"h",
+	"htm",
+	"html",
+	"java",
+	"js",
+	"json",
+	"jsx",
+	"mjs",
+	"py",
+	"rs",
+	"sh",
+	"ts",
+	"tsx",
+	"xml",
+	"yaml",
+	"yml",
+]);
+
+const NOTE_MENTION_FILE_EXTENSIONS = new Set(["", "txt"]);
+
 type AgentTaskStatus = CoreAgentTaskStatus;
 
 interface AgentTaskViewState {
@@ -118,6 +145,17 @@ interface SessionListGroup {
 	key: string;
 	label: string;
 	sessions: ConversationSession[];
+}
+
+interface ComposerChoiceMenuOption {
+	value: string;
+	label: string;
+	description?: string;
+}
+
+interface ComposerChoiceMenuGroup {
+	label: string;
+	options: ComposerChoiceMenuOption[];
 }
 
 interface AiTurnTarget {
@@ -195,8 +233,10 @@ export class DailyBoardView extends ItemView {
 	private aiErrorEl: HTMLElement | null = null;
 	private aiBackgroundAgentStatusHostEl: HTMLElement | null = null;
 	private aiSendButtonEl: HTMLButtonElement | null = null;
-	private aiModelSelectEl: HTMLSelectElement | null = null;
-	private aiPermissionSelectEl: HTMLSelectElement | null = null;
+	private aiModelSelectEl: HTMLButtonElement | null = null;
+	private aiPermissionSelectEl: HTMLButtonElement | null = null;
+	private aiToolbarChoiceMenuEl: HTMLElement | null = null;
+	private aiToolbarChoiceMenuCleanup: (() => void) | null = null;
 	private readonly mentionResolver = new MentionResolver();
 	private readonly gitIgnoreService: GitIgnoreService;
 	private skillReviewNotePopoverCleanups: Array<() => void> = [];
@@ -393,6 +433,7 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private resetAiChatShellRefs(): void {
+		this.closeAiToolbarChoiceMenu();
 		this.aiMessageListEl = null;
 		this.aiQueueHintEl = null;
 		this.aiErrorEl = null;
@@ -579,6 +620,7 @@ export class DailyBoardView extends ItemView {
 	): HTMLButtonElement {
 		const button = containerEl.createEl("button", { cls: className });
 		button.type = "button";
+		button.addClass("kit-control-button-v1");
 		button.setAttribute("aria-label", label);
 		setIcon(button, icon);
 		button.onclick = onClick;
@@ -1479,58 +1521,110 @@ export class DailyBoardView extends ItemView {
 		const modelOptions = this.buildModelOptions(activeSoulDefinition);
 		const groupedModelOptions = this.buildGroupedModelOptions(activeSoulDefinition);
 		const selectedModelValue = this.resolveSelectedModelOptionValue(activeSoulDefinition, modelOptions);
-		const modelSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
+		const selectedModelLabel = this.resolveComposerChoiceLabel(groupedModelOptions, selectedModelValue);
+		const modelSelectHost = toolbarEl.createSpan({ cls: "friday-ai-toolbar-select-host is-model" });
+		const modelSelect = modelSelectHost.createEl("button", {
+			cls: "friday-ai-toolbar-select-button kit-control-button-v1",
+		});
+		modelSelect.type = "button";
+		modelSelect.disabled = !activeSoulDefinition;
 		modelSelect.setAttribute("aria-label", this.t("ai.model.override", "选择当前 Agent 模型"));
-		for (const group of groupedModelOptions) {
-			const groupEl = modelSelect.createEl("optgroup", { attr: { label: group.label } });
-			for (const optionValue of group.options) {
-				const option = groupEl.createEl("option");
-				option.textContent = optionValue.label;
-				option.value = optionValue.value;
-				option.selected = optionValue.value === selectedModelValue;
-			}
-		}
+		modelSelect.setAttribute("aria-haspopup", "listbox");
+		modelSelect.setAttribute("aria-expanded", "false");
+		const modelSelectIcon = modelSelect.createSpan({
+			cls: "friday-ai-toolbar-select-icon",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(modelSelectIcon, "settings-2");
+		modelSelect.createSpan({
+			cls: "friday-ai-toolbar-select-label",
+			text: selectedModelLabel || this.t("ai.model.override", "选择当前 Agent 模型"),
+		});
+		const modelSelectChevron = modelSelect.createSpan({
+			cls: "friday-ai-toolbar-select-chevron",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(modelSelectChevron, "chevron-down");
 		this.aiModelSelectEl = modelSelect;
-		modelSelect.onchange = async () => {
+		modelSelect.onmousedown = (event) => {
+			event.preventDefault();
+		};
+		modelSelect.onclick = () => {
 			if (!activeSoulDefinition) {
 				return;
 			}
-			const parsed = parseAgentModelChoice(modelSelect.value);
-			if (!parsed) {
-				return;
-			}
-			await this.plugin.soulStore.updateSoul(activeSoulDefinition.id, {
-				preferredModel: parsed.model,
-				preferredModelMode: parsed.mode,
+			this.openAiToolbarChoiceMenu({
+				hostEl: modelSelectHost,
+				buttonEl: modelSelect,
+				groups: groupedModelOptions,
+				selectedValue: selectedModelValue,
+				onSelect: async (value) => {
+					const parsed = parseAgentModelChoice(value);
+					if (!parsed) {
+						return;
+					}
+					await this.plugin.soulStore.updateSoul(activeSoulDefinition.id, {
+						preferredModel: parsed.model,
+						preferredModelMode: parsed.mode,
+					});
+					if (parsed.mode === "group") {
+						const patched = patchLlmModeConfig(this.plugin.settings.llm, "group", {
+							model: parsed.model,
+						});
+						this.plugin.settings.llm = switchLlmMode(patched, "group");
+					}
+					await this.plugin.saveSettings();
+					this.renderBoard();
+				},
 			});
-			if (parsed.mode === "group") {
-				const patched = patchLlmModeConfig(this.plugin.settings.llm, "group", {
-					model: parsed.model,
-				});
-				this.plugin.settings.llm = switchLlmMode(patched, "group");
-			}
-			await this.plugin.saveSettings();
-			this.renderBoard();
 		};
 
-		const permissionSelect = toolbarEl.createEl("select", { cls: "friday-ai-toolbar-select" });
+		const permissionModeOptions = this.buildPermissionModeOptions();
+		const selectedPermissionValue = this.plugin.settings.agentRuntime.toolPermissionMode;
+		const permissionSelectHost = toolbarEl.createSpan({ cls: "friday-ai-toolbar-select-host is-permission" });
+		const permissionSelect = permissionSelectHost.createEl("button", {
+			cls: "friday-ai-toolbar-select-button kit-control-button-v1",
+		});
+		permissionSelect.type = "button";
 		permissionSelect.setAttribute("aria-label", this.t("ai.permission.override", "选择当前工具权限模式"));
-		for (const mode of this.buildPermissionModeOptions()) {
-			const option = permissionSelect.createEl("option", { text: mode.label });
-			option.value = mode.value;
-			option.selected = mode.value === this.plugin.settings.agentRuntime.toolPermissionMode;
-		}
+		permissionSelect.setAttribute("aria-haspopup", "listbox");
+		permissionSelect.setAttribute("aria-expanded", "false");
+		const permissionSelectIcon = permissionSelect.createSpan({
+			cls: "friday-ai-toolbar-select-icon",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(permissionSelectIcon, "shield");
+		permissionSelect.createSpan({
+			cls: "friday-ai-toolbar-select-label",
+			text: this.resolvePermissionModeLabel(selectedPermissionValue),
+		});
+		const permissionSelectChevron = permissionSelect.createSpan({
+			cls: "friday-ai-toolbar-select-chevron",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(permissionSelectChevron, "chevron-down");
 		this.aiPermissionSelectEl = permissionSelect;
-		permissionSelect.onchange = async () => {
-			const value = permissionSelect.value;
-			this.plugin.settings.agentRuntime.toolPermissionMode = value as ToolPermissionMode;
-			this.plugin.settings.agentRuntime.fileMutationMode = deriveFileMutationModeFromToolPermissionMode(value as ToolPermissionMode);
-			await this.plugin.saveSettings();
-			this.renderBoard();
+		permissionSelect.onmousedown = (event) => {
+			event.preventDefault();
+		};
+		permissionSelect.onclick = () => {
+			this.openAiToolbarChoiceMenu({
+				hostEl: permissionSelectHost,
+				buttonEl: permissionSelect,
+				groups: [{ label: "", options: permissionModeOptions }],
+				selectedValue: selectedPermissionValue,
+				onSelect: async (value) => {
+					const mode = value as ToolPermissionMode;
+					this.plugin.settings.agentRuntime.toolPermissionMode = mode;
+					this.plugin.settings.agentRuntime.fileMutationMode = deriveFileMutationModeFromToolPermissionMode(mode);
+					await this.plugin.saveSettings();
+					this.renderBoard();
+				},
+			});
 		};
 
 		const skillButton = toolbarEl.createEl("button", {
-			cls: "friday-ai-toolbar-button",
+			cls: "friday-ai-toolbar-button kit-control-button-v1",
 			text: this.t("ai.skill.button", "+Skill"),
 		});
 		skillButton.type = "button";
@@ -1544,7 +1638,7 @@ export class DailyBoardView extends ItemView {
 		};
 
 		const attachButton = toolbarEl.createEl("button", {
-			cls: "friday-ai-toolbar-button",
+			cls: "friday-ai-toolbar-button kit-control-button-v1",
 			text: "@",
 		});
 		attachButton.type = "button";
@@ -1559,7 +1653,7 @@ export class DailyBoardView extends ItemView {
 		};
 
 		const sendButton = toolbarEl.createEl("button", {
-			cls: "friday-ai-send-button",
+			cls: "friday-ai-send-button kit-control-button-v1",
 		});
 		sendButton.type = "button";
 		this.aiSendButtonEl = sendButton;
@@ -1965,9 +2059,15 @@ export class DailyBoardView extends ItemView {
 				.filter((item) => item.length > 0),
 		);
 		for (const tool of CapabilityRegistry.getInstance().listUserVisibleTools().filter((item) => this.isUserVisibleRuntimeTool(item.name))) {
-			const item = list.createDiv({ cls: "friday-control-center-item" });
+			const item = list.createDiv({ cls: "friday-control-center-item is-tool" });
 			const meta = item.createDiv({ cls: "friday-control-center-item-meta" });
-			meta.createDiv({ cls: "friday-control-center-item-title", text: tool.name });
+			const titleRow = meta.createDiv({ cls: "friday-control-center-item-title-row" });
+			const iconEl = titleRow.createSpan({
+				cls: "friday-control-center-item-icon kit-tool-icon-v1",
+				attr: { "aria-hidden": "true" },
+			});
+			setIcon(iconEl, "arrow-right");
+			titleRow.createDiv({ cls: "friday-control-center-item-title", text: tool.name });
 			meta.createDiv({
 				cls: "friday-control-center-item-desc",
 				text: this.resolveToolDescription(tool),
@@ -2020,11 +2120,15 @@ export class DailyBoardView extends ItemView {
 
 	private resolveToolSkillRelationship(tool: ToolManifest): string {
 		if (tool.relatedSkillCommand) {
-			return this.t("policy.tools.relation.sameNameSkill", "Related skill /{command}: the tool is the low-level executor, while the skill is the higher-level workflow that decides when and how to use it.", {
-				command: tool.relatedSkillCommand,
+			return this.t("policy.tools.relation.sameNameSkillNative", "Related skill {command}: the tool is the low-level executor, while the skill is the higher-level workflow that decides when and how to use it.", {
+				command: this.formatSkillDisplayName(tool.relatedSkillCommand),
 			});
 		}
 		return this.t("policy.tools.relation.generic", "This is a low-level runtime capability that can be reused by multiple skills or agent steps.");
+	}
+
+	private formatSkillDisplayName(command: string): string {
+		return command.trim().replace(/^\/+/, "") || "skill";
 	}
 
 	private async renderSkillControlSection(containerEl: HTMLElement): Promise<void> {
@@ -2115,10 +2219,15 @@ export class DailyBoardView extends ItemView {
 		disabledSkills: Set<string>,
 	): void {
 		const normalized = skill.command.trim().toLowerCase();
-		const item = containerEl.createDiv({ cls: "friday-control-center-item" });
+		const item = containerEl.createDiv({ cls: "friday-control-center-item is-skill" });
 		const meta = item.createDiv({ cls: "friday-control-center-item-meta" });
 		const titleRow = meta.createDiv({ cls: "friday-control-center-item-title-row" });
-		titleRow.createDiv({ cls: "friday-control-center-item-title", text: `/${skill.command}` });
+		const iconEl = titleRow.createSpan({
+			cls: "friday-control-center-item-icon kit-skill-icon-v1",
+			attr: { "aria-hidden": "true" },
+		});
+		setIcon(iconEl, "layout-grid");
+		titleRow.createDiv({ cls: "friday-control-center-item-title", text: this.formatSkillDisplayName(skill.command) });
 		const reviewNote = resolveBuiltinSkillReviewNote(skill.command, this.plugin.getLocale());
 		if (reviewNote) {
 			this.renderSkillReviewNote(titleRow, reviewNote);
@@ -2659,17 +2768,15 @@ export class DailyBoardView extends ItemView {
 		if (pendingApprovals.length === 0) {
 			return;
 		}
-		const panel = containerEl.createDiv({ cls: "friday-ai-chat-panel friday-inline-approval-panel" });
-		panel.createEl("h4", {
-			text: this.t("approval.inlineTitle", "待审批工具调用"),
+		const panel = containerEl.createDiv({ cls: "friday-inline-approval-panel kit-event-row-v1" });
+		panel.createSpan({
+			cls: "friday-inline-approval-copy",
+			text: this.t("approval.inlineDesc", "运行中的对话正在等待你在输入区确认。"),
 		});
-		panel.createEl("p", {
-			cls: "friday-approval-detail",
-			text: this.t("approval.inlineDesc", "运行中的对话正在等待你的审批，无需切换到其他页面。"),
+		panel.createSpan({
+			cls: "friday-inline-approval-count kit-soft-chip-v1",
+			text: this.t("approval.inlineCount", "待确认 {count}", { count: pendingApprovals.length }),
 		});
-		for (const item of pendingApprovals) {
-			this.renderApprovalCard(panel, item);
-		}
 	}
 
 	private startNewAiSession(): void {
@@ -3020,12 +3127,12 @@ export class DailyBoardView extends ItemView {
 			return;
 		}
 		const rowEl = containerEl.createDiv({
-			cls: "friday-ai-message-row is-user",
+			cls: "friday-ai-message-row is-user assistant-turn-v2",
 		});
 		const bubbleEl = rowEl.createDiv({
-			cls: "friday-ai-message is-user",
+			cls: "friday-ai-message is-user assistant-user-bubble-v3",
 		});
-		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
+		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta assistant-meta-v2" });
 		metaEl.createSpan({
 			cls: "friday-ai-message-role",
 			text: this.resolveUserDisplayName(),
@@ -3438,6 +3545,9 @@ export class DailyBoardView extends ItemView {
 				true,
 			);
 		}
+		for (const item of pendingApprovals) {
+			this.renderApprovalMessage(containerEl, item);
+		}
 		for (const task of visibleAgentTasks) {
 			this.renderAgentTaskPanel(containerEl, task);
 		}
@@ -3525,7 +3635,7 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiBusy && this.aiQueuedPrompts.length === 0) {
 			return;
 		}
-		const hint = this.aiQueueHintEl.createDiv({ cls: "friday-ai-queue-hint" });
+		const hint = this.aiQueueHintEl.createDiv({ cls: "friday-ai-queue-hint kit-event-row-v1" });
 		hint.createSpan({
 			cls: "friday-ai-queue-hint-copy",
 			text: this.aiQueuedPrompts.length > 0
@@ -3536,7 +3646,7 @@ export class DailyBoardView extends ItemView {
 		});
 		if (this.aiQueuedPrompts.length > 0) {
 			hint.createSpan({
-				cls: "friday-ai-queue-pill",
+				cls: "friday-ai-queue-pill kit-soft-chip-v1",
 				text: this.t("ai.queue.badge", "待发送 {count}", { count: this.aiQueuedPrompts.length }),
 			});
 		}
@@ -3574,6 +3684,101 @@ export class DailyBoardView extends ItemView {
 		this.syncAiSendButtonState();
 	}
 
+	private closeAiToolbarChoiceMenu(): void {
+		this.aiToolbarChoiceMenuCleanup?.();
+		this.aiToolbarChoiceMenuCleanup = null;
+		this.aiToolbarChoiceMenuEl?.remove();
+		this.aiToolbarChoiceMenuEl = null;
+	}
+
+	private openAiToolbarChoiceMenu(config: {
+		hostEl: HTMLElement;
+		buttonEl: HTMLButtonElement;
+		groups: ComposerChoiceMenuGroup[];
+		selectedValue: string;
+		onSelect: (value: string) => Promise<void> | void;
+	}): void {
+		if (this.aiToolbarChoiceMenuEl?.isConnected && this.aiToolbarChoiceMenuEl.parentElement === config.hostEl) {
+			this.closeAiToolbarChoiceMenu();
+			return;
+		}
+
+		this.closeAiToolbarChoiceMenu();
+		config.hostEl.addClass("is-open");
+		config.buttonEl.setAttribute("aria-expanded", "true");
+
+		const menuEl = config.hostEl.createDiv({
+			cls: "friday-ai-toolbar-choice-menu friday-mention-dropdown",
+			attr: { role: "listbox" },
+		});
+		const listEl = menuEl.createDiv({ cls: "friday-mention-dropdown-list friday-ai-toolbar-choice-list" });
+		this.aiToolbarChoiceMenuEl = menuEl;
+
+		for (const group of config.groups) {
+			const label = group.label.trim();
+			if (label) {
+				listEl.createDiv({
+					cls: "friday-ai-toolbar-choice-group",
+					text: label,
+					attr: { role: "presentation" },
+				});
+			}
+			for (const option of group.options) {
+				const selected = option.value === config.selectedValue;
+				const item = listEl.createEl("button", {
+					cls: `friday-mention-item friday-ai-toolbar-choice-item${selected ? " is-active" : ""}${option.description ? "" : " is-text-only"}`,
+					attr: {
+						role: "option",
+						"aria-selected": String(selected),
+					},
+				});
+				item.type = "button";
+				item.createSpan({ cls: "friday-mention-item-button", text: option.label });
+				if (option.description) {
+					item.createSpan({ cls: "friday-mention-item-description", text: option.description });
+				}
+				item.onmousedown = (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+				};
+				item.onclick = (event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					this.closeAiToolbarChoiceMenu();
+					void config.onSelect(option.value);
+				};
+			}
+		}
+
+		const ownerDocument = config.hostEl.ownerDocument;
+		const ownerWindow = ownerDocument.defaultView ?? window;
+		const closeOnOutsidePointer = (event: MouseEvent) => {
+			const target = event.target;
+			if (target instanceof Node && config.hostEl.contains(target)) {
+				return;
+			}
+			this.closeAiToolbarChoiceMenu();
+		};
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key === "Escape") {
+				event.preventDefault();
+				this.closeAiToolbarChoiceMenu();
+				config.buttonEl.focus();
+			}
+		};
+		const outsidePointerTimer = ownerWindow.setTimeout(() => {
+			ownerDocument.addEventListener("mousedown", closeOnOutsidePointer, true);
+		}, 0);
+		ownerDocument.addEventListener("keydown", closeOnEscape, true);
+		this.aiToolbarChoiceMenuCleanup = () => {
+			ownerWindow.clearTimeout(outsidePointerTimer);
+			ownerDocument.removeEventListener("mousedown", closeOnOutsidePointer, true);
+			ownerDocument.removeEventListener("keydown", closeOnEscape, true);
+			config.hostEl.removeClass("is-open");
+			config.buttonEl.setAttribute("aria-expanded", "false");
+		};
+	}
+
 	private syncAiComposerControls(): void {
 		const activeSoul = this.plugin.getActiveSoul();
 		const activeSoulDefinition = activeSoul ? this.plugin.soulStore.getSoulSync(activeSoul.id) : null;
@@ -3583,7 +3788,6 @@ export class DailyBoardView extends ItemView {
 		}
 		if (this.aiPermissionSelectEl?.isConnected) {
 			this.aiPermissionSelectEl.disabled = this.aiBusy;
-			this.aiPermissionSelectEl.value = this.plugin.settings.agentRuntime.toolPermissionMode;
 		}
 	}
 
@@ -3879,31 +4083,12 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private renderApprovalMessage(containerEl: HTMLElement, item: PendingApproval): void {
-		const rowEl = containerEl.createDiv({
-			cls: "friday-ai-message-row is-assistant",
-		});
-		const bubbleEl = rowEl.createDiv({
-			cls: "friday-ai-message is-assistant friday-ai-approval-message",
-		});
-		const metaEl = bubbleEl.createDiv({ cls: "friday-ai-message-meta" });
-		this.renderAssistantAvatar(metaEl);
-		const roleEl = metaEl.createSpan({
-			cls: "friday-ai-message-role friday-wordmark",
-			text: this.plugin.t("ai.role.assistant"),
-		});
-		roleEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
-		const contentEl = bubbleEl.createDiv({
-			cls: "friday-ai-message-content friday-ai-approval-content",
-		});
-		contentEl.createEl("h4", {
-			cls: "friday-ai-approval-title",
-			text: this.t("approval.chatTitle", "需要你的审批才能继续"),
-		});
-		contentEl.createDiv({
+		const rowEl = containerEl.createDiv({ cls: "friday-ai-approval-record kit-event-row-v1" });
+		rowEl.createSpan({
 			cls: "friday-ai-approval-summary",
 			text: this.t("approval.chatSummary", "FRIDAY 正在等待你在输入区确认是否继续。"),
 		});
-		contentEl.createDiv({
+		rowEl.createSpan({
 			cls: "friday-ai-approval-detail-text",
 			text: this.describeApprovalRequest(item),
 		});
@@ -4465,11 +4650,8 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private buildLocalIntakePreview(rawPrompt: string): string {
-		const prompt = rawPrompt.trim();
-		if (!prompt) {
-			return "";
-		}
-		return this.t("ai.intake.preview.local", "FRIDAY 正在响应……");
+		void rawPrompt;
+		return "";
 	}
 
 	private async streamAssistantText(text: string): Promise<void> {
@@ -4589,7 +4771,8 @@ export class DailyBoardView extends ItemView {
 			return false;
 		}
 		return processEl.getAttribute("data-expanded") === "true" ||
-			processEl.classList.contains("is-expanded");
+			processEl.classList.contains("is-expanded") ||
+			Boolean(processEl.querySelector('[data-expanded="true"], .is-expanded'));
 	}
 
 	private isDomElement(value: unknown): value is Element {
@@ -4606,7 +4789,9 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiMessageListEl?.isConnected || typeof this.aiMessageListEl.querySelector !== "function") {
 			return null;
 		}
-		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+		const processEl = this.aiMessageListEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
+			this.aiMessageListEl.querySelector(".assistant-turn-body-v2.is-live") ??
+			this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
 		return this.isDomElement(processEl) ? processEl as HTMLElement : null;
 	}
 
@@ -4634,6 +4819,22 @@ export class DailyBoardView extends ItemView {
 			}
 			result.set(key, detailEl.hasAttribute("open"));
 		}
+		const steps = Array.from(rootEl.querySelectorAll(".assistant-process-step-v6[data-item-id]"));
+		for (const stepEl of steps) {
+			if (!this.isDomElement(stepEl)) {
+				continue;
+			}
+			const key = stepEl.getAttribute("data-item-id")?.trim() || "";
+			if (!key) {
+				continue;
+			}
+			const buttonEl = stepEl.querySelector(".assistant-step-toggle-v6");
+			const detailEl = stepEl.querySelector(".assistant-step-detail-v6");
+			const expanded = (this.isDomElement(buttonEl) && buttonEl.getAttribute("aria-expanded") === "true") ||
+				stepEl.classList.contains("is-open") ||
+				(this.isDomElement(detailEl) && detailEl.getAttribute("aria-hidden") === "false");
+			result.set(`native-step:${key}`, expanded);
+		}
 		return result;
 	}
 
@@ -4658,6 +4859,30 @@ export class DailyBoardView extends ItemView {
 			}
 			if (typeof HTMLDetailsElement !== "undefined" && detailEl instanceof HTMLDetailsElement) {
 				detailEl.open = expanded;
+			}
+		}
+		const steps = Array.from(rootEl.querySelectorAll(".assistant-process-step-v6[data-item-id]"));
+		for (const stepEl of steps) {
+			if (!this.isDomElement(stepEl)) {
+				continue;
+			}
+			const key = stepEl.getAttribute("data-item-id")?.trim() || "";
+			if (!key || !disclosureState.has(`native-step:${key}`)) {
+				continue;
+			}
+			const expanded = disclosureState.get(`native-step:${key}`) === true;
+			if (expanded) {
+				stepEl.classList.add("is-open");
+			} else {
+				stepEl.classList.remove("is-open");
+			}
+			const buttonEl = stepEl.querySelector(".assistant-step-toggle-v6");
+			if (this.isDomElement(buttonEl)) {
+				buttonEl.setAttribute("aria-expanded", String(expanded));
+			}
+			const detailEl = stepEl.querySelector(".assistant-step-detail-v6");
+			if (this.isDomElement(detailEl)) {
+				detailEl.setAttribute("aria-hidden", expanded ? "false" : "true");
 			}
 		}
 	}
@@ -4722,13 +4947,15 @@ export class DailyBoardView extends ItemView {
 		const candidate = rootEl as ParentNode & {
 			matches?: (selector: string) => boolean;
 		};
-		if (typeof candidate.matches === "function" && candidate.matches(".friday-agent-process-shell.is-live.is-expanded")) {
+		if (typeof candidate.matches === "function" && candidate.matches(".friday-ai-message-row.is-assistant.is-live, .assistant-turn-body-v2.is-live, .friday-agent-process-shell.is-live.is-expanded")) {
 			return rootEl as HTMLElement;
 		}
 		if (typeof rootEl.querySelector !== "function") {
 			return null;
 		}
-		const processEl = rootEl.querySelector(".friday-agent-process-shell.is-live.is-expanded");
+		const processEl = rootEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
+			rootEl.querySelector(".assistant-turn-body-v2.is-live") ??
+			rootEl.querySelector(".friday-agent-process-shell.is-live.is-expanded");
 		return processEl ? processEl as HTMLElement : null;
 	}
 
@@ -4802,7 +5029,7 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiMessageListEl?.isConnected || !this.aiRuntimeTrajectorySnapshot) {
 			return false;
 		}
-		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+		const processEl = this.findCurrentLiveProcessElement();
 		if (!(processEl instanceof HTMLElement)) {
 			return false;
 		}
@@ -4813,7 +5040,9 @@ export class DailyBoardView extends ItemView {
 		const disclosureState = this.captureProcessDisclosureState(processEl);
 		const scratchEl = document.createElement("div");
 		this.renderTrajectoryCard(scratchEl, this.aiRuntimeTrajectorySnapshot, "live", preserveExpanded ? true : undefined);
-		const nextProcessEl = scratchEl.querySelector(".friday-agent-process-shell.is-live");
+		const nextProcessEl = scratchEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
+			scratchEl.querySelector(".assistant-turn-body-v2.is-live") ??
+			scratchEl.querySelector(".friday-agent-process-shell.is-live");
 		if (!(nextProcessEl instanceof HTMLElement)) {
 			return false;
 		}
@@ -4836,38 +5065,8 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiMessageListEl?.isConnected || !this.aiRuntimeTrajectorySnapshot) {
 			return;
 		}
-		const view = buildAgentProcessPanelViewModel(this.aiRuntimeTrajectorySnapshot);
-		if (!view.timeline) {
-			return;
-		}
-		const processEl = this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
-		if (!(processEl instanceof HTMLElement)) {
+		if (!this.syncLiveRuntimeProgressProcess()) {
 			this.syncAiLiveChatShell();
-			return;
-		}
-		const headlineEl = processEl.querySelector(".friday-agent-process-headline");
-		if (headlineEl instanceof HTMLElement) {
-			headlineEl.setText(view.timeline.title);
-		}
-		const summaryEl = processEl.querySelector(".friday-agent-process-disclosure-summary");
-		if (summaryEl instanceof HTMLElement && view.timeline.collapsedSummary) {
-			summaryEl.setText(view.timeline.collapsedSummary);
-		}
-		const statusBar = view.timeline.statusBar;
-		if (!statusBar) {
-			return;
-		}
-		const phaseEl = processEl.querySelector(".friday-agent-process-statusbar-phase");
-		if (phaseEl instanceof HTMLElement) {
-			phaseEl.setText(statusBar.phase);
-		}
-		const actionEl = processEl.querySelector(".friday-agent-process-statusbar-action");
-		if (actionEl instanceof HTMLElement) {
-			actionEl.setText(statusBar.action);
-		}
-		const elapsedEl = processEl.querySelector(".friday-agent-process-statusbar-elapsed");
-		if (elapsedEl instanceof HTMLElement) {
-			elapsedEl.setText(statusBar.elapsed);
 		}
 	}
 
@@ -4998,10 +5197,10 @@ export class DailyBoardView extends ItemView {
 			"",
 		];
 		for (const skill of skills) {
-			lines.push(`- /${skill.command}: ${skill.description}`);
+			lines.push(`- ${this.formatSkillDisplayName(skill.command)}: ${skill.description}`);
 		}
 		lines.push("");
-		lines.push(this.t("ai.skillCatalog.usage", "Usage: /skill <skill-name> <task>"));
+		lines.push(this.t("ai.skillCatalog.usage", "Choose a skill, then describe the task."));
 		return lines.join("\n");
 	}
 
@@ -5130,7 +5329,7 @@ export class DailyBoardView extends ItemView {
 			}).map((item) => {
 				if (item.kind === "skill" && item.command) {
 					return {
-						label: item.label,
+						label: this.formatSkillDisplayName(item.command),
 						description: item.description,
 						kind: "skill" as const,
 						trigger: "/" as const,
@@ -5181,14 +5380,7 @@ export class DailyBoardView extends ItemView {
 			}));
 		}
 		if (query.mode === "search" && query.category === "notes") {
-			return this.getMentionableFiles(normalizedQuery).map((file) => ({
-				label: file.basename,
-				description: file.path,
-				kind: "mention_token" as const,
-				trigger: "@" as const,
-				category: "note" as const,
-				token: this.createMentionToken("note", file.path),
-			}));
+			return this.getMentionableFiles(normalizedQuery).map((file) => this.buildFileMentionSuggestion(file));
 		}
 
 		const items: MentionSuggestion[] = [];
@@ -5201,14 +5393,7 @@ export class DailyBoardView extends ItemView {
 		) {
 			items.push(this.buildActiveNoteSuggestion());
 		}
-		items.push(...this.getMentionableFiles(normalizedQuery).map((file) => ({
-			label: file.basename,
-			description: file.path,
-			kind: "mention_token" as const,
-			trigger: "@" as const,
-			category: "note" as const,
-			token: this.createMentionToken("note", file.path),
-		})));
+		items.push(...this.getMentionableFiles(normalizedQuery).map((file) => this.buildFileMentionSuggestion(file)));
 		items.push(...this.getMentionableFolders(normalizedQuery).map((folder) => ({
 			label: folder.name,
 			description: folder.path,
@@ -5221,14 +5406,68 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private buildActiveNoteSuggestion(): MentionSuggestion {
+		const activeFile = this.app.workspace.getActiveFile();
 		return {
 			label: this.t("ai.mention.option.activeNote", "当前笔记"),
 			description: this.t("ai.mention.category.activeNote", "Use the active note at send time"),
 			kind: "mention_token",
 			trigger: "@",
 			category: "active_note",
+			fileTypeIcon: activeFile instanceof TFile ? this.getMentionFileTypeIcon(activeFile) : "note",
+			fileTypeLabel: activeFile instanceof TFile
+				? this.getMentionFileTypeLabel(this.getMentionFileTypeIcon(activeFile))
+				: this.getMentionFileTypeLabel("note"),
 			token: this.createMentionToken("active_note"),
 		};
+	}
+
+	private buildFileMentionSuggestion(file: TFile): MentionSuggestion {
+		const icon = this.getMentionFileTypeIcon(file);
+		return {
+			label: file.basename || file.name,
+			description: file.path,
+			kind: "mention_token",
+			trigger: "@",
+			category: "note",
+			fileTypeIcon: icon,
+			fileTypeLabel: this.getMentionFileTypeLabel(icon),
+			token: this.createMentionToken("note", file.path),
+		};
+	}
+
+	private getMentionFileTypeIcon(file: TFile): MentionFileTypeIconKind {
+		const extension = (file.extension ?? "").toLowerCase();
+		if (extension === "md") {
+			return "markdown";
+		}
+		if (extension === "canvas") {
+			return "canvas";
+		}
+		if (CODE_MENTION_FILE_EXTENSIONS.has(extension)) {
+			return "code";
+		}
+		return "note";
+	}
+
+	private getMentionFileTypeLabel(kind: MentionFileTypeIconKind): string {
+		switch (kind) {
+			case "markdown":
+				return this.t("ai.mention.fileType.markdown", "Markdown");
+			case "canvas":
+				return this.t("ai.mention.fileType.canvas", "Canvas");
+			case "code":
+				return this.t("ai.mention.fileType.code", "Code / HTML");
+			default:
+				return this.t("ai.mention.fileType.note", "Note");
+		}
+	}
+
+	private isMentionableFile(file: TFile): boolean {
+		const extension = (file.extension ?? "").toLowerCase();
+		return extension === "md"
+			|| extension === "canvas"
+			|| CODE_MENTION_FILE_EXTENSIONS.has(extension)
+			|| NOTE_MENTION_FILE_EXTENSIONS.has(extension);
 	}
 
 	private createMentionToken(type: MentionTokenType, pathValue = ""): MentionToken {
@@ -5245,12 +5484,12 @@ export class DailyBoardView extends ItemView {
 		const activeProject = this.getActiveProjectEntry();
 		const currentPath = this.app.workspace.getActiveFile()?.path ?? "";
 		const normalizedQuery = query.trim().toLowerCase();
-		const files = this.app.vault.getMarkdownFiles();
+		const files = this.app.vault.getFiles().filter((file) => this.isMentionableFile(file));
 		const scopePrefixes = resolveMentionScopePrefixes(
 			activeProject ?? undefined,
 			files.map((file) => file.path),
 		);
-		return this.app.vault.getMarkdownFiles()
+		return files
 			.filter((file) => {
 				return isPathWithinMentionScope(file.path, scopePrefixes);
 			})
@@ -5338,7 +5577,7 @@ export class DailyBoardView extends ItemView {
 					type: "token",
 					token: {
 						kind: "skill",
-						label: `Skill /${skillName}`,
+						label: this.formatSkillDisplayName(skillName),
 						tokenType: "skill",
 						target: skillName,
 					},
@@ -5481,9 +5720,9 @@ export class DailyBoardView extends ItemView {
 
 	private buildGroupedModelOptions(
 		activeSoul: { preferredModel?: string; preferredModelMode?: "openai" | "group" } | null,
-	): Array<{ label: string; options: Array<{ value: string; label: string }> }> {
+	): ComposerChoiceMenuGroup[] {
 		const flatOptions = this.buildModelOptions(activeSoul);
-		const groups = new Map<"openai" | "group", { label: string; options: Array<{ value: string; label: string }> }>();
+		const groups = new Map<"openai" | "group", ComposerChoiceMenuGroup>();
 		const ensureGroup = (mode: "openai" | "group") => {
 			const existing = groups.get(mode);
 			if (existing) {
@@ -5512,6 +5751,16 @@ export class DailyBoardView extends ItemView {
 				return left === "openai" ? -1 : 1;
 			})
 			.map(([, group]) => group);
+	}
+
+	private resolveComposerChoiceLabel(groups: ComposerChoiceMenuGroup[], selectedValue: string): string {
+		for (const group of groups) {
+			const option = group.options.find((item) => item.value === selectedValue);
+			if (option) {
+				return option.label;
+			}
+		}
+		return "";
 	}
 
 	private extractModelOptionShortLabel(label: string, fallbackModel: string): string {
@@ -5555,20 +5804,20 @@ export class DailyBoardView extends ItemView {
 
 	private buildPermissionModeOptions(): Array<{ value: ToolPermissionMode; label: string }> {
 		return [
-			{ value: "auto", label: this.t("settings.agent.permissionMode.auto", "🚀 全自动") },
-			{ value: "standard", label: this.t("settings.agent.permissionMode.standard", "🛡️ 标准") },
-			{ value: "strict", label: this.t("settings.agent.permissionMode.strict", "🔒 严格") },
+			{ value: "auto", label: this.t("settings.agent.permissionMode.auto", "全自动") },
+			{ value: "standard", label: this.t("settings.agent.permissionMode.standard", "标准") },
+			{ value: "strict", label: this.t("settings.agent.permissionMode.strict", "严格") },
 		];
 	}
 
 	private resolvePermissionModeLabel(mode: ToolPermissionMode): string {
 		switch (mode) {
 			case "auto":
-				return this.t("settings.agent.permissionMode.auto", "🚀 全自动");
+				return this.t("settings.agent.permissionMode.auto", "全自动");
 			case "strict":
-				return this.t("settings.agent.permissionMode.strict", "🔒 严格");
+				return this.t("settings.agent.permissionMode.strict", "严格");
 			default:
-				return this.t("settings.agent.permissionMode.standard", "🛡️ 标准");
+				return this.t("settings.agent.permissionMode.standard", "标准");
 		}
 	}
 
@@ -5576,7 +5825,7 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiBusy && this.aiQueuedPrompts.length === 0) {
 			return;
 		}
-		const hint = containerEl.createDiv({ cls: "friday-ai-queue-hint" });
+		const hint = containerEl.createDiv({ cls: "friday-ai-queue-hint kit-event-row-v1" });
 		hint.createSpan({
 			cls: "friday-ai-queue-hint-copy",
 			text: this.aiQueuedPrompts.length > 0
@@ -5587,7 +5836,7 @@ export class DailyBoardView extends ItemView {
 		});
 		if (this.aiQueuedPrompts.length > 0) {
 			hint.createSpan({
-				cls: "friday-ai-queue-pill",
+				cls: "friday-ai-queue-pill kit-soft-chip-v1",
 				text: this.t("ai.queue.badge", "待发送 {count}", { count: this.aiQueuedPrompts.length }),
 			});
 		}
@@ -5602,14 +5851,14 @@ export class DailyBoardView extends ItemView {
 		if (parts.length === 0) {
 			return;
 		}
-		const bar = containerEl.createDiv({ cls: "friday-ai-override-bar" });
+		const bar = containerEl.createDiv({ cls: "friday-ai-override-bar kit-event-row-v1" });
 		bar.createSpan({
 			text: this.t("ai.override.summary", "临时覆写: {value}", {
 				value: parts.join(" · "),
 			}),
 		});
 		const clearButton = bar.createEl("button", {
-			cls: "friday-ai-override-clear",
+			cls: "friday-ai-override-clear kit-control-button-v1",
 			text: this.t("ai.override.clear", "清除"),
 		});
 		clearButton.type = "button";

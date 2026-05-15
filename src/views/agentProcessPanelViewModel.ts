@@ -75,6 +75,7 @@ type AgentTrajectoryIntakeSurfaceItem = AgentTrajectoryItem & {
 const USER_VISIBLE_RETRY_LIMIT = 5;
 const RETRY_RECOVERY_COPY_PREFIX = "网络波动，正在恢复请求";
 const REQUEST_EXHAUSTED_COPY = "请求多次未成功，请稍后重试。";
+const PROJECT_CONTEXT_SUMMARY = "已查看项目结构和相关文件。";
 
 export interface AgentProcessStatusView {
 	key: AgentTrajectoryStatus;
@@ -106,11 +107,14 @@ export interface AgentProcessMutationView {
 	tone: AgentProcessTone;
 }
 
+export type AgentProcessFileType = "markdown" | "canvas" | "code" | "note";
+
 export interface AgentProcessArtifactView {
 	id: string;
 	path: string;
 	name: string;
 	extension: string;
+	fileType: AgentProcessFileType;
 	metadata: string;
 	status: "created" | "modified" | "applied";
 	summary: string;
@@ -122,6 +126,7 @@ export interface AgentProcessDiffSummaryView {
 	files: Array<{
 		path: string;
 		summary: string;
+		fileType: AgentProcessFileType;
 		additions?: number;
 		deletions?: number;
 	}>;
@@ -185,6 +190,11 @@ export interface AgentProcessTimelineNoteView {
 	tone: "progress" | "done" | "warning";
 }
 
+export interface AgentProcessTimelineToolCallView {
+	name: string;
+	detail: string;
+}
+
 export interface AgentProcessTimelineItemView {
 	id: string;
 	kind: AgentProcessTimelineItemKind;
@@ -194,6 +204,8 @@ export interface AgentProcessTimelineItemView {
 	meta?: string;
 	detail?: AgentProcessTimelineDetailView;
 	notes?: AgentProcessTimelineNoteView[];
+	toolCall?: AgentProcessTimelineToolCallView;
+	toolCalls?: AgentProcessTimelineToolCallView[];
 	artifactRefs?: string[];
 	actionRefs?: string[];
 	sourceItemIds?: string[];
@@ -326,7 +338,7 @@ export function buildAgentProcessPanelViewModel(
 		isRenderableTrajectoryItem(item) &&
 		!isStageReportNarrationItem(item) &&
 		!isTaskBarPlanProcessItem(snapshot, item) &&
-		!isGenericLiveModelLifecycleItem(snapshot, item)
+		!isGenericModelLifecycleItem(item)
 	);
 	const actions = buildActionViews(snapshot);
 	const mutations = buildMutations(snapshot);
@@ -439,9 +451,8 @@ function isLifecycleOnlyItem(item: AgentTrajectoryItem): boolean {
 		return true;
 	}
 	return item.kind === "task" &&
-		(item.rawEventType === "task_created" ||
-			item.rawEventType === "task_running" ||
-			item.rawEventType === "task_completed");
+		typeof item.rawEventType === "string" &&
+		item.rawEventType.startsWith("task_");
 }
 
 function isRenderableTrajectoryItem(item: AgentTrajectoryItem): boolean {
@@ -462,10 +473,7 @@ function isTaskBarPlanProcessItem(snapshot: AgentTrajectorySnapshot, item: Agent
 		isGenericLifecycleReasoningText(lifecycleItemText(item));
 }
 
-function isGenericLiveModelLifecycleItem(snapshot: AgentTrajectorySnapshot, item: AgentTrajectoryItem): boolean {
-	if (snapshot.privacy.source !== "live") {
-		return false;
-	}
+function isGenericModelLifecycleItem(item: AgentTrajectoryItem): boolean {
 	if (item.kind !== "model" && item.kind !== "reasoning") {
 		return false;
 	}
@@ -476,14 +484,10 @@ function isGenericLiveModelLifecycleItem(snapshot: AgentTrajectorySnapshot, item
 	if (item.rawEventType === "model_request") {
 		return true;
 	}
-	const generic = isGenericLifecycleReasoningText(text) ||
+	return isGenericLifecycleReasoningText(text) ||
 		isGenericLifecycleContextText(text) ||
 		/requesting model decision|model response received/i.test(text) ||
 		/FRIDAY\s*正在理解你的请求|正在理解你的请求|理解请求|完成理解|已整理当前判断/.test(text);
-	if (item.reasoningProvider || item.reasoningRawFormat) {
-		return generic;
-	}
-	return generic;
 }
 
 function hasTaskBarPlan(snapshot: AgentTrajectorySnapshot): boolean {
@@ -506,7 +510,7 @@ function isInternalPreflightContextItem(item: AgentTrajectoryItem): boolean {
 function isContextReadyCheckpointItem(item: AgentTrajectoryItem): boolean {
 	return item.kind === "system" &&
 		item.rawEventType === "checkpoint_saved" &&
-		/Context package built before|context_ready|native model request/i.test(lifecycleItemText(item));
+		isGenericLifecycleContextText(lifecycleItemText(item));
 }
 
 function resolveSurface(
@@ -823,7 +827,7 @@ function buildTimelineView(
 			diffSummary: context.diffSummary,
 		};
 	}
-	const items = compactRepeatedContextTimelineItems(buildTimelineItems(snapshot, context));
+	const items = attachDefaultTimelineNotes(compactRepeatedContextTimelineItems(buildTimelineItems(snapshot, context)));
 	const actions = buildTimelineActions(context.actions, status);
 	const groups = buildTimelineGroups(items, status);
 	return {
@@ -884,6 +888,7 @@ function composerTaskBarPlan(snapshot: AgentTrajectorySnapshot): ComposerTaskBar
 		snapshot.privacy.source === "live" &&
 		snapshot.planSource &&
 		snapshot.planSource !== "model" &&
+		snapshot.planSource !== "runtime" &&
 		snapshot.planSource !== "legacy"
 	) {
 		return null;
@@ -1104,6 +1109,77 @@ function buildTimelineItems(
 	return annotatedItems;
 }
 
+function attachDefaultTimelineNotes(items: AgentProcessTimelineItemView[]): AgentProcessTimelineItemView[] {
+	return items.map((item) => {
+		if (!shouldAttachDefaultTimelineNote(item) || (item.notes && item.notes.length > 0)) {
+			return item;
+		}
+		const text = defaultTimelineNoteText(item);
+		if (!text) {
+			return item;
+		}
+		return {
+			...item,
+			notes: [
+				{
+					id: `note:${item.id}:default`,
+					text,
+					tone: defaultTimelineNoteTone(item.status),
+				},
+			],
+		};
+	});
+}
+
+function shouldAttachDefaultTimelineNote(item: AgentProcessTimelineItemView): boolean {
+	return item.kind !== "receipt" && item.kind !== "done";
+}
+
+function defaultTimelineNoteText(item: AgentProcessTimelineItemView): string {
+	const base = sanitizeTimelineSummary(
+		item.summary ||
+		item.meta ||
+		item.toolCall?.detail ||
+		item.toolCalls?.[0]?.detail ||
+		item.detail?.lines?.[0] ||
+		item.title ||
+		"",
+	);
+	switch (item.status) {
+		case "running":
+			return base ? `FRIDAY 正在处理这一步：${base}` : "FRIDAY 正在执行这一步，完成后会继续推进。";
+		case "waiting":
+			return base ? `${base} FRIDAY 会在确认后继续。` : "FRIDAY 正在等待确认，确认后会继续。";
+		case "done":
+			return base ? `${base} FRIDAY 会根据这一步的结果继续推进。` : "FRIDAY 已完成这一步，接下来会继续推进。";
+		case "warning":
+		case "error":
+			return base ? `${base} 接下来会说明问题并选择可恢复的下一步。` : "这一步需要处理问题，FRIDAY 会选择可恢复的下一步。";
+		case "pending":
+			return base ? `FRIDAY 准备处理这一步：${base}` : "FRIDAY 准备执行这一步。";
+	}
+	return assertUnhandledDefaultTimelineStatus(item.status);
+}
+
+function defaultTimelineNoteTone(status: AgentProcessTimelineItemStatus): AgentProcessTimelineNoteView["tone"] {
+	switch (status) {
+		case "done":
+			return "done";
+		case "warning":
+		case "error":
+		case "waiting":
+			return "warning";
+		case "running":
+		case "pending":
+			return "progress";
+	}
+	return assertUnhandledDefaultTimelineStatus(status);
+}
+
+function assertUnhandledDefaultTimelineStatus(status: never): never {
+	throw new Error(`Unhandled timeline item status: ${String(status)}`);
+}
+
 function attachStageReportNotes(
 	items: AgentProcessTimelineItemView[],
 	snapshotItems: AgentTrajectoryItem[],
@@ -1126,6 +1202,7 @@ function attachStageReportNotes(
 			result,
 			stageEntry.item,
 			stageEntry.index,
+			text,
 			sourceItemById,
 			sourceIndexById,
 		);
@@ -1159,6 +1236,7 @@ function findStageReportNoteTargetIndex(
 	items: AgentProcessTimelineItemView[],
 	stageItem: AgentTrajectoryItem,
 	stageIndex: number,
+	stageText: string,
 	sourceItemById: Map<string, AgentTrajectoryItem>,
 	sourceIndexById: Map<string, number>,
 ): number {
@@ -1167,6 +1245,10 @@ function findStageReportNoteTargetIndex(
 		.filter((entry) => isStageReportNoteAnchor(entry.item));
 	if (eligible.length === 0) {
 		return -1;
+	}
+	const textTargetIndex = findStageReportNoteTargetIndexByText(eligible, stageText);
+	if (textTargetIndex >= 0) {
+		return textTargetIndex;
 	}
 	if (stageItem.step !== undefined) {
 		const sameStep = eligible.find((entry) => entry.sourceItems.some((item) => item.step === stageItem.step));
@@ -1192,6 +1274,59 @@ function findStageReportNoteTargetIndex(
 	return -1;
 }
 
+function findStageReportNoteTargetIndexByText(
+	eligible: Array<{
+		item: AgentProcessTimelineItemView;
+		index: number;
+		sourceItems: AgentTrajectoryItem[];
+	}>,
+	stageText: string,
+): number {
+	const normalizedText = normalizeTimelineDedupeText(stageText);
+	if (!normalizedText) {
+		return -1;
+	}
+	const fileChangeTarget = eligible.find((entry) =>
+		entry.item.kind === "file_change" &&
+		timelineItemMatchesStageReportText(entry.item, entry.sourceItems, normalizedText)
+	);
+	if (fileChangeTarget) {
+		return fileChangeTarget.index;
+	}
+	const target = eligible.find((entry) =>
+		timelineItemMatchesStageReportText(entry.item, entry.sourceItems, normalizedText)
+	);
+	return target?.index ?? -1;
+}
+
+function timelineItemMatchesStageReportText(
+	item: AgentProcessTimelineItemView,
+	sourceItems: AgentTrajectoryItem[],
+	normalizedText: string,
+): boolean {
+	const candidates = [
+		item.title,
+		item.summary,
+		item.meta,
+		item.toolCall?.name,
+		item.toolCall?.detail,
+		...(item.toolCalls ?? []).flatMap((call) => [call.name, call.detail]),
+		...(item.detail?.lines ?? []),
+		...(item.artifactRefs ?? []),
+		...sourceItems.flatMap((sourceItem) => [
+			sourceItem.tool,
+			sourceItem.targetPath,
+			sourceItem.title,
+			sourceItem.detail,
+		]),
+	];
+	return candidates.some((candidate) => {
+		const normalizedCandidate = normalizeTimelineDedupeText(candidate ?? "");
+		return normalizedCandidate.length >= 4 &&
+			(normalizedText.includes(normalizedCandidate) || normalizedCandidate.includes(normalizedText));
+	});
+}
+
 function timelineSourceItems(
 	item: AgentProcessTimelineItemView,
 	sourceItemById: Map<string, AgentTrajectoryItem>,
@@ -1206,10 +1341,20 @@ function isStageReportNoteAnchor(item: AgentProcessTimelineItemView): boolean {
 }
 
 function stageReportNoteText(item: AgentTrajectoryItem): string {
-	const detail = productizeRuntimeText(item.detail || "");
-	const progress = productizeRuntimeText([item.narrationJustDone, item.narrationNext].filter(Boolean).join(" "));
+	const rawDetail = item.detail || "";
+	const rawProgress = [item.narrationJustDone, item.narrationNext].filter(Boolean).join(" ");
+	if (
+		isInternalRuntimeTimelineText(rawDetail) ||
+		isProjectContextRuntimeText(rawDetail) ||
+		isInternalRuntimeTimelineText(rawProgress) ||
+		isProjectContextRuntimeText(rawProgress)
+	) {
+		return "";
+	}
+	const detail = productizeRuntimeText(rawDetail);
+	const progress = productizeRuntimeText(rawProgress);
 	const text = detail || progress;
-	if (!text || /stage_report|narration_report|阶段性汇报/i.test(text)) {
+	if (!text || /stage_report|narration_report|阶段性汇报/i.test(text) || isInternalRuntimeTimelineText(text)) {
 		return "";
 	}
 	return sanitizeTimelineSummary(text);
@@ -1261,8 +1406,8 @@ function buildTimelineStatusBar(
 	const currentTaskTitle = status === "completed" ? "" : currentVisiblePlanTaskTitle(snapshot);
 	if (currentTaskTitle) {
 		return {
-			phase: "任务",
-			action: currentTaskTitle,
+			phase: "执行中",
+			action: "过程记录会在展开后更新",
 			elapsed: formatDuration(durationSeconds),
 			status,
 		};
@@ -1408,11 +1553,13 @@ function timelineItemFromStep(
 	snapshot: AgentTrajectorySnapshot,
 ): AgentProcessTimelineItemView {
 	const kind = timelineKindForStep(step);
-	const status = timelineStatusForStep(step.status, kind);
+	const status = timelineStatusForStep(step.status, kind, snapshot.status);
 	const title = timelineTitleForStep(step, kind);
 	const summary = timelineSummaryForStep(step, snapshot, kind, status);
 	const meta = timelineMetaForStep(step, kind);
 	const detail = timelineDetailForStep(step, kind, [title, summary, meta]);
+	const toolCall = timelineToolCallForStep(step, kind, [title, summary, meta]);
+	const toolCalls = timelineToolCallsForStep(step, kind, [title, summary, meta]);
 	const actionRefs = step.actions
 		.filter((action) => action.kind === "control" && action.action)
 		.map((action) => action.action?.id)
@@ -1426,10 +1573,136 @@ function timelineItemFromStep(
 		summary,
 		...(meta ? { meta } : {}),
 		...(detail ? { detail } : {}),
+		...(toolCall ? { toolCall } : {}),
+		...(toolCalls.length > 0 ? { toolCalls } : {}),
 		sourceItemIds: step.actions.map((action) => action.id),
 		...(artifactRefs.length > 0 ? { artifactRefs } : {}),
 		...(actionRefs.length > 0 ? { actionRefs } : {}),
 	};
+}
+
+function timelineToolCallForStep(
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[] = [],
+): AgentProcessTimelineToolCallView | undefined {
+	if (kind === "context" && isProjectContextStep(step)) {
+		return undefined;
+	}
+	const action = step.actions.find(isTimelineToolCallAction);
+	if (!action || !action.tool) {
+		return undefined;
+	}
+	const name = formatTimelineToolName(action.tool);
+	const detail = timelineToolCallDetail(action, step, kind, visibleTexts);
+	if (!name || !detail) {
+		return undefined;
+	}
+	return { name, detail };
+}
+
+function timelineToolCallsForStep(
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[] = [],
+): AgentProcessTimelineToolCallView[] {
+	const calls: AgentProcessTimelineToolCallView[] = [];
+	for (const action of step.actions) {
+		const call = timelineCommandCallForAction(action, step, kind, visibleTexts);
+		if (!call) {
+			continue;
+		}
+		if (!calls.some((existing) => existing.name === call.name && existing.detail === call.detail)) {
+			calls.push(call);
+		}
+	}
+	return calls;
+}
+
+function timelineCommandCallForAction(
+	action: AgentProcessStepActionView,
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[],
+): AgentProcessTimelineToolCallView | undefined {
+	if (action.kind !== "event" || !action.tool) {
+		return undefined;
+	}
+	const name = formatTimelineToolName(action.tool);
+	const detail = timelineCommandCallDetail(action, step, kind, visibleTexts);
+	if (!name || !detail) {
+		return undefined;
+	}
+	return { name, detail };
+}
+
+function timelineCommandCallDetail(
+	action: AgentProcessStepActionView,
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[],
+): string {
+	if (action.targetPath) {
+		return action.targetPath;
+	}
+	const visible = new Set(visibleTexts.map(normalizeTimelineDedupeText).filter(Boolean));
+	const candidates = [action.detail, action.label, step.summary, step.title];
+	for (const candidate of candidates) {
+		const text = sanitizeTimelineSummary(candidate);
+		const normalized = normalizeTimelineDedupeText(text);
+		if (text && normalized && !visible.has(normalized) && !isInternalRuntimeTimelineText(text) && !isProjectContextRuntimeText(text)) {
+			return text;
+		}
+	}
+	void kind;
+	return "";
+}
+
+function isTimelineToolCallAction(action: AgentProcessStepActionView): boolean {
+	if (action.kind !== "event" || !action.tool) {
+		return false;
+	}
+	const texts = [action.label || "", action.detail || "", `${action.label || ""} ${action.detail || ""}`];
+	return !texts.some((text) => isInternalRuntimeTimelineText(text) || isProjectContextRuntimeText(text));
+}
+
+function timelineToolCallDetail(
+	action: AgentProcessStepActionView,
+	step: AgentProcessStepView,
+	kind: AgentProcessTimelineItemKind,
+	visibleTexts: string[],
+): string {
+	const visible = new Set(visibleTexts.map(normalizeTimelineDedupeText).filter(Boolean));
+	const candidates = [
+		action.detail,
+		action.label,
+		action.targetPath ? timelineToolTargetSummary(action.tool, action.targetPath, kind) : "",
+		step.summary,
+		step.title,
+	];
+	for (const candidate of candidates) {
+		const text = sanitizeTimelineSummary(candidate);
+		const normalized = normalizeTimelineDedupeText(text);
+		if (text && normalized && !visible.has(normalized) && !isInternalRuntimeTimelineText(text) && !isProjectContextRuntimeText(text)) {
+			return text;
+		}
+	}
+	return "";
+}
+
+function timelineToolTargetSummary(
+	tool: string | undefined,
+	targetPath: string,
+	kind: AgentProcessTimelineItemKind,
+): string {
+	if (kind === "file_change" || isWriteLikeTool(tool)) {
+		return `处理 ${filenameForPath(targetPath)}`;
+	}
+	return targetPath;
+}
+
+function formatTimelineToolName(tool: string): string {
+	return normalizeToken(tool) || tool;
 }
 
 function timelineKindForStep(step: AgentProcessStepView): AgentProcessTimelineItemKind {
@@ -1468,7 +1741,11 @@ function isIntakeReceiptStep(step: AgentProcessStepView): boolean {
 function timelineStatusForStep(
 	status: AgentProcessStepStatus,
 	kind: AgentProcessTimelineItemKind,
+	snapshotStatus?: AgentTrajectorySnapshot["status"],
 ): AgentProcessTimelineItemStatus {
+	if (snapshotStatus === "completed" && status === "running") {
+		return "done";
+	}
 	if (kind === "approval" || status === "waiting_for_approval") {
 		return "waiting";
 	}
@@ -1534,11 +1811,15 @@ function timelineSummaryForStep(
 		return retryTimelineSummaryForStep(step);
 	}
 	if (kind === "context") {
+		if (isProjectContextStep(step)) {
+			return PROJECT_CONTEXT_SUMMARY;
+		}
 		const fileCount = step.fileRefs.length;
 		if (fileCount > 0) {
 			return fileCount === 1 ? "已查看相关文件和项目上下文。" : `已查看 ${fileCount} 个相关文件和项目上下文。`;
 		}
-		return sanitizeTimelineSummary(step.summary || "已读取项目上下文。");
+		const summary = sanitizeTimelineSummary(step.summary);
+		return isGenericContextReadSummary(summary) ? PROJECT_CONTEXT_SUMMARY : summary || "已读取项目上下文。";
 	}
 	if (kind === "receipt") {
 		const summary = sanitizeTimelineSummary(step.summary);
@@ -1590,18 +1871,69 @@ function reasoningTimelineSummary(summary: string): string {
 	return sentences.join(" ") || sanitized;
 }
 
+function isProjectContextStep(step: AgentProcessStepView): boolean {
+	if (step.actions.some((action) => isProjectContextTool(action.tool))) {
+		return true;
+	}
+	const text = step.actions
+		.map((action) => `${action.label || ""} ${action.detail || ""} ${action.targetPath || ""}`)
+		.join(" ");
+	return isProjectContextRuntimeText(text);
+}
+
+function isProjectContextTool(tool: string | undefined): boolean {
+	const normalized = normalizeToken(tool);
+	return normalized === "project_tree" ||
+		normalized === "read_many" ||
+		normalized === "search_and_read" ||
+		normalized === "read" ||
+		normalized === "ls" ||
+		normalized === "glob" ||
+		normalized === "grep" ||
+		normalized === "search_text";
+}
+
+function isProjectContextRuntimeText(value: string): boolean {
+	return /project_tree|listed\s+\d+\s+(?:entry|entries|item|items)|read\s+\d+\s+file\(s\)|read_many|search_and_read/i.test(value);
+}
+
+function isGenericContextReadSummary(value: string): boolean {
+	return /^(?:read|loaded|listed|searched|found|checked)\b/i.test(value) ||
+		isProjectContextRuntimeText(value);
+}
+
+function isInternalRuntimeTimelineText(value: string): boolean {
+	const text = cleanText(value);
+	if (!text) {
+		return false;
+	}
+	return /^Tool ok\.?$/i.test(text) ||
+		/Native tool result appended/i.test(text) ||
+		/\bmodel messages?\b/i.test(text) ||
+		/\bcheckpoint\b/i.test(text) ||
+		/\bdebug\b/i.test(text) ||
+		/Context package built before|context_ready|native model request/i.test(text);
+}
+
 function timelineMetaForStep(step: AgentProcessStepView, kind: AgentProcessTimelineItemKind): string {
+	const commandCount = timelineCommandCountForStep(step);
 	if (kind === "context") {
-		const commandCount = step.actions.filter((action) => action.kind === "event").length;
-		return commandCount > 0 ? `已运行 ${commandCount} 条命令` : "";
+		return commandCount > 0 && !isProjectContextStep(step) ? `已运行 ${commandCount} 条命令` : "";
 	}
 	if (kind === "retry") {
 		return retryAttemptMeta(step.summary);
+	}
+	if (commandCount > 0) {
+		return `已运行 ${commandCount} 条命令`;
 	}
 	if (kind === "file_change" && step.fileRefs.length > 0) {
 		return `${step.fileRefs.length} 个文件`;
 	}
 	return "";
+}
+
+function timelineCommandCountForStep(step: AgentProcessStepView): number {
+	return step.actions.filter(isTimelineToolCallAction).length;
 }
 
 function retryAttemptMeta(value: string): string {
@@ -1617,6 +1949,11 @@ function timelineDetailForStep(
 	kind: AgentProcessTimelineItemKind,
 	visibleTexts: string[] = [],
 ): AgentProcessTimelineDetailView | undefined {
+	if (kind === "context") {
+		void step;
+		void visibleTexts;
+		return undefined;
+	}
 	const lines: string[] = [];
 	const visible = new Set(visibleTexts.map(normalizeTimelineDedupeText).filter(Boolean));
 	for (const action of step.actions) {
@@ -1655,6 +1992,9 @@ function sanitizeTimelineDetail(value: string, kind: AgentProcessTimelineItemKin
 	if (kind === "approval" && normalizeFileMutationStatusText(value)) {
 		return "";
 	}
+	if (isInternalRuntimeTimelineText(value) || isProjectContextRuntimeText(value)) {
+		return "";
+	}
 	if (/Context package built before|context_ready/i.test(value)) {
 		return "";
 	}
@@ -1669,6 +2009,12 @@ function sanitizeTimelineSummary(value: string): string {
 	const productText = productizeRuntimeText(text);
 	if (productText && productText !== text) {
 		return productText;
+	}
+	if (isProjectContextRuntimeText(text)) {
+		return PROJECT_CONTEXT_SUMMARY;
+	}
+	if (isInternalRuntimeTimelineText(text)) {
+		return "";
 	}
 	if (!productText && /checkpoint|model_request|model request|replay|debug/i.test(text)) {
 		return "FRIDAY 正在整理当前进度。";
@@ -1824,26 +2170,21 @@ function compactRepeatedContextTimelineItems(
 	const compacted: AgentProcessTimelineItemView[] = [];
 	let activeContext: AgentProcessTimelineItemView | null = null;
 	let activeBatches = 0;
-	let activeCommands = 0;
 	for (const item of items) {
 		if (item.kind === "context") {
-			const commandCount = contextCommandCount(item);
 			if (!activeContext) {
 				activeContext = { ...item };
 				activeBatches = 1;
-				activeCommands = commandCount;
 				compacted.push(activeContext);
 				continue;
 			}
 			activeBatches += 1;
-			activeCommands += commandCount;
-			mergeContextTimelineItem(activeContext, item, activeBatches, activeCommands);
+			mergeContextTimelineItem(activeContext, item, activeBatches);
 			continue;
 		}
 		compacted.push(item);
 		activeContext = null;
 		activeBatches = 0;
-		activeCommands = 0;
 	}
 	return compacted;
 }
@@ -1852,16 +2193,30 @@ function mergeContextTimelineItem(
 	target: AgentProcessTimelineItemView,
 	item: AgentProcessTimelineItemView,
 	batches: number,
-	commands: number,
 ): void {
+	void batches;
 	target.status = mergeTimelineStatus(target.status, item.status);
-	target.summary = `已合并 ${batches} 批项目现状读取。`;
-	target.meta = commands > 0 ? `已运行 ${commands} 条命令` : `${batches} 批`;
+	target.summary = PROJECT_CONTEXT_SUMMARY;
+	delete target.meta;
 	target.artifactRefs = mergeUnique([...(target.artifactRefs ?? []), ...(item.artifactRefs ?? [])]);
 	target.actionRefs = mergeUnique([...(target.actionRefs ?? []), ...(item.actionRefs ?? [])]);
 	target.sourceItemIds = mergeUnique([...(target.sourceItemIds ?? []), ...(item.sourceItemIds ?? [])]);
+	target.toolCalls = mergeTimelineToolCalls(target.toolCalls, item.toolCalls);
 	target.notes = mergeTimelineNotes(target.notes, item.notes);
 	target.detail = mergeTimelineDetails(target.detail, item.detail);
+}
+
+function mergeTimelineToolCalls(
+	current: AgentProcessTimelineToolCallView[] | undefined,
+	next: AgentProcessTimelineToolCallView[] | undefined,
+): AgentProcessTimelineToolCallView[] | undefined {
+	const calls = [...(current ?? [])];
+	for (const call of next ?? []) {
+		if (!calls.some((entry) => entry.name === call.name && entry.detail === call.detail)) {
+			calls.push(call);
+		}
+	}
+	return calls.length > 0 ? calls : undefined;
 }
 
 function mergeTimelineNotes(
@@ -1875,14 +2230,6 @@ function mergeTimelineNotes(
 		}
 	}
 	return notes.length > 0 ? notes : undefined;
-}
-
-function contextCommandCount(item: AgentProcessTimelineItemView): number {
-	const match = item.meta?.match(/\d+/);
-	if (match) {
-		return Number(match[0]);
-	}
-	return 1;
 }
 
 function mergeTimelineStatus(
@@ -1985,8 +2332,8 @@ function buildVisibleSteps(
 		if (item.kind === "final") {
 			continue;
 		}
-		const key = semanticStepKey(item);
 		const previous = builders.at(-1);
+		const key = semanticStepKeyForBuilder(item, previous);
 		const shouldStartNewStep = !previous || previous.key !== key || shouldSplitStep(previous, item, key);
 		const builder = shouldStartNewStep ? createStepBuilder(key, item) : previous;
 		if (shouldStartNewStep) {
@@ -2002,9 +2349,36 @@ function buildVisibleSteps(
 		builder.items.push(failureItem);
 		builders.push(builder);
 	}
-	return builders
-		.map((builder) => finalizeStepBuilder(builder, snapshot, actions, recovery))
+	return normalizeActiveVisibleSteps(
+		snapshot,
+		builders.map((builder) => finalizeStepBuilder(builder, snapshot, actions, recovery)),
+	)
 		.filter((step) => step.actions.length > 0 || step.fileRefs.length > 0 || step.status !== "completed");
+}
+
+function normalizeActiveVisibleSteps(
+	snapshot: AgentTrajectorySnapshot,
+	steps: AgentProcessStepView[],
+): AgentProcessStepView[] {
+	if (snapshot.status !== "running" && !isActionRequiredStatus(snapshot.status)) {
+		return steps;
+	}
+	const activeIndexes = steps
+		.map((step, index) => isActiveStepStatus(step.status) ? index : -1)
+		.filter((index) => index >= 0);
+	if (activeIndexes.length <= 1) {
+		return steps;
+	}
+	const currentIndex = activeIndexes.at(-1);
+	return steps.map((step, index) =>
+		index !== currentIndex && isActiveStepStatus(step.status)
+			? { ...step, status: "completed" }
+			: step
+	);
+}
+
+function isActiveStepStatus(status: AgentProcessStepStatus): boolean {
+	return status === "running" || status === "waiting_for_approval";
 }
 
 function coalesceReceiptItems(items: AgentTrajectoryItem[]): AgentTrajectoryItem[] {
@@ -2091,6 +2465,11 @@ function isGenericCompletedLifecycleItem(item: AgentTrajectoryItem): boolean {
 	if (item.kind === "intake") {
 		return isGenericLifecycleReceiptText(lifecycleItemText(item));
 	}
+	if (item.kind === "task") {
+		return item.rawEventType === "task_created" ||
+			item.rawEventType === "task_running" ||
+			item.rawEventType === "task_completed";
+	}
 	return false;
 }
 
@@ -2125,6 +2504,7 @@ function isGenericLifecycleReasoning(item: AgentTrajectoryItem): boolean {
 
 function isGenericLifecycleReasoningText(text: string): boolean {
 	return /received model reasoning/i.test(text) ||
+		/model response received|requesting model decision/i.test(text) ||
 		/FRIDAY\s*已整理当前判断/.test(text);
 }
 
@@ -2134,6 +2514,7 @@ function isGenericLifecycleContext(item: AgentTrajectoryItem): boolean {
 
 function isGenericLifecycleContextText(text: string): boolean {
 	return /Context package built before|context_ready|native model request/i.test(text) ||
+		/FRIDAY\s*已保存当前进度|saved current progress/i.test(text) ||
 		/已整理上下文，准备进入下一步/.test(text);
 }
 
@@ -2166,7 +2547,19 @@ function shouldSplitStep(previous: StepBuilder, item: AgentTrajectoryItem, key: 
 	if (key === "approval" || key === "failure" || key === "transport") {
 		return true;
 	}
-	if (key === "file_change" && previous.items.some((entry) => semanticStepKey(entry) !== "file_change")) {
+	if (previous.items.some((entry) => entry.status === "failed") && (item.status === "running" || item.status === "waiting")) {
+		return false;
+	}
+	const previousItem = previous.items.at(-1);
+	if (previousItem?.step !== undefined && item.step !== undefined && previousItem.step !== item.step) {
+		if (isSameFileChangeContinuation(previous, item, key)) {
+			return false;
+		}
+		return true;
+	}
+	if (key === "file_change" && previous.items.some((entry) =>
+		semanticStepKey(entry) !== "file_change" && !isOutputValidationTool(entry.tool)
+	)) {
 		return true;
 	}
 	return false;
@@ -2292,14 +2685,78 @@ function semanticStepKey(item: AgentTrajectoryItem): AgentProcessStepKey {
 	return "internal";
 }
 
+function semanticStepKeyForBuilder(
+	item: AgentTrajectoryItem,
+	previous: StepBuilder | undefined,
+): AgentProcessStepKey {
+	const key = semanticStepKey(item);
+	if (key === "context" && shouldAttachValidationToFileChange(item, previous)) {
+		return "file_change";
+	}
+	return key;
+}
+
 function isWriteLikeTool(tool: string | undefined): boolean {
 	const normalized = normalizeToken(tool);
 	return normalized === "write" ||
+		normalized === "write_file" ||
 		normalized === "edit" ||
+		normalized === "edit_file" ||
+		normalized === "delete" ||
+		normalized === "delete_file" ||
+		normalized === "remove" ||
+		normalized === "remove_file" ||
 		normalized === "create" ||
+		normalized === "create_file" ||
 		normalized === "modify" ||
+		normalized === "modify_file" ||
 		normalized === "update" ||
+		normalized === "update_file" ||
+		normalized === "canvas_apply" ||
+		normalized === "frontmatter_update" ||
+		normalized === "markdown_insert_reference" ||
 		normalized === "apply_patch";
+}
+
+function isOutputValidationTool(tool: string | undefined): boolean {
+	const normalized = normalizeToken(tool);
+	return normalized === "validate_canvas" ||
+		normalized === "validate_markdown" ||
+		normalized === "validate_outputs";
+}
+
+function shouldAttachValidationToFileChange(
+	item: AgentTrajectoryItem,
+	previous: StepBuilder | undefined,
+): boolean {
+	if (!previous || previous.key !== "file_change" || item.kind !== "tool" || !isOutputValidationTool(item.tool)) {
+		return false;
+	}
+	return hasMatchingFileRef(previous, item.targetPath);
+}
+
+function isSameFileChangeContinuation(
+	previous: StepBuilder,
+	item: AgentTrajectoryItem,
+	key: AgentProcessStepKey,
+): boolean {
+	if (previous.key !== "file_change" || key !== "file_change") {
+		return false;
+	}
+	return hasMatchingFileRef(previous, item.targetPath);
+}
+
+function hasMatchingFileRef(builder: StepBuilder, targetPath: string | undefined): boolean {
+	const normalizedTarget = normalizePathForComparison(targetPath);
+	if (!normalizedTarget) {
+		return false;
+	}
+	for (const filePath of builder.fileRefs.keys()) {
+		if (normalizePathForComparison(filePath) === normalizedTarget) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function addItemFileRef(builder: StepBuilder, item: AgentTrajectoryItem): void {
@@ -2410,6 +2867,12 @@ function summaryForStep(
 	if (builder.key === "transport") {
 		return transportSummaryForItems(builder.items);
 	}
+	if (builder.key === "context") {
+		const summary = firstMeaningfulDetail(builder.items);
+		return isContextBuilderProjectRead(builder) || isGenericContextReadSummary(summary)
+			? PROJECT_CONTEXT_SUMMARY
+			: summary || "已读取项目上下文。";
+	}
 	if (builder.key === "receipt" || builder.key === "plan") {
 		return firstMeaningfulDetail(builder.items);
 	}
@@ -2425,6 +2888,13 @@ function pendingMutationCount(snapshot: AgentTrajectorySnapshot, builder: StepBu
 		(!filePaths.size || filePaths.has(mutation.targetPath))
 	).length;
 	return count || filePaths.size;
+}
+
+function isContextBuilderProjectRead(builder: StepBuilder): boolean {
+	return builder.items.some((item) =>
+		isProjectContextTool(item.tool) ||
+		isProjectContextRuntimeText(`${item.title || ""} ${item.detail || ""} ${item.targetPath || ""}`)
+	);
 }
 
 function firstMeaningfulDetail(items: AgentTrajectoryItem[]): string {
@@ -2472,12 +2942,12 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 		: item.kind === "transport"
 			? transportSummaryForItems([item])
 			: cleanText(item.detail);
+	const label = stepEventActionLabel(item);
+	const detail = stepEventActionDetail(item, narrationDetail);
 	return {
 		id: item.id,
-		label: item.status === "cancelled" ? "已停止处理" : sanitizeTimelineSummary(item.title) || "FRIDAY 正在处理",
-		detail: item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0
-			? item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n")
-			: sanitizeTimelineSummary(narrationDetail),
+		label,
+		detail,
 		kind: "event",
 		tone: itemTone(item.status),
 		status: item.status,
@@ -2485,6 +2955,28 @@ function toStepEventAction(item: AgentTrajectoryItem): AgentProcessStepActionVie
 		...(item.targetPath ? { targetPath: item.targetPath } : {}),
 		...(item.rawEventType ? { rawEventType: item.rawEventType } : {}),
 	};
+}
+
+function stepEventActionLabel(item: AgentTrajectoryItem): string {
+	if (item.status === "cancelled") {
+		return "已停止处理";
+	}
+	const raw = sanitizeTimelineSummary(item.title);
+	if (semanticStepKey(item) === "context" && (isProjectContextTool(item.tool) || isGenericContextReadSummary(raw))) {
+		return "读取项目现状";
+	}
+	return raw || "FRIDAY 正在处理";
+}
+
+function stepEventActionDetail(item: AgentTrajectoryItem, narrationDetail: string): string {
+	if (item.kind === "narration" && Array.isArray(item.narrationPlan) && item.narrationPlan.length > 0) {
+		return item.narrationPlan.map((line) => sanitizeTimelineSummary(line)).filter(Boolean).join("\n");
+	}
+	const detail = sanitizeTimelineSummary(narrationDetail);
+	if (semanticStepKey(item) === "context" && (isProjectContextTool(item.tool) || isGenericContextReadSummary(detail))) {
+		return PROJECT_CONTEXT_SUMMARY;
+	}
+	return detail;
 }
 
 function toStepControlAction(action: AgentProcessActionView): AgentProcessStepActionView {
@@ -2552,6 +3044,7 @@ function buildResultArtifacts(snapshot: AgentTrajectorySnapshot): AgentProcessAr
 			path: mutation.targetPath,
 			name: filenameForPath(mutation.targetPath),
 			extension: extensionForPath(mutation.targetPath),
+			fileType: fileTypeForPath(mutation.targetPath),
 			metadata: metadataForPath(mutation.targetPath),
 			status: artifactStatusForMutation(mutation),
 			summary: mutationDisplaySummary(mutation.summary || mutation.reason),
@@ -2575,6 +3068,7 @@ function buildDiffSummary(artifacts: AgentProcessArtifactView[]): AgentProcessDi
 		files: artifacts.map((artifact) => ({
 			path: artifact.path,
 			summary: artifact.summary,
+			fileType: artifact.fileType,
 		})),
 	};
 }
@@ -2775,6 +3269,20 @@ function extensionForPath(pathValue: string): string {
 	return dotIndex >= 0 ? name.slice(dotIndex + 1).toLowerCase() : "";
 }
 
+function fileTypeForPath(pathValue: string): AgentProcessFileType {
+	const extension = extensionForPath(pathValue);
+	if (extension === "md") {
+		return "markdown";
+	}
+	if (extension === "canvas") {
+		return "canvas";
+	}
+	if (isCodeFileExtension(extension)) {
+		return "code";
+	}
+	return "note";
+}
+
 function metadataForPath(pathValue: string): string {
 	const extension = extensionForPath(pathValue);
 	if (extension === "md") {
@@ -2783,7 +3291,29 @@ function metadataForPath(pathValue: string): string {
 	if (extension === "canvas") {
 		return "画布 · Canvas";
 	}
+	if (isCodeFileExtension(extension)) {
+		return extension ? `代码 · ${extension.toUpperCase()}` : "代码";
+	}
 	return extension ? `文件 · ${extension.toUpperCase()}` : "文件";
+}
+
+function isCodeFileExtension(extension: string): boolean {
+	return [
+		"html",
+		"htm",
+		"css",
+		"js",
+		"jsx",
+		"ts",
+		"tsx",
+		"mjs",
+		"cjs",
+		"json",
+		"yaml",
+		"yml",
+		"xml",
+		"svg",
+	].includes(extension);
 }
 
 function artifactStatusForMutation(mutation: AgentTrajectoryMutation): AgentProcessArtifactView["status"] {
@@ -2835,6 +3365,10 @@ function lastDefined(values: Array<string | undefined>): string | undefined {
 
 function normalizeToken(value: string | undefined): string {
 	return cleanText(value).toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function normalizePathForComparison(value: string | undefined): string {
+	return cleanText(value).replace(/\\/g, "/");
 }
 
 function shortText(value: string, maxLength = 96): string {

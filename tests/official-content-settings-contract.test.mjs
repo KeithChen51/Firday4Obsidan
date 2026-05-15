@@ -13,6 +13,7 @@ const officialContentConstantsPath = path.join(projectRoot, "src", "constants", 
 const pluginTypePath = path.join(projectRoot, "src", "types", "plugin.ts");
 const mainPath = path.join(projectRoot, "src", "main.ts");
 const settingsPath = path.join(projectRoot, "src", "settings", "FridaySettingTab.ts");
+const settingsKitPath = path.join(projectRoot, "src", "ui", "obsidian-native", "SettingsKit.ts");
 const officialContentServicePath = path.join(projectRoot, "src", "services", "OfficialContentService.ts");
 const zhLocalePath = path.join(projectRoot, "src", "i18n", "locales", "zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src", "i18n", "locales", "en-US.ts");
@@ -89,11 +90,13 @@ test("subscriptions refresh background notice is localized", () => {
 
 test("subscriptions refresh surfaces background sync progress and current status", () => {
 	const source = read(settingsPath);
+	const settingsKitSource = read(settingsKitPath);
 	assert.match(source, /officialContentRefreshStatus/);
 	assert.match(source, /renderOfficialContentRefreshStatus\(/);
 	assert.match(source, /settings\.subscriptions\.refreshStatus\.name/);
 	assert.match(source, /settings\.subscriptions\.refreshStatus\.progress/);
-	assert.match(source, /createEl\("progress"/);
+	assert.match(source, /renderNativeSettingsFeedback\(/);
+	assert.match(settingsKitSource, /createEl\("progress"/);
 	assert.match(source, /runBackgroundSync\(\(progress\) =>/);
 });
 

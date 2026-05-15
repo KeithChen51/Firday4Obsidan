@@ -6,8 +6,8 @@ Scope: FRIDAY surfaces that run inside Obsidian: settings, side panes, modals,
 status rows, project tools, Studio controls, assistant UI, onboarding, and
 official content management.
 
-Source of truth: `DESIGN.md` defines the product and brand system. This document
-defines the executable UI contract for plugin implementation.
+Source of truth: `DESIGN.md` defines the product and brand system. `docs/design/native-kit-catalog.html`
+is the visual reference for Native Kit states. This document defines the executable UI contract for plugin implementation.
 
 ## Core Rule
 
@@ -277,6 +277,16 @@ Rules:
 - Mark: monochrome Double Shell or compact FRIDAY concept icon.
 - Color: follow current text color, with optional small Muted Teal accent.
 - Do not use robot, human, mascot, or generic AI symbols.
+- Result-state identity keeps elapsed time visible. Simple answers use
+  `[FRIDAY mark] FRIDAY 已思考 {elapsed}` and do not expose process content.
+- Complex task results use `[FRIDAY mark] FRIDAY 已完成工作 {elapsed} >`;
+  the process is collapsed by default and expands from the FRIDAY name or
+  adjacent arrow.
+- Each visible process step inside working state or expanded result state can
+  expand to show only that step's tool-call details. Do not add a separate
+  "过程" heading inside the expanded block.
+- Tool-call detail rows are subordinate to process steps: they should be
+  shorter, lighter, and visually weaker than the step row.
 
 ### Inline Alert
 

@@ -85,6 +85,19 @@ test("settings project section renders grouped native panels instead of a floati
 	assert.match(block, /this\.renderProjectListGroup\(shell, group, projectsInGroup\)/);
 });
 
+test("settings project area does not migrate the held project status group into Native Kit", async () => {
+	const source = readSettingsSource();
+	const match = source.match(/private renderProjectSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderActiveProjectSelector/);
+	assert.ok(match, "renderProjectSection block should exist");
+	const block = match[1] ?? "";
+
+	assert.doesNotMatch(source, /renderNativeProjectStatusGroup/);
+	assert.doesNotMatch(source, /friday-native-project-status-group/);
+	assert.doesNotMatch(source, /data-component="项目状态组"/);
+	assert.doesNotMatch(block, /renderNativeSettingsFeedback/);
+	assert.doesNotMatch(block, /renderNativePrerequisiteList/);
+});
+
 test("settings user section reads and writes git credentials through secure storage hooks", async () => {
 	const source = readSettingsSource();
 	assert.match(source, /getUserGitCredential\(/);
