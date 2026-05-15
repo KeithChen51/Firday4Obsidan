@@ -31,6 +31,47 @@ test("settings tab exposes a shared native settings group helper", () => {
 	assert.match(kitSource, /friday-native-settings-group-description/);
 });
 
+test("SettingsKit exposes native hooks for settings status feedback and local states", () => {
+	const kitSource = read(settingsKitPath);
+
+	for (const exportedHelper of [
+		"renderNativeSettingStatus",
+		"markNativeDangerSetting",
+		"renderNativeSettingsFeedback",
+		"renderNativePrerequisiteList",
+		"renderNativeSettingsEmptyState",
+		"renderNativeInlineAlert",
+	]) {
+		assert.match(kitSource, new RegExp(`export function ${exportedHelper}\\(`));
+	}
+
+	for (const hook of [
+		"friday-native-setting-status",
+		"friday-native-danger-setting",
+		"friday-native-settings-feedback",
+		"friday-native-prerequisite-list",
+		"friday-native-empty-state",
+		"friday-native-inline-alert",
+	]) {
+		assert.match(kitSource, new RegExp(hook));
+	}
+});
+
+test("settings tab wires Native Kit hooks to explicit settings-page components", () => {
+	const source = read(settingsPath);
+
+	assert.match(source, /renderNativeSettingStatus/);
+	assert.match(source, /markNativeDangerSetting/);
+	assert.match(source, /renderNativeSettingsFeedback/);
+	assert.match(source, /renderNativePrerequisiteList/);
+	assert.match(source, /renderNativeSettingsEmptyState/);
+	assert.match(source, /renderNativeInlineAlert/);
+	assert.match(source, /renderPluginUpdatePrerequisitesSetting\(card, prereqDetails\)/);
+	assert.match(source, /renderOfficialContentRefreshStatus\(controls\)/);
+	assert.match(source, /pendingOfficialContentArchiveConfirm/);
+	assert.match(source, /pendingSoulCleanupConfirm/);
+});
+
 test("agent runtime settings hide max tool iterations emergency fuse from user-facing UI", () => {
 	const settingsSource = read(settingsPath);
 	const en = read(enLocalePath);

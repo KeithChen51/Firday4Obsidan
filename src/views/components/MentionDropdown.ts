@@ -1,5 +1,7 @@
 import type { MentionToken } from "../../core/context/mention/MentionResolver";
 
+export type MentionFileTypeIconKind = "markdown" | "canvas" | "code" | "note";
+
 export interface MentionSuggestion {
 	label: string;
 	description?: string;
@@ -7,6 +9,8 @@ export interface MentionSuggestion {
 	kind?: "slash" | "mention_category" | "mention_token" | "skill";
 	trigger?: "@" | "/";
 	category?: "active_note" | "note" | "folder";
+	fileTypeIcon?: MentionFileTypeIconKind;
+	fileTypeLabel?: string;
 	replacementText?: string;
 	token?: MentionToken;
 }
@@ -103,34 +107,80 @@ export class MentionDropdown {
 		this.suggestions.forEach((item, index) => {
 			const optionId = this.getOptionId(index);
 			const row = this.listEl.createDiv({
-				cls: `friday-mention-item ${index === this.activeIndex ? "is-active" : ""}`,
-			});
-			const button = row.createEl("button", {
-				cls: "friday-mention-item-button",
-				text: item.label,
+				cls: [
+					"friday-mention-item",
+					index === this.activeIndex ? "is-active" : "",
+					item.fileTypeIcon ? "" : "is-text-only",
+				].filter(Boolean).join(" "),
 				attr: {
 					id: optionId,
 					role: "option",
 					"aria-selected": index === this.activeIndex ? "true" : "false",
 				},
 			});
-			button.type = "button";
-			button.onmouseenter = () => {
+			const selectFromPointer = (event: MouseEvent) => {
+				event.preventDefault();
+				event.stopPropagation();
+				this.activeIndex = index;
+				this.selectHandler?.(item);
+			};
+			row.onmouseenter = () => {
 				this.activeIndex = index;
 				this.render();
 			};
-			button.onmousedown = (event) => {
-				event.preventDefault();
-				this.selectHandler?.(item);
-			};
-			button.onclick = (event) => {
-				event.preventDefault();
-				this.selectHandler?.(item);
-			};
+			row.onmousedown = selectFromPointer;
+			row.onclick = selectFromPointer;
+			const copyParent = item.fileTypeIcon ? this.renderFileTypeIcon(row, item) : row;
+			copyParent.createDiv({
+				cls: "friday-mention-item-button",
+				text: item.label,
+			});
 			if (item.description) {
-				row.createDiv({ cls: "friday-mention-item-description", text: item.description });
+				copyParent.createDiv({ cls: "friday-mention-item-description", text: item.description });
 			}
 		});
+	}
+
+	private renderFileTypeIcon(row: HTMLElement, item: MentionSuggestion): HTMLElement {
+		const iconKind = item.fileTypeIcon ?? "note";
+		const iconEl = row.createEl("span", {
+			cls: `kit-file-type-icon-v1 is-${iconKind}`,
+			attr: {
+				"aria-label": item.fileTypeLabel ?? this.getFileTypeLabel(iconKind),
+			},
+		});
+		iconEl.createEl("span", {
+			cls: "friday-icon",
+			text: this.getFileTypeGlyph(iconKind),
+			attr: { "aria-hidden": "true" },
+		});
+		return row.createDiv({ cls: "friday-mention-item-copy" });
+	}
+
+	private getFileTypeLabel(kind: MentionFileTypeIconKind): string {
+		switch (kind) {
+			case "markdown":
+				return "Markdown";
+			case "canvas":
+				return "Canvas";
+			case "code":
+				return "Code";
+			default:
+				return "Note";
+		}
+	}
+
+	private getFileTypeGlyph(kind: MentionFileTypeIconKind): string {
+		switch (kind) {
+			case "markdown":
+				return "M";
+			case "canvas":
+				return "C";
+			case "code":
+				return "<>";
+			default:
+				return "N";
+		}
 	}
 
 	private getOptionId(index: number): string {

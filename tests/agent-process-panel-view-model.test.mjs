@@ -1341,6 +1341,31 @@ test("buildAgentProcessPanelViewModel builds progressive visible steps from actu
 	assertNoBannedOrdinaryTerms(ordinaryProcessText(view), "progressive visible process steps");
 });
 
+test("buildAgentProcessPanelViewModel keeps only the current visible step active during approval waits", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		items: [
+			makeItem({ id: "read-1", kind: "tool", title: "Read project", detail: "Read project files.", status: "running", tool: "read", targetPath: "Project/a.md", step: 1 }),
+			makeItem({ id: "write-1", kind: "tool", title: "Write note", detail: "Prepared a note.", status: "running", tool: "write", targetPath: "Project/output.md", step: 2 }),
+			makeItem({ id: "read-2", kind: "tool", title: "Read related context", detail: "Checked related context.", status: "running", tool: "read", targetPath: "Project/b.md", step: 3 }),
+		],
+		mutations: [
+			{ id: "pending", event: "planned", operation: "write", targetPath: "Project/output.md", status: "pending", summary: "Prepared a note.", reason: "" },
+		],
+	}));
+
+	const activeSteps = view.visibleSteps.filter((step) => step.status === "running" || step.status === "waiting_for_approval");
+	assert.equal(activeSteps.length, 1);
+	assert.equal(activeSteps[0]?.status, "waiting_for_approval");
+	assert.deepEqual(view.visibleSteps.slice(0, -1).map((step) => step.status), ["completed", "completed", "completed"]);
+	assert.equal(
+		view.timeline?.items.filter((item) => item.status === "running" || item.status === "waiting").length,
+		1,
+	);
+});
+
 test("buildAgentProcessPanelViewModel productizes pending mutation review fallback text", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -1557,6 +1582,296 @@ test("buildAgentProcessPanelViewModel hides generic live model reasoning so it d
 	assert.doesNotMatch(JSON.stringify(view), /整理方案|计划|received model reasoning|正在理解你的请求/);
 });
 
+test("buildAgentProcessPanelViewModel does not invent approval replay steps from lifecycle receipts", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "waiting_for_approval",
+		privacy: { redacted: true, source: "replay" },
+		items: [
+			makeItem({
+				id: "reasoning-1",
+				kind: "reasoning",
+				title: "FRIDAY 的思路",
+				detail: "FRIDAY 已整理当前判断。",
+				status: "ok",
+				rawEventType: "model_response",
+				reasoningProvider: "zenmux",
+			}),
+			makeItem({
+				id: "reasoning-2",
+				kind: "model",
+				title: "完成理解",
+				detail: "FRIDAY 已整理当前判断。",
+				status: "ok",
+				rawEventType: "model_response",
+			}),
+			makeItem({
+				id: "mutation",
+				kind: "mutation",
+				title: "创建/修改文件",
+				detail: "已准备文件改动。",
+				status: "waiting",
+				targetPath: "123/workspace/UX验收/native-kit-cli-artifact-ui-fix-check.md",
+				rawEventType: "mutation_planned",
+				actionRef: "m1",
+			}),
+			makeItem({
+				id: "task-waiting",
+				kind: "task",
+				title: "等待确认",
+				detail: "已准备好 1 个待应用的文件修改，确认后才会写入 Obsidian。",
+				status: "waiting",
+				rawEventType: "task_waiting_for_approval",
+				actionRef: "task-1",
+			}),
+			makeItem({
+				id: "checkpoint",
+				kind: "system",
+				title: "FRIDAY 已保存当前进度",
+				detail: "FRIDAY 已保存当前进度。",
+				status: "ok",
+				rawEventType: "checkpoint_saved",
+			}),
+		],
+		mutations: [
+			{
+				id: "m1",
+				event: "planned",
+				operation: "write",
+				targetPath: "123/workspace/UX验收/native-kit-cli-artifact-ui-fix-check.md",
+				status: "pending",
+				summary: "已准备文件改动。",
+				reason: "",
+			},
+		],
+	}));
+
+	assert.deepEqual(view.visibleSteps.map((step) => step.title), ["等待确认"]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "approval"]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.title), ["收到任务", "等待确认"]);
+	const text = ordinaryProcessText(view);
+	assert.doesNotMatch(text, /整理方案|FRIDAY 已整理当前判断|FRIDAY 已保存当前进度/);
+	assert.equal(countOccurrences(text, "读取项目现状"), 0);
+});
+
+test("buildAgentProcessPanelViewModel hides saved-progress checkpoints during running approval work", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		privacy: { redacted: true, source: "live" },
+		items: [
+			makeItem({
+				id: "tool-project-tree",
+				kind: "tool",
+				title: "project_tree",
+				detail: "project_tree listed 14 entry(s)",
+				status: "ok",
+				tool: "project_tree",
+				targetPath: "workspace",
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "mutation",
+				kind: "mutation",
+				title: "创建/修改文件",
+				detail: "已准备文件改动。",
+				status: "waiting",
+				targetPath: "123/workspace/UX验收/native-kit-cli-artifact-ui-fix-check.md",
+				rawEventType: "mutation_planned",
+				actionRef: "m1",
+			}),
+			makeItem({
+				id: "checkpoint",
+				kind: "system",
+				title: "FRIDAY 已保存当前进度",
+				detail: "FRIDAY 已保存当前进度。",
+				status: "ok",
+				rawEventType: "checkpoint_saved",
+			}),
+		],
+		mutations: [
+			{
+				id: "m1",
+				event: "planned",
+				operation: "write",
+				targetPath: "123/workspace/UX验收/native-kit-cli-artifact-ui-fix-check.md",
+				status: "pending",
+				summary: "已准备文件改动。",
+				reason: "",
+			},
+		],
+	}));
+
+	assert.deepEqual(view.visibleSteps.map((step) => step.title), ["读取上下文", "等待确认"]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.kind), ["receipt", "context", "approval"]);
+	assert.deepEqual(view.timeline?.items.map((item) => item.title), ["收到任务", "读取项目现状", "等待确认"]);
+	const text = ordinaryProcessText(view);
+	assert.doesNotMatch(text, /FRIDAY 已保存当前进度/);
+});
+
+test("buildAgentProcessPanelViewModel keeps live canvas output steps aligned with completed replay", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const canvasPath = "workspace/123.canvas";
+	const liveItems = [
+		makeItem({
+			id: "live:tool:1:use_skill",
+			kind: "tool",
+			title: "use_skill json-canvas",
+			detail: "Loaded json-canvas skill.",
+			status: "ok",
+			step: 1,
+			tool: "use_skill",
+			rawEventType: "tool_result",
+		}),
+		makeItem({
+			id: "live:tool:2:canvas_apply:call",
+			kind: "tool",
+			title: `canvas_apply ${canvasPath}`,
+			detail: "Step 2: calling tool canvas_apply",
+			status: "ok",
+			step: 2,
+			tool: "canvas_apply",
+			targetPath: canvasPath,
+			rawEventType: "tool_result",
+		}),
+		makeItem({
+			id: "live:tool:3:validate_canvas:call",
+			kind: "tool",
+			title: `validate_canvas ${canvasPath}`,
+			detail: "Step 3: calling tool validate_canvas",
+			status: "running",
+			step: 3,
+			tool: "validate_canvas",
+			targetPath: canvasPath,
+			rawEventType: "tool_call",
+		}),
+	];
+	const completedItems = liveItems.map((item) => ({
+		...item,
+		id: item.id.replace("live:", "replay:"),
+		status: "ok",
+	}));
+
+	const liveView = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "running",
+		privacy: { redacted: true, source: "live" },
+		items: liveItems,
+	}));
+	const completedView = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		items: completedItems,
+		mutations: [
+			{
+				id: "mutation-canvas",
+				event: "applied",
+				operation: "create",
+				targetPath: canvasPath,
+				status: "applied",
+				summary: "Created canvas output.",
+				reason: "",
+			},
+		],
+	}));
+
+	const liveKinds = liveView.timeline?.items.map((item) => item.kind) ?? [];
+	const completedKinds = completedView.timeline?.items
+		.map((item) => item.kind)
+		.filter((kind) => kind !== "done") ?? [];
+	assert.deepEqual(liveKinds, ["receipt", "context", "file_change"]);
+	assert.deepEqual(liveKinds, completedKinds);
+	assert.equal(liveView.timeline?.items.filter((item) => item.kind === "file_change").length, 1);
+	assert.deepEqual(
+		liveView.timeline?.items.find((item) => item.kind === "file_change")?.toolCalls?.map((call) => call.name),
+		["canvas_apply", "validate_canvas"],
+	);
+});
+
+test("buildAgentProcessPanelViewModel attaches output stage reports to the matching file-change step", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const canvasPath = "workspace/native-kit-live-parity-789.canvas";
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		items: [
+			makeItem({
+				id: "stage-apply",
+				kind: "narration",
+				title: "Stage report",
+				detail: `canvas_apply completed ${canvasPath}`,
+				status: "ok",
+				rawEventType: "narration_report",
+				narrationKind: "stage_report",
+			}),
+			makeItem({
+				id: "stage-validate",
+				kind: "narration",
+				title: "Stage report",
+				detail: "validate_canvas passed 0 issue(s)",
+				status: "ok",
+				rawEventType: "narration_report",
+				narrationKind: "stage_report",
+			}),
+			makeItem({
+				id: "tool-skill",
+				kind: "tool",
+				title: "use_skill json-canvas",
+				detail: "Loaded json-canvas skill.",
+				status: "ok",
+				step: 1,
+				tool: "use_skill",
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "tool-apply",
+				kind: "tool",
+				title: `canvas_apply ${canvasPath}`,
+				detail: `canvas_apply ${canvasPath}`,
+				status: "ok",
+				step: 2,
+				tool: "canvas_apply",
+				targetPath: canvasPath,
+				rawEventType: "tool_result",
+			}),
+			makeItem({
+				id: "tool-validate",
+				kind: "tool",
+				title: `validate_canvas ${canvasPath}`,
+				detail: `validate_canvas ${canvasPath}`,
+				status: "ok",
+				step: 3,
+				tool: "validate_canvas",
+				targetPath: canvasPath,
+				rawEventType: "tool_result",
+			}),
+		],
+		mutations: [
+			{
+				id: "mutation-canvas",
+				event: "applied",
+				operation: "create",
+				targetPath: canvasPath,
+				status: "applied",
+				summary: "Created canvas output.",
+				reason: "",
+			},
+		],
+	}));
+
+	const contextNotes = view.timeline?.items
+		.find((item) => item.kind === "context")
+		?.notes?.map((note) => note.text).join(" ") ?? "";
+	const fileChangeNotes = view.timeline?.items
+		.find((item) => item.kind === "file_change")
+		?.notes?.map((note) => note.text).join(" ") ?? "";
+	assert.doesNotMatch(contextNotes, /canvas_apply|validate_canvas/);
+	assert.match(fileChangeNotes, /canvas_apply completed/);
+	assert.match(fileChangeNotes, /validate_canvas passed/);
+});
+
 test("buildAgentProcessPanelViewModel productizes repeated context tool results without runtime plumbing", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 
@@ -1624,8 +1939,50 @@ test("buildAgentProcessPanelViewModel productizes repeated context tool results 
 	assert.equal(contextItem.summary, "已查看项目结构和相关文件。");
 	assert.equal(contextItem.meta, undefined);
 	assert.equal(contextItem.detail, undefined);
-	assert.equal(contextItem.notes, undefined);
+	assert.ok(contextItem.notes?.length >= 1, "every visible process item should provide a user-facing narration note");
+	assert.doesNotMatch(contextItem.notes.map((note) => note.text).join(" "), /Tool ok\.|Native tool result appended|project_tree listed|Read 8 file\(s\)|model messages|checkpoint|debug/i);
+	assert.deepEqual(contextItem.toolCalls, [
+		{ name: "project_tree", detail: "workspace" },
+		{ name: "read_many", detail: "src/views" },
+		{ name: "read", detail: "src/views/agentProcessPanelViewModel.ts" },
+	]);
+	assert.doesNotMatch(JSON.stringify(contextItem.toolCalls), /Tool ok\.|Native tool result appended|project_tree listed|Read 8 file\(s\)|model messages|checkpoint|debug/i);
 	assert.doesNotMatch(ordinaryProcessText(view), /Tool ok\.|Native tool result appended|project_tree listed|Read 8 file\(s\)|model messages|checkpoint|debug|已运行\s*\d+\s*条命令/i);
+});
+
+test("buildAgentProcessPanelViewModel keeps HTML command-count chip for visible tool calls", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+
+	const view = buildAgentProcessPanelViewModel(makeSnapshot({
+		status: "completed",
+		items: [
+			makeItem({
+				id: "read-catalog",
+				kind: "tool",
+				title: "read_file",
+				detail: "docs/design/native-kit-catalog.html",
+				status: "ok",
+				tool: "read_file",
+				targetPath: "docs/design/native-kit-catalog.html",
+				rawEventType: "tool_result",
+			}),
+		],
+	}));
+
+	const toolItem = view.timeline?.items.find((item) => item.toolCall);
+	assert.ok(toolItem, "a visible tool call should be exposed to the Native Kit renderer");
+	assert.deepEqual(toolItem.toolCall, {
+		name: "read_file",
+		detail: "docs/design/native-kit-catalog.html",
+	});
+	assert.deepEqual(toolItem.toolCalls, [
+		{
+			name: "read_file",
+			detail: "docs/design/native-kit-catalog.html",
+		},
+	]);
+	assert.equal(toolItem.meta, "已运行 1 条命令");
+	assert.doesNotMatch(ordinaryProcessText(view), /Tool ok\.|Native tool result appended|project_tree listed|model messages|checkpoint|debug/i);
 });
 
 test("buildAgentProcessPanelViewModel hides context checkpoint implementation wording", async () => {

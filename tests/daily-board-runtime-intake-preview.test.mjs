@@ -24,7 +24,7 @@ function extractMethod(source, name, nextName) {
 	return match[0];
 }
 
-test("submitAiPrompt renders a local intake preview before mention and planner startup", () => {
+test("submitAiPrompt avoids generic local response prose before mention and planner startup", () => {
 	const source = readViewSource();
 	const submitBlock = extractMethod(source, "submitAiPrompt", "compileWikiByButton");
 	const listBlock = extractMethod(source, "renderAiMessageList", "shouldRenderAgentTaskPanel");
@@ -40,8 +40,8 @@ test("submitAiPrompt renders a local intake preview before mention and planner s
 	assert.ok(plannerIndex > renderIndex, "planner startup must happen after the first preview render");
 	assert.match(source, /private buildLocalIntakePreview\(rawPrompt: string\): string/);
 	assert.match(listBlock, /content: this\.aiLocalIntakePreview/);
-	assert.match(previewBuilderBlock, /FRIDAY 正在响应……/);
-	assert.doesNotMatch(previewBuilderBlock, /FRIDAY 正在理解你的请求/);
+	assert.match(previewBuilderBlock, /return "";/);
+	assert.doesNotMatch(previewBuilderBlock, /FRIDAY/);
 	assert.doesNotMatch(previewBuilderBlock, /aiRuntimeTrajectoryStore|rememberCompletedTrajectorySnapshot|projectReplaySummary/);
 	assert.doesNotMatch(submitBlock, /content: this\.aiLocalIntakePreview/);
 });
@@ -135,9 +135,9 @@ test("runtime elapsed refresh updates the live process in place without rebuildi
 	assert.match(timerBlock, /this\.syncLiveRuntimeElapsedProcess\(\)/);
 	assert.doesNotMatch(timerBlock, /syncAiLiveChatShell\(\)/);
 	assert.doesNotMatch(timerBlock, /renderAiMessageList\(/);
-	assert.match(refreshBlock, /querySelector\("\.friday-agent-process-shell\.is-live"\)/);
-	assert.match(refreshBlock, /friday-agent-process-headline/);
-	assert.match(refreshBlock, /friday-agent-process-statusbar-elapsed/);
+	assert.match(refreshBlock, /this\.syncLiveRuntimeProgressProcess\(\)/);
+	assert.match(source, /querySelector\("\.friday-ai-message-row\.is-assistant\.is-live"\)/);
+	assert.doesNotMatch(refreshBlock, /friday-agent-process-headline|friday-agent-process-statusbar-elapsed/);
 	assert.doesNotMatch(refreshBlock, /containerEl\.empty\(\)|renderAiMessageList\(/);
 });
 
@@ -155,7 +155,7 @@ test("runtime progress refreshes an existing live process without rebuilding the
 	assert.match(childSyncBlock, /appendChild\(templateNode\)/);
 	assert.match(childSyncBlock, /replaceWith\(templateNode\)/);
 	assert.doesNotMatch(childSyncBlock, /replaceChildren|containerEl\.empty\(\)|renderAiMessageList\(/);
-	assert.match(progressRefreshBlock, /querySelector\("\.friday-agent-process-shell\.is-live"\)/);
+	assert.match(progressRefreshBlock, /this\.findCurrentLiveProcessElement\(\)/);
 	assert.match(progressRefreshBlock, /document\.createElement\("div"\)/);
 	assert.doesNotMatch(progressRefreshBlock, /containerEl\.empty\(\)|renderAiMessageList\(/);
 	assert.ok(progressInPlaceIndex >= 0, "runtime progress should attempt in-place live process refresh");
@@ -206,17 +206,25 @@ test("runtime progress preserves the currently expanded live process while synci
 	assert.match(progressRefreshBlock, /this\.renderTrajectoryCard\(scratchEl, this\.aiRuntimeTrajectorySnapshot, "live", preserveExpanded \? true : undefined\)/);
 });
 
-test("runtime progress preserves opened phase and technical detail disclosures", () => {
+test("runtime progress no longer depends on opened phase or technical detail disclosures", () => {
 	const source = readViewSource();
 	const rendererSource = readRendererSource();
 	const progressRefreshBlock = extractMethod(source, "syncLiveRuntimeProgressProcess", "syncLiveRuntimeElapsedProcess");
 	const liveShellBlock = extractMethod(source, "syncAiLiveChatShell", "syncAiRuntimeShell");
 
-	assert.match(rendererSource, /data-process-disclosure-key/);
-	assert.match(rendererSource, /`phase:\$\{group\.id\}`/);
-	assert.match(rendererSource, /`\$\{item\.id\}:detail`/);
+	assert.doesNotMatch(rendererSource, /data-process-disclosure-key/);
+	assert.doesNotMatch(rendererSource, /`phase:\$\{group\.id\}`/);
+	assert.doesNotMatch(rendererSource, /`\$\{item\.id\}:detail`/);
+	assert.doesNotMatch(rendererSource, /friday-agent-process-phase-group|friday-agent-process-timeline-detail/);
+	assert.match(rendererSource, /friday-agent-process-timeline-event-row kit-event-row-v1/);
 	assert.match(source, /private captureProcessDisclosureState\(/);
 	assert.match(source, /private applyProcessDisclosureState\(/);
+	assert.match(source, /\.assistant-process-step-v6\[data-item-id\]/);
+	assert.match(source, /assistant-step-toggle-v6/);
+	assert.match(source, /native-step:\$\{key\}/);
+	assert.match(source, /aria-expanded/);
+	assert.match(source, /aria-hidden/);
+	assert.match(source, /is-open/);
 	assert.match(progressRefreshBlock, /const disclosureState = this\.captureProcessDisclosureState\(processEl\)/);
 	assert.match(progressRefreshBlock, /this\.applyProcessDisclosureState\(nextProcessEl, disclosureState\)/);
 	assert.match(liveShellBlock, /const disclosureState = this\.captureCurrentLiveProcessDisclosureState\(\)/);

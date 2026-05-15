@@ -45,9 +45,16 @@ import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
 import type { GitRuntimeStatus } from "../platform/git/GitRuntimeProbe";
 import {
 	createNativeSettingsGroup,
+	markNativeDangerSetting,
 	renderFridaySettingsTitle,
+	renderNativeInlineAlert,
+	renderNativePrerequisiteList,
 	renderNativeSectionTabs,
+	renderNativeSettingStatus,
+	renderNativeSettingsEmptyState,
+	renderNativeSettingsFeedback,
 	type NativeSettingsGroupOptions,
+	type NativeSettingsTone,
 	type NativeSectionTabItem,
 } from "../ui/obsidian-native/SettingsKit";
 
@@ -452,23 +459,21 @@ export class FridaySettingTab extends PluginSettingTab {
 					: details.summary,
 			);
 
-		const lineWrap = setting.descEl.createDiv({ cls: "friday-plugin-update-prerequisites-list" });
-		if (details.readyLabels.length > 0) {
-			lineWrap.createDiv({
-				cls: "friday-plugin-update-prereq-line is-ready",
-				text: this.t("settings.user.update.prerequisites.ready", "已完成：{items}", {
-					items: details.readyLabels.join("、"),
-				}),
-			});
-		}
-		if (details.pendingLabels.length > 0) {
-			lineWrap.createDiv({
-				cls: "friday-plugin-update-prereq-line",
-				text: this.t("settings.user.update.prerequisites.pending", "待完成：{items}", {
-					items: details.pendingLabels.join("、"),
-				}),
-			});
-		}
+		renderNativePrerequisiteList(setting.descEl, {
+			ariaLabel: this.t("settings.user.update.prerequisites.name", "前置条件"),
+			items: [
+				...details.readyLabels.map((label) => ({
+					label,
+					state: "ready" as const,
+					stateLabel: this.t("settings.user.update.prerequisites.readyState", "已完成"),
+				})),
+				...details.pendingLabels.map((label) => ({
+					label,
+					state: "pending" as const,
+					stateLabel: this.t("settings.user.update.prerequisites.pendingState", "待完成"),
+				})),
+			],
+		});
 	}
 
 	private renderSubscriptionsUnavailableState(
@@ -483,18 +488,21 @@ export class FridaySettingTab extends PluginSettingTab {
 			),
 			extraClass: "friday-project-settings-panel",
 		});
-		if (details.readyLabels.length > 0) {
-			group.createEl("p", {
-				text: this.t("settings.user.update.prerequisites.ready", "已完成：{items}", {
-					items: details.readyLabels.join("、"),
-				}),
-			});
-		}
-		if (details.pendingLabels.length > 0) {
-			group.createEl("p", {
-				text: this.t("settings.user.update.prerequisites.pending", "待完成：{items}", {
-					items: details.pendingLabels.join("、"),
-				}),
+		if (details.readyLabels.length > 0 || details.pendingLabels.length > 0) {
+			renderNativePrerequisiteList(group, {
+				ariaLabel: this.t("settings.user.update.prerequisites.name", "前置条件"),
+				items: [
+					...details.readyLabels.map((label) => ({
+						label,
+						state: "ready" as const,
+						stateLabel: this.t("settings.user.update.prerequisites.readyState", "已完成"),
+					})),
+					...details.pendingLabels.map((label) => ({
+						label,
+						state: "blocked" as const,
+						stateLabel: this.t("settings.user.update.prerequisites.blockedState", "需补充"),
+					})),
+				],
 			});
 		}
 		new Setting(group)
@@ -614,12 +622,14 @@ export class FridaySettingTab extends PluginSettingTab {
 				),
 				extraClass: "friday-project-settings-panel",
 			});
-			warningGroup.createEl("p", {
-				text: this.t("settings.subscriptions.legacy.blockingPaths", "阻断路径：{paths}", {
+			renderNativeInlineAlert(warningGroup, {
+				tone: "warning",
+				title: this.t("settings.subscriptions.legacy.warning", "检测到 FRIDAY 根目录历史内容"),
+				message: this.t("settings.subscriptions.legacy.blockingPaths", "阻断路径：{paths}", {
 					paths: blockingPaths.join(" | "),
 				}),
 			});
-			new Setting(warningGroup)
+			const archiveSetting = new Setting(warningGroup)
 				.setName(
 					this.pendingOfficialContentArchiveConfirm
 						? this.t("settings.subscriptions.legacy.archiveConfirm", "确认归档旧版本文件夹")
@@ -629,8 +639,9 @@ export class FridaySettingTab extends PluginSettingTab {
 					this.pendingOfficialContentArchiveConfirm
 						? this.t("settings.subscriptions.legacy.archiveConfirmDesc", "这不会删除旧数据；只会把当前 F.R.I.D.A.Y/ 改名，为订阅频道腾出新的 F.R.I.D.A.Y/。")
 						: this.t("settings.subscriptions.legacy.archiveDesc", "将当前 F.R.I.D.A.Y/ 改名为“旧版本F.R.I.D.A.Y文件夹”，保留里面的项目、个人和 Agent 数据供你之后手动整理。"),
-				)
-				.addButton((button) =>
+				);
+			markNativeDangerSetting(archiveSetting);
+			archiveSetting.addButton((button) =>
 					button
 						.setWarning()
 						.setButtonText(
@@ -667,7 +678,7 @@ export class FridaySettingTab extends PluginSettingTab {
 								this.display();
 							}
 						}),
-				);
+			);
 		}
 
 		new Setting(controls)
@@ -705,8 +716,9 @@ export class FridaySettingTab extends PluginSettingTab {
 		});
 
 		if (this.host.settings.officialContent.catalog.length === 0) {
-			providerGroup.createEl("p", {
-				text: this.t("settings.subscriptions.empty", "暂无可显示的栏目。先点击“刷新官方内容”。"),
+			renderNativeSettingsEmptyState(providerGroup, {
+				title: this.t("settings.subscriptions.empty.title", "暂无可显示的栏目"),
+				description: this.t("settings.subscriptions.empty", "暂无可显示的栏目。先点击“刷新官方内容”。"),
 			});
 			return;
 		}
@@ -753,24 +765,22 @@ export class FridaySettingTab extends PluginSettingTab {
 		const detail = status.error?.trim()
 			? this.t("settings.subscriptions.refreshStatus.error", "错误：{error}", { error: status.error })
 			: status.message;
-		const statusSetting = new Setting(containerEl)
-			.setName(this.t("settings.subscriptions.refreshStatus.name", "刷新状态"))
-			.setDesc(
-				this.t("settings.subscriptions.refreshStatus.desc", "当前状态：{status}。{detail}", {
-					status: statusLabel,
-					detail,
-				}),
-			);
-		const progressContainer = statusSetting.controlEl.createDiv({ cls: "friday-subscriptions-refresh-progress" });
-		const progressEl = progressContainer.createEl("progress") as HTMLProgressElement;
 		const percent = Math.max(0, Math.min(100, Math.round(status.percent)));
-		progressEl.max = 100;
-		progressEl.value = percent;
-		progressEl.setAttribute("aria-label", statusLabel);
-		progressContainer.createSpan({
-			cls: "friday-subscriptions-refresh-progress-label",
-			text: this.t("settings.subscriptions.refreshStatus.progress", "{percent}%", { percent }),
+		const feedback = renderNativeSettingsFeedback(containerEl, {
+			title: this.t("settings.subscriptions.refreshStatus.name", "刷新状态"),
+			message: this.t("settings.subscriptions.refreshStatus.desc", "当前状态：{status}。{detail}", {
+				status: statusLabel,
+				detail,
+			}),
+			tone: this.getOfficialContentRefreshStatusTone(status),
+			progressPercent: percent,
+			progressLabel: this.t("settings.subscriptions.refreshStatus.progress", "{percent}%", { percent }),
+			extraClass: "friday-subscriptions-refresh-status",
 		});
+		const progressContainer = feedback.querySelector(".friday-native-settings-feedback-progress");
+		progressContainer?.classList.add("friday-subscriptions-refresh-progress");
+		const progressLabel = feedback.querySelector(".friday-native-settings-feedback-progress-label");
+		progressLabel?.classList.add("friday-subscriptions-refresh-progress-label");
 	}
 
 	private queueOfficialContentBackgroundSync(): void {
@@ -832,7 +842,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		const connectionGroup = this.createNativeSettingsGroup(containerEl);
 		const capabilityGroup = this.createNativeSettingsGroup(containerEl);
 
-		new Setting(statusGroup)
+		const llmStatusSetting = new Setting(statusGroup)
 			.setName(this.t("settings.llm.connection.name", "连通状态"))
 			.setDesc(this.getLlmStatusDesc())
 			.addButton((button) =>
@@ -847,6 +857,10 @@ export class FridaySettingTab extends PluginSettingTab {
 						await this.runLlmConnectionTest();
 					}),
 			);
+		renderNativeSettingStatus(llmStatusSetting, {
+			text: this.getLlmStatusLabel(),
+			tone: this.getLlmStatusTone(),
+		});
 
 		new Setting(statusGroup)
 			.setName(this.t("settings.llm.mode.name", "接入模式"))
@@ -1193,22 +1207,24 @@ export class FridaySettingTab extends PluginSettingTab {
 			);
 
 		if (this.llmStatus === "failed" && this.llmStatusDetail) {
-			const wrap = this.createNativeSettingsGroup(containerEl, {
+			const feedback = renderNativeSettingsFeedback(statusGroup, {
 				title: this.t("settings.llm.errorDetail.title", "错误详情（点击文本可复制）"),
-				extraClass: "friday-llm-error-detail-wrap",
+				message: this.t("settings.llm.status.failedDesc", "连接失败，请查看下方错误详情。"),
+				tone: "danger",
+				detail: this.llmStatusDetail,
 			});
-			const detail = wrap.createEl("pre", {
-				cls: "friday-llm-error-detail",
-				text: this.llmStatusDetail,
-			});
-			detail.onclick = async () => {
-				try {
-					await navigator.clipboard.writeText(this.llmStatusDetail);
-					new Notice(this.t("settings.llm.errorDetail.copySuccess", "已复制错误详情"), 2500);
-				} catch {
-					new Notice(this.t("settings.llm.errorDetail.copyFailed", "复制失败，请手动复制"), 2500);
-				}
-			};
+			const detail = feedback.querySelector(".friday-native-settings-feedback-detail");
+			if (detail instanceof HTMLElement) {
+				detail.classList.add("friday-llm-error-detail");
+				detail.onclick = async () => {
+					try {
+						await navigator.clipboard.writeText(this.llmStatusDetail);
+						new Notice(this.t("settings.llm.errorDetail.copySuccess", "已复制错误详情"), 2500);
+					} catch {
+						new Notice(this.t("settings.llm.errorDetail.copyFailed", "复制失败，请手动复制"), 2500);
+					}
+				};
+			}
 		}
 	}
 
@@ -1471,9 +1487,9 @@ export class FridaySettingTab extends PluginSettingTab {
 				),
 			)
 			.addDropdown((dropdown) => {
-				dropdown.addOption("auto", this.t("settings.agent.permissionMode.auto", "🚀 全自动"));
-				dropdown.addOption("standard", this.t("settings.agent.permissionMode.standard", "🛡️ 标准"));
-				dropdown.addOption("strict", this.t("settings.agent.permissionMode.strict", "🔒 严格"));
+				dropdown.addOption("auto", this.t("settings.agent.permissionMode.auto", "全自动"));
+				dropdown.addOption("standard", this.t("settings.agent.permissionMode.standard", "标准"));
+				dropdown.addOption("strict", this.t("settings.agent.permissionMode.strict", "严格"));
 				dropdown.setValue(this.host.settings.agentRuntime.toolPermissionMode);
 				dropdown.onChange(async (value) => {
 					const mode = value as ToolPermissionMode;
@@ -1539,7 +1555,7 @@ export class FridaySettingTab extends PluginSettingTab {
 						: "自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作，会删除旧 preset 与知识文件。",
 				),
 			});
-			new Setting(cleanupGroup)
+			const cleanupSetting = new Setting(cleanupGroup)
 				.setName(this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"))
 				.setDesc(
 					this.pendingSoulCleanupConfirm
@@ -1551,8 +1567,9 @@ export class FridaySettingTab extends PluginSettingTab {
 								"settings.soul.cleanup.desc",
 								"自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作。",
 						  ),
-				)
-				.addButton((button) =>
+				);
+			markNativeDangerSetting(cleanupSetting);
+			cleanupSetting.addButton((button) =>
 					button
 						.setButtonText(
 							this.pendingSoulCleanupConfirm
@@ -1795,8 +1812,8 @@ export class FridaySettingTab extends PluginSettingTab {
 						);
 						await this.host.saveSettings();
 						this.display();
-					}),
-				);
+						}),
+			);
 		}
 	}
 
@@ -2496,6 +2513,20 @@ export class FridaySettingTab extends PluginSettingTab {
 		}
 	}
 
+	private getOfficialContentRefreshStatusTone(status: OfficialContentSyncProgress): NativeSettingsTone {
+		switch (status.stage) {
+			case "refreshingCatalog":
+			case "applyingSubscriptions":
+				return "active";
+			case "completed":
+				return "success";
+			case "failed":
+				return "danger";
+			default:
+				return "muted";
+		}
+	}
+
 	private markLlmStatusDirty(): void {
 		this.visionProbeStatus = "idle";
 		this.testedVisionCapability = null;
@@ -2538,6 +2569,14 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (this.llmStatus === "connected") return this.llmStatusDetail || this.t("settings.llm.status.passed", "检测通过。");
 		if (this.llmStatus === "failed") return this.t("settings.llm.status.failedDesc", "连接失败，请查看下方错误详情。");
 		return this.t("settings.llm.status.idleDesc", "点击右侧按钮进行连通测试。");
+	}
+
+	private getLlmStatusTone(): NativeSettingsTone {
+		if (this.llmStatus === "connected") return "success";
+		if (this.llmStatus === "checking") return "active";
+		if (this.llmStatus === "failed") return "danger";
+		if (this.llmStatus === "unconfigured") return "warning";
+		return "muted";
 	}
 
 	private formatVisionCapability(capability: ModelCapabilityInfo): string {

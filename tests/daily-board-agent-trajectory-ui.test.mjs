@@ -165,20 +165,40 @@ test("DailyBoard syncComposerTaskBar renders plan progress only and rerenders fr
 
 	assert.equal(syncCount, 1);
 	assert.equal(host.countByClass("friday-composer-task-bar"), 1);
-	assert.equal(host.findByClass("friday-composer-task-bar-summary")?.attributes["aria-expanded"], "false");
+	assert.equal(host.findByClass("composer-taskbar-kit-v5")?.classes.has("is-collapsed"), true);
+	assert.equal(host.findByClass("composer-taskbar-kit-v5")?.classes.has("is-running"), true);
+	assert.equal(host.findByClass("composer-taskbar-summary-v5")?.attributes["aria-expanded"], "false");
 	assert.match(host.textContent, /正在执行/);
 	assert.match(host.textContent, /2\/3/);
 	assert.match(host.textContent, /实现 Composer Task Bar/);
 	assert.doesNotMatch(host.textContent, /当前：|刚刚完成：|接下来：|正在做什么/);
 
-	host.findByClass("friday-composer-task-bar-summary")?.onclick?.();
+	host.findByClass("composer-taskbar-summary-v5")?.onclick?.();
 
 	assert.equal(syncCount, 2);
 	assert.equal(view.aiComposerTaskBarExpanded, true);
-	assert.equal(host.findByClass("friday-composer-task-bar-summary")?.attributes["aria-expanded"], "true");
-	assert.equal(host.countByClass("friday-composer-task-bar-item"), 3);
+	assert.equal(host.findByClass("composer-taskbar-summary-v5")?.attributes["aria-expanded"], "true");
+	assert.equal(host.findByClass("composer-taskbar-kit-v5")?.classes.has("is-expanded"), true);
+	assert.equal(host.countByClass("composer-taskbar-task-v5"), 3);
+	assert.equal(host.findAllByClass("composer-taskbar-task-v5").some((item) => item.classes.has("is-pending")), true);
 	assert.match(host.textContent, /确认现状/);
 	assert.match(host.textContent, /运行验收测试/);
+});
+
+test("DailyBoard syncComposerTaskBar renders runtime-sourced task bar plans", async () => {
+	const view = await createDailyBoardHarness({
+		aiRuntimeTrajectorySnapshot: makeTaskBarSnapshot({
+			planSource: "runtime",
+		}),
+	});
+	const host = new FakeElement("div");
+	view.aiComposerTaskBarHostEl = host;
+
+	view.syncComposerTaskBar();
+
+	assert.equal(host.countByClass("friday-composer-task-bar"), 1);
+	assert.equal(host.findByClass("composer-taskbar-kit-v5")?.classes.has("is-running"), true);
+	assert.equal(host.findByClass("composer-taskbar-summary-v5")?.attributes["aria-expanded"], "false");
 });
 
 test("DailyBoard syncAiLiveChatShell refreshes the saved composer task bar host", async () => {
@@ -324,12 +344,12 @@ test("DailyBoard renders live stage reports as process notes without extra assis
 		false,
 		"stage report should not render as a standalone assistant reply"
 	);
-	assert.equal(messageListEl.countByClass("test-assistant-avatar"), 0);
-	assert.equal(messageListEl.findByClass("friday-agent-process-disclosure")?.classes.has("kit-running-surface-v1"), true);
-	const processNotes = messageListEl.findAllByClass("friday-agent-process-timeline-note");
-	assert.equal(processNotes.length, 1, "stage report should render as an inline process note");
-	assert.match(processNotes[0]?.textContent ?? "", /已读取相关文件/);
-	assert.ok(messageListEl.countByClass("friday-agent-process-timeline-item") >= 1);
+	assert.equal(messageListEl.countByClass("test-assistant-avatar"), 1);
+	assert.equal(messageListEl.findAllByClass("assistant-process-event-v6").some((row) => row.classes.has("kit-running-surface-v1")), true);
+	const processNotes = messageListEl.findAllByClass("assistant-step-narration-v6");
+	assert.equal(processNotes.length, 1, "running stage report should stay attached to the live process step");
+	assert.ok(processNotes[0]?.textContent.includes(stageText));
+	assert.ok(messageListEl.countByClass("assistant-process-step-v6") >= 1);
 });
 
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
@@ -1625,8 +1645,30 @@ test("renderAgentAnswerFlow does not keep a process panel for completed direct-a
 	assert.equal(root.countByClass("friday-agent-process-shell"), 0);
 	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
+	assert.equal(root.findByClass("assistant-turn-v2")?.classes.has("is-simple-result"), true);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
 	assert.match(root.textContent, /2\+2 等于 4。/);
-	assert.doesNotMatch(root.textContent, /我会直接回答|FRIDAY 已思考|过程|正在处理/);
+	assert.match(root.textContent, /FRIDAY 已思考/);
+	assert.doesNotMatch(root.textContent, /我会直接回答|过程|正在处理/);
+});
+
+test("renderAgentAnswerFlow uses working meta without generic response prose for streaming placeholders", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: null,
+		isStreaming: true,
+		expanded: false,
+		onToggle: () => {},
+		renderContent: () => {},
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.match(root.textContent, /FRIDAY/);
+	assert.doesNotMatch(root.textContent, /已思考|正在响应|FRIDAY 正在响应/);
 });
 
 test("renderAgentTrajectoryCard adds expanded and collapsed process state classes", async () => {
@@ -1678,10 +1720,10 @@ test("renderAgentTrajectoryCard adds expanded and collapsed process state classe
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), true);
-	assert.equal(collapsedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), false);
-	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-expanded"), true);
-	assert.equal(expandedRoot.findByClass("friday-agent-process-shell")?.classes.has("is-collapsed"), false);
+	assert.equal(collapsedRoot.findByClass("assistant-output-stack-v3")?.classes.has("is-live"), true);
+	assert.equal(collapsedRoot.findByClass("assistant-output-stack-v3")?.classes.has("is-expanded"), true);
+	assert.equal(expandedRoot.findByClass("assistant-output-stack-v3")?.classes.has("is-expanded"), true);
+	assert.equal(expandedRoot.findByClass("assistant-output-stack-v3")?.classes.has("is-collapsed"), false);
 	assert.equal(expandedRoot.countByClass("friday-agent-process-timeline-detail"), 0);
 });
 
@@ -1743,25 +1785,57 @@ test("renderAgentTrajectoryCard collapsed process panel shows FRIDAY work-proces
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process"), 1);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.equal(root.countByClass("avatar"), 0);
-	assert.equal(root.findByClass("friday-agent-process-disclosure")?.classes.has("kit-event-row-v1"), true);
-	assert.equal(root.findByClass("friday-agent-process-disclosure")?.classes.has("kit-running-surface-v1"), true);
-	assert.equal(root.countByClass("kit-event-row-main-v1"), 1);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-step-v6"), 1);
+	assert.equal(root.countByClass("avatar"), 1);
+	assert.equal(root.findByClass("assistant-process-event-v6")?.classes.has("kit-event-row-v1"), true);
+	assert.equal(root.findByClass("assistant-process-event-v6")?.classes.has("kit-running-surface-v1"), true);
+	assert.equal(root.countByClass("kit-event-row-main-v1") >= 1, true);
 	assert.equal(root.countByClass("friday-runtime-card"), 0);
-	assert.match(root.textContent, /正在处理 3s/);
+	assert.match(root.textContent, /FRIDAY 正在工作 3s/);
 	assert.doesNotMatch(root.textContent, />/);
-	assert.doesNotMatch(root.textContent, /Read Notes\/today\.md/);
-	assert.doesNotMatch(root.textContent, /Reading project notes/);
 	assert.doesNotMatch(root.textContent, /Current|Evidence|Task running|Runtime started/i);
 	assert.equal(root.countByClass("friday-agent-process-current"), 0);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
 	assert.equal(root.countByClass("friday-agent-process-action"), 0);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
-	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-right");
-	root.findByClass("friday-agent-process-toggle")?.onclick?.();
-	assert.deepEqual(calls, ["toggle"]);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.deepEqual(calls, []);
+});
+
+test("renderAgentTrajectoryCard renders working process steps with catalog DOM and narration for each step", async () => {
+	const { renderAgentTrajectoryCard } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentTrajectoryCard({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			headline: "Agent is using a tool",
+			summary: "Reading project notes.",
+			time: { startedAt: "2026-05-05T00:00:00.000Z", updatedAt: "2026-05-05T00:00:08.000Z", durationMs: 8000 },
+			items: [
+				makeItem({ id: "read", kind: "tool", title: "读取规范", detail: "docs/design/friday-native-kit.md", status: "ok", tool: "read_file", targetPath: "docs/design/friday-native-kit.md", step: 1 }),
+				makeItem({ id: "stage", kind: "narration", title: "阶段性汇报", detail: "已读取规范。接下来整理消息状态。", status: "ok", rawEventType: "narration_report", narrationKind: "stage_report", narrationJustDone: "已读取规范", narrationNext: "接下来整理消息状态", step: 1 }),
+				makeItem({ id: "edit", kind: "tool", title: "整理助手消息状态", detail: "docs/design/native-kit-catalog.html", status: "running", tool: "edit_file", targetPath: "docs/design/native-kit-catalog.html", step: 2 }),
+				makeItem({ id: "running-stage", kind: "narration", title: "阶段性汇报", detail: "不应显示在运行中的步骤下。", status: "running", rawEventType: "narration_report", narrationKind: "stage_report", narrationJustDone: "不应显示", narrationNext: "仍在执行", step: 2 }),
+			],
+		}),
+		variant: "live",
+		expanded: false,
+		onToggle: () => {},
+		translate,
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	const turn = root.findByClass("assistant-turn-v2");
+	assert.ok(turn?.classes.has("is-assistant"));
+	assert.ok(turn?.classes.has("is-working"));
+	assert.match(root.findByClass("assistant-result-meta-v6")?.textContent ?? "", /FRIDAY 正在工作 8s/);
+	assert.equal(root.countByClass("assistant-process-step-v6"), 2);
+	assert.equal(root.countByClass("assistant-process-event-v6"), 2);
+	assert.equal(root.findAllByClass("assistant-process-event-v6").some((row) => row.classes.has("kit-running-surface-v1")), true);
+	assert.equal(root.countByClass("assistant-step-narration-v6"), 2);
+	assert.ok(root.findAllByClass("assistant-process-step-v6").every((step) => step.countByClass("assistant-step-narration-v6") === 1));
 });
 
 test("renderAgentTrajectoryCard expanded ordinary process hides internal runtime terms", async () => {
@@ -1794,9 +1868,8 @@ test("renderAgentTrajectoryCard expanded ordinary process hides internal runtime
 	});
 
 	assertNoBannedOrdinaryTerms(root.textContent, "expanded process DOM text");
-	const disclosure = root.findByClass("friday-agent-process-disclosure");
-	assert.equal(disclosure?.classes.has("kit-event-row-v1"), true);
-	assert.equal(disclosure?.classes.has("kit-running-surface-v1"), true);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(root.findAllByClass("assistant-process-event-v6").some((row) => row.classes.has("kit-running-surface-v1")), true);
 	assert.equal(root.countByClass("friday-agent-process-phase-group"), 0);
 	assert.equal(root.countByClass("friday-agent-process-timeline-detail"), 0);
 });
@@ -1823,14 +1896,12 @@ test("renderAgentTrajectoryCard renders simple completed answer replay as compac
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.equal(root.findByClass("friday-agent-process-disclosure")?.classes.has("kit-event-row-v1"), true);
-	assert.equal(root.findByClass("friday-agent-process-disclosure")?.classes.has("kit-running-surface-v1"), false);
-	assert.equal(root.countByClass("avatar"), 0);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-step-v6"), 0);
+	assert.equal(root.countByClass("avatar"), 1);
 	assert.match(root.textContent, /FRIDAY 已思考/);
-	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
 });
 
 test("renderAgentTrajectoryCard keeps completed file read replay as expandable work process", async () => {
@@ -1858,12 +1929,12 @@ test("renderAgentTrajectoryCard keeps completed file read replay as expandable w
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 1);
 	assert.match(root.textContent, /FRIDAY 已完成工作/);
 	assert.doesNotMatch(root.textContent, /已处理 4s/);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
-	assert.doesNotMatch(root.textContent, /Read Notes\/Today\.md|Current|Evidence|Timeline/i);
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "false");
+	assert.equal(root.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
+	assert.doesNotMatch(root.textContent, /Current|Evidence|Timeline/i);
 });
 
 test("renderAgentTrajectoryCard expanded process panel shows visible steps without fixed phase tabs", async () => {
@@ -1898,16 +1969,19 @@ test("renderAgentTrajectoryCard expanded process panel shows visible steps witho
 
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
 	assert.equal(root.countByClass("friday-agent-process-current"), 0);
-	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
 	assert.equal(root.countByClass("friday-agent-process-mutations"), 0);
 	assert.equal(root.countByClass("friday-agent-process-recovery"), 0);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item") >= 2, true);
+	assert.equal(root.countByClass("assistant-process-step-v6") >= 2, true);
 	assert.equal(root.countByClass("friday-agent-process-step"), 0);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 	assert.match(root.textContent, /读取项目现状/);
-	assert.match(root.textContent, /运行遇到问题/);
-	assert.doesNotMatch(root.textContent, /Notes\/A\.md/);
+	assert.match(root.textContent, /遇到可恢复问题/);
+	assert.ok(
+		root.findAllByClass("assistant-tool-call-v5").some((row) => row.findByClass("assistant-tool-detail-v5")?.textContent === "Notes/A.md"),
+		"context step should keep file path inside the command drill-down",
+	);
 	assert.match(root.textContent, /Permission denied/);
 });
 
@@ -1935,15 +2009,12 @@ test("renderAgentTrajectoryCard expanded process panel uses linear timeline DOM 
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-panel"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 3);
-	assert.equal(root.countByClass("friday-agent-process-timeline-rail"), 3);
-	assert.equal(root.countByClass("friday-agent-process-timeline-marker"), 3);
-	assert.equal(root.countByClass("friday-agent-process-timeline-content"), 3);
-	assert.match(root.textContent, /正在恢复请求 18s/);
-	assert.match(root.textContent, /收到任务/);
+	assert.equal(root.countByClass("assistant-output-stack-v3"), 1);
+	assert.equal(root.countByClass("assistant-process-step-v6") >= 2, true);
+	assert.equal(root.countByClass("assistant-process-event-v6"), root.countByClass("assistant-process-step-v6"));
+	assert.equal(root.countByClass("friday-agent-process-timeline-rail"), 0);
+	assert.equal(root.countByClass("friday-agent-process-timeline-marker"), 0);
+	assert.match(root.textContent, /FRIDAY 正在工作 18s/);
 	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /恢复请求/);
 	assert.doesNotMatch(root.textContent, /正在重试|处理连接重试/);
@@ -1975,19 +2046,18 @@ test("renderAgentTrajectoryCard expanded process panel renders a status bar and 
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-statusbar"), 1);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
 	assert.equal(root.countByClass("friday-agent-process-phase-groups"), 0);
 	assert.equal(root.countByClass("friday-agent-process-phase-group"), 0);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 2);
-	assert.equal(root.countByClass("friday-agent-process-timeline-event-row"), 2);
-	for (const eventRow of root.findAllByClass("friday-agent-process-timeline-event-row")) {
+	assert.equal(root.countByClass("assistant-process-step-v6") >= 1, true);
+	assert.equal(root.countByClass("assistant-process-event-v6"), root.countByClass("assistant-process-step-v6"));
+	for (const eventRow of root.findAllByClass("assistant-process-event-v6")) {
 		assert.equal(eventRow.classes.has("kit-event-row-v1"), true);
 	}
 	assert.equal(root.countByClass("friday-agent-process-timeline-detail"), 0);
-	assert.match(root.textContent, /执行/);
+	assert.match(root.textContent, /正在工作|进行中/);
 	assert.match(root.textContent, /读取项目现状/);
 	assert.match(root.textContent, /12s/);
-	assert.match(root.textContent, /收到任务/);
 	assert.doesNotMatch(root.textContent, /计划|整理方案/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 });
@@ -2023,7 +2093,7 @@ test("renderAgentTrajectoryCard renders reasoning visibleSummary without raw rea
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
 	assert.match(root.textContent, /FRIDAY 已完成工作/);
 	assert.doesNotMatch(root.textContent, /已处理 8s/);
 	assert.match(root.textContent, /整理方案/);
@@ -2081,14 +2151,13 @@ test("renderAgentAnswerFlow keeps stage reports out of the structured process pa
 		onToggle: () => {},
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
-	assert.equal(root.countByClass("friday-agent-process-timeline-item"), 2);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-step-v6"), 0);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
-	assert.match(root.textContent, /收到任务/);
 	assert.doesNotMatch(root.textContent, /整理方案/);
 	assert.doesNotMatch(root.textContent, /阶段性汇报/);
 	assert.doesNotMatch(root.textContent, /已读取相关文件，接下来实现事件链路。/);
-	assert.equal(root.countByClass("friday-agent-process-timeline-note"), 0);
+	assert.equal(root.countByClass("assistant-step-narration-v6"), 0);
 	assert.match(root.findByClass("friday-ai-answer-content")?.textContent ?? "", /结论已完成/);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b|raw chain of thought/i);
 });
@@ -2145,9 +2214,9 @@ test("renderAgentAnswerFlow renders stage reports as inline notes on process ite
 		onToggle: () => {},
 	});
 
-	const notes = root.findAllByClass("friday-agent-process-timeline-note");
+	const notes = root.findAllByClass("assistant-step-narration-v6");
 	assert.equal(notes.length, 1);
-	assert.match(notes[0]?.textContent ?? "", /已读取相关文件/);
+	assert.ok(notes[0]?.textContent.includes(stageText));
 	assert.equal(
 		root.findAllByClass("friday-ai-answer-content").some((item) => item.textContent.includes(stageText)),
 		false,
@@ -2305,8 +2374,8 @@ test("renderAgentTrajectoryCard renders complex completed replay as collapsed pr
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process"), 1);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 1);
+	assert.equal(root.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
 	assert.match(root.textContent, /FRIDAY 已完成工作/);
 	assert.doesNotMatch(root.textContent, /已处理 5s/);
 	assert.doesNotMatch(root.textContent, />/);
@@ -2342,7 +2411,7 @@ test("renderAgentTrajectoryCard hides lifecycle runtime wording from completed r
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process"), 1);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
 	assert.doesNotMatch(root.textContent, /Task running|Runtime started for ask mode/);
 });
 
@@ -2387,6 +2456,15 @@ test("renderAgentAnswerFlow renders assistant answer as document flow with resul
 			status: "completed",
 			headline: "Agent finished",
 			items: [
+				makeItem({
+					id: "read-catalog",
+					kind: "tool",
+					title: "read_file",
+					detail: "docs/design/native-kit-catalog.html",
+					status: "ok",
+					tool: "read_file",
+					targetPath: "docs/design/native-kit-catalog.html",
+				}),
 				makeItem({ id: "mutation", kind: "mutation", title: "edit Notes/Updated.md", status: "ok", targetPath: "Notes/Updated.md" }),
 			],
 			mutations: [
@@ -2405,22 +2483,45 @@ test("renderAgentAnswerFlow renders assistant answer as document flow with resul
 
 	assert.equal(root.countByClass("friday-ai-message"), 0);
 	assert.equal(root.countByClass("friday-ai-message-row"), 1);
+	assert.equal(root.findByClass("friday-ai-message-row")?.classes.has("assistant-turn-v2"), true);
+	assert.equal(root.findByClass("friday-ai-message-row")?.classes.has("is-assistant"), true);
+	assert.equal(root.countByClass("assistant-source-mark-v3"), 1);
+	assert.equal(root.countByClass("assistant-turn-body-v2"), 1);
+	assert.equal(root.countByClass("assistant-meta-v2"), 1);
+	assert.equal(root.countByClass("assistant-output-stack-v3"), 1);
 	assert.equal(root.countByClass("friday-ai-answer-flow"), 1);
 	assert.equal(root.countByClass("friday-ai-answer-content"), 1);
-	assert.equal(root.countByClass("avatar"), 0);
-	assert.equal(root.countByClass("friday-wordmark"), 0);
-	assert.equal(root.countByClass("friday-agent-process-header"), 1);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
+	assert.equal(root.countByClass("assistant-output-block"), 2);
+	assert.equal(root.findByClass("friday-ai-answer-content")?.classes.has("is-prose"), true);
+	assert.equal(root.findByClass("friday-ai-answer-content")?.classes.has("assistant-output-block"), true);
+	assert.equal(root.countByClass("friday-wordmark"), 1);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 1);
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "false");
+	assert.equal(root.countByClass("assistant-tool-call-v5") >= 1, true);
+	assert.equal(root.findByClass("assistant-tool-name-v5")?.textContent, "read_file");
+	assert.equal(root.findByClass("assistant-tool-detail-v5")?.textContent, "docs/design/native-kit-catalog.html");
 	assert.match(root.textContent, /Final answer body/);
 	assert.doesNotMatch(root.textContent, /FRIDAY\s+Final answer body/);
-	assert.match(root.textContent, /本次改动/);
-	assert.match(root.textContent, /文档 · MD/);
-	assert.match(root.textContent, /画布 · Canvas/);
+	assert.doesNotMatch(root.textContent, /文档流输出|上下文\s*\d+|正文/);
+	assert.match(root.textContent, /本次产出/);
+	assert.doesNotMatch(root.textContent, /可进入执行过程详情/);
+	assert.equal(root.countByClass("friday-agent-artifact-diff-summary"), 0);
+	assert.equal(root.countByClass("assistant-artifact-list-v4"), 1);
+	assert.equal(root.countByClass("assistant-artifact-row-v4"), 2);
+	const artifacts = root.findByClass("friday-agent-artifacts");
+	assert.match(artifacts?.textContent ?? "", /Updated\.md/);
+	assert.match(artifacts?.textContent ?? "", /Project\.canvas/);
+	assert.doesNotMatch(artifacts?.textContent ?? "", /Notes\/Updated\.md/);
+	assert.doesNotMatch(artifacts?.textContent ?? "", /Maps\/Project\.canvas/);
 	assert.doesNotMatch(root.textContent, /Pending/);
-	const buttons = root.findAllByClass("friday-agent-artifact-open");
-	assert.equal(buttons.length, 2);
-	buttons[0]?.onclick?.();
-	buttons[1]?.onclick?.();
+	assert.equal(root.countByClass("friday-agent-artifact-open"), 0);
+	const rows = artifacts?.findAllByClass("assistant-artifact-row-v4") ?? [];
+	assert.equal(rows.length, 2);
+	assert.equal(rows[0]?.attributes.role, "button");
+	assert.equal(rows[0]?.attributes.tabindex, "0");
+	assert.match(rows[0]?.attributes["aria-label"] ?? "", /Updated\.md/);
+	rows[0]?.onclick?.();
+	rows[1]?.onclick?.();
 	assert.deepEqual(opened, ["Notes/Updated.md", "Maps/Project.canvas"]);
 });
 
@@ -2448,22 +2549,25 @@ test("renderAgentAnswerFlow places process disclosure before answer body and kee
 
 	const flow = root.findByClass("friday-ai-answer-flow");
 	assert.ok(flow, "answer flow should render");
-	assert.ok(directChildIndex(flow, "friday-agent-process-shell") >= 0, "process shell should be a direct flow child");
-	assert.ok(directChildIndex(flow, "friday-ai-answer-content") >= 0, "answer body should be a direct flow child");
-	assert.ok(directChildIndex(flow, "friday-agent-artifacts") >= 0, "artifacts should be a direct flow child");
+	assert.equal(directChildIndex(flow, "assistant-meta-v2"), 0, "assistant meta line should be the process disclosure");
+	assert.ok(directChildIndex(flow, "assistant-process-detail-v6") >= 0, "process detail should be a direct flow child");
+	assert.ok(directChildIndex(flow, "assistant-output-stack-v3") >= 0, "answer output stack should be a direct flow child");
+	const outputStack = flow.findByClass("assistant-output-stack-v3");
+	assert.ok(outputStack?.findByClass("friday-ai-answer-content"), "answer body should be inside the output stack");
+	assert.ok(outputStack?.findByClass("friday-agent-artifacts"), "artifacts should be inside the output stack");
 	assert.ok(
-		directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"),
+		directChildIndex(flow, "assistant-process-detail-v6") < directChildIndex(flow, "assistant-output-stack-v3"),
 		"process disclosure should render before answer body",
 	);
 	assert.ok(
-		directChildIndex(flow, "friday-agent-artifacts") > directChildIndex(flow, "friday-ai-answer-content"),
+		directChildIndex(outputStack, "friday-agent-artifacts") > directChildIndex(outputStack, "friday-ai-answer-content"),
 		"artifacts belong after the answer body",
 	);
 	assert.ok(
-		directChildIndex(flow, "friday-agent-artifacts") > directChildIndex(flow, "friday-agent-process-shell"),
+		directChildIndex(flow, "assistant-output-stack-v3") > directChildIndex(flow, "assistant-process-detail-v6"),
 		"result artifacts should remain below the process disclosure in the final answer flow",
 	);
-	assert.equal(flow.findByClass("friday-agent-process-timeline")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
+	assert.equal(flow.findByClass("assistant-process-detail-v6")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
 });
 
 test("renderAgentAnswerFlow opens markdown and canvas artifacts from the result area", async () => {
@@ -2495,16 +2599,18 @@ test("renderAgentAnswerFlow opens markdown and canvas artifacts from the result 
 	const artifacts = root.findByClass("friday-agent-artifacts");
 	assert.ok(artifacts, "artifact result area should render");
 	assert.equal(artifacts.countByClass("friday-agent-artifact-card"), 2);
-	assert.equal(root.findByClass("friday-agent-process-timeline")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
-	for (const button of artifacts.findAllByClass("friday-agent-artifact-open")) {
-		button.onclick?.();
+	assert.equal(root.findByClass("assistant-process-detail-v6")?.countByClass("friday-agent-artifact-card") ?? 0, 0);
+	assert.equal(artifacts.countByClass("friday-agent-artifact-open"), 0);
+	for (const row of artifacts.findAllByClass("assistant-artifact-row-v4")) {
+		row.onclick?.();
 	}
 	assert.deepEqual(opened, ["Notes/A.md", "Maps/A.canvas"]);
 });
 
-test("renderAgentAnswerFlow gives artifacts and diff rows Native Kit file type icons", async () => {
+test("renderAgentAnswerFlow gives artifacts Native Kit file type icons without legacy diff summary", async () => {
 	const { renderAgentAnswerFlow } = await loadRenderer();
 	const root = new FakeElement("div");
+	const renderedIcons = [];
 
 	renderAgentAnswerFlow({
 		containerEl: root,
@@ -2522,18 +2628,28 @@ test("renderAgentAnswerFlow gives artifacts and diff rows Native Kit file type i
 		onToggle: () => {},
 		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Final answer body." }),
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+		renderIcon: (containerEl, icon) => {
+			renderedIcons.push(icon);
+			containerEl.createSpan({ cls: "mock-rendered-icon", text: icon });
+		},
 	});
 
 	const artifacts = root.findByClass("friday-agent-artifacts");
 	assert.ok(artifacts, "artifact result area should render");
 	assert.equal(artifacts.countByClass("friday-agent-artifact-card"), 4);
 	const fileIcons = artifacts.findAllByClass("kit-file-type-icon-v1");
-	assert.equal(fileIcons.length, 8);
-	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-markdown")).length, 2);
-	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-canvas")).length, 2);
-	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-code")).length, 2);
-	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-note")).length, 2);
-	assert.equal(artifacts.findByClass("friday-agent-artifact-diff-summary")?.countByClass("kit-file-type-icon-v1"), 4);
+	assert.equal(fileIcons.length, 4);
+	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-markdown")).length, 1);
+	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-canvas")).length, 1);
+	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-code")).length, 1);
+	assert.equal(fileIcons.filter((icon) => icon.classes.has("is-note")).length, 1);
+	assert.equal(fileIcons.filter((icon) => icon.findByClass("friday-icon")).length, 4);
+	assert.deepEqual(
+		renderedIcons.filter((icon) => ["file-text", "layout", "file-code", "file"].includes(icon)),
+		["file-text", "layout", "file-code", "file"],
+	);
+	assert.doesNotMatch(fileIcons.map((icon) => icon.textContent).join(" "), /\bMD\b|Canvas|Code|File/);
+	assert.equal(artifacts.findByClass("friday-agent-artifact-diff-summary"), null);
 });
 
 test("renderAgentAnswerFlow inserts expanded process panel above the answer body", async () => {
@@ -2561,12 +2677,218 @@ test("renderAgentAnswerFlow inserts expanded process panel above the answer body
 
 	const flow = root.findByClass("friday-ai-answer-flow");
 	assert.ok(flow, "answer flow should render");
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "true");
-	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-up");
-	const shell = flow.findByClass("friday-agent-process-shell");
-	assert.ok(shell, "process shell should contain header and panel");
-	assert.ok(directChildIndex(shell, "friday-agent-process-header") < directChildIndex(shell, "friday-agent-process-panel"));
-	assert.ok(directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"));
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "true");
+	assert.equal(root.findByClass("assistant-process-chevron-v6")?.attributes["data-icon"], "chevron-right");
+	assert.ok(flow.findByClass("assistant-process-detail-v6"), "process detail should contain process steps");
+	assert.ok(directChildIndex(flow, "assistant-process-toggle-v6") < directChildIndex(flow, "assistant-process-detail-v6"));
+	assert.ok(directChildIndex(flow, "assistant-process-detail-v6") < directChildIndex(flow, "assistant-output-stack-v3"));
+	assert.ok(root.countByClass("assistant-tool-call-v5") >= 1, "expanded process should render tool rows with catalog classes");
+	assert.ok(
+		root.findAllByClass("assistant-tool-call-v5").some((row) => row.findByClass("assistant-tool-name-v5")?.textContent === "search"),
+		"tool row should expose the tool name with the HTML catalog class",
+	);
+});
+
+test("renderAgentAnswerFlow omits completed generic judgement rows from replayed process details", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			privacy: { redacted: true, source: "replay" },
+			items: [
+				makeItem({ id: "reasoning-1", kind: "reasoning", title: "整理方案", detail: "FRIDAY 已整理当前判断。", status: "ok" }),
+				makeItem({ id: "model-1", kind: "model", title: "整理方案", detail: "FRIDAY 已整理当前判断。", status: "ok" }),
+				makeItem({ id: "read", kind: "tool", title: "读取项目现状", detail: "已查看项目结构和相关文件。", status: "ok", tool: "project_tree", targetPath: "workspace", step: 1 }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Final answer body." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.countByClass("assistant-process-step-v6"), 1);
+	assert.doesNotMatch(root.textContent, /整理方案/);
+	assert.doesNotMatch(root.textContent, /FRIDAY 已整理当前判断/);
+	assert.match(root.textContent, /读取项目现状/);
+});
+
+test("renderAgentAnswerFlow marks running nested tool rows with the Native Kit running surface", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			privacy: { redacted: true, source: "live" },
+			items: [
+				makeItem({ id: "read", kind: "tool", title: "读取项目现状", detail: "正在读取 workspace。", status: "running", tool: "project_tree", targetPath: "workspace", step: 1 }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	const toolRows = root.findAllByClass("assistant-tool-call-v5");
+	assert.ok(toolRows.length > 0, "running process should render tool call detail rows");
+	assert.ok(
+		toolRows.some((row) => row.classes.has("kit-running-surface-v1")),
+		"running tool call row should use catalog running surface for sheen animation",
+	);
+});
+
+test("renderAgentAnswerFlow step detail toggle resolves the current DOM node after live sync", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "running",
+			privacy: { redacted: true, source: "live" },
+			items: [
+				makeItem({ id: "read", kind: "tool", title: "Read workspace", detail: "Reading workspace.", status: "running", tool: "read", targetPath: "workspace", step: 1 }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "" }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	const templateButton = root.findByClass("assistant-step-toggle-v6");
+	assert.ok(templateButton, "step toggle should render");
+
+	const liveDetail = makeDomLikeElement({
+		attributes: { "aria-hidden": "true" },
+	});
+	const liveStep = makeDomLikeElement({
+		classes: new Set(["assistant-process-step-v6"]),
+		querySelector: (selector) => selector === ".assistant-step-detail-v6" ? liveDetail : null,
+	});
+	const movedButton = makeDomLikeElement({
+		attributes: { ...templateButton.attributes },
+		classes: new Set(templateButton.classes),
+		closest: (selector) => selector === ".assistant-process-step-v6" ? liveStep : null,
+	});
+	const event = {
+		currentTarget: movedButton,
+		preventDefault() {},
+		stopPropagation() {},
+	};
+
+	templateButton.onclick?.(event);
+	assert.equal(movedButton.attributes["aria-expanded"], "true");
+	assert.equal(liveDetail.attributes["aria-hidden"], "false");
+	assert.equal(liveStep.classes.has("is-open"), true);
+
+	templateButton.onclick?.(event);
+	assert.equal(movedButton.attributes["aria-expanded"], "false");
+	assert.equal(liveDetail.attributes["aria-hidden"], "true");
+	assert.equal(liveStep.classes.has("is-open"), false);
+});
+
+test("renderAgentAnswerFlow restores complex result process with catalog toggle, step detail, and narration order", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const collapsedRoot = new FakeElement("div");
+	let toggleCount = 0;
+	const snapshot = makeSnapshot({
+		status: "completed",
+		privacy: { redacted: true, source: "replay" },
+		time: { startedAt: "2026-05-05T00:00:00.000Z", updatedAt: "2026-05-05T00:00:08.000Z", durationMs: 8000 },
+		items: [
+			makeItem({ id: "read", kind: "tool", title: "读取规范", detail: "docs/design/friday-native-kit.md", status: "ok", tool: "read_file", targetPath: "docs/design/friday-native-kit.md", step: 1 }),
+			makeItem({ id: "stage", kind: "narration", title: "阶段性汇报", detail: "已读取规范。接下来整理消息状态。", status: "ok", rawEventType: "narration_report", narrationKind: "stage_report", narrationJustDone: "已读取规范", narrationNext: "接下来整理消息状态", step: 1 }),
+			makeItem({ id: "write", kind: "mutation", title: "归并产物展示", detail: "docs/design/native-kit-catalog.html", status: "ok", targetPath: "docs/design/native-kit-catalog.html", step: 2 }),
+		],
+		mutations: [
+			{ id: "applied", event: "applied", operation: "edit", targetPath: "docs/design/native-kit-catalog.html", status: "applied", summary: "Updated catalog.", reason: "" },
+		],
+	});
+
+	renderAgentAnswerFlow({
+		containerEl: collapsedRoot,
+		snapshot,
+		expanded: false,
+		onToggle: () => {
+			toggleCount += 1;
+		},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Final answer body." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	const toggle = collapsedRoot.findByClass("assistant-process-toggle-v6");
+	assert.equal(toggle?.tagName, "button");
+	assert.equal(toggle?.attributes["aria-expanded"], "false");
+	assert.match(toggle?.textContent ?? "", /FRIDAY 已完成工作 8s/);
+	assert.equal(collapsedRoot.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
+	assert.equal(collapsedRoot.countByClass("friday-agent-process-timeline-item"), 0);
+	assert.equal(collapsedRoot.countByClass("friday-agent-process-command-details"), 0);
+	toggle?.onclick?.();
+	assert.equal(toggleCount, 1);
+
+	const expandedRoot = new FakeElement("div");
+	renderAgentAnswerFlow({
+		containerEl: expandedRoot,
+		snapshot,
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Final answer body." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+	const detail = expandedRoot.findByClass("assistant-process-detail-v6");
+	assert.equal(detail?.attributes["aria-hidden"], "false");
+	assert.equal(expandedRoot.countByClass("assistant-process-step-v6"), 2);
+	const firstStep = expandedRoot.findByClass("assistant-process-step-v6");
+	assert.ok(firstStep, "first process step should render");
+	assert.equal(directChildIndex(firstStep, "assistant-process-event-v6"), 0);
+	assert.ok(directChildIndex(firstStep, "assistant-step-detail-v6") > directChildIndex(firstStep, "assistant-process-event-v6"));
+	assert.ok(directChildIndex(firstStep, "assistant-step-narration-v6") > directChildIndex(firstStep, "assistant-step-detail-v6"));
+	assert.equal(firstStep.findByClass("assistant-tool-name-v5")?.textContent, "read_file");
+	assert.match(firstStep.findByClass("assistant-step-narration-v6")?.textContent ?? "", /已读取规范/);
+	assert.ok(directChildIndex(expandedRoot.findByClass("friday-ai-answer-flow"), "assistant-process-detail-v6") < directChildIndex(expandedRoot.findByClass("friday-ai-answer-flow"), "assistant-output-stack-v3"));
+	assert.equal(expandedRoot.countByClass("assistant-artifact-row-v4"), 1);
+});
+
+test("renderAgentAnswerFlow does not duplicate file artifacts between process and output stacks", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+	const targetPath = "Notes/New.md";
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-05T00:00:00.000Z", completedAt: "2026-05-05T00:00:10.000Z", durationMs: 10000 },
+			items: [
+				makeItem({ id: "write", kind: "tool", title: "Write Notes/New.md", detail: "Created Notes/New.md", status: "ok", tool: "write_file", targetPath, step: 1 }),
+				makeItem({ id: "context", kind: "context", title: "Context refreshed", detail: "Context package built before native model request.", status: "ok", step: 2 }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Created Notes/New.md.", status: "ok" }),
+			],
+			mutations: [
+				{ id: "applied", event: "applied", operation: "create", targetPath, status: "applied", summary: "Created Notes/New.md.", reason: "" },
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Created Notes/New.md." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	const processDetail = root.findByClass("assistant-process-detail-v6");
+	assert.ok(processDetail, "process detail should render for file work");
+	const fileProcessSteps = processDetail.findAllByClass("assistant-process-step-v6").filter((step) => step.textContent.includes(targetPath));
+	assert.equal(fileProcessSteps.length, 1);
+	assert.equal(root.countByClass("assistant-artifact-row-v4"), 1);
+	assert.equal(processDetail.countByClass("assistant-artifact-row-v4"), 0);
+	assert.ok(root.findByClass("assistant-output-stack-v3")?.findByClass("assistant-artifact-row-v4"));
 });
 
 test("renderAgentAnswerFlow toggles process disclosure from the title row and chevron button", async () => {
@@ -2598,17 +2920,17 @@ test("renderAgentAnswerFlow toggles process disclosure from the title row and ch
 	};
 
 	render();
-	const header = root.findByClass("friday-agent-process-disclosure");
-	assert.ok(header?.classes.has("is-clickable"));
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
+	const header = root.findByClass("assistant-process-toggle-v6");
+	assert.equal(header?.tagName, "button");
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "false");
 	header?.onclick?.();
 	assert.equal(toggleCount, 1);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "true");
-	assert.equal(root.findByClass("friday-agent-process-chevron")?.attributes["data-icon"], "chevron-up");
-	assert.equal(root.countByClass("friday-agent-process-panel"), 1);
-	root.findByClass("friday-agent-process-toggle")?.onclick?.({ stopPropagation: () => {} });
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "true");
+	assert.equal(root.findByClass("assistant-process-chevron-v6")?.attributes["data-icon"], "chevron-right");
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
+	root.findByClass("assistant-process-toggle-v6")?.onclick?.({ stopPropagation: () => {} });
 	assert.equal(toggleCount, 2);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "false");
 });
 
 test("renderAgentAnswerFlow uses compact thought strip without toggle for simple completed answers", async () => {
@@ -2636,12 +2958,12 @@ test("renderAgentAnswerFlow uses compact thought strip without toggle for simple
 	assert.match(root.textContent, /FRIDAY 已思考/);
 	assert.doesNotMatch(root.textContent, /FRIDAY 的思路/);
 	assert.doesNotMatch(root.textContent, /FRIDAY 的工作过程/);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
 	const flow = root.findByClass("friday-ai-answer-flow");
 	assert.ok(flow, "answer flow should render");
-	assert.ok(directChildIndex(flow, "friday-agent-process-shell") < directChildIndex(flow, "friday-ai-answer-content"));
+	assert.ok(directChildIndex(flow, "assistant-result-meta-v6") < directChildIndex(flow, "assistant-output-stack-v3"));
 });
 
 test("renderAgentAnswerFlow compacts simple completed replay with generic lifecycle narration", async () => {
@@ -2695,14 +3017,47 @@ test("renderAgentAnswerFlow compacts simple completed replay with generic lifecy
 	});
 
 	assert.match(root.textContent, /FRIDAY/);
-	assert.match(root.textContent, /FRIDAY 已思考 · 4s/);
+	assert.match(root.textContent, /FRIDAY 已思考 4s/);
 	assert.match(root.textContent, /2\+2 等于 4。/);
-	assert.equal(root.countByClass("friday-agent-process-shell"), 1);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
 	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
 	assert.doesNotMatch(root.textContent, /已处理 4s|完成：本次工作已结束|收到任务|FRIDAY 已收到任务|整理方案|执行|已整理上下文/);
+});
+
+test("renderAgentAnswerFlow treats model lifecycle-only replay as a simple result", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			headline: "Agent finished",
+			summary: "Lifecycle-only answer.",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-08T00:00:00.000Z", completedAt: "2026-05-08T00:00:05.000Z", durationMs: 5000 },
+			items: [
+				makeItem({ id: "model-response", kind: "reasoning", title: "Model response received", detail: "Model response received.", status: "ok", rawEventType: "model_response" }),
+				makeItem({ id: "context-ready", kind: "system", title: "FRIDAY saved current progress", detail: "FRIDAY 已保存当前进度。", status: "ok", rawEventType: "checkpoint_saved" }),
+				makeItem({ id: "task-created", kind: "task", title: "FRIDAY received task", detail: "Task created.", status: "pending", rawEventType: "task_created" }),
+				makeItem({ id: "task-running", kind: "task", title: "FRIDAY is working", detail: "Runtime started for ask mode.", status: "running", rawEventType: "task_running" }),
+				makeItem({ id: "task-completed", kind: "task", title: "FRIDAY completed work", detail: "Final answer delivered.", status: "ok", rawEventType: "task_completed" }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Lifecycle-only answer.", status: "ok", rawEventType: "assistant_final" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Lifecycle-only answer." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.findByClass("assistant-turn-v2")?.classes.has("is-simple-result"), true);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-step-v6"), 0);
+	assert.doesNotMatch(root.textContent, /Model response received|saved current progress|Task created|Runtime started|Final answer delivered/);
 });
 
 test("renderAgentAnswerFlow compacts completed preflight-only replay with elapsed thinking strip", async () => {
@@ -2733,10 +3088,10 @@ test("renderAgentAnswerFlow compacts completed preflight-only replay with elapse
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /FRIDAY 已思考 · 3s/);
+	assert.match(root.textContent, /FRIDAY 已思考 3s/);
 	assert.match(root.textContent, /3\+3 等于 6。/);
-	assert.equal(root.countByClass("friday-agent-process-toggle"), 0);
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 0);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 0);
 	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
 	assert.doesNotMatch(root.textContent, /加载项目规则|匹配相关技能|加载长期记忆|压缩上下文|context_ready|读取项目现状/);
 });
@@ -2765,13 +3120,43 @@ test("renderAgentAnswerFlow keeps simple workspace read completed process collap
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /FRIDAY 已完成工作 · 4s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作 4s/);
 	assert.doesNotMatch(root.textContent, /已处理 4s/);
 	assert.doesNotMatch(root.textContent, /完成：本次工作已结束/);
-	assert.equal(root.countByClass("friday-agent-process-disclosure"), 1);
-	assert.equal(root.findByClass("friday-agent-process-toggle")?.attributes["aria-expanded"], "false");
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
-	assert.doesNotMatch(root.textContent, /Read Notes\/Today\.md|Evidence|Timeline/i);
+	assert.equal(root.countByClass("assistant-process-toggle-v6"), 1);
+	assert.equal(root.findByClass("assistant-process-toggle-v6")?.attributes["aria-expanded"], "false");
+	assert.equal(root.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
+	assert.doesNotMatch(root.textContent, /Evidence|Timeline/i);
+});
+
+test("renderAgentAnswerFlow normalizes completed replay process rows out of running state", async () => {
+	const { renderAgentAnswerFlow } = await loadRenderer();
+	const root = new FakeElement("div");
+
+	renderAgentAnswerFlow({
+		containerEl: root,
+		snapshot: makeSnapshot({
+			status: "completed",
+			headline: "Answer finished",
+			summary: "Answered from the current note.",
+			privacy: { redacted: true, source: "replay" },
+			time: { startedAt: "2026-05-05T00:00:00.000Z", completedAt: "2026-05-05T00:00:04.000Z", durationMs: 4000 },
+			items: [
+				makeItem({ id: "context", kind: "context", title: "Loaded current note", detail: "Read visible context.", status: "running" }),
+				makeItem({ id: "read", kind: "tool", title: "Read Notes/Today.md", detail: "Read current note.", status: "running", tool: "read", targetPath: "Notes/Today.md" }),
+				makeItem({ id: "final", kind: "final", title: "Final response", detail: "Answered from the current note.", status: "ok" }),
+			],
+		}),
+		expanded: true,
+		onToggle: () => {},
+		renderContent: (containerEl) => containerEl.createDiv({ cls: "answer-body", text: "Current note answer." }),
+		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
+	});
+
+	assert.equal(root.findByClass("assistant-turn-v2")?.classes.has("is-complex-result"), true);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
+	assert.equal(root.countByClass("assistant-process-step-v6") >= 1, true);
+	assert.equal(root.findAllByClass("assistant-process-event-v6").some((row) => row.classes.has("kit-running-surface-v1")), false);
 });
 
 test("renderAgentAnswerFlow pads completed process elapsed seconds after one minute", async () => {
@@ -2797,9 +3182,9 @@ test("renderAgentAnswerFlow pads completed process elapsed seconds after one min
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.match(root.textContent, /FRIDAY 已完成工作 · 1m 04s/);
+	assert.match(root.textContent, /FRIDAY 已完成工作 1m 04s/);
 	assert.doesNotMatch(root.textContent, /1m 4s|完成：本次工作已结束/);
-	assert.equal(root.countByClass("friday-agent-process-panel"), 0);
+	assert.equal(root.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
 	assert.equal(root.countByClass("friday-composer-task-bar"), 0);
 });
 
@@ -2827,18 +3212,25 @@ test("renderAgentAnswerFlow expands completed workspace read process above the a
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-panel"), 1);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
 	assert.equal(root.countByClass("friday-agent-process-stages"), 0);
-	assert.equal(root.countByClass("friday-agent-process-timeline"), 1);
+	assert.equal(root.countByClass("friday-agent-process-statusbar"), 0);
 	assert.equal(root.countByClass("friday-agent-process-evidence"), 0);
+	assert.equal(root.countByClass("assistant-process-step-v6") >= 1, true);
 	assert.match(root.textContent, /读取项目现状/);
-	assert.doesNotMatch(root.textContent, /Notes\/Today\.md/);
+	const commandRow = root.findByClass("assistant-tool-call-v5");
+	assert.ok(commandRow, "step detail should list the underlying tool command");
+	assert.equal(commandRow.classes.has("kit-event-row-v1"), true);
+	assert.equal(commandRow.classes.has("assistant-tool-call-v5"), true);
+	assert.equal(commandRow.findByClass("assistant-tool-name-v5")?.textContent, "read");
+	assert.equal(commandRow.findByClass("assistant-tool-detail-v5")?.textContent, "Notes/Today.md");
+	assert.equal(root.countByClass("friday-agent-process-command-list"), 0);
 	assert.equal(root.countByClass("friday-agent-process-phase-group"), 0);
 	assert.equal(root.countByClass("friday-agent-process-timeline-detail"), 0);
 	assert.doesNotMatch(root.textContent, /\bContext\b|\bReasoning\b|\bTools\b|\bReview\b|\bFinalize\b/);
 	assert.ok(
-		directChildIndex(root.findByClass("friday-ai-answer-flow"), "friday-agent-process-shell") <
-			directChildIndex(root.findByClass("friday-ai-answer-flow"), "friday-ai-answer-content"),
+		directChildIndex(root.findByClass("friday-ai-answer-flow"), "assistant-process-detail-v6") <
+			directChildIndex(root.findByClass("friday-ai-answer-flow"), "assistant-output-stack-v3"),
 	);
 });
 
@@ -2865,7 +3257,7 @@ test("renderAgentAnswerFlow does not expose process summary text under the discl
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(root.countByClass("friday-agent-process-panel"), 1);
+	assert.equal(root.countByClass("assistant-process-detail-v6"), 1);
 	assert.equal(root.countByClass("friday-agent-process-summary"), 0);
 	assert.equal(root.textContent.includes(hiddenSummary), false);
 });
@@ -2907,8 +3299,8 @@ test("renderAgentTrajectoryCard and completed answer flow reuse the same process
 		renderAssistantAvatar: (containerEl) => containerEl.createDiv({ cls: "avatar", text: "A" }),
 	});
 
-	assert.equal(liveRoot.countByClass("friday-agent-process-header"), 1);
-	assert.equal(completedRoot.countByClass("friday-agent-process-header"), 1);
+	assert.equal(liveRoot.countByClass("assistant-result-meta-v6"), 1);
+	assert.equal(completedRoot.countByClass("assistant-result-meta-v6"), 1);
 });
 
 test("DailyBoard embeds completed replay in every matching assistant answer row", async () => {
@@ -2963,29 +3355,32 @@ test("DailyBoard embeds completed replay in every matching assistant answer row"
 
 	assert.ok(previousAssistantRow, "previous assistant answer should render");
 	assert.ok(matchingAssistantRow, "matching assistant answer should render");
-	assert.equal(previousAssistantRow.countByClass("friday-agent-process-shell"), 1);
-	assert.equal(matchingAssistantRow.countByClass("friday-agent-process-shell"), 1);
-	assert.equal(matchingAssistantRow.countByClass("friday-agent-process-disclosure"), 1);
+	assert.equal(previousAssistantRow.countByClass("assistant-process-detail-v6"), 1);
+	assert.equal(matchingAssistantRow.countByClass("assistant-process-detail-v6"), 1);
+	assert.equal(matchingAssistantRow.countByClass("assistant-process-toggle-v6"), 1);
 	assert.equal(matchingAssistantRow.countByClass("friday-ai-answer-content"), 1);
 
 	const matchingFlow = matchingAssistantRow.findByClass("friday-ai-answer-flow");
 	assert.ok(matchingFlow, "matching assistant answer should use answer flow");
-	const processIndex = directChildIndex(matchingFlow, "friday-agent-process-shell");
-	const answerIndex = directChildIndex(matchingFlow, "friday-ai-answer-content");
+	const processIndex = directChildIndex(matchingFlow, "assistant-process-detail-v6");
+	const answerIndex = directChildIndex(matchingFlow, "assistant-output-stack-v3");
 	assert.ok(processIndex >= 0, "process disclosure should be a direct child of the matching answer flow");
 	assert.ok(answerIndex >= 0, "answer content should be a direct child of the matching answer flow");
 	assert.ok(processIndex < answerIndex, "process disclosure should render above answer content in the matching row");
-	assert.equal(root.children.some((child) => child.classes.has("friday-agent-process-shell")), false);
+	assert.equal(root.children.some((child) => child.classes.has("assistant-process-detail-v6")), false);
 });
 
-test("DailyBoard keeps approval task cards out of the chat flow", () => {
+test("DailyBoard keeps approval task cards out of the chat flow while allowing a low-emphasis record", () => {
 	const source = fs.readFileSync(dailyBoardPath, "utf8").replace(/\r\n?/g, "\n");
 	const shouldRenderMatch = source.match(/private shouldRenderAgentTaskPanel\([\s\S]*?\n\t\}/);
 	const messageListMatch = source.match(/private renderAiMessageList\([\s\S]*?\n\t\}\n\n\tprivate shouldRenderAgentTaskPanel/);
+	const approvalMessageMatch = source.match(/private renderApprovalMessage\([\s\S]*?\n\t\}\n\n\tprivate renderRuntimeExecutionPreview/);
 	assert.ok(shouldRenderMatch, "task panel visibility predicate should exist");
 	assert.ok(messageListMatch, "message list renderer should exist");
+	assert.ok(approvalMessageMatch, "approval record renderer should exist");
 	const shouldRenderBlock = shouldRenderMatch[0] ?? "";
 	const messageListBlock = messageListMatch[0] ?? "";
+	const approvalMessageBlock = approvalMessageMatch[0] ?? "";
 
 	assert.match(source, /private shouldRenderAgentTaskPanel\(task: AgentTaskViewState\): boolean/);
 	assert.match(shouldRenderBlock, /task\.waitingForUser/);
@@ -2998,7 +3393,10 @@ test("DailyBoard keeps approval task cards out of the chat flow", () => {
 	assert.doesNotMatch(shouldRenderBlock, /task\.status === "completed"/);
 	assert.match(shouldRenderBlock, /task\.status === "waiting_for_user"/);
 	assert.match(source, /private getVisibleAgentTasksForCurrentSession\(\)/);
-	assert.doesNotMatch(messageListBlock, /renderApprovalMessage/);
+	assert.match(messageListBlock, /renderApprovalMessage\(containerEl, item\)/);
+	assert.doesNotMatch(messageListBlock, /renderApprovalCard\(/);
+	assert.match(approvalMessageBlock, /friday-ai-approval-record kit-event-row-v1/);
+	assert.doesNotMatch(approvalMessageBlock, /friday-approval-card|friday-agent-task-panel/);
 });
 
 test("renderAgentTrajectoryCard renders trajectory actions without deciding availability", async () => {
@@ -3092,6 +3490,22 @@ function translate(_key, fallback, params = {}) {
 
 function directChildIndex(element, className) {
 	return element.children.findIndex((child) => child.classes.has(className));
+}
+
+function makeDomLikeElement(overrides = {}) {
+	const element = {
+		attributes: overrides.attributes ? { ...overrides.attributes } : {},
+		classes: overrides.classes ?? new Set(),
+		setAttribute(name, value) {
+			this.attributes[name] = String(value);
+		},
+		getAttribute(name) {
+			return this.attributes[name] ?? null;
+		},
+		querySelector: overrides.querySelector ?? (() => null),
+		closest: overrides.closest ?? (() => null),
+	};
+	return element;
 }
 
 function createDailyBoardRuntimeAliases() {
@@ -3268,6 +3682,7 @@ class FakeElement {
 		this.attributes = {};
 		this.text = "";
 		this.onclick = undefined;
+		this.style = {};
 		this.disabled = false;
 		this.type = "";
 		this.isConnected = true;

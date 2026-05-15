@@ -103,7 +103,7 @@ test("native kit accepted spec matches the reviewed catalog decisions", async ()
 	const spec = await readFile(specPath, "utf8");
 	const migrationMap = await readFile(migrationMapPath, "utf8");
 
-	assert.deepEqual(decisions.counts, { keep: 14, adjust: 0, hold: 1 });
+	assert.deepEqual(decisions.counts, { keep: 13, adjust: 0, hold: 1 });
 	assert.equal(decisions.choices["项目状态组"], "hold");
 
 	for (const component of [
@@ -120,7 +120,6 @@ test("native kit accepted spec matches the reviewed catalog decisions", async ()
 		"工作台顶部栏",
 		"助手消息",
 		"对话输入区",
-		"执行过程时间线",
 	]) {
 		assert.equal(decisions.choices[component], "keep", `${component} should remain accepted`);
 		assert.match(spec, new RegExp(component, "u"), `${component} should be documented in the spec`);
@@ -134,7 +133,11 @@ test("native kit accepted spec matches the reviewed catalog decisions", async ()
 		"已选中的 `@` token 不需要文件类型 icon",
 		"Task Bar 收起并贴住输入框",
 		"审批卡片占用对话输入区",
-		"产物用文件类型 icon 区分",
+		"不单独定义“执行过程时间线”组件",
+		"每个过程步骤都可以点击展开",
+		"不要再加“过程”标题",
+		"视觉强度必须低于上层步骤",
+		"按文件类型显示 icon",
 	]) {
 		assert.match(spec, new RegExp(requiredSpecText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
 	}
@@ -154,7 +157,7 @@ test("native kit accepted spec matches the reviewed catalog decisions", async ()
 test("native kit catalog exposes v2 candidates for adjusted components", async () => {
 	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
 	const html = await readFile(htmlPath, "utf8");
-	const adjustedComponents = ["工作台顶部栏", "助手消息", "执行过程时间线", "项目状态组", "行内提醒"];
+	const adjustedComponents = ["工作台顶部栏", "助手消息", "项目状态组", "行内提醒"];
 
 	for (const component of adjustedComponents) {
 		assert.match(
@@ -167,7 +170,6 @@ test("native kit catalog exposes v2 candidates for adjusted components", async (
 	for (const className of [
 		"friday-workbench-bar-v2",
 		"friday-assistant-thread-v2",
-		"friday-agent-run-list-v2",
 		"friday-project-panel-v2",
 		"friday-inline-notice-v2",
 	]) {
@@ -176,6 +178,8 @@ test("native kit catalog exposes v2 candidates for adjusted components", async (
 
 	assert.match(html, />调整版候选</);
 	assert.match(html, />Native Kit v0.2</);
+	assert.doesNotMatch(html, /data-component="执行过程时间线"/u);
+	assert.doesNotMatch(html, /<h2>执行过程组件<\/h2>/u);
 });
 
 test("native kit catalog reflects the reviewed v2 component direction", async () => {
@@ -191,10 +195,42 @@ test("native kit catalog reflects the reviewed v2 component direction", async ()
 		"assistant-document-flow-v3",
 		"assistant-user-bubble-v3",
 		"assistant-output-block is-prose",
-		"kit-event-row-v1 assistant-tool-call-v5",
+		"assistant-result-meta-v6",
+		"assistant-process-toggle-v6",
+		"assistant-process-detail-v6",
+		"assistant-process-event-v6",
+		"assistant-step-narration-v6",
+		"assistant-step-toggle-v6",
+		"assistant-step-detail-v6",
 	]) {
 		assert.match(html, new RegExp(className, "u"));
 	}
+
+	assert.match(html, />已思考</u);
+	assert.match(html, />已完成工作</u);
+	assert.match(html, />正在工作</u);
+	assert.match(html, />已读取当前规范，确认过程说明只写工作日志，不展示内部推理。</u);
+	assert.match(html, />已整理消息状态，明确正在思考、正在工作、已思考和已完成工作四种状态。</u);
+	assert.match(html, />本次产出</u);
+	assert.match(html, /aria-controls="assistant-process-detail-demo"/u);
+	assert.match(html, /aria-controls="assistant-result-step-read"/u);
+	assert.match(html, /aria-controls="assistant-work-step-message"/u);
+	assert.match(html, /kit-event-row-v1\.kit-running-surface-v1\.assistant-process-event-v6\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0, 1fr\) auto/u);
+	assert.match(html, /classList\.toggle\("is-process-open", !isOpen\)/u);
+	assert.match(html, /classList\.toggle\("is-open", !isOpen\)/u);
+	assert.match(html, /assistant-tool-call-v5\s*\{[\s\S]*--kit-event-row-height:\s*26px[\s\S]*opacity:\s*0\.86/u);
+	assert.match(html, /assistant-tool-call-v5 \.kit-event-row-main-v1\s*\{[\s\S]*font-size:\s*0\.74rem/u);
+	assert.match(html, /assistant-step-narration-v6\s*\{[\s\S]*white-space:\s*nowrap/u);
+	assert.match(html, /id="assistant-work-step-read"[\s\S]*assistant-tool-call-v5[\s\S]*<div class="assistant-step-narration-v6">已读取当前规范/u);
+	const runningStepStart = html.indexOf('aria-controls="assistant-work-step-message"');
+	const runningStepEnd = html.indexOf('<div class="assistant-turn-v2 is-assistant is-simple-result"', runningStepStart);
+	const runningStepMarkup = html.slice(runningStepStart, runningStepEnd);
+	assert.doesNotMatch(runningStepMarkup, /assistant-step-narration-v6/u);
+	assert.doesNotMatch(html, />文档流输出</u);
+	assert.doesNotMatch(html, />上下文 3</u);
+	assert.doesNotMatch(html, />可进入执行过程详情</u);
+	assert.doesNotMatch(html, /assistant-process-heading-v6/u);
+	assert.doesNotMatch(html, />过程<\/div>/u);
 
 	for (const className of ["kit-file-type-icon-v1 is-markdown", "kit-file-type-icon-v1 is-canvas", "kit-file-type-icon-v1 is-note"]) {
 		assert.match(html, new RegExp(className, "u"));
@@ -217,11 +253,24 @@ test("native kit catalog includes assistant process taskbar system refinements",
 	for (const className of [
 		"assistant-output-block is-prose",
 		"assistant-output-block is-artifact",
-		"kit-event-row-v1 assistant-tool-call-v5",
-		"assistant-tool-call-v5",
 		"kit-tool-icon-v1",
 		"icon-tool-action",
-		"assistant-tool-name-v5",
+		"assistant-result-meta-v6",
+		"assistant-process-toggle-v6",
+		"assistant-process-chevron-v6",
+		"assistant-process-detail-v6",
+		"assistant-process-detail-inner-v6",
+		"assistant-process-event-v6",
+		"assistant-step-narration-v6",
+		"assistant-step-toggle-v6",
+		"assistant-step-detail-v6",
+		"assistant-step-detail-inner-v6",
+		"已思考",
+		"已完成工作",
+		"正在工作",
+		"过程步骤可带工作叙述",
+		"已整理消息状态，明确正在思考、正在工作、已思考和已完成工作四种状态。",
+		"本次产出",
 		"composer-input-kit-v5 is-empty",
 		"composer-input-kit-v5 is-skill",
 		"composer-input-kit-v5 is-skill-picker",
@@ -301,6 +350,19 @@ test("native kit catalog includes assistant process taskbar system refinements",
 	const projectMarkup = html.match(/data-project-variant="compact"[\s\S]*?data-project-variant="inspector"/u)?.[0] || "";
 	assert.match(projectMarkup, /project-focus-strip-v4/);
 	assert.match(projectMarkup, /project-health-meter-v4/);
+});
+
+test("native kit catalog preserves theme responsive and reduced-motion CSS contracts", async () => {
+	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
+	const html = await readFile(htmlPath, "utf8");
+
+	assert.match(html, /<html lang="zh-CN" data-theme="light" data-density="comfortable">/u);
+	assert.match(html, /:root\s*\{[\s\S]*color-scheme:\s*light/u);
+	assert.match(html, /html\[data-theme="dark"\]\s*\{[\s\S]*color-scheme:\s*dark/u);
+	assert.match(html, /data-theme-target="light"[\s\S]*data-theme-target="dark"/u);
+	assert.match(html, /@media\s*\(max-width:\s*980px\)\s*\{[\s\S]*\.catalog-layout\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.catalog-header-inner\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.kit-running-surface-v1::after\s*\{[\s\S]*animation:\s*none[\s\S]*opacity:\s*0/u);
 });
 
 test("native kit catalog includes scanned components and reusable primitives", async () => {
@@ -389,7 +451,7 @@ test("native kit catalog includes scanned components and reusable primitives", a
 	for (const requiredMapText of [
 		"跨组件元组件",
 		"新增组件候选已进 HTML 画板",
-		"这些候选不改变当前 `native-kit-catalog-decisions.json` 的 14/0/1 选择计数",
+		"这些候选不改变当前 `native-kit-catalog-decisions.json` 的 13/0/1 选择计数",
 		"同步冲突差异不是解除项目状态组暂缓",
 	]) {
 		assert.match(migrationMap, new RegExp(requiredMapText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));

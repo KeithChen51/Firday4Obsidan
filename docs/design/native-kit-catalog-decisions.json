@@ -4,7 +4,7 @@
   "theme": "light",
   "density": "comfortable",
   "counts": {
-    "keep": 14,
+    "keep": 13,
     "adjust": 0,
     "hold": 1
   },
@@ -22,7 +22,6 @@
     "工作台顶部栏": "keep",
     "助手消息": "keep",
     "对话输入区": "keep",
-    "执行过程时间线": "keep",
     "项目状态组": "hold"
   }
 }

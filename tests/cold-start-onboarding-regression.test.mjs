@@ -117,12 +117,14 @@ test("daily board renders onboarding panel when basic setup is incomplete", () =
 test("onboarding panel styles are present and avoid card nesting", () => {
 	const styles = read(stylesPath);
 	const headerStyles = styles.match(/\.friday-onboarding-header\s*\{[\s\S]*?\}/);
+	const panelStyles = styles.match(/\.friday-onboarding-panel\s*\{[\s\S]*?\}/);
 	assert.ok(headerStyles, "onboarding header styles should exist");
+	assert.ok(panelStyles, "onboarding panel styles should exist");
 	assert.match(styles, /\.friday-onboarding-panel\s*\{/);
 	assert.match(styles, /\.friday-onboarding-list\s*\{/);
 	assert.match(styles, /\.friday-onboarding-step\s*\{/);
 	assert.match(headerStyles[0], /align-items:\s*center;/);
 	assert.match(headerStyles[0], /text-align:\s*center;/);
 	assert.match(styles, /\.friday-onboarding-actions\s*\{/);
-	assert.doesNotMatch(styles, /\.friday-onboarding-panel[\s\S]*\.friday-card/);
+	assert.doesNotMatch(panelStyles[0], /\.friday-card/);
 });

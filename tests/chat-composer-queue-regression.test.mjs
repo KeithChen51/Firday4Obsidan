@@ -23,16 +23,17 @@ test("chat toolbar persists model and permission choices instead of session foll
 	assert.doesNotMatch(source, /ai\.permission\.follow/);
 	assert.match(source, /await this\.plugin\.soulStore\.updateSoul\(/);
 	assert.doesNotMatch(source, /await this\.plugin\.agentService\.writeAgentProfile\(activeAgent\)/);
-	assert.match(source, /this\.plugin\.settings\.agentRuntime\.toolPermissionMode = value as ToolPermissionMode/);
+	assert.match(source, /const mode = value as ToolPermissionMode/);
+	assert.match(source, /this\.plugin\.settings\.agentRuntime\.toolPermissionMode = mode/);
 });
 
 test("chat toolbar execution mode derives file mutation behavior from the visible mode", async () => {
 	const source = readSource(viewPath);
-	const permissionChangeBlock = source.match(/permissionSelect\.onchange = async \(\) => \{[\s\S]*?\n\t\t\};/)?.[0] ?? "";
+	const permissionChangeBlock = source.match(/permissionSelect\.onclick = \(\) => \{[\s\S]*?\n\t\tconst skillButton/)?.[0] ?? "";
 
-	assert.match(permissionChangeBlock, /deriveFileMutationModeFromToolPermissionMode\(value as ToolPermissionMode\)/);
+	assert.match(permissionChangeBlock, /deriveFileMutationModeFromToolPermissionMode\(mode\)/);
 	assert.match(permissionChangeBlock, /fileMutationMode = /);
-	assert.doesNotMatch(permissionChangeBlock, /toolPermissionMode = value as ToolPermissionMode;\s*await this\.plugin\.saveSettings\(\);/);
+	assert.doesNotMatch(permissionChangeBlock, /toolPermissionMode = mode;\s*await this\.plugin\.saveSettings\(\);/);
 });
 
 test("chat composer stays editable during work and queues the next prompt", async () => {

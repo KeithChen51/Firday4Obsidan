@@ -200,7 +200,7 @@ export function formatMentionTokenLabel(token: MentionToken): string {
 
 function formatMentionLabel(attrs: MentionNodeAttrs): string {
 	if (attrs.type === "skill") {
-		return `Skill /${(attrs.path ?? "").trim() || "skill"}`;
+		return (attrs.path ?? "").trim().replace(/^\/+/, "") || "skill";
 	}
 	if (attrs.type === "active_note") {
 		return "@ Active note";

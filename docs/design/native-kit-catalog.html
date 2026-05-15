@@ -1098,92 +1098,6 @@
 			font-size: 0.78rem;
 		}
 
-		.agent-process-shell {
-			display: grid;
-			gap: var(--space-3);
-			padding: var(--space-3);
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-l);
-			background: var(--background-primary);
-		}
-
-		.agent-process-head {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			gap: var(--space-3);
-		}
-
-		.agent-process-head strong {
-			display: block;
-		}
-
-		.agent-timeline {
-			display: grid;
-			gap: var(--space-2);
-			position: relative;
-			padding-left: 22px;
-		}
-
-		.agent-timeline::before {
-			content: "";
-			position: absolute;
-			top: 10px;
-			bottom: 10px;
-			left: 7px;
-			width: 1px;
-			background: var(--background-modifier-border);
-		}
-
-		.timeline-item {
-			position: relative;
-			display: grid;
-			gap: 2px;
-			padding: var(--space-2) var(--space-3);
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary-alt);
-		}
-
-		.timeline-item::before {
-			content: "";
-			position: absolute;
-			top: 13px;
-			left: -20px;
-			width: 9px;
-			height: 9px;
-			border-radius: 50%;
-			background: var(--background-secondary-alt);
-			border: 1px solid var(--background-modifier-border);
-		}
-
-		.timeline-item.is-active::before {
-			background: var(--interactive-accent);
-			border-color: color-mix(in srgb, var(--interactive-accent) 70%, var(--background-modifier-border));
-		}
-
-		.timeline-item span {
-			color: var(--text-muted);
-			font-size: 0.8rem;
-		}
-
-		.artifact-row {
-			display: flex;
-			align-items: center;
-			justify-content: space-between;
-			gap: var(--space-3);
-			padding: var(--space-2) var(--space-3);
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary-alt);
-		}
-
-		.artifact-row code {
-			font-family: var(--font-monospace);
-			color: var(--text-muted);
-			font-size: 0.78rem;
-		}
-
 		.friday-inline-notice-v2 {
 			display: grid;
 			gap: var(--space-2);
@@ -1484,6 +1398,60 @@
 			font-size: 0.76rem;
 		}
 
+		.assistant-result-meta-v6 {
+			gap: var(--space-2);
+			min-height: 28px;
+			font-size: 0.8rem;
+		}
+
+		.assistant-result-meta-v6 .friday-wordmark {
+			color: var(--text-normal);
+		}
+
+		.assistant-process-toggle-v6 {
+			width: fit-content;
+			padding: 0;
+			border: 0;
+			background: transparent;
+			cursor: pointer;
+		}
+
+		.assistant-process-toggle-v6:hover {
+			color: var(--text-normal);
+		}
+
+		.assistant-process-chevron-v6 {
+			display: inline-block;
+			color: var(--text-muted);
+			font-size: 1rem;
+			line-height: 1;
+			transition: transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
+		}
+
+		.assistant-turn-v2.is-process-open .assistant-process-chevron-v6 {
+			transform: rotate(90deg);
+		}
+
+		.assistant-process-detail-v6 {
+			display: grid;
+			grid-template-rows: 0fr;
+			opacity: 0;
+			transition:
+				grid-template-rows 180ms cubic-bezier(0.25, 1, 0.5, 1),
+				opacity 140ms ease;
+		}
+
+		.assistant-turn-v2.is-process-open .assistant-process-detail-v6 {
+			grid-template-rows: 1fr;
+			opacity: 1;
+		}
+
+		.assistant-process-detail-inner-v6 {
+			display: grid;
+			gap: var(--space-1);
+			overflow: hidden;
+		}
+
 		.assistant-context-v2 span,
 		.agent-step-state-v2 {
 			display: inline-flex;
@@ -1528,7 +1496,82 @@
 		}
 
 		.assistant-tool-call-v5 {
-			min-height: 24px;
+			--kit-event-row-height: 26px;
+			min-height: 26px;
+			padding: 2px 8px;
+			border-color: color-mix(in srgb, var(--background-modifier-border) 48%, transparent);
+			border-radius: var(--radius-s);
+			background: color-mix(in srgb, var(--background-primary) 72%, transparent);
+			opacity: 0.86;
+		}
+
+		.assistant-tool-call-v5 .kit-tool-icon-v1 {
+			width: 18px;
+			height: 18px;
+			color: var(--text-faint);
+		}
+
+		.assistant-tool-call-v5 .kit-event-row-main-v1 {
+			font-size: 0.74rem;
+		}
+
+		.assistant-process-event-v6 {
+			--kit-event-row-height: 32px;
+			padding: 3px 8px;
+		}
+
+		.assistant-process-event-v6 .kit-tool-icon-v1 {
+			width: 20px;
+			height: 20px;
+		}
+
+		.assistant-step-narration-v6 {
+			margin: -2px 8px 0 32px;
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			line-height: 1.45;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.assistant-process-step-v6 {
+			display: grid;
+			gap: var(--space-1);
+		}
+
+		.assistant-step-toggle-v6 {
+			width: 100%;
+			text-align: left;
+		}
+
+		.assistant-step-arrow-v6 {
+			transition: transform 160ms cubic-bezier(0.25, 1, 0.5, 1);
+		}
+
+		.assistant-process-step-v6.is-open .assistant-step-arrow-v6 {
+			transform: rotate(90deg);
+		}
+
+		.assistant-step-detail-v6 {
+			display: grid;
+			grid-template-rows: 0fr;
+			padding-left: 32px;
+			opacity: 0;
+			transition:
+				grid-template-rows 180ms cubic-bezier(0.25, 1, 0.5, 1),
+				opacity 140ms ease;
+		}
+
+		.assistant-process-step-v6.is-open .assistant-step-detail-v6 {
+			grid-template-rows: 1fr;
+			opacity: 1;
+		}
+
+		.assistant-step-detail-inner-v6 {
+			display: grid;
+			gap: var(--space-1);
+			overflow: hidden;
 		}
 
 		.assistant-tool-name-v5 {
@@ -1938,115 +1981,6 @@
 			padding: 9px 10px;
 		}
 
-		.friday-agent-run-list-v2 {
-			display: grid;
-			gap: var(--space-3);
-			padding: var(--space-3);
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary);
-		}
-
-		.agent-run-summary-v2,
-		.agent-run-output-v2 {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			gap: var(--space-3);
-			align-items: center;
-		}
-
-		.agent-run-summary-v2 strong,
-		.agent-run-summary-v2 span {
-			display: block;
-		}
-
-		.agent-run-summary-v2 span {
-			color: var(--text-muted);
-			font-size: 0.8rem;
-		}
-
-		.agent-run-steps-v2 {
-			display: grid;
-			gap: 0;
-			margin: 0;
-			padding: 0;
-			list-style: none;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			overflow: hidden;
-		}
-
-		.agent-run-steps-v2 li {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			gap: var(--space-3);
-			align-items: center;
-			padding: 9px 10px;
-			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
-			background: var(--background-primary-alt);
-		}
-
-		.agent-run-steps-v2 li:first-child {
-			border-top: 0;
-		}
-
-		.agent-run-steps-v2 strong,
-		.agent-run-steps-v2 span {
-			display: block;
-		}
-
-		.agent-run-steps-v2 span {
-			color: var(--text-muted);
-			font-size: 0.8rem;
-		}
-
-		.agent-run-output-v2 {
-			padding: 9px 10px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary-alt);
-		}
-
-		.agent-run-output-v2 code {
-			color: var(--text-muted);
-			font-family: var(--font-monospace);
-			font-size: 0.78rem;
-			overflow-wrap: anywhere;
-		}
-
-		.agent-artifact-grid-v3 {
-			display: grid;
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-			gap: var(--space-2);
-		}
-
-		.artifact-card-v3 {
-			display: grid;
-			grid-template-columns: auto minmax(0, 1fr);
-			gap: var(--space-2);
-			align-items: center;
-			min-width: 0;
-			padding: 9px 10px;
-			border: 1px solid var(--background-modifier-border);
-			border-radius: var(--radius-m);
-			background: var(--background-primary-alt);
-		}
-
-		.artifact-card-v3 strong,
-		.artifact-card-v3 code {
-			display: block;
-			min-width: 0;
-			overflow: hidden;
-			text-overflow: ellipsis;
-			white-space: nowrap;
-		}
-
-		.artifact-card-v3 code {
-			color: var(--text-muted);
-			font-family: var(--font-monospace);
-			font-size: 0.76rem;
-		}
-
 		.friday-project-panel-v2 {
 			border: 1px solid var(--background-modifier-border);
 			border-radius: var(--radius-m);
@@ -2416,6 +2350,10 @@
 			grid-template-columns: minmax(0, 1fr) auto;
 		}
 
+		.kit-event-row-v1.kit-running-surface-v1.assistant-process-event-v6 {
+			grid-template-columns: auto minmax(0, 1fr) auto;
+		}
+
 		.kit-event-row-main-v1 {
 			display: flex;
 			align-items: baseline;
@@ -2762,6 +2700,13 @@
 				animation: none;
 				opacity: 0;
 			}
+
+			.assistant-process-detail-v6,
+			.assistant-step-detail-v6,
+			.assistant-step-arrow-v6,
+			.assistant-process-chevron-v6 {
+				transition: none;
+			}
 		}
 
 		@media (max-width: 980px) {
@@ -2810,8 +2755,6 @@
 			.friday-native-inline-callout,
 			.friday-workbench-bar-v2,
 			.composer-v2,
-			.agent-run-summary-v2,
-			.agent-run-output-v2,
 			.project-panel-head-v2,
 			.project-list-row-v2,
 			.project-candidate-grid-v3,
@@ -2849,10 +2792,6 @@
 				flex-wrap: wrap;
 			}
 
-			.agent-artifact-grid-v3 {
-				grid-template-columns: 1fr;
-			}
-
 			.assistant-turn-v2.is-user {
 				padding-left: 24px;
 			}
@@ -2867,8 +2806,7 @@
 			}
 
 			.friday-shell-header,
-			.composer-footer,
-			.agent-process-head {
+			.composer-footer {
 				align-items: flex-start;
 				flex-direction: column;
 			}
@@ -2971,7 +2909,6 @@
 					<a href="#shell">工作台外壳 <span class="nav-count">3</span></a>
 					<a href="#control">能力控制 <span class="nav-count">1</span></a>
 					<a href="#ai">助手组件 <span class="nav-count">3</span></a>
-					<a href="#agent">执行过程 <span class="nav-count">1</span></a>
 					<a href="#project">项目组件 <span class="nav-count">2</span></a>
 				</nav>
 				<div class="selection-summary">
@@ -3872,7 +3809,7 @@
 							<div class="specimen-head">
 								<div>
 									<h3 class="specimen-title">助手消息</h3>
-									<div class="specimen-meta">用户右侧气泡，FRIDAY 走文档流；工具调用弱化为一行记录，计划进 Task Bar</div>
+									<div class="specimen-meta">用户右侧气泡，FRIDAY 走文档流；过程步骤可带工作叙述，结果态保留用时，复杂任务从名称旁展开过程</div>
 									<div class="component-version">
 										<span class="adjustment-badge">调整版候选</span>
 										<span class="adjustment-badge is-version">Native Kit v0.2</span>
@@ -3895,36 +3832,172 @@
 											<p>先做一个初版，我来挑。</p>
 										</div>
 									</div>
-									<div class="assistant-turn-v2 is-assistant">
+									<div class="assistant-turn-v2 is-assistant is-working">
 										<span class="assistant-source-mark-v3" aria-hidden="true">
 											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
 											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
 										</span>
 										<div class="assistant-turn-body-v2">
-											<div class="assistant-meta-v2">
+											<div class="assistant-meta-v2 assistant-result-meta-v6">
 												<span class="friday-wordmark">FRIDAY</span>
-												<span>文档流输出</span>
-												<span>上下文 3</span>
+												<span>正在工作</span>
+												<span>8s</span>
+											</div>
+											<div class="assistant-output-stack-v3">
+												<div class="assistant-process-step-v6">
+													<button type="button" class="kit-event-row-v1 assistant-process-event-v6 assistant-step-toggle-v6" aria-expanded="false" aria-controls="assistant-work-step-read">
+														<span class="kit-tool-icon-v1 assistant-step-arrow-v6" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+														<div class="kit-event-row-main-v1">
+															<strong>读取规范</strong>
+															<span>docs/design/friday-native-kit.md</span>
+														</div>
+													</button>
+													<div class="assistant-step-detail-v6" id="assistant-work-step-read" aria-hidden="true">
+														<div class="assistant-step-detail-inner-v6">
+															<div class="kit-event-row-v1 assistant-tool-call-v5">
+																<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+																<div class="kit-event-row-main-v1">
+																	<strong class="assistant-tool-name-v5">read_file</strong>
+																	<span class="assistant-tool-detail-v5">docs/design/friday-native-kit.md</span>
+																</div>
+																<span>完成</span>
+															</div>
+														</div>
+													</div>
+													<div class="assistant-step-narration-v6">已读取当前规范，确认过程说明只写工作日志，不展示内部推理。</div>
+												</div>
+												<div class="assistant-process-step-v6">
+													<button type="button" class="kit-event-row-v1 kit-running-surface-v1 assistant-process-event-v6 assistant-step-toggle-v6" aria-expanded="false" aria-controls="assistant-work-step-message">
+														<span class="kit-tool-icon-v1 assistant-step-arrow-v6" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+														<div class="kit-event-row-main-v1">
+															<strong>整理助手消息状态</strong>
+															<span>过程态、结果态和产物展示</span>
+														</div>
+														<span>进行中</span>
+													</button>
+													<div class="assistant-step-detail-v6" id="assistant-work-step-message" aria-hidden="true">
+														<div class="assistant-step-detail-inner-v6">
+															<div class="kit-event-row-v1 assistant-tool-call-v5">
+																<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+																<div class="kit-event-row-main-v1">
+																	<strong class="assistant-tool-name-v5">edit_file</strong>
+																	<span class="assistant-tool-detail-v5">docs/design/native-kit-catalog.html</span>
+																</div>
+																<span>运行中</span>
+															</div>
+														</div>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div class="assistant-turn-v2 is-assistant is-simple-result">
+										<span class="assistant-source-mark-v3" aria-hidden="true">
+											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
+											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
+										</span>
+										<div class="assistant-turn-body-v2">
+											<div class="assistant-meta-v2 assistant-result-meta-v6">
+												<span class="friday-wordmark">FRIDAY</span>
+												<span>已思考</span>
+												<span>8s</span>
 											</div>
 											<div class="assistant-output-stack-v3">
 												<section class="assistant-output-block is-prose">
-													<div class="assistant-block-title">
-														<span>正文</span>
-													</div>
-													<p>我会先读取当前项目的设计规范，再给出最小可迁移的组件候选。</p>
+													<p>可以，先按这版推进。</p>
 												</section>
-												<div class="kit-event-row-v1 assistant-tool-call-v5">
-													<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
-													<div class="kit-event-row-main-v1">
-														<strong class="assistant-tool-name-v5">read_file</strong>
-														<span class="assistant-tool-detail-v5">docs/design/obsidian-plugin-ui-contract.md</span>
+											</div>
+										</div>
+									</div>
+									<div class="assistant-turn-v2 is-assistant is-complex-result">
+										<span class="assistant-source-mark-v3" aria-hidden="true">
+											<img class="brand-asset-on-light" src="../../brand/logo/friday-icon.svg" alt="">
+											<img class="brand-asset-on-dark" src="../../brand/logo/friday-icon-reversed.svg" alt="">
+										</span>
+										<div class="assistant-turn-body-v2">
+											<button type="button" class="assistant-meta-v2 assistant-result-meta-v6 assistant-process-toggle-v6" aria-expanded="false" aria-controls="assistant-process-detail-demo">
+												<span class="friday-wordmark">FRIDAY</span>
+												<span>已完成工作</span>
+												<span>8s</span>
+												<span class="assistant-process-chevron-v6" aria-hidden="true">›</span>
+											</button>
+											<div class="assistant-process-detail-v6" id="assistant-process-detail-demo" aria-hidden="true">
+												<div class="assistant-process-detail-inner-v6">
+													<div class="assistant-process-step-v6">
+														<button type="button" class="kit-event-row-v1 assistant-process-event-v6 assistant-step-toggle-v6" aria-expanded="false" aria-controls="assistant-result-step-read">
+															<span class="kit-tool-icon-v1 assistant-step-arrow-v6" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+															<div class="kit-event-row-main-v1">
+																<strong>读取规范</strong>
+																<span>docs/design/friday-native-kit.md</span>
+															</div>
+														</button>
+														<div class="assistant-step-detail-v6" id="assistant-result-step-read" aria-hidden="true">
+															<div class="assistant-step-detail-inner-v6">
+																<div class="kit-event-row-v1 assistant-tool-call-v5">
+																	<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+																	<div class="kit-event-row-main-v1">
+																		<strong class="assistant-tool-name-v5">read_file</strong>
+																		<span class="assistant-tool-detail-v5">docs/design/friday-native-kit.md</span>
+																	</div>
+																	<span>完成</span>
+																</div>
+															</div>
+														</div>
+														<div class="assistant-step-narration-v6">已读取规范，确认复杂任务的过程属于助手消息，不再单独做时间线。</div>
 													</div>
-													<span class="kit-soft-chip-v1">已运行 1 条命令</span>
+													<div class="assistant-process-step-v6">
+														<button type="button" class="kit-event-row-v1 assistant-process-event-v6 assistant-step-toggle-v6" aria-expanded="false" aria-controls="assistant-result-step-state">
+															<span class="kit-tool-icon-v1 assistant-step-arrow-v6" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+															<div class="kit-event-row-main-v1">
+																<strong>整理消息状态</strong>
+																<span>静默过程、显性过程、简单结果和复杂结果</span>
+															</div>
+														</button>
+														<div class="assistant-step-detail-v6" id="assistant-result-step-state" aria-hidden="true">
+															<div class="assistant-step-detail-inner-v6">
+																<div class="kit-event-row-v1 assistant-tool-call-v5">
+																	<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+																	<div class="kit-event-row-main-v1">
+																		<strong class="assistant-tool-name-v5">edit_file</strong>
+																		<span class="assistant-tool-detail-v5">docs/design/native-kit-catalog.html</span>
+																	</div>
+																	<span>完成</span>
+																</div>
+															</div>
+														</div>
+														<div class="assistant-step-narration-v6">已整理消息状态，明确正在思考、正在工作、已思考和已完成工作四种状态。</div>
+													</div>
+													<div class="assistant-process-step-v6">
+														<button type="button" class="kit-event-row-v1 assistant-process-event-v6 assistant-step-toggle-v6" aria-expanded="false" aria-controls="assistant-result-step-artifact">
+															<span class="kit-tool-icon-v1 assistant-step-arrow-v6" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+															<div class="kit-event-row-main-v1">
+																<strong>归并产物展示</strong>
+																<span>按文件类型 icon 展示本次产出</span>
+															</div>
+														</button>
+														<div class="assistant-step-detail-v6" id="assistant-result-step-artifact" aria-hidden="true">
+															<div class="assistant-step-detail-inner-v6">
+																<div class="kit-event-row-v1 assistant-tool-call-v5">
+																	<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+																	<div class="kit-event-row-main-v1">
+																		<strong class="assistant-tool-name-v5">write_file</strong>
+																		<span class="assistant-tool-detail-v5">docs/design/native-kit-catalog.html</span>
+																	</div>
+																	<span>完成</span>
+																</div>
+															</div>
+														</div>
+														<div class="assistant-step-narration-v6">已把本次产出归到同一组，只按文件类型显示图标。</div>
+													</div>
 												</div>
+											</div>
+											<div class="assistant-output-stack-v3">
+												<section class="assistant-output-block is-prose">
+													<p>我已按 Native Kit 的结果态规则整理了消息结构，并把产物按文件类型归入同一组展示。</p>
+												</section>
 												<section class="assistant-output-block is-artifact">
 													<div class="assistant-block-title">
-														<span>产物</span>
-														<span>可进入执行过程详情</span>
+														<span>本次产出</span>
 													</div>
 													<div class="assistant-artifact-list-v4">
 														<div class="assistant-artifact-row-v4">
@@ -4249,89 +4322,6 @@
 												<span>无结果时复用空状态元件，给一个恢复动作。</span>
 											</div>
 											<button type="button">清除</button>
-										</div>
-									</div>
-								</div>
-							</div>
-						</article>
-					</div>
-				</section>
-
-				<section class="kit-section" id="agent">
-					<div class="section-head">
-						<div>
-							<h2>执行过程组件</h2>
-							<p>先做 catalog，不急着抽源码。这个区域状态多，适合第二阶段系统化。</p>
-						</div>
-						<span class="section-mode">第二阶段</span>
-					</div>
-					<div class="component-grid">
-						<article class="component-specimen is-wide" data-component="执行过程时间线" data-adjusted-candidate="true">
-							<div class="specimen-head">
-								<div>
-									<h3 class="specimen-title">执行过程时间线</h3>
-									<div class="specimen-meta">保留时间线结构，与助手文档流共用工具事件，并增强 md、白板、笔记等产物类型</div>
-									<div class="component-version">
-										<span class="adjustment-badge">调整版候选</span>
-										<span class="adjustment-badge is-version">Native Kit v0.2</span>
-									</div>
-								</div>
-								<div class="component-choice" aria-label="Choice">
-									<button type="button" data-choice="keep">保留</button>
-									<button type="button" data-choice="adjust">调整</button>
-									<button type="button" data-choice="hold">暂缓</button>
-								</div>
-							</div>
-							<div class="specimen-body">
-								<div class="agent-process-shell friday-agent-run-list-v2">
-									<div class="agent-process-head">
-										<div>
-											<strong>排查 Native Kit 差异</strong>
-											<span class="inline-status">正在检查 DailyBoardView.ts 和 styles.css</span>
-										</div>
-										<span class="kit-soft-chip-v1 is-warning">运行中</span>
-									</div>
-									<div class="agent-timeline">
-										<div class="timeline-item">
-											<strong>读取规范</strong>
-											<span>DESIGN.md 和 obsidian-plugin-ui-contract.md</span>
-										</div>
-										<div class="timeline-item is-active kit-running-surface-v1">
-											<strong>扫描 UI surface</strong>
-											<span>查找重复 class、硬编码样式和局部 helper</span>
-										</div>
-										<div class="timeline-item">
-											<strong>输出差异报告</strong>
-											<span>按 Settings、Shell、Assistant、Agent 分组</span>
-										</div>
-									</div>
-									<div class="agent-artifact-grid-v3" aria-label="执行产物">
-										<div class="artifact-card-v3">
-											<span class="kit-file-type-icon-v1 is-markdown" aria-hidden="true">
-												<span class="friday-icon"><svg><use href="#icon-file-text"></use></svg></span>
-											</span>
-											<div>
-												<strong>差异报告</strong>
-												<code>friday-ui-ux-gap.md</code>
-											</div>
-										</div>
-										<div class="artifact-card-v3">
-											<span class="kit-file-type-icon-v1 is-canvas" aria-hidden="true">
-												<span class="friday-icon"><svg><use href="#icon-layout"></use></svg></span>
-											</span>
-											<div>
-												<strong>组件白板</strong>
-												<code>native-kit-map.canvas</code>
-											</div>
-										</div>
-										<div class="artifact-card-v3">
-											<span class="kit-file-type-icon-v1 is-note" aria-hidden="true">
-												<span class="friday-icon"><svg><use href="#icon-file"></use></svg></span>
-											</span>
-											<div>
-												<strong>实施笔记</strong>
-												<code>migration-notes.md</code>
-											</div>
 										</div>
 									</div>
 								</div>
@@ -4666,6 +4656,30 @@
 					applySelections();
 					saveState();
 				});
+			});
+		});
+
+		document.querySelectorAll(".assistant-process-toggle-v6").forEach((button) => {
+			const turn = button.closest(".assistant-turn-v2");
+			const detail = document.getElementById(button.getAttribute("aria-controls"));
+			if (!turn || !detail) return;
+			button.addEventListener("click", () => {
+				const isOpen = button.getAttribute("aria-expanded") === "true";
+				button.setAttribute("aria-expanded", String(!isOpen));
+				detail.setAttribute("aria-hidden", String(isOpen));
+				turn.classList.toggle("is-process-open", !isOpen);
+			});
+		});
+
+		document.querySelectorAll(".assistant-step-toggle-v6").forEach((button) => {
+			const step = button.closest(".assistant-process-step-v6");
+			const detail = document.getElementById(button.getAttribute("aria-controls"));
+			if (!step || !detail) return;
+			button.addEventListener("click", () => {
+				const isOpen = button.getAttribute("aria-expanded") === "true";
+				button.setAttribute("aria-expanded", String(!isOpen));
+				detail.setAttribute("aria-hidden", String(isOpen));
+				step.classList.toggle("is-open", !isOpen);
 			});
 		});
 

@@ -69,6 +69,19 @@ test("mention composer document keeps skill tokens as inline badges while preser
 	assert.ok(snapshot.doc);
 });
 
+test("mention composer skill tokens display the skill name without command prefixes", async () => {
+	const mod = await loadModule();
+	const skillToken = { id: "skill-1", type: "skill", path: "json-canvas" };
+	const node = mod.createMentionNode(skillToken);
+	const domSpec = mod.mentionComposerSchema.nodes.mention.spec.toDOM?.(node);
+	const serializedDom = JSON.stringify(domSpec);
+
+	assert.equal(mod.formatMentionTokenLabel(skillToken), "json-canvas");
+	assert.match(serializedDom, /json-canvas/);
+	assert.doesNotMatch(serializedDom, /Skill \//);
+	assert.doesNotMatch(serializedDom, />\/json-canvas</);
+});
+
 test("mention node DOM spec includes a dedicated remove control for mouse interaction", async () => {
 	const mod = await loadModule();
 	const node = mod.createMentionNode({ id: "note-1", type: "note", path: "Projects/demo/raw/spec.md" });
