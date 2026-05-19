@@ -490,120 +490,120 @@ executionMode: agent_orchestrated\r
 sourceMap: { hitStep: "direct_read", sourcePath: "<projectRoot>/wiki/pages/context-compression-strategy.md", sourceSection: "compiled_truth" }\r
 \u7F6E\u4FE1\u5EA6\uFF1A\u9AD8\uFF08\u76F4\u63A5\u547D\u4E2D Compiled Truth\uFF09\r
 \`\`\`\r
-`,Lv=`---\r
-name: intent-framing\r
-description: Frame ambiguous user requests before acting, without turning every turn into a questionnaire or blocking low-risk exploration.\r
-command: intent-framing\r
-aliases: [intent-framing, understand-intent, clarify-intent, problem-understanding, \u6F84\u6E05\u95EE\u9898]\r
-tags: [cognitive, intent, clarification, planning]\r
-trigger: Use when the user goal, target object, or success criteria are ambiguous enough that guessing would change the next action, especially before side-effecting work.\r
-executionMode: model_owned\r
----\r
-\r
-# Skill: intent-framing\r
-\r
-Use this skill to understand what the user is really asking for before committing to an action. This is a cognitive skill, not a runtime gate: it guides the model's judgment while leaving normal agent autonomy intact.\r
-\r
-## Core stance\r
-\r
-1. Do not turn every task into a questionnaire.\r
-2. Read-only exploration is allowed when it can reduce ambiguity without side effects.\r
-3. Ask one necessary clarifying question only when the missing intent would change the action.\r
-4. If the next step would write, delete, move, send, publish, or batch-transform user content, resolve the intent first or route the work through review.\r
-5. State assumptions briefly when proceeding under a low-risk interpretation.\r
-\r
-## Quick frame\r
-\r
-Before acting on an ambiguous request, form this short internal frame:\r
-\r
-\`\`\`text\r
-goal: What outcome does the user likely want?\r
-target: What file, project, note, topic, or system is affected?\r
-task_type: answer | read_context | plan | write | refactor | research\r
-confidence: high | medium | low\r
-missing_context: What would change the action if unknown?\r
-risk: none | low | side_effect\r
-next_move: answer | read_context | ask_clarifying_question | propose_plan | request_review\r
-\`\`\`\r
-\r
-Keep this frame internal unless it helps the user understand why you are asking or how you will proceed.\r
-\r
-## Decision rules\r
-\r
-### Answer directly\r
-\r
-Use direct answer when the request is clear and no tool evidence is needed.\r
-\r
-### Read context first\r
-\r
-Use read-only tools first when files, settings, or project state can answer the uncertainty. Tell the user what you are checking only if a visible progress note is useful.\r
-\r
-### Ask one question\r
-\r
-Ask one concise question when:\r
-\r
-- The user names an action but not the target.\r
-- Multiple reasonable interpretations would produce different work.\r
-- Broad verbs do not automatically require a question. When the request asks for "\u6574\u7406", "\u4F18\u5316", "\u5904\u7406", "fix this", "make it better", or similar broad action, use read-only context first if it can identify the target or useful options; ask only when the missing target or success criteria still changes the next action.\r
-- Continuing would require inventing user intent.\r
-\r
-### Request review before side effects\r
-\r
-For write/delete/move/publish/batch operations, do not rely on guessed intent. If the user intent is clear, proceed through the normal review or confirmation surface. If it is unclear, ask one question before building a plan.\r
-\r
-## Response patterns\r
-\r
-When asking:\r
-\r
-\`\`\`text\r
-I understand the goal as <X>, but <Y> changes the work. Which target should I use?\r
-\`\`\`\r
-\r
-When doing read-only exploration:\r
-\r
-\`\`\`text\r
-I will first inspect <target> read-only to confirm the shape of the problem. I will not change files yet.\r
-\`\`\`\r
-\r
-When proceeding with an assumption:\r
-\r
-\`\`\`text\r
-I will treat <X> as the target for now because <reason>. I will stop before any write if that assumption becomes risky.\r
-\`\`\`\r
-\r
-## Behavior examples\r
-\r
-### Repo explanation\r
-\r
-User: "What does this repo do?"\r
-\r
-Expected behavior: use read-only project inspection, such as project_tree and key manifest reads, then answer. Do not ask a clarification question first.\r
-\r
-### Broad improvement request\r
-\r
-User: "Help me improve this project."\r
-\r
-Expected behavior: inspect the project read-only, then offer a small set of improvement directions or ask one focused question before any write. Do not start editing from a guessed goal.\r
-\r
-### Deictic file request with no active file\r
-\r
-User: "\u6574\u7406\u4E00\u4E0B\u8FD9\u4E2A\u6587\u4EF6"\r
-\r
-Expected behavior: if no Active file context is present, ask which file. Do not assume the editor file or invent a target.\r
-\r
-### Clear summary-note request\r
-\r
-User: "Create a summary note from the workspace files."\r
-\r
-Expected behavior: read the workspace files, choose a sensible workspace output path if none is provided, and proceed through normal mutation review. State the path assumption briefly; do not ask whether to do the task.\r
-\r
-## Anti-patterns\r
-\r
-- Do not ask for confirmation when the next safe read can answer the question.\r
-- Do not create a visible plan just because the request is ambiguous.\r
-- Do not hide uncertainty and then mutate files.\r
-- Do not load domain skills before understanding which domain actually applies.\r
-- Do not treat this skill as permission to ignore mutation review.\r
+`,Lv=`---
+name: intent-framing
+description: Frame ambiguous user requests before acting, without turning every turn into a questionnaire or blocking low-risk exploration.
+command: intent-framing
+aliases: [intent-framing, understand-intent, clarify-intent, problem-understanding, \u6F84\u6E05\u95EE\u9898]
+tags: [cognitive, intent, clarification, planning]
+trigger: Use when the user goal, target object, or success criteria are ambiguous enough that guessing would change the next action, especially before side-effecting work.
+executionMode: model_owned
+---
+
+# Skill: intent-framing
+
+Use this skill to understand what the user is really asking for before committing to an action. This is a cognitive skill, not a runtime gate: it guides the model's judgment while leaving normal agent autonomy intact.
+
+## Core stance
+
+1. Do not turn every task into a questionnaire.
+2. Read-only exploration is allowed when it can reduce ambiguity without side effects.
+3. Ask one necessary clarifying question only when the missing intent would change the action.
+4. If the next step would write, delete, move, send, publish, or batch-transform user content, resolve the intent first or route the work through review.
+5. State assumptions briefly when proceeding under a low-risk interpretation.
+
+## Quick frame
+
+Before acting on an ambiguous request, form this short internal frame:
+
+\`\`\`text
+goal: What outcome does the user likely want?
+target: What file, project, note, topic, or system is affected?
+task_type: answer | read_context | plan | write | refactor | research
+confidence: high | medium | low
+missing_context: What would change the action if unknown?
+risk: none | low | side_effect
+next_move: answer | read_context | ask_clarifying_question | propose_plan | request_review
+\`\`\`
+
+Keep this frame internal unless it helps the user understand why you are asking or how you will proceed.
+
+## Decision rules
+
+### Answer directly
+
+Use direct answer when the request is clear and no tool evidence is needed.
+
+### Read context first
+
+Use read-only tools first when files, settings, or project state can answer the uncertainty. Tell the user what you are checking only if a visible progress note is useful.
+
+### Ask one question
+
+Ask one concise question when:
+
+- The user names an action but not the target.
+- Multiple reasonable interpretations would produce different work.
+- Broad verbs do not automatically require a question. When the request asks for "\u6574\u7406", "\u4F18\u5316", "\u5904\u7406", "fix this", "make it better", or similar broad action, use read-only context first if it can identify the target or useful options; ask only when the missing target or success criteria still changes the next action.
+- Continuing would require inventing user intent.
+
+### Request review before side effects
+
+For write/delete/move/publish/batch operations, do not rely on guessed intent. If the user intent is clear, proceed through the normal review or confirmation surface. If it is unclear, ask one question before building a plan.
+
+## Response patterns
+
+When asking:
+
+\`\`\`text
+I understand the goal as <X>, but <Y> changes the work. Which target should I use?
+\`\`\`
+
+When doing read-only exploration:
+
+\`\`\`text
+I will first inspect <target> read-only to confirm the shape of the problem. I will not change files yet.
+\`\`\`
+
+When proceeding with an assumption:
+
+\`\`\`text
+I will treat <X> as the target for now because <reason>. I will stop before any write if that assumption becomes risky.
+\`\`\`
+
+## Behavior examples
+
+### Repo explanation
+
+User: "What does this repo do?"
+
+Expected behavior: use read-only project inspection, such as project_tree and key manifest reads, then answer. Do not ask a clarification question first.
+
+### Broad improvement request
+
+User: "Help me improve this project."
+
+Expected behavior: inspect the project read-only, then offer a small set of improvement directions or ask one focused question before any write. Do not start editing from a guessed goal.
+
+### Deictic file request with no active file
+
+User: "\u6574\u7406\u4E00\u4E0B\u8FD9\u4E2A\u6587\u4EF6"
+
+Expected behavior: if no Active file context is present, ask which file. Do not assume the editor file or invent a target.
+
+### Clear summary-note request
+
+User: "Create a summary note from the workspace files."
+
+Expected behavior: read the workspace files, choose a sensible workspace output path if none is provided, and proceed through normal mutation review. State the path assumption briefly; do not ask whether to do the task.
+
+## Anti-patterns
+
+- Do not ask for confirmation when the next safe read can answer the question.
+- Do not create a visible plan just because the request is ambiguous.
+- Do not hide uncertainty and then mutate files.
+- Do not load domain skills before understanding which domain actually applies.
+- Do not treat this skill as permission to ignore mutation review.
 `,Ov=`---\r
 name: resolve-conflict\r
 description: \u5728\u540C\u6B65\u6216\u6587\u4EF6\u4FEE\u6539\u53D1\u751F\u51B2\u7A81\u65F6\uFF0C\u7531 Agent \u9A71\u52A8\u751F\u6210\u4FEE\u590D\u5EFA\u8BAE\uFF08Fix Proposal\uFF09\uFF0C\u63D0\u4EA4\u7528\u6237\u5BA1\u6279\uFF0C\u66FF\u4EE3\u4F20\u7EDF\u62A5\u9519\u963B\u65AD\u6D41\u7A0B\u3002\r
@@ -859,17 +859,17 @@ executionMode: agent_orchestrated\r
 \r
 # Skill: obsidian-markdown\r
 \r
-Generate valid Obsidian Flavored Markdown. Standard Markdown still applies, but this skill focuses on Obsidian-specific syntax and safe editing behavior for existing notes.\r
-\r
-## FRIDAY tool usage\r
-\r
-- Use \`markdown_outline\` before structural edits so you can inspect headings, frontmatter, wikilinks, embeds, and Markdown links.\r
-- Use \`frontmatter_update\` for note properties instead of rewriting the whole note.\r
-- Use \`markdown_insert_reference\` for wikilinks, embeds, and local Markdown links.\r
-- Use \`validate_markdown\` after changing one note, or \`validate_outputs\` when checking several generated files.\r
-- Use write/edit only as a low-level fallback when the structured Markdown tools cannot express the requested change.\r
-\r
-## Prefer these constructs\r
+Generate valid Obsidian Flavored Markdown. Standard Markdown still applies, but this skill focuses on Obsidian-specific syntax and safe editing behavior for existing notes.
+
+## FRIDAY tool usage
+
+- Use \`markdown_outline\` before structural edits so you can inspect headings, frontmatter, wikilinks, embeds, and Markdown links.
+- Use \`frontmatter_update\` for note properties instead of rewriting the whole note.
+- Use \`markdown_insert_reference\` for wikilinks, embeds, and local Markdown links.
+- Use \`validate_markdown\` after changing one note, or \`validate_outputs\` when checking several generated files.
+- Use write/edit only as a low-level fallback when the structured Markdown tools cannot express the requested change.
+
+## Prefer these constructs
 \r
 ### Frontmatter\r
 \`\`\`yaml\r
@@ -929,7 +929,7 @@ Visible text %%hidden comment%%\r
 2. Preserve existing note structure and link style unless there is a clear reason to change it.\r
 3. Add callouts or embeds only when they improve the note, not just because the syntax exists.\r
 4. Verify the final syntax is valid for Obsidian, not just generic Markdown.\r
-`,$v='---\r\nname: json-canvas\r\ndescription: Create and edit Obsidian JSON Canvas files with spec-valid nodes, edges, groups, labels, colors, and safe editing of existing canvas graphs.\r\ncommand: json-canvas\r\naliases: [json-canvas, canvas, obsidian-canvas]\r\ntags: [obsidian, canvas, graph, layout]\r\ntrigger: Use when the task is about .canvas files, visual boards, flowcharts, mind maps, or canvas node or edge editing.\r\nexecutionMode: agent_orchestrated\r\n---\r\n\r\n# Skill: json-canvas\r\n\r\nOperate on Obsidian `.canvas` files, which are JSON documents with top-level `nodes` and `edges` arrays.\r\n\r\n## Base structure\r\n\r\n```json\r\n{\r\n  "nodes": [],\r\n  "edges": []\r\n}\r\n```\r\n\r\n## Core rules\r\n\r\n### Required validity rules\r\n\r\n1. The top level should contain `nodes` and `edges` arrays.\r\n2. Every node and edge ID must be unique strings.\r\n3. Preserve existing IDs when editing an existing canvas. Create new IDs only for new nodes or edges.\r\n4. Every `fromNode` and `toNode` in edges must reference an existing node ID.\r\n5. `fromSide` and `toSide` may only use `top`, `right`, `bottom`, or `left`.\r\n6. `fromEnd` and `toEnd` may only use `none` or `arrow`.\r\n7. Preserve node order unless you intentionally want to change z-index, because array order controls stacking.\r\n\r\n### Layout and readability suggestions\r\n\r\n1. Keep layout readable: avoid overlap and use consistent spacing.\r\n2. Prefer minimal edits over full regeneration when updating an existing canvas.\r\n\r\n## FRIDAY tool usage\r\n\r\n- Use `canvas_read` before editing an existing canvas so you can inspect nodes, edges, file references, and validation issues.\r\n- Use `canvas_apply` to create or update `.canvas` files from structured nodes and edges. It preserves existing IDs, unknown fields, and unrelated graph data when updating.\r\n- Use `validate_canvas` after changing one canvas, or `validate_outputs` when checking several generated files.\r\n- Do not default to raw write/edit for Canvas JSON. Use low-level file tools only when the structured canvas tools cannot express the requested change.\r\n\r\n## Common operations\r\n\r\n### Create a canvas\r\n- Initialize empty `nodes` and `edges`.\r\n- Add nodes with `id`, `type`, `x`, `y`, `width`, and `height`.\r\n- Add edges that connect valid node IDs.\r\n\r\n### Edit a canvas\r\n- Parse JSON first.\r\n- Locate target nodes or edges by `id`.\r\n- Preserve unknown fields and unrelated nodes or edges.\r\n- Modify attributes like text, file, subpath, URL, position, color, label, grouping, or edge endpoints.\r\n- Re-validate references and enum values after every change.\r\n\r\n## Important node types\r\n\r\n- `text`: markdown-capable text block\r\n- `file`: vault file reference\r\n- `link`: external URL\r\n- `group`: visual grouping container\r\n\r\n## Common fields worth preserving\r\n\r\n- File nodes may use `file` and optional `subpath`.\r\n- Group nodes may use `label`, `background`, and `backgroundStyle`.\r\n- Edges may use `label`, `color`, `fromSide`, `toSide`, `fromEnd`, and `toEnd`.\r\n- Colors may be hex strings or preset color strings such as `"1"` to `"6"`.\r\n\r\n## Validation checklist\r\n\r\n- JSON parses successfully.\r\n- No duplicate IDs.\r\n- All edge references resolve.\r\n- Required fields exist for each node type.\r\n- Unknown fields are preserved unless intentionally removed.\r\n',Vv=`---\r
+`,$v='---\r\nname: json-canvas\r\ndescription: Create and edit Obsidian JSON Canvas files with spec-valid nodes, edges, groups, labels, colors, and safe editing of existing canvas graphs.\r\ncommand: json-canvas\r\naliases: [json-canvas, canvas, obsidian-canvas]\r\ntags: [obsidian, canvas, graph, layout]\r\ntrigger: Use when the task is about .canvas files, visual boards, flowcharts, mind maps, or canvas node or edge editing.\r\nexecutionMode: agent_orchestrated\r\n---\r\n\r\n# Skill: json-canvas\r\n\r\nOperate on Obsidian `.canvas` files, which are JSON documents with top-level `nodes` and `edges` arrays.\r\n\r\n## Base structure\r\n\r\n```json\r\n{\r\n  "nodes": [],\r\n  "edges": []\r\n}\r\n```\r\n\r\n## Core rules\r\n\r\n### Required validity rules\r\n\r\n1. The top level should contain `nodes` and `edges` arrays.\r\n2. Every node and edge ID must be unique strings.\r\n3. Preserve existing IDs when editing an existing canvas. Create new IDs only for new nodes or edges.\r\n4. Every `fromNode` and `toNode` in edges must reference an existing node ID.\r\n5. `fromSide` and `toSide` may only use `top`, `right`, `bottom`, or `left`.\r\n6. `fromEnd` and `toEnd` may only use `none` or `arrow`.\r\n7. Preserve node order unless you intentionally want to change z-index, because array order controls stacking.\r\n\r\n### Layout and readability suggestions\r\n\r\n1. Keep layout readable: avoid overlap and use consistent spacing.\r\n2. Prefer minimal edits over full regeneration when updating an existing canvas.\r\n\r\n## FRIDAY tool usage\n\n- Use `canvas_read` before editing an existing canvas so you can inspect nodes, edges, file references, and validation issues.\n- Use `canvas_apply` to create or update `.canvas` files from structured nodes and edges. It preserves existing IDs, unknown fields, and unrelated graph data when updating.\n- Use `validate_canvas` after changing one canvas, or `validate_outputs` when checking several generated files.\n- Do not default to raw write/edit for Canvas JSON. Use low-level file tools only when the structured canvas tools cannot express the requested change.\n\n## Common operations\n\n### Create a canvas\n- Initialize empty `nodes` and `edges`.\n- Add nodes with `id`, `type`, `x`, `y`, `width`, and `height`.\n- Add edges that connect valid node IDs.\r\n\r\n### Edit a canvas\r\n- Parse JSON first.\r\n- Locate target nodes or edges by `id`.\r\n- Preserve unknown fields and unrelated nodes or edges.\r\n- Modify attributes like text, file, subpath, URL, position, color, label, grouping, or edge endpoints.\r\n- Re-validate references and enum values after every change.\r\n\r\n## Important node types\r\n\r\n- `text`: markdown-capable text block\r\n- `file`: vault file reference\r\n- `link`: external URL\r\n- `group`: visual grouping container\r\n\r\n## Common fields worth preserving\r\n\r\n- File nodes may use `file` and optional `subpath`.\r\n- Group nodes may use `label`, `background`, and `backgroundStyle`.\r\n- Edges may use `label`, `color`, `fromSide`, `toSide`, `fromEnd`, and `toEnd`.\r\n- Colors may be hex strings or preset color strings such as `"1"` to `"6"`.\r\n\r\n## Validation checklist\r\n\r\n- JSON parses successfully.\r\n- No duplicate IDs.\r\n- All edge references resolve.\r\n- Required fields exist for each node type.\r\n- Unknown fields are preserved unless intentionally removed.\r\n',Vv=`---\r
 name: obsidian-bases\r
 description: Create and edit Obsidian Bases configurations in \`.base\` files or embedded \`base\` code blocks with filters, formulas, properties, summaries, and views.\r
 command: obsidian-bases\r
