@@ -38,6 +38,10 @@ import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
 import type { GroupModelCatalogModel } from "../types/groupModelCatalog";
 import type { SoulTonePreset } from "../types/soul";
+import {
+	SOUL_EXPERIMENT_TEMPLATE_SERIES,
+	type SoulExperimentTemplate,
+} from "../features/soul/SoulExperimentTemplates";
 import type { LocaleCode } from "../i18n/types";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS } from "../constants/officialContent";
@@ -97,6 +101,8 @@ export class FridaySettingTab extends PluginSettingTab {
 	private testedVisionModel = "";
 	private modelPresetResult: ModelPresetResult | null = null;
 	private activeSection: SettingsSection = "user";
+	private soulPanelMode: "manage" | "lab" = "manage";
+	private soulLabPreviewTemplateId = "";
 	private newAgentDraft = "";
 	private soulEditorDraftId = "";
 	private soulEditorNameDraft = "";
@@ -153,6 +159,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			return;
 		}
 		this.activeSection = section;
+		this.soulPanelMode = "manage";
 	}
 
 	display(): void {
@@ -206,6 +213,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			activeId: this.activeSection,
 			onSelect: (section) => {
 				this.activeSection = section;
+				this.soulPanelMode = "manage";
 				this.display();
 			},
 		});
@@ -1229,6 +1237,10 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderSoulSection(containerEl: HTMLElement): void {
+		if (this.soulPanelMode === "lab") {
+			this.renderSoulLabSection(containerEl);
+			return;
+		}
 		const souls = this.host.listSouls();
 		const activeSoul = this.host.getActiveSoul();
 		const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
@@ -1328,6 +1340,16 @@ export class FridaySettingTab extends PluginSettingTab {
 					}),
 				);
 
+			new Setting(managementGroup)
+				.setName(this.t("settings.agent.create.fromTemplate", "从实验模板创建"))
+				.setDesc(this.t("settings.agent.create.fromTemplateDesc", "打开 Soul 实验室，从 MBTI 等实验系列复制一个可编辑的 Soul。"))
+				.addButton((button) =>
+					button.setButtonText(this.t("settings.agent.create.fromTemplate", "从实验模板创建")).onClick(() => {
+						this.soulPanelMode = "lab";
+						this.display();
+					}),
+				);
+
 			for (const soul of souls) {
 				const summary = soul.summary?.trim() || this.t("settings.agent.manage.emptySummary", "尚未补充简介");
 				const row = new Setting(managementGroup)
@@ -1353,7 +1375,7 @@ export class FridaySettingTab extends PluginSettingTab {
 					button.setButtonText(this.t("settings.agent.manage.delete", "删除"));
 					if (!this.canDeleteSoul(soul, souls.length)) {
 						button.setDisabled(true);
-						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "原生 FRIDAY 或最后一个 Soul 不能删除。"));
+						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "内置 Soul 或最后一个 Soul 不能删除。"));
 						return;
 					}
 					button.onClick(async () => {
@@ -1428,12 +1450,12 @@ export class FridaySettingTab extends PluginSettingTab {
 				});
 
 			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
-				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置原生 FRIDAY 可用，会用最新默认参数覆盖当前 Soul 定义。"))
+				.setName(this.t("settings.agent.profile.reset", "重置为最新内置默认配置"))
+				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置 Soul 可用，会用最新默认参数覆盖当前 Soul 定义。"))
 				.addButton((button) =>
 					button
-						.setButtonText(this.t("settings.agent.profile.reset", "重置为最新原生默认配置"))
-						.setDisabled(!(activeSoulDefinition.builtIn && activeSoulDefinition.id.startsWith("default")))
+						.setButtonText(this.t("settings.agent.profile.reset", "重置为最新内置默认配置"))
+						.setDisabled(!this.host.canResetBuiltInSoulPreset(activeSoulDefinition.id))
 						.onClick(async () => {
 							await this.resetActiveSoulToBuiltInPreset(activeSoulDefinition.id);
 						}),
@@ -1610,6 +1632,89 @@ export class FridaySettingTab extends PluginSettingTab {
 				);
 		}
 
+	}
+
+	private renderSoulLabSection(containerEl: HTMLElement): void {
+		const introGroup = this.createNativeSettingsGroup(containerEl, {
+			title: this.t("settings.soulLab.title", "Soul 实验室"),
+			description: this.t(
+				"settings.soulLab.desc",
+				"从实验模板生成一个可编辑的 FRIDAY Soul。模板只作为起点，不会自动改变你当前使用的 Soul。",
+			),
+		});
+
+		new Setting(introGroup)
+			.setName(this.t("settings.soulLab.back", "返回 Soul 管理"))
+			.setDesc(this.t("settings.soulLab.backDesc", "回到当前 Soul、模型和运行时设置。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.soulLab.back", "返回 Soul 管理")).onClick(() => {
+					this.soulPanelMode = "manage";
+					this.display();
+				}),
+			);
+
+		renderNativeInlineAlert(introGroup, {
+			tone: "muted",
+			title: this.t("settings.soulLab.notice.title", "实验模板不会直接改写当前 Soul"),
+			message: this.t(
+				"settings.soulLab.notice.desc",
+				"先复制成新的 Soul，再决定是否设为当前。MBTI 系列只表示沟通偏好，不是心理测评或人格判断。",
+			),
+		});
+
+		for (const series of SOUL_EXPERIMENT_TEMPLATE_SERIES) {
+			const seriesGroup = this.createNativeSettingsGroup(containerEl, {
+				title:
+					series.id === "mbti-communication"
+						? this.t("settings.soulLab.mbti.title", series.title)
+						: series.title,
+				description:
+					series.id === "mbti-communication"
+						? this.t("settings.soulLab.mbti.desc", series.description)
+						: series.description,
+			});
+
+			for (const template of series.templates) {
+				new Setting(seriesGroup)
+					.setName(template.name)
+					.setDesc(template.summary)
+					.addButton((button) =>
+						button.setButtonText(this.t("settings.soulLab.preview", "预览风格")).onClick(() => {
+							this.soulLabPreviewTemplateId =
+								this.soulLabPreviewTemplateId === template.id ? "" : template.id;
+							this.display();
+						}),
+					)
+					.addButton((button) =>
+						button.setButtonText(this.t("settings.soulLab.create", "基于此创建")).onClick(async () => {
+							await this.createSoulFromExperimentTemplate(template, false);
+						}),
+					)
+					.addButton((button) =>
+						button
+							.setButtonText(this.t("settings.soulLab.createCurrent", "创建并设为当前"))
+							.setCta()
+							.onClick(async () => {
+								await this.createSoulFromExperimentTemplate(template, true);
+							}),
+					);
+
+				if (this.soulLabPreviewTemplateId === template.id) {
+					renderNativeInlineAlert(seriesGroup, {
+						tone: "muted",
+						title: template.name,
+						message: [
+							template.tonePrompt,
+							`回应节奏：${template.responseRhythm}`,
+							`信息组织：${template.informationStructure}`,
+							`反馈方式：${template.feedbackStyle}`,
+							`风险边界：${template.riskBoundary}`,
+							`适用场景：${template.bestFor.join("、")}`,
+						].join(" "),
+					});
+				}
+			}
+		}
 	}
 
 	private renderProjectPolicyEditor(containerEl: HTMLElement): void {
@@ -2703,7 +2808,7 @@ export class FridaySettingTab extends PluginSettingTab {
 		const souls = this.host.listSouls();
 		const target = souls.find((item) => item.id === soulId);
 		if (!target || !this.canDeleteSoul(target, souls.length)) {
-			throw new Error(this.t("settings.agent.manage.deleteBlocked", "原生 FRIDAY 或最后一个 Soul 不能删除。"));
+			throw new Error(this.t("settings.agent.manage.deleteBlocked", "内置 Soul 或最后一个 Soul 不能删除。"));
 		}
 		const fallback = souls.find((item) => item.id !== soulId);
 		await this.host.soulStore.deleteSoul(soulId);
@@ -2799,8 +2904,57 @@ export class FridaySettingTab extends PluginSettingTab {
 			tonePreset: (updated as typeof updated & { tonePreset?: SoulTonePreset }).tonePreset,
 			tonePrompt: (updated as typeof updated & { tonePrompt?: string }).tonePrompt,
 		});
-		new Notice(this.t("settings.agent.profile.resetSuccess", "已恢复最新原生 Soul 默认配置：{name}", { name: updated.name }), 3000);
+		new Notice(this.t("settings.agent.profile.resetSuccess", "已恢复最新内置 Soul 默认配置：{name}", { name: updated.name }), 3000);
 		this.display();
+	}
+
+	private async createSoulFromExperimentTemplate(
+		template: SoulExperimentTemplate,
+		setCurrent: boolean,
+	): Promise<void> {
+		const created = await this.host.soulStore.createSoul({
+			id: this.buildExperimentSoulId(template),
+			name: template.name,
+			summary: template.summary,
+			description: template.description,
+		});
+		const updated = await this.host.soulStore.updateSoul(created.id, {
+			name: template.name,
+			summary: template.summary,
+			description: template.description,
+			rolePrompt: template.rolePrompt,
+			identityAnchor: "FRIDAY",
+			identityVoice: template.identityVoice,
+			styleDisclosure: template.styleDisclosure,
+			tonePreset: template.tonePreset,
+			tonePrompt: template.tonePrompt,
+			behaviorRules: template.behaviorRules,
+			antiPatterns: template.antiPatterns,
+			presetRefs: [template.id],
+			tags: template.tags,
+			builtIn: false,
+			editable: true,
+			archived: false,
+			builtInPresetVersion: undefined,
+		});
+		if (setCurrent) {
+			await this.host.setActiveSoul(updated.id);
+			this.setSoulEditorDraft(updated);
+			this.soulPanelMode = "manage";
+		}
+		await this.host.saveSettings();
+		new Notice(
+			this.t("settings.soulLab.created", "已从实验模板创建 Soul：{name}", {
+				name: updated.name,
+			}),
+			3000,
+		);
+		this.display();
+	}
+
+	private buildExperimentSoulId(template: SoulExperimentTemplate): string {
+		const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+		return `${template.id}-${suffix}`;
 	}
 
 	private async openRegisterProjectModal(initial?: ProjectEntry): Promise<void> {

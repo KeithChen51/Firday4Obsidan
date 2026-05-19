@@ -15,6 +15,9 @@ export interface SoulSummary {
 
 export interface SoulDefinition extends SoulSummary {
 	rolePrompt: string;
+	identityAnchor?: string;
+	identityVoice?: string;
+	styleDisclosure?: string;
 	tonePreset: SoulTonePreset;
 	tonePrompt: string;
 	behaviorRules: string[];

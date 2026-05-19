@@ -21,10 +21,10 @@ function loadBuiltinReviewNotes() {
 	return jiti.import(builtinReviewNotesModulePath);
 }
 
-test("builtin skill pack exports five enabled builtin skills", async () => {
+test("builtin skill pack exports six enabled builtin skills", async () => {
 	const mod = await loadBuiltinPack();
 	assert.equal(Array.isArray(mod.BUILTIN_SKILL_DEFINITIONS), true);
-	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 5);
+	assert.equal(mod.BUILTIN_SKILL_DEFINITIONS.length, 6);
 });
 
 test("builtin skill pack contains required commands", async () => {
@@ -33,6 +33,7 @@ test("builtin skill pack contains required commands", async () => {
 	assert.deepEqual(
 		commands,
 		[
+			"intent-framing",
 			"resolve-conflict",
 			"obsidian-cli",
 			"obsidian-markdown",
@@ -67,6 +68,8 @@ test("new builtin skills resolve common aliases", async () => {
 	assert.equal(mod.resolveBuiltinSkill("canvas")?.command, "json-canvas");
 	assert.equal(mod.resolveBuiltinSkill("bases")?.command, "obsidian-bases");
 	assert.equal(mod.resolveBuiltinSkill("obsidian-note")?.command, "obsidian-markdown");
+	assert.equal(mod.resolveBuiltinSkill("understand-intent")?.command, "intent-framing");
+	assert.equal(mod.resolveBuiltinSkill("澄清问题")?.command, "intent-framing");
 });
 
 test("builtin skill markdown loader returns embedded markdown", async () => {
@@ -84,6 +87,33 @@ test("builtin skill pack loads markdown from per-skill SKILL.md source files", a
 		const sourceMarkdown = fs.readFileSync(skillSourcePath, "utf8");
 		assert.equal(mod.getBuiltinSkillMarkdown(entry.command), sourceMarkdown);
 	}
+});
+
+test("intent framing builtin skill is a cognitive skill, not a hard execution gate", async () => {
+	const mod = await loadBuiltinPack();
+	const skill = mod.resolveBuiltinSkill("intent-framing");
+	const markdown = mod.getBuiltinSkillMarkdown("intent-framing");
+
+	assert.equal(skill?.trigger, "auto");
+	assert.equal(skill?.tags.includes("cognitive"), true);
+	assert.equal(markdown.includes("not a runtime gate"), true);
+	assert.equal(markdown.includes("Read-only exploration is allowed"), true);
+	assert.equal(markdown.includes("Ask one necessary clarifying question"), true);
+	assert.equal(markdown.includes("Do not turn every task into a questionnaire"), true);
+});
+
+test("intent framing builtin skill documents autonomy-preserving behavior examples", async () => {
+	const mod = await loadBuiltinPack();
+	const markdown = mod.getBuiltinSkillMarkdown("intent-framing");
+
+	assert.equal(markdown.includes("Broad verbs do not automatically require a question"), true);
+	assert.equal(markdown.includes("What does this repo do?"), true);
+	assert.equal(markdown.includes("Help me improve this project."), true);
+	assert.equal(markdown.includes("整理一下这个文件"), true);
+	assert.equal(markdown.includes("Create a summary note from the workspace files."), true);
+	assert.equal(markdown.includes("read-only project inspection"), true);
+	assert.equal(markdown.includes("ask which file"), true);
+	assert.equal(markdown.includes("do not ask whether to do the task"), true);
 });
 
 test("obsidian cli builtin skill documents Windows CLI preflight and avoids stale silent flag guidance", async () => {

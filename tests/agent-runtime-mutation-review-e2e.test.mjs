@@ -140,6 +140,7 @@ test("autoApproved mutation mode applies writes immediately after planning", asy
 	const result = await runAgentRuntimeScenario(writeScenario({
 		settings: {
 			agentRuntime: {
+				requireWriteConfirmation: false,
 				toolPermissionMode: "auto",
 				fileMutationMode: "autoApproved",
 			},
@@ -152,21 +153,44 @@ test("autoApproved mutation mode applies writes immediately after planning", asy
 	assert.equal(result.turnEventSummary.mutations.applied, 1);
 });
 
-test("auto execution applies ordinary file writes even when legacy mutation mode was review", async () => {
+test("write confirmation requirement overrides autoApproved mutation mode", async () => {
 	const result = await runAgentRuntimeScenario(writeScenario({
 		settings: {
 			agentRuntime: {
+				requireWriteConfirmation: true,
+				toolPermissionMode: "auto",
+				fileMutationMode: "autoApproved",
+			},
+		},
+	}));
+
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
+	assert.equal(result.approvalRequests.length, 0);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.turnEventSummary.mutations.planned, 1);
+	assert.equal(result.turnEventSummary.mutations.applied, 0);
+	assert.ok(!result.turnEvents.some((event) => event.type === "mutation_applied"));
+});
+
+test("auto permission keeps ordinary file writes pending when mutation review is enabled", async () => {
+	const result = await runAgentRuntimeScenario(writeScenario({
+		settings: {
+			agentRuntime: {
+				requireWriteConfirmation: true,
 				toolPermissionMode: "auto",
 				fileMutationMode: "review",
 			},
 		},
 	}));
 
-	assert.deepEqual(result.files, { "Project/workspace/a.md": "changed" });
+	assert.deepEqual(result.files, { "Project/workspace/a.md": "original" });
 	assert.equal(result.approvalRequests.length, 0);
-	assert.equal(result.pendingMutations.length, 0);
+	assert.equal(result.pendingMutations.length, 1);
+	assert.equal(result.pendingMutations[0].operation, "write");
+	assert.equal(result.pendingMutations[0].targetPath, "Project/workspace/a.md");
 	assert.equal(result.turnEventSummary.mutations.planned, 1);
-	assert.equal(result.turnEventSummary.mutations.applied, 1);
+	assert.equal(result.turnEventSummary.mutations.applied, 0);
+	assert.ok(!result.turnEvents.some((event) => event.type === "mutation_applied"));
 });
 
 test("standard review write creates one mutation review without a separate tool approval", async () => {

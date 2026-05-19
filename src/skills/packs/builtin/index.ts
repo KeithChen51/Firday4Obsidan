@@ -1,5 +1,6 @@
 import {
 	BUILTIN_COMPILE_WIKI_MARKDOWN,
+	BUILTIN_INTENT_FRAMING_MARKDOWN,
 	BUILTIN_JSON_CANVAS_MARKDOWN,
 	BUILTIN_LOOKUP_WIKI_MARKDOWN,
 	BUILTIN_OBSIDIAN_BASES_MARKDOWN,
@@ -50,6 +51,18 @@ const ALL_BUILTIN_SKILL_DEFINITIONS: BuiltinSkillDefinition[] = [
 		trigger: "auto" as BuiltinSkillTriggerMode,
 		filePath: `${BUILTIN_SKILL_SCHEME}lookup-wiki/SKILL.md`,
 		markdown: BUILTIN_LOOKUP_WIKI_MARKDOWN,
+	},
+	{
+		name: "Intent Framing",
+		description: "Frame ambiguous user requests before acting, without turning every turn into a questionnaire or blocking low-risk exploration.",
+		descriptionZh: "在行动前理解用户目标、对象和成功标准；它是模型自己的认知 skill，不是全局执行闸门。",
+		command: "intent-framing",
+		aliases: ["intent-framing", "understand-intent", "clarify-intent", "problem-understanding", "澄清问题"],
+		tags: ["cognitive", "intent", "clarification", "planning"],
+		globs: [],
+		trigger: "auto" as BuiltinSkillTriggerMode,
+		filePath: `${BUILTIN_SKILL_SCHEME}intent-framing/SKILL.md`,
+		markdown: BUILTIN_INTENT_FRAMING_MARKDOWN,
 	},
 	{
 		name: "Resolve Conflict",

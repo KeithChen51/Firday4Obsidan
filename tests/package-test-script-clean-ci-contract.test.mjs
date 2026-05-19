@@ -18,6 +18,10 @@ function commandIndex(script, command) {
 test("package test script verifies generated sources without publishing release artifacts", () => {
 	const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
 	const script = pkg.scripts.test;
+	assert.equal(pkg.scripts["normalize:shell-line-endings"], "node scripts/normalize-shell-line-endings.mjs");
+	assert.equal(pkg.scripts.pretest, "npm run normalize:shell-line-endings");
+	assert.equal(pkg.scripts.prebuild, "npm run normalize:shell-line-endings");
+
 	const builtinIndex = commandIndex(script, "node scripts/generate-builtin-skill-markdown.mjs");
 	const studioIndex = commandIndex(script, "node scripts/generate-studio-content.mjs");
 	const typecheckIndex = commandIndex(script, "tsc -noEmit -skipLibCheck");

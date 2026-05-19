@@ -24,6 +24,9 @@ function normalizeTonePreset(value: unknown): SoulTonePreset {
 function normalizeSoulDefinition(input: SoulDefinition | (Partial<SoulDefinition> & Pick<SoulDefinition, "id" | "name" | "summary" | "description" | "rolePrompt">)): SoulDefinition {
 		return {
 			...input,
+			identityAnchor: input.identityAnchor?.trim() || undefined,
+			identityVoice: input.identityVoice?.trim() || undefined,
+			styleDisclosure: input.styleDisclosure?.trim() || undefined,
 			tonePreset: normalizeTonePreset(input.tonePreset),
 			tonePrompt: input.tonePrompt?.trim() ?? "",
 			behaviorRules: Array.isArray(input.behaviorRules) ? input.behaviorRules : [],
@@ -134,6 +137,9 @@ export class SoulStore {
 			summary: input.summary.trim(),
 			description: input.description?.trim() || input.summary.trim(),
 			rolePrompt: input.description?.trim() || input.summary.trim(),
+			identityAnchor: "FRIDAY",
+			identityVoice: undefined,
+			styleDisclosure: undefined,
 			tonePreset: "balanced",
 			tonePrompt: "",
 			behaviorRules: [],

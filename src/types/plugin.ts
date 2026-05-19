@@ -109,5 +109,6 @@ export interface FridayPluginApi {
 	getActiveSoul(): SoulSummary | null;
 	setActiveSoul(soulId: string): Promise<void>;
 	createSoul(input: { name: string; summary: string; description?: string }): Promise<SoulSummary>;
+	canResetBuiltInSoulPreset(soulId: string): boolean;
 	resetBuiltInSoulPreset(soulId: string): Promise<SoulSummary>;
 }

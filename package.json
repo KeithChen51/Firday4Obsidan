@@ -7,6 +7,9 @@
 	"scripts": {
 		"generate:builtin-skills": "node scripts/generate-builtin-skill-markdown.mjs",
 		"generate:studio-content": "node scripts/generate-studio-content.mjs",
+		"normalize:shell-line-endings": "node scripts/normalize-shell-line-endings.mjs",
+		"pretest": "npm run normalize:shell-line-endings",
+		"prebuild": "npm run normalize:shell-line-endings",
 		"generate:plugin-release": "node scripts/release.mjs --skip-build",
 		"native-kit:catalog": "node scripts/native-kit-catalog-server.mjs",
 		"dev": "node scripts/generate-builtin-skill-markdown.mjs && node scripts/generate-studio-content.mjs && npm run generate:plugin-release && node esbuild.config.mjs",

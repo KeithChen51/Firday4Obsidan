@@ -178,6 +178,7 @@ export class PromptContextEngine {
 			...obsidianStructureRules,
 			"- SkillCatalog is summary-only metadata. If a skill clearly helps, call use_skill first to load its full instructions.",
 			"- use_skill only loads skill instructions; after TOOL_RESULT from use_skill, continue execution with the loaded skill context.",
+			"- intent-framing is a model-owned cognitive skill, not a global gate: use it when missing intent would change the action. Read-only exploration can proceed before asking if it reduces ambiguity without side effects.",
 			"- Use memory only for durable facts that should survive future turns.",
 			"- File tools accept project-relative paths and canonical vault paths.",
 			"- The tool layer normalizes project-relative paths under the active project when one is selected.",

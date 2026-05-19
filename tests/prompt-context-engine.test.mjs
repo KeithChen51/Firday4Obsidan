@@ -111,6 +111,26 @@ test("prompt context engine instructs canonical interaction routes and plan_writ
 	assert.match(result.prompt, /no modifications|no changes|read-only|只读|不要修改/);
 });
 
+test("prompt context engine treats intent framing as a model-owned skill, not a global gate", async () => {
+	const mod = await loadPromptContextEngineModule();
+	const engine = new mod.PromptContextEngine();
+	const result = engine.build({
+		mode: "auto",
+		depth: 0,
+		permissionMode: "auto",
+		runtimeProfileId: "win_desktop",
+		activeProjectRoot: "<projectRoot>",
+		userPrompt: "Help me improve this project.",
+		agentProfile: "agent",
+	});
+
+	assert.match(result.prompt, /intent-framing/);
+	assert.match(result.prompt, /model-owned/i);
+	assert.match(result.prompt, /not a global gate/i);
+	assert.match(result.prompt, /Read-only exploration can proceed/i);
+	assert.match(result.prompt, /missing intent would change the action/i);
+});
+
 test("prompt context engine teaches batched read-only tools without single-tool step limits", async () => {
 	const mod = await loadPromptContextEngineModule();
 	const engine = new mod.PromptContextEngine();
