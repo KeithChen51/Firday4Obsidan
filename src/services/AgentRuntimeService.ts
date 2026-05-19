@@ -97,6 +97,7 @@ import type { LlmTransportChannel, LlmTransportEvent, LlmTransportEventType } fr
 import { SoulStore } from "./SoulStore";
 import { RuntimeStateStore } from "./RuntimeStateStore";
 import type { SoulDefinition } from "../types/soul";
+import { compileSoulProfileForPrompt } from "../features/soul/SoulProfile";
 import {
 	isAgentWritableProjectPath,
 	isProjectRawPath,
@@ -2267,28 +2268,26 @@ export class AgentRuntimeService {
 		this.reportContextProgress(input, depth, "instructions", "加载项目规则与 Soul 设定");
 		const fridayMd = await this.loadFridayMd();
 		const soulDefinition = await this.soulStore.getSoul(agentId);
-		const soulIdentityProfile = this.buildSoulIdentityProfile(soulDefinition);
-		const soulBehaviorRules = soulDefinition ? this.normalizeSoulBehaviorRulesForIdentity(soulDefinition) : [];
-		const soulAntiPatterns = soulDefinition ? this.normalizeSoulAntiPatternsForIdentity(soulDefinition) : [];
+		const soulProfilePrompt = this.buildSoulProfilePrompt(soulDefinition, userPrompt ?? "");
 		const agentProfile = soulDefinition
 			? this.truncateText(
 				[
-					soulIdentityProfile,
+					soulProfilePrompt,
 					`# ${soulDefinition.name}`,
 					soulDefinition.summary,
 					soulDefinition.description,
-					this.normalizeSoulRolePromptForIdentity(soulDefinition),
+					soulDefinition.rolePrompt,
 					this.resolveSoulTonePrompt(soulDefinition.tonePreset, soulDefinition.tonePrompt),
-					soulBehaviorRules.length > 0
-						? `Behavior rules:\n- ${soulBehaviorRules.join("\n- ")}`
+					soulDefinition.behaviorRules.length > 0
+						? `Behavior rules:\n- ${soulDefinition.behaviorRules.join("\n- ")}`
 						: "",
-					soulAntiPatterns.length > 0
-						? `Anti-patterns:\n- ${soulAntiPatterns.join("\n- ")}`
+					soulDefinition.antiPatterns.length > 0
+						? `Anti-patterns:\n- ${soulDefinition.antiPatterns.join("\n- ")}`
 						: "",
 				].filter(Boolean).join("\n\n"),
 				3000,
 			)
-			: [soulIdentityProfile, "soul definition not found"].join("\n\n");
+			: "soul definition not found";
 
 		const trimmedExtra = extraSystemContext?.trim();
 
@@ -2345,173 +2344,8 @@ export class AgentRuntimeService {
 		return promptContext.prompt;
 	}
 
-	private buildSoulIdentityProfile(soulDefinition: SoulDefinition | null): string {
-		const shouldUseIdentityVoice = this.shouldUseSoulIdentityVoice(soulDefinition);
-		const identityVoice = shouldUseIdentityVoice ? this.resolveSoulIdentityVoice(soulDefinition) : "";
-		const styleDisclosure = this.resolveSoulStyleDisclosure(soulDefinition);
-		return [
-			"Identity profile:",
-			"identity name: FRIDAY",
-			"name handling: FRIDAY is a proper noun; use it as-is",
-			"active Soul changes voice, not identity",
-			shouldUseIdentityVoice ? "identity question handling:" : "",
-			shouldUseIdentityVoice ? "Do not answer identity questions with only the bare identity name." : "",
-			identityVoice ? `identity answer voice: ${identityVoice}` : "",
-			styleDisclosure ? `style disclosure when asked: ${styleDisclosure}` : "",
-			"Use these as behavior specs, not text to recite.",
-		].filter(Boolean).join("\n");
-	}
-
-	private shouldUseSoulIdentityVoice(soulDefinition: SoulDefinition | null): boolean {
-		return Boolean(soulDefinition?.identityVoice?.trim() || this.resolveMbtiIdentityProfile(soulDefinition));
-	}
-
-	private resolveSoulIdentityVoice(soulDefinition: SoulDefinition | null): string {
-		const explicitVoice = soulDefinition?.identityVoice?.trim();
-		if (explicitVoice) {
-			return this.normalizeSoulIdentityVoice(soulDefinition, explicitVoice);
-		}
-		return this.resolveMbtiIdentityProfile(soulDefinition)?.identityVoice ?? "FRIDAY。专注帮你把事情理清并推进下一步。";
-	}
-
-	private normalizeSoulIdentityVoice(soulDefinition: SoulDefinition | null, explicitVoice: string): string {
-		const voice = explicitVoice.trim();
-		if (!voice) {
-			return "";
-		}
-		if (soulDefinition && this.isLegacyBareIdentityVoice(voice) && this.isMbtiSoulDefinition(soulDefinition)) {
-			return this.resolveMbtiIdentityProfile(soulDefinition)?.identityVoice ?? voice;
-		}
-		return voice;
-	}
-
-	private isLegacyBareIdentityVoice(voice: string): boolean {
-		return /^FRIDAY。/u.test(voice.trim());
-	}
-
-	private resolveSoulStyleDisclosure(soulDefinition: SoulDefinition | null): string {
-		const explicitDisclosure = soulDefinition?.styleDisclosure?.trim();
-		if (explicitDisclosure) {
-			return explicitDisclosure;
-		}
-		return this.resolveMbtiIdentityProfile(soulDefinition)?.styleDisclosure ?? "";
-	}
-
-	private resolveMbtiIdentityProfile(soulDefinition: SoulDefinition | null): { identityVoice: string; styleDisclosure: string } | null {
-		if (!soulDefinition || !this.isMbtiSoulDefinition(soulDefinition)) {
-			return null;
-		}
-		const mbtiKey = this.resolveMbtiSoulKey(soulDefinition);
-		if (!mbtiKey) {
-			return null;
-		}
-		return {
-			"mbti-intj": {
-				identityVoice: "可以叫我 FRIDAY。我会先把混乱信息压成判断、路径和下一步。",
-				styleDisclosure: "当前是 INTJ · 战略军师沟通风格：更克制、更重结构，会先看目标、约束和长期代价。",
-			},
-			"mbti-entp": {
-				identityVoice: "可以叫我 FRIDAY。我通常先拆掉第一个答案，再帮你找到更好的那个。",
-				styleDisclosure: "当前是 ENTP · 反方辩手沟通风格：会多拆假设、抛反例，再把争论收成小实验。",
-			},
-			"mbti-infj": {
-				identityVoice: "可以叫我 FRIDAY。我更像一个帮你把没说出口的线索慢慢理出来的同行者。",
-				styleDisclosure: "当前是 INFJ · 深度洞察者沟通风格：会先看隐含动机、反复模式和真正牵动你的东西。",
-			},
-			"mbti-enfp": {
-				identityVoice: "可以叫我 FRIDAY。我会先把散掉的念头点成一把小火花，再帮你选一个马上能试的方向。",
-				styleDisclosure: "当前是 ENFP · 灵感火花沟通风格：更跳跃、联想更多，但会收束到一个能试的小动作。",
-			},
-			"mbti-istj": {
-				identityVoice: "可以叫我 FRIDAY。我会先把事实、缺口和步骤摆清楚，再陪你一项项落下去。",
-				styleDisclosure: "当前是 ISTJ · 秩序管家沟通风格：会更重事实、清单、顺序和验收标准。",
-			},
-			"mbti-estp": {
-				identityVoice: "可以叫我 FRIDAY。少绕路，先把眼前能动的一步找出来。",
-				styleDisclosure: "当前是 ESTP · 现场推进者沟通风格：会更快落到行动、反馈和下一次调整。",
-			},
-		}[mbtiKey] ?? null;
-	}
-
-	private resolveMbtiSoulKey(soulDefinition: SoulDefinition): string | null {
-		const presetRefs = Array.isArray(soulDefinition.presetRefs) ? soulDefinition.presetRefs : [];
-		const presetRef = presetRefs.find((item) => item.startsWith("mbti-"));
-		if (presetRef) {
-			return presetRef;
-		}
-		const match = soulDefinition.name.match(/^([A-Z]{4})\s*·/u);
-		if (!match) {
-			return null;
-		}
-		const typeCode = match[1];
-		return typeCode ? `mbti-${typeCode.toLowerCase()}` : null;
-	}
-
-	private normalizeSoulRolePromptForIdentity(soulDefinition: SoulDefinition): string {
-		const rolePrompt = soulDefinition.rolePrompt;
-		if (!this.isMbtiSoulDefinition(soulDefinition)) {
-			return rolePrompt;
-		}
-		return rolePrompt
-			.replace(/^你是 [A-Z]{4} · [^。\n]+ FRIDAY。\n?/u, "你是 FRIDAY。MBTI 只影响沟通方式，不改变身份。\n")
-			.replace(/我是 [A-Z]{4} · [^。\n]+/gu, "FRIDAY")
-			.split("\n")
-			.filter((line) =>
-				!line.includes("被问“你是谁”") &&
-				!line.includes("被问身份") &&
-				!line.includes("自我介绍时说") &&
-				!line.includes("普通身份回答") &&
-				!line.includes("周五")
-			)
-			.join("\n");
-	}
-
-	private normalizeSoulBehaviorRulesForIdentity(soulDefinition: SoulDefinition): string[] {
-		const rules = Array.isArray(soulDefinition.behaviorRules) ? soulDefinition.behaviorRules : [];
-		if (!this.isMbtiSoulDefinition(soulDefinition)) {
-			return rules;
-		}
-		const filteredRules = rules.filter((rule) =>
-			!rule.includes("FRIDAY 是产品名") &&
-			!rule.includes("周五") &&
-			!rule.includes("周五伙伴") &&
-			!(rule.includes("自我介绍时说") && rule.includes("当前使用")) &&
-			!rule.includes("被问“你是谁”") &&
-			!rule.includes("普通身份回答")
-		);
-		return this.uniqueSoulRules([
-			...filteredRules,
-			"FRIDAY 是专名，原样使用。",
-		]);
-	}
-
-	private normalizeSoulAntiPatternsForIdentity(soulDefinition: SoulDefinition): string[] {
-		const antiPatterns = Array.isArray(soulDefinition.antiPatterns) ? soulDefinition.antiPatterns : [];
-		if (!this.isMbtiSoulDefinition(soulDefinition)) {
-			return antiPatterns;
-		}
-		const filteredAntiPatterns = antiPatterns.filter((rule) =>
-			!rule.includes("周五") &&
-			!rule.includes("Friday partner") &&
-			!rule.includes("FRIDAY 翻译")
-		);
-		return this.uniqueSoulRules([
-			...filteredAntiPatterns,
-			"不要把 FRIDAY 当作普通英文词翻译或解释。",
-		]);
-	}
-
-	private uniqueSoulRules(rules: string[]): string[] {
-		return [...new Set(rules.map((rule) => rule.trim()).filter(Boolean))];
-	}
-
-	private isMbtiSoulDefinition(soulDefinition: SoulDefinition): boolean {
-		const presetRefs = Array.isArray(soulDefinition.presetRefs) ? soulDefinition.presetRefs : [];
-		const tags = Array.isArray(soulDefinition.tags) ? soulDefinition.tags : [];
-		return (
-			presetRefs.some((item) => item.startsWith("mbti-")) ||
-			tags.includes("mbti")
-		);
+	private buildSoulProfilePrompt(soulDefinition: SoulDefinition | null, userPrompt: string): string {
+		return compileSoulProfileForPrompt(soulDefinition?.profile, userPrompt);
 	}
 
 	private resolveSoulTonePrompt(tonePreset: string | undefined, tonePrompt: string | undefined): string {
