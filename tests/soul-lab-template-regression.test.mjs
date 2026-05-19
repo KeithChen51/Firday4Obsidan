@@ -107,23 +107,27 @@ test("mbti soul templates preserve FRIDAY as identity and untranslated product n
 	assert.doesNotMatch(source, /`你是 \$\{name\} FRIDAY。`/);
 });
 
-test("mbti soul templates model identity voice separately from style disclosure", () => {
+test("mbti soul templates model profile strategy instead of fixed identity scripts", () => {
 	const source = read(templatePath);
 
 	for (const field of [
-		"identityVoice: string",
-		"styleDisclosure: string",
-		"identityVoice: input.identityVoice",
-		"styleDisclosure: input.styleDisclosure",
+		"profile: SoulProfile",
+		"createMbtiSoulProfile",
+		"profile: createMbtiSoulProfile",
+		"identityExamples: string[]",
+		"disclosureExamples: string[]",
+		"identityExamples: input.identityExamples",
+		"disclosureExamples: input.disclosureExamples",
+		"posture: [input.roleFocus]",
 	]) {
-		assert.ok(source.includes(field), `Expected structured identity field: ${field}`);
+		assert.ok(source.includes(field), `Expected structured Soul profile field: ${field}`);
 	}
-	assert.equal(source.match(/identityVoice:\s*"/g)?.length ?? 0, 6, "each MBTI template needs an identity voice");
-	assert.equal(source.match(/styleDisclosure:\s*"/g)?.length ?? 0, 6, "each MBTI template needs a style disclosure");
+	assert.equal(source.match(/identityExamples:\s*\[/g)?.length ?? 0, 6, "each MBTI template needs identity examples");
+	assert.equal(source.match(/disclosureExamples:\s*\[/g)?.length ?? 0, 6, "each MBTI template needs disclosure examples");
 	assert.equal(
-		source.match(/identityVoice:\s*"可以叫我 FRIDAY/g)?.length ?? 0,
+		source.match(/identityExamples:\s*\[\s*"可以叫我 FRIDAY/g)?.length ?? 0,
 		6,
-		"each MBTI identity voice should be a natural self-introduction, not a bare label fragment",
+		"each MBTI identity strategy should include natural self-introduction examples, not bare label fragments",
 	);
 	for (const expected of [
 		"可以叫我 FRIDAY。我会先把混乱信息压成判断、路径和下一步。",
@@ -131,9 +135,13 @@ test("mbti soul templates model identity voice separately from style disclosure"
 		"可以叫我 FRIDAY。少绕路，先把眼前能动的一步找出来。",
 		"当前是 ENFP · 灵感火花沟通风格",
 	]) {
-		assert.ok(source.includes(expected), `Expected style-specific identity design: ${expected}`);
+		assert.ok(source.includes(expected), `Expected style-specific profile example: ${expected}`);
 	}
-	assert.ok(!source.includes('identityVoice: "FRIDAY。'), "identity voice should not be a bare FRIDAY label fragment");
+	assert.ok(!source.includes("identityVoice: string"), "template interface should not expose identityVoice");
+	assert.ok(!source.includes("styleDisclosure: string"), "template interface should not expose styleDisclosure");
+	assert.ok(!source.includes("identityVoice: input.identityVoice"), "templates should not copy identity scripts");
+	assert.ok(!source.includes("styleDisclosure: input.styleDisclosure"), "templates should not copy disclosure scripts");
+	assert.ok(!source.includes('identityVoice: "FRIDAY。'), "identity strategy should not be a bare FRIDAY label fragment");
 	assert.ok(
 		!source.includes("被问“你是谁”时，直接回答“我是 FRIDAY”。"),
 		"template should not force a single mechanical identity answer",
@@ -160,8 +168,9 @@ test("settings soul section opens Soul Lab and creates editable souls from templ
 	assert.match(source, /template\.feedbackStyle/);
 	assert.match(source, /template\.riskBoundary/);
 	assert.match(source, /template\.bestFor\.join/);
-	assert.match(source, /identityVoice:\s*template\.identityVoice/);
-	assert.match(source, /styleDisclosure:\s*template\.styleDisclosure/);
+	assert.match(source, /profile:\s*template\.profile/);
+	assert.doesNotMatch(source, /identityVoice:\s*template\.identityVoice/);
+	assert.doesNotMatch(source, /styleDisclosure:\s*template\.styleDisclosure/);
 });
 
 test("locales cover Soul Lab entry and MBTI series copy", () => {

@@ -1,3 +1,5 @@
+import type { SoulProfile } from "../features/soul/SoulProfile";
+
 export type SoulTonePreset = "balanced" | "calm" | "warm";
 
 export interface SoulSummary {
@@ -16,8 +18,7 @@ export interface SoulSummary {
 export interface SoulDefinition extends SoulSummary {
 	rolePrompt: string;
 	identityAnchor?: string;
-	identityVoice?: string;
-	styleDisclosure?: string;
+	profile?: SoulProfile;
 	tonePreset: SoulTonePreset;
 	tonePrompt: string;
 	behaviorRules: string[];

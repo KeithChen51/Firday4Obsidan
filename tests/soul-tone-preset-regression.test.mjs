@@ -43,73 +43,69 @@ test("runtime prompt assembly resolves tone presets into stable prompt text", ()
 	assert.match(source, /soulDefinition\.tonePrompt/);
 });
 
-test("runtime prompt assembly separates stable identity from style-specific identity voice", () => {
+test("runtime prompt assembly delegates identity and style behavior to Soul Profile v2", () => {
 	const source = read(runtimePath);
 
-	assert.match(source, /buildSoulIdentityProfile\(soulDefinition\)/);
-	assert.match(source, /const soulIdentityProfile = this\.buildSoulIdentityProfile\(soulDefinition\);/);
-	assert.match(source, /identityVoice\?\.\s*trim\(\)/);
-	assert.match(source, /styleDisclosure\?\.\s*trim\(\)/);
+	assert.match(source, /compileSoulProfileForPrompt/);
+	assert.match(source, /buildSoulProfilePrompt\(soulDefinition, userPrompt \?\? ""\)/);
+	assert.match(source, /const soulProfilePrompt = this\.buildSoulProfilePrompt\(soulDefinition, userPrompt \?\? ""\);/);
+	assert.match(source, /soulDefinition\?\.profile/);
 	for (const expected of [
-		"identity name: FRIDAY",
-		"active Soul changes voice, not identity",
-		"identity question handling:",
-		"identity answer voice:",
-		"style disclosure when asked:",
-		"Do not answer identity questions with only the bare identity name.",
-		"Use these as behavior specs, not text to recite.",
+		"soulProfilePrompt",
+		"soulProfilePrompt,",
+		"soulDefinition.rolePrompt",
+		"soulDefinition.behaviorRules.length > 0",
+		"soulDefinition.antiPatterns.length > 0",
 	]) {
-		assert.ok(source.includes(expected), `Expected structured identity profile: ${expected}`);
+		assert.ok(source.includes(expected), `Expected Soul profile prompt assembly: ${expected}`);
 	}
 	assert.doesNotMatch(source, /buildFridayIdentityPrompt/);
+	assert.doesNotMatch(source, /buildSoulIdentityProfile/);
+	assert.ok(!source.includes("identity answer voice:"));
+	assert.ok(!source.includes("style disclosure when asked:"));
 	assert.ok(!source.includes("被问身份只答“我是 FRIDAY”"));
 });
 
-test("runtime derives style-specific identity voice for copied MBTI souls", () => {
-	const source = read(runtimePath);
+test("copied MBTI souls carry their profile from the template instead of runtime fallback maps", () => {
+	const runtimeSource = read(runtimePath);
+	const settingsSource = read(settingsPath);
 
-	for (const expected of [
-		"resolveSoulIdentityVoice(soulDefinition)",
-		"resolveSoulStyleDisclosure(soulDefinition)",
-		"resolveMbtiIdentityProfile(soulDefinition)",
-		"mbti-enfp",
-		"可以叫我 FRIDAY。我会先把散掉的念头点成一把小火花，再帮你选一个马上能试的方向。",
-		"当前是 ENFP · 灵感火花沟通风格",
-		"normalizeSoulBehaviorRulesForIdentity(soulDefinition)",
-		"normalizeSoulAntiPatternsForIdentity(soulDefinition)",
-	]) {
-		assert.ok(source.includes(expected), `Expected style-specific runtime identity support: ${expected}`);
-	}
+	assert.match(settingsSource, /profile:\s*template\.profile/);
+	assert.doesNotMatch(settingsSource, /identityVoice:\s*template\.identityVoice/);
+	assert.doesNotMatch(settingsSource, /styleDisclosure:\s*template\.styleDisclosure/);
+	assert.doesNotMatch(runtimeSource, /resolveMbtiIdentityProfile/);
+	assert.doesNotMatch(runtimeSource, /mbti-enfp/);
 	assert.ok(
-		!source.includes("FRIDAY 是产品名，别译成“周五”“周五伙伴”。"),
-		"runtime identity profile should not contain translation examples that the model may repeat",
+		!runtimeSource.includes("FRIDAY 是产品名，别译成“周五”“周五伙伴”。"),
+		"runtime profile prompt should not contain translation examples that the model may repeat",
 	);
 });
 
-test("runtime upgrades legacy MBTI identity voice fragments before prompt assembly", () => {
+test("runtime does not keep legacy MBTI identity upgrade paths when v1 migration is out of scope", () => {
 	const source = read(runtimePath);
 
-	for (const expected of [
-		"normalizeSoulIdentityVoice(soulDefinition, explicitVoice)",
-		"isLegacyBareIdentityVoice(voice)",
-		"this.isLegacyBareIdentityVoice(voice) && this.isMbtiSoulDefinition(soulDefinition)",
-		"return this.resolveMbtiIdentityProfile(soulDefinition)?.identityVoice",
+	for (const forbidden of [
+		"normalizeSoulIdentityVoice",
+		"isLegacyBareIdentityVoice",
+		"resolveMbtiIdentityProfile",
+		"resolveSoulIdentityVoice",
+		"resolveSoulStyleDisclosure",
 	]) {
-		assert.ok(source.includes(expected), `Expected legacy identity voice upgrade support: ${expected}`);
+		assert.ok(!source.includes(forbidden), `Legacy identity path should be removed: ${forbidden}`);
 	}
 });
 
-test("runtime prompt assembly sanitizes copied MBTI role prompts before model use", () => {
+test("runtime prompt assembly uses raw Soul text plus structured profile policy", () => {
 	const source = read(runtimePath);
 
-	assert.match(source, /normalizeSoulRolePromptForIdentity\(soulDefinition\)/);
-	assert.match(source, /isMbtiSoulDefinition\(soulDefinition\)/);
-	assert.match(source, /const presetRefs = Array\.isArray\(soulDefinition\.presetRefs\)/);
-	assert.match(source, /const tags = Array\.isArray\(soulDefinition\.tags\)/);
-	assert.match(source, /presetRefs\.some\(\(item\) => item\.startsWith\("mbti-"\)\)/);
-	assert.match(source, /tags\.includes\("mbti"\)/);
-	assert.ok(source.includes('.replace(/^你是 [A-Z]{4} · [^。\\n]+ FRIDAY。\\n?/u,'));
-	assert.ok(source.includes('"你是 FRIDAY。MBTI 只影响沟通方式，不改变身份。\\n"'));
+	assert.match(source, /soulProfilePrompt,/);
+	assert.match(source, /soulDefinition\.rolePrompt/);
+	assert.match(source, /soulDefinition\.behaviorRules\.length > 0/);
+	assert.match(source, /soulDefinition\.antiPatterns\.length > 0/);
+	assert.doesNotMatch(source, /normalizeSoulRolePromptForIdentity/);
+	assert.doesNotMatch(source, /normalizeSoulBehaviorRulesForIdentity/);
+	assert.doesNotMatch(source, /normalizeSoulAntiPatternsForIdentity/);
+	assert.doesNotMatch(source, /isMbtiSoulDefinition/);
 });
 
 test("native friday preset seeds the warm tone preset", () => {
