@@ -216,7 +216,7 @@ test("runtime progress no longer depends on opened phase or technical detail dis
 	assert.doesNotMatch(rendererSource, /`phase:\$\{group\.id\}`/);
 	assert.doesNotMatch(rendererSource, /`\$\{item\.id\}:detail`/);
 	assert.doesNotMatch(rendererSource, /friday-agent-process-phase-group|friday-agent-process-timeline-detail/);
-	assert.match(rendererSource, /friday-agent-process-timeline-event-row kit-event-row-v1/);
+	assert.match(rendererSource, /kit-event-row-v1 assistant-process-event-v6/);
 	assert.match(source, /private captureProcessDisclosureState\(/);
 	assert.match(source, /private applyProcessDisclosureState\(/);
 	assert.match(source, /\.assistant-process-step-v6\[data-item-id\]/);

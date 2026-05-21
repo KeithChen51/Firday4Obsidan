@@ -97,7 +97,7 @@ test("core design selectors have one source of truth", () => {
 		".friday-top-nav",
 		".friday-page-content",
 		".friday-ai-chat-shell",
-		".friday-agent-process-shell",
+		".assistant-process-detail-v6",
 	]) {
 		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const matches = styles.match(new RegExp(`^${escaped}\\s*\\{`, "gm")) ?? [];
@@ -107,18 +107,12 @@ test("core design selectors have one source of truth", () => {
 
 test("agent process completion indicators avoid saturated success green", () => {
 	const styles = read(stylesPath);
-	const completedTimelineMarker = lastCssBlock(
-		styles,
-		".friday-agent-process-timeline-item.is-done .friday-agent-process-timeline-marker",
-	);
 	const completedStatus = lastCssBlock(
 		styles,
 		".friday-agent-process-status.is-completed,\n.friday-agent-process-status.is-safe_stopped",
 	);
 
-	assert.ok(completedTimelineMarker, "completed timeline marker should be styled");
-	assert.doesNotMatch(completedTimelineMarker, /var\(--color-green\)/);
-	assert.match(completedTimelineMarker, /var\(--text-faint\)|var\(--text-muted\)|var\(--background-modifier-border\)/);
+	assert.doesNotMatch(styles, /\.friday-agent-process-timeline-item\.is-done\s+\.friday-agent-process-timeline-marker/);
 	assert.doesNotMatch(completedStatus, /var\(--color-green\)\s*(?:[4-9][0-9]|100)%/);
 });
 

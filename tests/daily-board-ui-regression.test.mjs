@@ -296,6 +296,64 @@ test("pending approvals keep strong visual in composer while chat uses a low-emp
 	assert.doesNotMatch(approvalMessageBlock, /renderAssistantAvatar/);
 });
 
+test("retired approval transcript classes are removed from source and styles", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const retiredApprovalClasses = [
+		"friday-inline-approval-panel",
+		"friday-ai-approval-message",
+		"friday-ai-approval-content",
+		"friday-ai-approval-title",
+		"friday-ai-approval-summary",
+		"friday-ai-approval-detail-text",
+		"friday-ai-approval-actions",
+	];
+
+	for (const className of retiredApprovalClasses) {
+		assert.doesNotMatch(source, new RegExp(className), `${className} should not appear in DailyBoard source`);
+		assert.doesNotMatch(styles, new RegExp(`\\.${className}\\b`), `${className} should not have CSS`);
+	}
+	assert.match(source, /friday-ai-approval-record kit-event-row-v1/);
+	assert.match(source, /friday-ai-approval-record-summary/);
+	assert.match(source, /friday-ai-approval-record-detail/);
+});
+
+test("retired frontend component classes are removed from Daily Board source and CSS", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const retiredSourceClasses = [
+		"friday-agent-process-shell",
+		"friday-agent-process-panel",
+		"friday-agent-process-disclosure",
+	];
+	const retiredStyleClasses = [
+		"friday-kanban-columns",
+		"friday-kanban-column",
+		"friday-task-card",
+		"friday-card",
+		"friday-plugin-update-prerequisites-list",
+		"friday-plugin-update-prereq-line",
+		"friday-project-settings-toolbar",
+		"friday-ai-mention-pill-bar",
+		"friday-ai-mention-pill",
+		"friday-ai-mention-pill-remove",
+		"friday-ai-message-badges",
+		"friday-ai-message-detail",
+		"friday-agent-artifact-body",
+		"friday-agent-artifact-diff-summary",
+		"friday-agent-artifact-diff-file",
+	];
+
+	for (const className of retiredSourceClasses) {
+		assert.doesNotMatch(source, new RegExp(className), `${className} should not appear in DailyBoard source`);
+	}
+	for (const className of retiredStyleClasses) {
+		assert.doesNotMatch(styles, new RegExp(`\\.${className}\\b`), `${className} should not keep CSS`);
+	}
+	assert.match(styles, /\.assistant-artifact-row-v4\b/);
+	assert.match(styles, /\.friday-mention-composer-root\b/);
+});
+
 test("ordinary approval cards expose only user-level allow or reject decisions", async () => {
 	const source = readViewSource();
 	const cardMatch = source.match(/private renderApprovalCard\(containerEl: HTMLElement, item: PendingApproval\): void \{([\s\S]*?)\n\t\}\n\n\tprivate addApprovalDecisionButton/);

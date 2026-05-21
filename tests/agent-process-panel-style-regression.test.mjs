@@ -9,32 +9,52 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const stylesPath = path.join(projectRoot, "styles.css");
 const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
+const RETIRED_PROCESS_STYLE_CLASSES = [
+	"friday-agent-process-shell",
+	"friday-agent-process-disclosure",
+	"friday-agent-process-disclosure-summary",
+	"friday-agent-process-thinking",
+	"friday-agent-process-strip",
+	"friday-agent-process-header",
+	"friday-agent-process-status",
+	"friday-agent-process-statusbar",
+	"friday-agent-process-timeline",
+	"friday-agent-process-timeline-panel",
+	"friday-agent-process-timeline-item",
+	"friday-agent-process-timeline-rail",
+	"friday-agent-process-timeline-marker",
+	"friday-agent-process-timeline-content",
+	"friday-agent-process-timeline-title",
+	"friday-agent-process-timeline-summary",
+	"friday-agent-process-timeline-meta",
+	"friday-agent-process-timeline-detail",
+	"friday-agent-process-step",
+	"friday-agent-process-step-card-v2",
+	"friday-agent-process-recovery",
+	"friday-agent-process-command-details",
+	"friday-agent-process-command-summary",
+	"friday-agent-process-command-list",
+	"friday-agent-process-command-row",
+];
 
-test("agent process panel styles define the primary friday-agent-process namespace", () => {
+test("agent process panel styles use current Native Kit process classes and retire old timeline shells", () => {
 	const styles = read(stylesPath);
 	for (const className of [
-		"friday-agent-process",
-		"friday-agent-process-shell",
-		"friday-agent-process-disclosure",
-		"friday-agent-process-thinking",
-		"friday-agent-process-strip",
-		"friday-agent-process-header",
-		"friday-agent-process-status",
-		"friday-agent-process-timeline",
-		"friday-agent-process-timeline-panel",
-		"friday-agent-process-timeline-item",
-		"friday-agent-process-timeline-rail",
-		"friday-agent-process-timeline-marker",
-		"friday-agent-process-timeline-content",
-		"friday-agent-process-step-card-v2",
-		"friday-agent-process-timeline-title",
-		"friday-agent-process-timeline-summary",
-		"friday-agent-process-timeline-meta",
-		"friday-agent-process-timeline-detail",
+		"assistant-process-detail-v6",
+		"assistant-process-detail-inner-v6",
+		"assistant-process-step-v6",
+		"assistant-process-event-v6",
+		"assistant-step-toggle-v6",
+		"assistant-step-detail-v6",
+		"assistant-step-detail-inner-v6",
+		"assistant-step-narration-v6",
+		"assistant-tool-call-v5",
 		"friday-agent-process-actions",
-		"friday-agent-process-recovery",
 	]) {
 		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
+	}
+	for (const retiredClassName of RETIRED_PROCESS_STYLE_CLASSES) {
+		assert.doesNotMatch(styles, new RegExp(`\\.${retiredClassName}\\b`), `${retiredClassName} should not keep CSS`);
 	}
 });
 
@@ -44,19 +64,21 @@ test("agent process timeline styles remove fixed narrow primary width caps", () 
 
 	assert.doesNotMatch(processBlock, /\.friday-agent-process-shell\s*\{[\s\S]*?width:\s*min\(100%,\s*640px\)/);
 	assert.doesNotMatch(processBlock, /\.friday-ai-answer-flow\s*\{[\s\S]*?width:\s*min\(100%,\s*720px\)/);
-	assert.match(processBlock, /\.friday-agent-process-shell\s*\{[\s\S]*?width:\s*100%/);
+	assert.doesNotMatch(processBlock, /\.friday-agent-process-shell\b/);
 	assert.match(processBlock, /\.friday-ai-answer-flow\s*\{[\s\S]*?width:\s*100%/);
-	assert.match(processBlock, /\.friday-agent-process-timeline,\s*[\s\S]*?\.friday-ai-answer-content,\s*[\s\S]*?\.friday-agent-artifacts\s*\{[\s\S]*max-width:\s*min\(100%,\s*920px\)/);
+	assert.match(processBlock, /\.friday-ai-answer-content,\s*[\s\S]*?\.friday-agent-artifacts\s*\{[\s\S]*max-width:\s*min\(100%,\s*920px\)/);
 });
 
-test("expanded process shell stacks disclosure and timeline vertically", () => {
+test("expanded process detail stacks Native Kit steps vertically", () => {
 	const styles = read(stylesPath);
-	const shellBlock = styles.match(/\.friday-agent-process-shell\s*\{[\s\S]*?\}/)?.[0] ?? "";
+	const detailInnerBlock = lastCssBlock(styles, ".assistant-process-detail-inner-v6");
+	const stepBlock = lastCssBlock(styles, ".assistant-process-step-v6");
 
-	assert.ok(shellBlock, "process shell style should exist");
-	assert.match(shellBlock, /display:\s*flex/);
-	assert.match(shellBlock, /flex-direction:\s*column/);
-	assert.match(shellBlock, /align-items:\s*stretch/);
+	assert.ok(detailInnerBlock, "process detail inner style should exist");
+	assert.match(detailInnerBlock, /display:\s*grid/);
+	assert.match(detailInnerBlock, /gap:\s*var\(--friday-kit-space-1\)/);
+	assert.match(stepBlock, /display:\s*grid/);
+	assert.match(stepBlock, /min-width:\s*0/);
 });
 
 test("agent process styles do not retain stale runtime preview CSS", () => {
@@ -97,8 +119,8 @@ test("agent answer and artifact styles define document-flow result surfaces", ()
 		"friday-agent-artifacts",
 		"friday-agent-artifacts-title",
 		"friday-agent-artifact-card",
-		"friday-agent-artifact-meta",
-		"friday-agent-artifact-diff-summary",
+		"friday-agent-artifact-icon",
+		"friday-agent-artifact-name",
 	]) {
 		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
 	}
@@ -163,7 +185,6 @@ test("Native Kit assistant process artifact and task bar surfaces do not use non
 		".composer-taskbar-task-v5",
 		".composer-taskbar-marker-v5",
 		".friday-composer-task-bar",
-		".friday-agent-process-timeline-marker",
 	];
 
 	for (const selector of selectors) {
@@ -205,22 +226,21 @@ test("agent process panel styles use Obsidian variables and restrained operation
 test("agent process panel styles cover focus responsive and reduced motion states", () => {
 	const styles = read(stylesPath);
 
-	assert.match(styles, /\.friday-agent-process(?:-[\w-]+)?[^{}]*:focus-visible/);
-	assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*friday-agent-process/);
-	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*friday-agent-process/);
+	assert.match(styles, /\.assistant-step-toggle-v6:focus-visible/);
+	assert.match(styles, /@media\s*\(max-width:\s*760px\)[\s\S]*kit-event-row-v1/);
+	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*assistant-process-detail-v6/);
 });
 
 test("agent process motion is scoped and disabled for reduced motion", () => {
 	const styles = read(stylesPath);
 	const processBlock = extractProcessCss(styles);
-	const reducedMotionBlock = styles.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
 
-	assert.match(processBlock, /@keyframes\s+friday-agent-process-pulse/);
 	assert.match(processBlock, /@keyframes\s+friday-agent-process-enter/);
-	assert.match(processBlock, /\.friday-agent-process-shell\.is-running[\s\S]*animation:\s*friday-agent-process-enter/);
-	assert.match(processBlock, /\.friday-agent-process-timeline-item\.is-running\s+\.friday-agent-process-timeline-marker[\s\S]*animation:\s*friday-agent-process-pulse/);
+	assert.doesNotMatch(processBlock, /@keyframes\s+friday-agent-process-pulse/);
+	assert.match(styles, /\.friday-composer-decision-panel\s*\{[\s\S]*animation:\s*friday-agent-process-enter/);
+	assert.match(styles, /\.kit-running-surface-v1::after[\s\S]*animation:\s*friday-kit-running-sheen/);
 	assert.doesNotMatch(processBlock, /@keyframes\s+(?!friday-agent-process-)[\w-]+/);
-	assert.match(reducedMotionBlock, /friday-agent-process[\s\S]*animation:\s*none/);
+	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*\.kit-running-surface-v1::after[\s\S]*animation:\s*none/);
 	assert.doesNotMatch(processBlock, /transition:\s*(?:width|height|top|left|right|bottom|margin|padding)/);
 });
 
@@ -246,112 +266,59 @@ test("composer decision panel styles are compact and flatten nested approval car
 	assert.match(styles, /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*friday-composer-decision-panel[\s\S]*animation:\s*none/);
 });
 
-test("agent process disclosure only shows pointer cursor when it is clickable", () => {
+test("assistant process toggles use Native Kit controls instead of retired disclosure rows", () => {
 	const styles = read(stylesPath);
-	const baseBlock = styles.match(/\.friday-agent-process-disclosure\s*\{[\s\S]*?\}/)?.[0] ?? "";
+	const metaButtonBlock = lastCssBlock(styles, "button.assistant-result-meta-v6");
+	const stepToggleBlock = lastCssBlock(styles, ".assistant-step-toggle-v6");
 
-	assert.ok(baseBlock, "base disclosure style should exist");
-	assert.doesNotMatch(baseBlock, /cursor\s*:\s*pointer/);
-	assert.match(styles, /\.friday-agent-process-disclosure\.is-clickable\s*\{[\s\S]*cursor\s*:\s*pointer/);
-	assert.match(styles, /\.friday-agent-process-disclosure\s*\{[\s\S]*justify-content\s*:\s*flex-start/);
-	assert.match(styles, /\.friday-agent-process-header-main\s*\{[\s\S]*flex\s*:\s*0\s+1\s+auto/);
+	assert.doesNotMatch(styles, /\.friday-agent-process-disclosure\b/);
+	assert.match(metaButtonBlock, /cursor\s*:\s*pointer/);
+	assert.match(metaButtonBlock, /box-shadow:\s*none/);
+	assert.match(stepToggleBlock, /cursor:\s*pointer/);
 });
 
-test("agent process chevron toggle suppresses native button frame", () => {
+test("assistant process chevron toggle suppresses native button frame", () => {
 	const styles = read(stylesPath);
-	const toggleBlock = styles.match(/\.friday-agent-process-toggle\s*\{[\s\S]*?\}/)?.[0] ?? "";
+	const toggleBlock = lastCssBlock(styles, ".assistant-process-toggle-v6");
 
 	assert.ok(toggleBlock, "toggle style block should exist");
-	assert.match(toggleBlock, /appearance\s*:\s*none/);
 	assert.match(toggleBlock, /border\s*:\s*(?:0|none)/);
 	assert.match(toggleBlock, /background\s*:\s*transparent/);
-	assert.match(toggleBlock, /box-shadow\s*:\s*none/);
+	assert.match(lastCssBlock(styles, "button.assistant-result-meta-v6"), /box-shadow\s*:\s*none/);
 });
 
-test("agent process disclosure is a compact single-line Native Kit event row", () => {
+test("assistant process event rows are compact Native Kit rows", () => {
 	const styles = read(stylesPath);
-	const disclosureBlock = lastCssBlock(styles, ".friday-agent-process-disclosure");
-	const titleBlock = lastCssBlock(styles, ".friday-agent-process-disclosure-title");
-	const headlineBlock = lastCssBlock(styles, ".friday-agent-process-headline");
-	const summaryBlock = lastCssBlock(styles, ".friday-agent-process-disclosure-summary");
+	const eventBlock = lastCssBlock(styles, ".assistant-process-event-v6");
+	const narrationBlock = lastCssBlock(styles, ".assistant-step-narration-v6");
 
-	assert.ok(disclosureBlock, "process disclosure style should exist");
-	assert.match(disclosureBlock, /min-height:\s*34px/);
-	assert.match(disclosureBlock, /padding:\s*5px\s+8px/);
-	assert.match(disclosureBlock, /overflow:\s*hidden/);
-	assert.match(titleBlock, /flex-direction:\s*row/);
-	for (const [label, block] of [
-		["headline", headlineBlock],
-		["summary", summaryBlock],
-	]) {
-		assert.ok(block, `${label} style should exist`);
-		assert.match(block, /min-width:\s*0/);
-		assert.match(block, /overflow:\s*hidden/);
-		assert.match(block, /text-overflow:\s*ellipsis/);
-		assert.match(block, /white-space:\s*nowrap/);
-		assert.doesNotMatch(block, /overflow-wrap:\s*anywhere/);
-	}
+	assert.ok(eventBlock, "process event row style should exist");
+	assert.match(eventBlock, /min-height:\s*32px/);
+	assert.match(eventBlock, /padding:\s*3px\s+8px/);
+	assert.match(narrationBlock, /overflow-wrap:\s*anywhere/);
+	assert.match(narrationBlock, /white-space:\s*normal/);
 });
 
-test("agent process timeline visuals are flattened without rail weight", () => {
+test("old agent process timeline rails and command drill-down styles are retired", () => {
 	const styles = read(stylesPath);
-	const panelBlock = lastCssBlock(styles, ".friday-agent-process-panel");
-	const timelinePanelBlock = lastCssBlock(styles, ".friday-agent-process-timeline-panel");
-	const timelineBlock = lastCssBlock(styles, ".friday-agent-process-timeline");
-	const itemBlock = lastCssBlock(styles, ".friday-agent-process-timeline-item");
-	const railBlock = lastCssBlock(styles, ".friday-agent-process-timeline-rail");
-	const railLineBlock = lastCssBlock(styles, ".friday-agent-process-timeline-rail::before");
-	const doneMarkerBlock = lastCssBlock(styles, ".friday-agent-process-timeline-item.is-done .friday-agent-process-timeline-marker");
+	const proseAfterProcessBlock = lastCssBlock(styles, ".friday-agent-process-shell + .friday-ai-answer-content.assistant-output-block.is-prose");
 
-	assert.match(panelBlock, /padding:\s*2px\s+0\s+0/);
-	assert.doesNotMatch(panelBlock, /padding:\s*[^;]*\s(?:1[2-9]|[2-9][0-9])px/);
-	assert.match(timelinePanelBlock, /padding:\s*0/);
-	assert.match(timelineBlock, /gap:\s*6px/);
-	assert.match(itemBlock, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
-	assert.match(railBlock, /display:\s*none/);
-	assert.match(railLineBlock, /display:\s*none/);
-	assert.doesNotMatch(railLineBlock, /background:/);
-	assert.doesNotMatch(doneMarkerBlock, /color-green|text-success|#22c55e|#16a34a/i);
-});
-
-test("agent process command drill-down and answer prose are visually separated", () => {
-	const styles = read(stylesPath);
-	for (const className of [
+	for (const retiredClassName of [
+		"friday-agent-process-timeline-item",
+		"friday-agent-process-timeline-rail",
+		"friday-agent-process-timeline-marker",
+		"friday-agent-process-timeline-content",
+		"friday-agent-process-timeline-detail",
 		"friday-agent-process-command-details",
 		"friday-agent-process-command-summary",
 		"friday-agent-process-command-list",
 		"friday-agent-process-command-row",
 	]) {
-		assert.match(styles, new RegExp(`\\.${className}\\b`), `${className} should be styled`);
+		assert.doesNotMatch(styles, new RegExp(`\\.${retiredClassName}\\b`), `${retiredClassName} should be retired`);
 	}
-	const expandedShellBlock = lastCssBlock(styles, ".friday-agent-process-shell.is-expanded");
-	const commandDetailsBlock = lastCssBlock(styles, ".friday-agent-process-command-details");
-	const commandSummaryBlock = lastCssBlock(styles, ".friday-agent-process-command-summary");
-	const commandListBlock = lastCssBlock(styles, ".friday-agent-process-command-list");
-	const commandRowBlock = lastCssBlock(styles, ".friday-agent-process-command-row");
-	const timelineContentBlock = lastCssBlock(styles, ".friday-agent-process-timeline-content");
-	const timelineEventRowBlock = lastCssBlock(styles, ".friday-agent-process-timeline-event-row");
-	const proseAfterProcessBlock = lastCssBlock(styles, ".friday-agent-process-shell + .friday-ai-answer-content.assistant-output-block.is-prose");
-
-	assert.match(expandedShellBlock, /border:\s*1px\s+solid/);
-	assert.match(expandedShellBlock, /background:\s*var\(--background-secondary\)/);
-	assert.match(timelineContentBlock, /border:\s*1px\s+solid/);
-	assert.match(timelineContentBlock, /background:\s*color-mix/);
-	assert.match(timelineEventRowBlock, /border:\s*0/);
-	assert.match(timelineEventRowBlock, /background:\s*transparent/);
-	assert.match(timelineEventRowBlock, /padding:\s*0/);
-	assert.match(commandDetailsBlock, /margin-top:\s*4px/);
-	assert.match(commandSummaryBlock, /cursor:\s*pointer/);
-	assert.match(commandSummaryBlock, /min-height:\s*26px/);
-	assert.match(commandSummaryBlock, /background:\s*color-mix/);
-	assert.match(commandListBlock, /padding:\s*4px\s+0\s+0\s+26px/);
-	assert.match(commandRowBlock, /min-height:\s*24px/);
-	assert.match(commandRowBlock, /background:\s*transparent/);
-	assert.doesNotMatch(commandSummaryBlock + commandRowBlock, /background:\s*var\(--background-primary\)/);
-	assert.match(proseAfterProcessBlock, /margin-top:\s*10px/);
-	assert.match(proseAfterProcessBlock, /padding-top:\s*12px/);
-	assert.match(proseAfterProcessBlock, /border-top:\s*1px\s+solid/);
-	assert.doesNotMatch(commandDetailsBlock + commandRowBlock + proseAfterProcessBlock, /linear-gradient|radial-gradient|backdrop-filter|blur\(/);
+	assert.equal(proseAfterProcessBlock, "");
+	assert.match(styles, /\.assistant-tool-call-v5\s*\{[\s\S]*border-color:\s*color-mix/);
+	assert.match(styles, /\.assistant-tool-call-v5\s+\.kit-event-row-main-v1\s*\{[\s\S]*font-size:\s*0\.74rem/);
 });
 
 test("Native Kit running process animation is disabled for reduced motion", () => {
@@ -422,13 +389,15 @@ test("agent process renderer no longer requires old runtime-card classes", () =>
 	const renderer = read(rendererPath);
 
 	assert.match(renderer, /friday-agent-process/);
-	assert.match(renderer, /friday-agent-process-timeline-item/);
+	assert.match(renderer, /assistant-process-step-v6/);
+	assert.match(renderer, /assistant-process-event-v6/);
 	assert.match(renderer, /friday-ai-answer-flow/);
 	assert.match(renderer, /friday-agent-artifacts/);
 	assert.doesNotMatch(renderer, /friday-runtime-card/);
 	assert.doesNotMatch(renderer, /friday-runtime-stage/);
 	assert.doesNotMatch(renderer, /friday-runtime-entry/);
 	assert.doesNotMatch(renderer, /renderVisibleStepTimeline/);
+	assert.doesNotMatch(renderer, /friday-agent-process-timeline-item/);
 	assert.doesNotMatch(renderer, /friday-agent-process-step(?!-card-v2)/);
 	assert.doesNotMatch(renderer, /renderStages|friday-agent-process-stages/);
 	assert.doesNotMatch(renderer, /renderCurrent|friday-agent-process-current/);

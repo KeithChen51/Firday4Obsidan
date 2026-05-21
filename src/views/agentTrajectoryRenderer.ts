@@ -463,7 +463,7 @@ function renderNativeKitProcessStep(
 	renderNativeKitStepNarration(stepEl, item);
 	if (item.actionRefs && item.actionRefs.length > 0) {
 		const itemActions = actions.filter((action) => item.actionRefs?.includes(action.id));
-		renderTimelineActions(stepEl, itemActions, onAction, "friday-agent-process-timeline-actions");
+		renderTimelineActions(stepEl, itemActions, onAction, "assistant-step-actions-v6");
 	}
 }
 
@@ -638,74 +638,6 @@ function renderChevronIcon(
 	renderIcon?.(iconEl, icon);
 }
 
-function renderTimelineItem(
-	containerEl: HTMLElement,
-	item: AgentProcessTimelineItemView,
-	actions: AgentProcessTimelineActionView[],
-	onAction?: (action: AgentTrajectoryAction) => void,
-	renderIcon?: RenderAgentProcessIcon,
-): void {
-	const itemEl = containerEl.createDiv({
-		cls: `friday-agent-process-timeline-item is-${item.kind} is-${item.status}`,
-		attr: {
-			"data-item-id": item.id,
-			"data-kind": item.kind,
-			"data-status": item.status,
-		},
-	});
-	const railEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-rail", attr: { "aria-hidden": "true" } });
-	railEl.createDiv({ cls: "friday-agent-process-timeline-marker" });
-	const contentEl = itemEl.createDiv({ cls: "friday-agent-process-timeline-content friday-agent-process-step-card-v2" });
-	const eventRowEl = contentEl.createDiv({
-		cls: `friday-agent-process-timeline-event-row kit-event-row-v1${item.toolCall ? " assistant-tool-call-v5" : ""} is-${item.kind}`,
-	});
-	renderTimelineEventRowMain(eventRowEl, item, renderIcon);
-	if (item.meta) {
-		eventRowEl.createSpan({ cls: "friday-agent-process-timeline-meta kit-soft-chip-v1", text: item.meta });
-	}
-	createTypewriterText(
-		contentEl,
-		"friday-agent-process-timeline-summary",
-		item.summary,
-		`${item.id}:summary`,
-	);
-	renderTimelineItemNotes(contentEl, item);
-	renderTimelineItemCommandDetails(contentEl, item, renderIcon);
-	if (item.actionRefs && item.actionRefs.length > 0) {
-		const itemActions = actions.filter((action) => item.actionRefs?.includes(action.id));
-		renderTimelineActions(contentEl, itemActions, onAction, "friday-agent-process-timeline-actions");
-	}
-}
-
-function renderTimelineEventRowMain(
-	eventRowEl: HTMLElement,
-	item: AgentProcessTimelineItemView,
-	renderIcon?: RenderAgentProcessIcon,
-): HTMLElement {
-	if (item.toolCall) {
-		renderToolCallIcon(eventRowEl, renderIcon);
-		const titleRowEl = eventRowEl.createDiv({ cls: "friday-agent-process-timeline-title-row kit-event-row-main-v1" });
-		titleRowEl.createEl("strong", {
-			cls: "friday-agent-process-timeline-tool-name assistant-tool-name-v5",
-			text: displayTimelineText(item.toolCall.name),
-		});
-		if (item.title && item.title !== item.toolCall.detail) {
-			titleRowEl.createSpan({
-				cls: "friday-agent-process-timeline-tool-title",
-				text: displayTimelineText(item.title),
-			});
-		}
-		titleRowEl.createSpan({
-			cls: "friday-agent-process-timeline-tool-detail assistant-tool-detail-v5",
-			text: displayTimelineText(item.toolCall.detail),
-		});
-		return titleRowEl;
-	}
-	const titleRowEl = eventRowEl.createDiv({ cls: "friday-agent-process-timeline-title-row kit-event-row-main-v1" });
-	titleRowEl.createDiv({ cls: "friday-agent-process-timeline-title", text: displayTimelineText(item.title) });
-	return titleRowEl;
-}
-
 function renderToolCallIcon(
 	containerEl: HTMLElement,
 	renderIcon?: RenderAgentProcessIcon,
@@ -718,85 +650,6 @@ function renderToolCallIcon(
 		},
 	});
 	renderIcon?.(iconEl, "arrow-right");
-}
-
-function createTypewriterText(
-	containerEl: HTMLElement,
-	className: string,
-	text: string,
-	key: string,
-): HTMLElement {
-	const displayText = displayTimelineText(text);
-	return containerEl.createDiv({
-		cls: className,
-		text: displayText,
-		attr: {
-			"data-process-typewriter-key": key,
-			"data-process-typewriter-text": displayText,
-		},
-	});
-}
-
-function renderTimelineItemNotes(containerEl: HTMLElement, item: AgentProcessTimelineItemView): void {
-	if (!item.notes || item.notes.length === 0) {
-		return;
-	}
-	const notesEl = containerEl.createDiv({ cls: "friday-agent-process-timeline-notes" });
-	for (const [index, note] of item.notes.entries()) {
-		const noteEl = createTypewriterText(
-			notesEl,
-			`friday-agent-process-timeline-note is-${note.tone}`,
-			note.text,
-			`${item.id}:note:${index}`,
-		);
-		noteEl.setAttribute("data-tone", note.tone);
-	}
-}
-
-function renderTimelineItemCommandDetails(
-	containerEl: HTMLElement,
-	item: AgentProcessTimelineItemView,
-	renderIcon?: RenderAgentProcessIcon,
-): void {
-	const calls = (item.toolCalls ?? []).filter((call) => !isSameTimelineToolCall(call, item.toolCall));
-	if (calls.length === 0) {
-		return;
-	}
-	const detailsEl = containerEl.createEl("details", {
-		cls: "friday-agent-process-command-details is-secondary",
-		attr: {
-			"data-command-count": String(calls.length),
-		},
-	});
-	const summaryEl = detailsEl.createEl("summary", {
-		cls: "friday-agent-process-command-summary kit-event-row-v1 is-secondary",
-	});
-	renderToolCallIcon(summaryEl, renderIcon);
-	const summaryMainEl = summaryEl.createDiv({ cls: "kit-event-row-main-v1" });
-	summaryMainEl.createEl("strong", { text: "工具调用" });
-	summaryMainEl.createSpan({ text: "查看本步骤运行的命令" });
-	summaryEl.createSpan({ cls: "kit-soft-chip-v1", text: `已运行 ${calls.length} 条命令` });
-	const listEl = detailsEl.createDiv({ cls: "friday-agent-process-command-list" });
-	for (const call of calls) {
-		const rowEl = listEl.createDiv({ cls: "friday-agent-process-command-row kit-event-row-v1 assistant-tool-call-v5 is-secondary" });
-		renderToolCallIcon(rowEl, renderIcon);
-		const mainEl = rowEl.createDiv({ cls: "kit-event-row-main-v1" });
-		mainEl.createEl("strong", {
-			cls: "assistant-tool-name-v5 friday-agent-process-timeline-tool-name",
-			text: displayTimelineText(call.name),
-		});
-		mainEl.createSpan({
-			cls: "assistant-tool-detail-v5 friday-agent-process-timeline-tool-detail",
-			text: displayTimelineText(call.detail),
-		});
-	}
-}
-
-function isSameTimelineToolCall(
-	call: AgentProcessTimelineToolCallView,
-	primary: AgentProcessTimelineToolCallView | undefined,
-): boolean {
-	return Boolean(primary && primary.name === call.name && primary.detail === call.detail);
 }
 
 function renderTimelineActions(
@@ -898,43 +751,6 @@ function renderAssistantProseBlock(
 	renderContent(bodyEl);
 }
 
-function renderAssistantToolCallRows(
-	containerEl: HTMLElement,
-	timeline: AgentProcessTimelineView,
-	renderIcon?: RenderAgentProcessIcon,
-): void {
-	for (const item of timeline.items) {
-		if (!item.toolCall) {
-			continue;
-		}
-		renderAssistantToolCallRow(containerEl, item, renderIcon);
-	}
-}
-
-function renderAssistantToolCallRow(
-	containerEl: HTMLElement,
-	item: AgentProcessTimelineItemView,
-	renderIcon?: RenderAgentProcessIcon,
-): void {
-	if (!item.toolCall) {
-		return;
-	}
-	const rowEl = containerEl.createDiv({ cls: `kit-event-row-v1 assistant-tool-call-v5 is-${item.kind}` });
-	renderToolCallIcon(rowEl, renderIcon);
-	const mainEl = rowEl.createDiv({ cls: "kit-event-row-main-v1" });
-	mainEl.createEl("strong", {
-		cls: "assistant-tool-name-v5 friday-agent-process-timeline-tool-name",
-		text: displayTimelineText(item.toolCall.name),
-	});
-	mainEl.createSpan({
-		cls: "assistant-tool-detail-v5 friday-agent-process-timeline-tool-detail",
-		text: displayTimelineText(item.toolCall.detail),
-	});
-	if (item.meta) {
-		rowEl.createSpan({ cls: "kit-soft-chip-v1", text: item.meta });
-	}
-}
-
 function renderResultArtifacts(
 	containerEl: HTMLElement,
 	artifacts: AgentProcessArtifactView[],
@@ -1028,11 +844,4 @@ function fileTypeIconName(fileType: AgentProcessFileType): AgentProcessFileIcon 
 
 function assertUnhandledFileType(fileType: never): never {
 	throw new Error(`Unhandled file type: ${String(fileType)}`);
-}
-
-function isTimelineRunningSurfaceStatus(status: AgentProcessTimelineView["status"]): boolean {
-	return status === "running" ||
-		status === "waiting" ||
-		status === "retrying" ||
-		status === "recovering";
 }

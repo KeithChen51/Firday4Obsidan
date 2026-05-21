@@ -2764,22 +2764,6 @@ export class DailyBoardView extends ItemView {
 		}
 	}
 
-	private renderInlineApprovalPanel(containerEl: HTMLElement): void {
-		const pendingApprovals = this.approvalQueue.list();
-		if (pendingApprovals.length === 0) {
-			return;
-		}
-		const panel = containerEl.createDiv({ cls: "friday-inline-approval-panel kit-event-row-v1" });
-		panel.createSpan({
-			cls: "friday-inline-approval-copy",
-			text: this.t("approval.inlineDesc", "运行中的对话正在等待你在输入区确认。"),
-		});
-		panel.createSpan({
-			cls: "friday-inline-approval-count kit-soft-chip-v1",
-			text: this.t("approval.inlineCount", "待确认 {count}", { count: pendingApprovals.length }),
-		});
-	}
-
 	private startNewAiSession(): void {
 		this.aiConversation = [];
 		this.aiDraft = "";
@@ -4128,11 +4112,11 @@ export class DailyBoardView extends ItemView {
 	private renderApprovalMessage(containerEl: HTMLElement, item: PendingApproval): void {
 		const rowEl = containerEl.createDiv({ cls: "friday-ai-approval-record kit-event-row-v1" });
 		rowEl.createSpan({
-			cls: "friday-ai-approval-summary",
+			cls: "friday-ai-approval-record-summary",
 			text: this.t("approval.chatSummary", "FRIDAY 正在等待你在输入区确认是否继续。"),
 		});
 		rowEl.createSpan({
-			cls: "friday-ai-approval-detail-text",
+			cls: "friday-ai-approval-record-detail",
 			text: this.describeApprovalRequest(item),
 		});
 	}
@@ -4837,8 +4821,7 @@ export class DailyBoardView extends ItemView {
 			return null;
 		}
 		const processEl = this.aiMessageListEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
-			this.aiMessageListEl.querySelector(".assistant-turn-body-v2.is-live") ??
-			this.aiMessageListEl.querySelector(".friday-agent-process-shell.is-live");
+			this.aiMessageListEl.querySelector(".assistant-turn-body-v2.is-live");
 		return this.isDomElement(processEl) ? processEl as HTMLElement : null;
 	}
 
@@ -4994,15 +4977,14 @@ export class DailyBoardView extends ItemView {
 		const candidate = rootEl as ParentNode & {
 			matches?: (selector: string) => boolean;
 		};
-		if (typeof candidate.matches === "function" && candidate.matches(".friday-ai-message-row.is-assistant.is-live, .assistant-turn-body-v2.is-live, .friday-agent-process-shell.is-live.is-expanded")) {
+		if (typeof candidate.matches === "function" && candidate.matches(".friday-ai-message-row.is-assistant.is-live, .assistant-turn-body-v2.is-live")) {
 			return rootEl as HTMLElement;
 		}
 		if (typeof rootEl.querySelector !== "function") {
 			return null;
 		}
 		const processEl = rootEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
-			rootEl.querySelector(".assistant-turn-body-v2.is-live") ??
-			rootEl.querySelector(".friday-agent-process-shell.is-live.is-expanded");
+			rootEl.querySelector(".assistant-turn-body-v2.is-live");
 		return processEl ? processEl as HTMLElement : null;
 	}
 
@@ -5088,8 +5070,7 @@ export class DailyBoardView extends ItemView {
 		const scratchEl = document.createElement("div");
 		this.renderTrajectoryCard(scratchEl, this.aiRuntimeTrajectorySnapshot, "live", preserveExpanded ? true : undefined);
 		const nextProcessEl = scratchEl.querySelector(".friday-ai-message-row.is-assistant.is-live") ??
-			scratchEl.querySelector(".assistant-turn-body-v2.is-live") ??
-			scratchEl.querySelector(".friday-agent-process-shell.is-live");
+			scratchEl.querySelector(".assistant-turn-body-v2.is-live");
 		if (!(nextProcessEl instanceof HTMLElement)) {
 			return false;
 		}
