@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
+const chatMessageSegmentsPath = path.join(projectRoot, "src/views/chatMessageSegments.ts");
 const composerDocumentPath = path.join(projectRoot, "src/core/editor/mention/MentionComposerDocument.ts");
 const mentionComposerPath = path.join(projectRoot, "src/views/components/MentionComposer.ts");
 
@@ -83,17 +84,19 @@ test("send affordance resyncs immediately after a submitted prompt enters the ru
 
 test("chat messages render skill and context badges from persisted ui metadata", async () => {
 	const source = readSource(viewPath);
+	const chatMessageSegmentsSource = readSource(chatMessageSegmentsPath);
 	const metaBlock = source.match(/private buildUserMessageUiMeta\([\s\S]*?\n\t}\n\n\tprivate /)?.[0] ?? "";
 	assert.match(source, /message\.uiMeta/);
 	assert.match(source, /renderStructuredUserMessageBody/);
 	assert.match(source, /friday-ai-inline-body/);
 	assert.match(source, /friday-ai-inline-token/);
 	assert.match(source, /private formatMentionBadgeLabel\(/);
-	assert.match(metaBlock, /const segments = this\.buildUserMessageSegments/);
+	assert.match(source, /import \{ buildUserMessageSegments \} from "\.\/chatMessageSegments"/);
+	assert.match(metaBlock, /const segments = buildUserMessageSegments\(\{/);
 	assert.match(metaBlock, /return \{\s*segments,/);
-	assert.match(source, /type:\s*"token"/);
-	assert.match(source, /kind:\s*"context"/);
-	assert.match(source, /kind:\s*"skill"/);
+	assert.match(chatMessageSegmentsSource, /type:\s*"token"/);
+	assert.match(chatMessageSegmentsSource, /kind:\s*"context"/);
+	assert.match(chatMessageSegmentsSource, /kind:\s*"skill"/);
 	assert.doesNotMatch(source, /friday-ai-message-badges/);
 });
 

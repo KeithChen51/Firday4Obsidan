@@ -3,6 +3,9 @@ import { homedir } from "os";
 import path from "path";
 import { App, Notice, Plugin, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { normalizeProjectGroupIdCandidate } from "./projectGroupId";
+import { renderLlmSettingsSection } from "./sections/LlmSettingsSection";
+import { renderProjectSettingsSection } from "./sections/ProjectSettingsSection";
+import { renderSoulSettingsSection } from "./sections/SoulSettingsSection";
 import {
 	buildDefaultProjectRootPath,
 	buildRemoteBootstrapDefaults,
@@ -18,21 +21,15 @@ import {
 	selectOpencodeProvider,
 	type OpencodeProviderOption,
 } from "../core/llm/OpencodeConfigResolver";
-import {
-	buildAgentModelCatalogFromSettings,
-	parseAgentModelChoice,
-	resolveSelectedAgentModelValue,
-} from "../core/llm/AgentModelCatalog";
+import { buildAgentModelCatalogFromSettings } from "../core/llm/AgentModelCatalog";
 import {
 	patchActiveLlmConfig,
 	patchLlmModeConfig,
 	readModeConfig,
-	switchLlmMode,
 } from "../core/llm/LlmSettingsResolver";
 import type { ModelCapabilityInfo } from "../services/AIService";
 import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrationService";
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
-import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
@@ -40,7 +37,6 @@ import type { GroupModelCatalogModel } from "../types/groupModelCatalog";
 import type { SoulDefinition, SoulSummary, SoulTonePreset } from "../types/soul";
 import {
 	getSoulExperimentTemplate,
-	SOUL_EXPERIMENT_TEMPLATE_SERIES,
 	type SoulExperimentTemplate,
 } from "../features/soul/SoulExperimentTemplates";
 import type { LocaleCode } from "../i18n/types";
@@ -55,7 +51,6 @@ import {
 	renderNativeInlineAlert,
 	renderNativePrerequisiteList,
 	renderNativeSectionTabs,
-	renderNativeSettingStatus,
 	renderNativeSettingsEmptyState,
 	renderNativeSettingsFeedback,
 	type NativeSettingsGroupOptions,
@@ -64,7 +59,6 @@ import {
 } from "../ui/obsidian-native/SettingsKit";
 
 type SettingsHost = FridayPluginApi & Plugin;
-type LlmMode = "openai" | "group";
 type LlmStatus = "unconfigured" | "idle" | "checking" | "connected" | "failed";
 type VisionProbeStatus = "idle" | "checking";
 type ProjectEditorSelectOption = string | { value: string; label: string };
@@ -136,6 +130,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	private userGitCredentialLoaded = false;
 	private userGitUsernameDraft = "";
 	private userGitTokenDraft = "";
+	private userGitTokenVisible = false;
 	private gitRuntimeStatus: GitRuntimeStatus | null = null;
 	private gitRuntimeStatusLoading = false;
 	private pluginUpdateActionPending = false;
@@ -338,10 +333,15 @@ export class FridaySettingTab extends PluginSettingTab {
 				};
 			});
 
+		let gitTokenInputEl: HTMLInputElement | null = null;
 		new Setting(gitGroup)
 			.setName(this.t("settings.user.gitToken.name", "Git 令牌"))
 			.setDesc(this.t("settings.user.gitToken.desc", "作为所有项目同步认证的统一令牌。"))
 			.addText((text) => {
+				text.inputEl.type = this.userGitTokenVisible ? "text" : "password";
+				text.inputEl.setAttribute("autocomplete", "off");
+				text.inputEl.setAttribute("spellcheck", "false");
+				gitTokenInputEl = text.inputEl;
 				text
 					.setPlaceholder("token")
 					.setValue(this.userGitTokenDraft)
@@ -354,6 +354,32 @@ export class FridaySettingTab extends PluginSettingTab {
 						this.display();
 					}
 				};
+			})
+			.addExtraButton((button) => {
+				const syncTokenVisibility = () => {
+					if (gitTokenInputEl) {
+						gitTokenInputEl.type = this.userGitTokenVisible ? "text" : "password";
+					}
+					const tooltip = this.userGitTokenVisible
+						? this.t("settings.user.gitToken.hide", "隐藏令牌")
+						: this.t("settings.user.gitToken.show", "显示令牌");
+					button
+						.setIcon(this.userGitTokenVisible ? "eye-off" : "eye")
+						.setTooltip(tooltip);
+					button.extraSettingsEl.setAttribute("aria-label", tooltip);
+					button.extraSettingsEl.classList.add("friday-secret-visibility-toggle", "friday-token-visibility-leading");
+					button.extraSettingsEl.classList.toggle("is-visible", this.userGitTokenVisible);
+				};
+				button.extraSettingsEl.addEventListener("mousedown", (event) => {
+					event.preventDefault();
+				});
+				gitTokenInputEl?.insertAdjacentElement("beforebegin", button.extraSettingsEl);
+				syncTokenVisibility();
+				button.onClick(() => {
+					this.userGitTokenVisible = !this.userGitTokenVisible;
+					syncTokenVisibility();
+					gitTokenInputEl?.focus();
+				});
 			});
 
 		new Setting(gitGroup)
@@ -844,943 +870,14 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderLlmSection(containerEl: HTMLElement): void {
-		this.syncLlmStatusWithConfig();
-		const mode = (this.host.settings.llm.mode ?? "openai") as LlmMode;
-		if (this.host.settings.llm.mode !== mode) {
-			this.host.settings.llm.mode = mode;
-		}
-		const statusGroup = this.createNativeSettingsGroup(containerEl);
-		const connectionGroup = this.createNativeSettingsGroup(containerEl);
-		const capabilityGroup = this.createNativeSettingsGroup(containerEl);
-
-		const llmStatusSetting = new Setting(statusGroup)
-			.setName(this.t("settings.llm.connection.name", "连通状态"))
-			.setDesc(this.getLlmStatusDesc())
-			.addButton((button) =>
-				button
-					.setButtonText(
-						this.llmStatus === "checking"
-							? this.t("settings.llm.connection.checking", "检测中...")
-							: this.t("settings.llm.connection.test", "测试连通"),
-					)
-					.setDisabled(this.llmStatus === "checking")
-					.onClick(async () => {
-						await this.runLlmConnectionTest();
-					}),
-			);
-		renderNativeSettingStatus(llmStatusSetting, {
-			text: this.getLlmStatusLabel(),
-			tone: this.getLlmStatusTone(),
-		});
-
-		new Setting(statusGroup)
-			.setName(this.t("settings.llm.mode.name", "接入模式"))
-			.setDesc(this.t("settings.llm.mode.desc", "可选通用 OpenAI 协议，或集团集采网关模式。"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("openai", this.t("settings.llm.mode.openai", "OpenAI 协议模式"));
-				dropdown.addOption("group", this.t("settings.llm.mode.group", "集团集采模式"));
-				dropdown.setValue(mode);
-				dropdown.onChange(async (value: LlmMode) => {
-					this.host.settings.llm = switchLlmMode(this.host.settings.llm, value);
-					if (value === "group") {
-						const presets = this.getModelPresetResult();
-						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-							opencodeProviderId: this.host.settings.llm.opencodeProviderId || presets.activeProvider?.id || "",
-						});
-						if (!this.host.settings.llm.model.trim()) {
-							this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-								model: presets.models[0] ?? "",
-							});
-						}
-					}
-					await this.host.saveSettings();
-					this.markLlmStatusDirty();
-					this.display();
-				});
-			});
-
-		if (mode === "group") {
-			const modelPresets = this.getModelPresetResult();
-			const activeProvider = modelPresets.activeProvider;
-			if (modelPresets.providers.length > 0) {
-				new Setting(statusGroup)
-					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
-					.setDesc(
-						activeProvider
-							? this.t("settings.llm.opencodeProvider.desc", "来源: {source} | 当前: {provider}", {
-									source: modelPresets.source,
-									provider: activeProvider.name,
-								})
-							: this.t(
-									"settings.llm.opencodeProvider.empty",
-									"已读取 OpenCode 配置，但未发现可用 provider。",
-								),
-					)
-					.addDropdown((dropdown) => {
-						for (const provider of modelPresets.providers) {
-							dropdown.addOption(provider.id, provider.name || provider.id);
-						}
-						dropdown.setValue(activeProvider?.id ?? modelPresets.providers[0]?.id ?? "");
-						dropdown.onChange(async (value) => {
-							this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
-								opencodeProviderId: value,
-							});
-							const selectedProvider = selectOpencodeProvider(this.readOpencodeSnapshot(), value);
-							if (
-								selectedProvider &&
-								selectedProvider.models.length > 0 &&
-								!selectedProvider.models.some((item) => item.id === this.host.settings.llm.model.trim())
-							) {
-								this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
-									model: selectedProvider.models[0]!.id,
-								});
-							}
-							await this.host.saveSettings();
-							this.markLlmStatusDirty();
-							this.display();
-						});
-					})
-					.addButton((button) =>
-						button
-							.setButtonText(this.t("settings.llm.opencodeProvider.sync", "一键同步 OpenCode 配置"))
-							.setCta()
-							.onClick(async () => {
-								await this.syncSelectedOpencodeProvider();
-							}),
-					)
-					.addExtraButton((button) =>
-						button
-							.setIcon("refresh-cw")
-							.setTooltip(this.t("settings.llm.presetModel.reload", "重新读取模型预置"))
-							.onClick(() => {
-								this.modelPresetResult = null;
-								this.display();
-							}),
-					);
-			} else {
-				new Setting(statusGroup)
-					.setName(this.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
-					.setDesc(
-						this.t(
-							"settings.llm.opencodeProvider.missing",
-							"未在 OpenCode 配置中读取到 provider。请检查 opencode.json。",
-						),
-					);
-			}
-			this.renderGroupModelCatalogSetting(statusGroup);
-		}
-
-		new Setting(connectionGroup)
-			.setName(this.t("settings.llm.apiUrl.name", "API 地址（必填）"))
-			.setDesc(this.t("settings.llm.apiUrl.desc", "可填网关基础地址或完整 chat/completions 地址。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.llm.apiUrl.placeholder", "例如: https://api.openai.com/v1"))
-					.setValue(this.host.settings.llm.apiUrl)
-					.onChange(async (value) => {
-						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-							apiUrl: value.trim(),
-						});
-						await this.host.saveSettings();
-						this.markLlmStatusDirty();
-					}),
-			);
-
-		new Setting(connectionGroup)
-			.setName(this.t("settings.llm.apiKey.name", "API 密钥（选填）"))
-			.setDesc(this.t("settings.llm.apiKey.desc", "如果网关不需要密钥，可留空。"))
-			.addText((text) => {
-				text.inputEl.type = "password";
-				text
-					.setPlaceholder(this.t("settings.llm.apiKey.placeholder", "可留空"))
-					.setValue(this.host.settings.llm.apiKey)
-					.onChange(async (value) => {
-						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-							apiKey: value.trim(),
-						});
-						await this.host.saveSettings();
-						this.markLlmStatusDirty();
-					});
-			});
-
-		if (mode === "group") {
-			const modelPresets = this.getModelPresetResult();
-			const currentModel = this.host.settings.llm.model.trim();
-			const selected = modelPresets.models.includes(currentModel)
-				? currentModel
-				: modelPresets.models[0] ?? "";
-			new Setting(connectionGroup)
-				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
-				.setDesc(this.t("settings.llm.presetModel.source", "来源: {source}", { source: modelPresets.source }))
-				.addDropdown((dropdown) => {
-					for (const model of modelPresets.models) {
-						dropdown.addOption(model, modelPresets.modelLabels[model] ?? model);
-					}
-					dropdown.setValue(selected);
-					dropdown.onChange(async (value) => {
-						this.host.settings.llm = patchLlmModeConfig(this.host.settings.llm, "group", {
-							model: value,
-						});
-						await this.host.saveSettings();
-						this.markLlmStatusDirty();
-						this.display();
-					});
-				})
-				.addExtraButton((button) =>
-					button
-						.setIcon("refresh-cw")
-						.setTooltip(this.t("settings.llm.presetModel.reload", "重新读取模型预置"))
-						.onClick(() => {
-							this.modelPresetResult = null;
-							this.display();
-						}),
-				);
-		}
-
-		if (mode !== "group") {
-			new Setting(connectionGroup)
-				.setName(this.t("settings.llm.defaultModel.name", "默认模型"))
-				.setDesc(this.t("settings.llm.defaultModel.desc", "可被当前 Agent 的模型覆盖。"))
-				.addText((text) =>
-					text
-						.setPlaceholder(this.t("settings.llm.defaultModel.placeholder", "例如: glm-5 或 gpt-4o-mini"))
-						.setValue(this.host.settings.llm.model)
-						.onChange(async (value) => {
-							this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-								model: value.trim(),
-							});
-							await this.host.saveSettings();
-							this.markLlmStatusDirty();
-						}),
-				);
-		}
-
-		const currentVisionModelKey = this.getCurrentVisionModelKey();
-		const capability =
-			this.testedVisionCapability && this.testedVisionModel === currentVisionModelKey
-				? this.testedVisionCapability
-				: null;
-		const confidenceLabel = capability
-			? capability.confidence === "high"
-				? this.t("settings.llm.vision.confidence.high", "高")
-				: capability.confidence === "medium"
-					? this.t("settings.llm.vision.confidence.medium", "中")
-					: this.t("settings.llm.vision.confidence.low", "低")
-			: this.t("settings.llm.vision.confidence.unknown", "未测试");
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.vision.name", "视觉能力"))
-			.setDesc(
-				this.t("settings.llm.vision.desc", "结果：{result} | 置信度：{confidence} | {reason}", {
-					result: capability
-						? this.formatVisionCapability(capability)
-						: this.t("settings.llm.vision.notTested", "未测试"),
-					confidence: confidenceLabel,
-					reason: capability?.reason ?? this.t("settings.llm.vision.pending", "点击右侧“能力测试”后会更新结果。"),
-				}),
-			)
-			.addButton((button) =>
-				button
-					.setButtonText(
-						this.visionProbeStatus === "checking"
-							? this.t("settings.llm.vision.checking", "能力测试中...")
-							: this.t("settings.llm.vision.test", "能力测试"),
-					)
-					.setDisabled(this.visionProbeStatus === "checking")
-					.onClick(async () => {
-						await this.runVisionCapabilityTest();
-					}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.temperature.name", "温度（选填）"))
-			.setDesc(this.t("settings.llm.temperature.desc", "留空时不发送 temperature 参数。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.llm.temperature.placeholder", "例如 0.7"))
-					.setValue(this.host.settings.llm.temperature == null ? "" : String(this.host.settings.llm.temperature))
-					.onChange(async (value) => {
-						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-							temperature: this.parseOptionalFloat(value),
-						});
-						await this.host.saveSettings();
-					}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.maxTokens.name", "最大 Token（选填）"))
-			.setDesc(this.t("settings.llm.maxTokens.desc", "留空时不发送 max_tokens 参数。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.llm.maxTokens.placeholder", "例如 4096"))
-					.setValue(this.host.settings.llm.maxTokens == null ? "" : String(this.host.settings.llm.maxTokens))
-					.onChange(async (value) => {
-						this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-							maxTokens: this.parseOptionalPositiveInt(value),
-						});
-						await this.host.saveSettings();
-					}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.streaming.name", "流式输出"))
-			.setDesc(this.t("settings.llm.streaming.desc", "开启后，聊天回复将实时逐字显示。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.llm.enableStreaming ?? true).onChange(async (value) => {
-					this.host.settings.llm = patchActiveLlmConfig(this.host.settings.llm, {
-						enableStreaming: value,
-					});
-					await this.host.saveSettings();
-				}),
-			);
-
-		const reasoning = this.host.settings.llm.reasoning;
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.enabled.name", "推理能力"))
-			.setDesc(this.t("settings.llm.reasoning.enabled.desc", "为支持 thinking/reasoning 的 provider 发送对应参数；未知网关不会发送专用字段。"))
-			.addToggle((toggle) =>
-				toggle.setValue(reasoning.enabled).onChange(async (value) => {
-					await this.patchActiveLlmReasoningConfig({ enabled: value });
-				}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.effort.name", "推理强度"))
-			.setDesc(this.t("settings.llm.reasoning.effort.desc", "映射到 ZenMux/OpenAI Responses 等 provider 的 effort 字段。"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("", this.t("settings.llm.reasoning.effort.default", "默认"));
-				dropdown.addOption("minimal", "minimal");
-				dropdown.addOption("low", "low");
-				dropdown.addOption("medium", "medium");
-				dropdown.addOption("high", "high");
-				dropdown.addOption("xhigh", "xhigh");
-				dropdown.setValue(reasoning.effort).onChange(async (value) => {
-					await this.patchActiveLlmReasoningConfig({
-						effort: (["", "minimal", "low", "medium", "high", "xhigh"].includes(value) ? value : "") as LlmReasoningSettings["effort"],
-					});
-				});
-			});
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.summary.name", "推理摘要"))
-			.setDesc(this.t("settings.llm.reasoning.summary.desc", "仅使用 provider summary 或 FRIDAY 的安全摘要进入过程 UI。"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("auto", "auto");
-				dropdown.addOption("concise", "concise");
-				dropdown.addOption("detailed", "detailed");
-				dropdown.addOption("none", "none");
-				dropdown.setValue(reasoning.summary).onChange(async (value) => {
-					await this.patchActiveLlmReasoningConfig({
-						summary: (["auto", "concise", "detailed", "none"].includes(value) ? value : "auto") as LlmReasoningSettings["summary"],
-					});
-				});
-			});
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.maxTokens.name", "推理 Token 上限"))
-			.setDesc(this.t("settings.llm.reasoning.maxTokens.desc", "用于 Anthropic thinking budget；留空则不发送。"))
-			.addText((text) =>
-				text
-					.setPlaceholder("2048")
-					.setValue(reasoning.maxTokens == null ? "" : String(reasoning.maxTokens))
-					.onChange(async (value) => {
-						await this.patchActiveLlmReasoningConfig({
-							maxTokens: this.parseOptionalPositiveInt(value),
-						});
-					}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.thinking.name", "DashScope thinking"))
-			.setDesc(this.t("settings.llm.reasoning.thinking.desc", "映射为百炼/DashScope 的 enable_thinking 与 thinking_budget。"))
-			.addToggle((toggle) =>
-				toggle.setValue(reasoning.enableThinking).onChange(async (value) => {
-					await this.patchActiveLlmReasoningConfig({ enableThinking: value });
-				}),
-			)
-			.addText((text) =>
-				text
-					.setPlaceholder("4096")
-					.setValue(reasoning.thinkingBudget == null ? "" : String(reasoning.thinkingBudget))
-					.onChange(async (value) => {
-						await this.patchActiveLlmReasoningConfig({
-							thinkingBudget: this.parseOptionalPositiveInt(value),
-						});
-					}),
-			);
-
-		new Setting(capabilityGroup)
-			.setName(this.t("settings.llm.reasoning.debug.name", "调试时保留 raw reasoning"))
-			.setDesc(this.t("settings.llm.reasoning.debug.desc", "仅用于隔离调试路径；普通 replay 和过程 UI 不显示 raw CoT。"))
-			.addToggle((toggle) =>
-				toggle.setValue(reasoning.showRawInDebug).onChange(async (value) => {
-					await this.patchActiveLlmReasoningConfig({ showRawInDebug: value });
-				}),
-			);
-
-		if (this.llmStatus === "failed" && this.llmStatusDetail) {
-			const feedback = renderNativeSettingsFeedback(statusGroup, {
-				title: this.t("settings.llm.errorDetail.title", "错误详情（点击文本可复制）"),
-				message: this.t("settings.llm.status.failedDesc", "连接失败，请查看下方错误详情。"),
-				tone: "danger",
-				detail: this.llmStatusDetail,
-			});
-			const detail = feedback.querySelector(".friday-native-settings-feedback-detail");
-			if (detail instanceof HTMLElement) {
-				detail.classList.add("friday-llm-error-detail");
-				detail.onclick = async () => {
-					try {
-						await navigator.clipboard.writeText(this.llmStatusDetail);
-						new Notice(this.t("settings.llm.errorDetail.copySuccess", "已复制错误详情"), 2500);
-					} catch {
-						new Notice(this.t("settings.llm.errorDetail.copyFailed", "复制失败，请手动复制"), 2500);
-					}
-				};
-			}
-		}
+		renderLlmSettingsSection(this, containerEl);
 	}
 
 	private renderSoulSection(containerEl: HTMLElement): void {
-		if (this.soulPanelMode === "lab") {
-			this.renderSoulLabSection(containerEl);
-			return;
-		}
-		if (this.soulPanelMode === "editor") {
-			this.renderSoulEditorSection(containerEl);
-			return;
-		}
-		const souls = this.host.listSouls();
-		const activeSoul = this.host.getActiveSoul();
-		const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
-		const identityGroup = this.createNativeSettingsGroup(containerEl);
-		const managementGroup = this.createNativeSettingsGroup(containerEl, {
-			title: this.t("settings.agent.manage.title", "Soul 管理"),
-			description: this.t(
-				"settings.agent.manage.desc",
-				"管理已经加入的 Soul。原生 FRIDAY 和实验性 Soul 只能选择或移除；自定义 Soul 可进入配置页编辑。",
-			),
-		});
-		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
-		const pathGroup = this.createNativeSettingsGroup(containerEl);
-
-		new Setting(identityGroup)
-				.setName(this.t("settings.agent.currentSoul.name", "当前 FRIDAY Soul"))
-			.setDesc(
-				this.t(
-					"settings.agent.currentSoul.desc",
-				"Soul 是对 FRIDAY 的人格、风格的定义，可灵活调整。",
-				),
-			)
-			.addDropdown((dropdown) => {
-				for (const soul of souls) {
-					dropdown.addOption(soul.id, this.resolveSoulDisplayName(soul));
-				}
-				if (souls.length > 0) {
-					dropdown.setValue(activeSoul?.id || souls[0]!.id);
-				}
-				dropdown.onChange(async (value) => {
-					await this.host.setActiveSoul(value);
-					this.display();
-				});
-			});
-
-		if (activeSoulDefinition) {
-			new Setting(identityGroup)
-				.setName(this.t("settings.agent.currentModel.name", "当前 FRIDAY Model"))
-				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
-				.addDropdown((dropdown) => {
-					const agentModelOptions = this.getAvailableAgentModelOptions();
-					const selectedModelValue = resolveSelectedAgentModelValue({
-						model: activeSoulDefinition.preferredModel ?? "",
-						modelMode: activeSoulDefinition.preferredModelMode,
-					}, agentModelOptions);
-					dropdown.addOption("", this.t("settings.agent.model.followGlobal", "跟随全局默认"));
-					for (const option of agentModelOptions) {
-						dropdown.addOption(option.value, option.label);
-					}
-					dropdown.setValue(selectedModelValue);
-					dropdown.onChange(async (value) => {
-						const parsed = parseAgentModelChoice(value);
-						await this.host.soulStore.updateSoul(activeSoulDefinition.id, {
-							preferredModel: parsed?.model ?? "",
-							preferredModelMode: parsed?.mode,
-						});
-						await this.host.saveSettings();
-						this.display();
-					});
-				});
-
-		}
-
-		new Setting(managementGroup)
-			.setName(this.t("settings.agent.create.name", "新建 Soul"))
-			.setDesc(this.t("settings.agent.create.desc", "进入配置页创建一个只属于你的自定义 Soul。"))
-			.addButton((button) =>
-				button
-					.setButtonText(this.t("settings.agent.create.button", "新建 Soul"))
-					.setIcon("plus")
-					.setCta()
-					.onClick(async () => {
-						await this.createCustomSoulFromSettings();
-					}),
-			);
-
-		new Setting(managementGroup)
-			.setName(this.t("settings.agent.create.fromTemplate", "Soul 实验室"))
-			.setDesc(this.t("settings.agent.create.fromTemplateDesc", "打开 Soul 实验室，勾选要加入的 MBTI 等实验性 Soul。"))
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.agent.create.fromTemplateAction", "去实验室看看")).onClick(() => {
-					this.soulPanelMode = "lab";
-					this.display();
-				}),
-			);
-
-		for (const soul of souls) {
-			const definition = this.host.soulStore.getSoulSync(soul.id) ?? soul;
-			const summary = soul.summary?.trim() || this.t("settings.agent.manage.emptySummary", "尚未补充简介");
-			const isCurrent = soul.id === activeSoulDefinition?.id;
-			const row = new Setting(managementGroup)
-				.setName(this.resolveSoulDisplayName(soul))
-				.setDesc(
-					isCurrent
-						? this.t("settings.agent.manage.currentBadge", "当前使用中 · {summary}", { summary })
-					: summary,
-				);
-			row.settingEl.addClass("friday-soul-manage-row");
-			row.controlEl.addClass("friday-soul-manage-actions");
-			row.addButton((button) => {
-				const currentToggleLabel = isCurrent && this.isExperimentSoul(definition)
-					? this.t("settings.agent.manage.unsetExperiment", "取消当前并回到原生 FRIDAY")
-					: this.t("settings.agent.manage.current", "当前使用");
-				button
-					.setIcon(isCurrent ? "check-circle-2" : "circle")
-					.setTooltip(isCurrent
-						? currentToggleLabel
-						: this.t("settings.agent.manage.setCurrent", "设为当前"))
-					.onClick(async () => {
-						if (isCurrent && this.isExperimentSoul(definition)) {
-							await this.setCurrentSoulFromSettings(this.getNativeSoulFallbackId(souls, soul.id));
-							return;
-						}
-						if (!isCurrent) {
-							await this.setCurrentSoulFromSettings(soul.id);
-						}
-					});
-				button.buttonEl.addClass("friday-soul-manage-icon-button");
-				button.buttonEl.setAttribute(
-					"aria-label",
-					isCurrent ? currentToggleLabel : this.t("settings.agent.manage.setCurrent", "设为当前"),
-				);
-				if (isCurrent) {
-					button.buttonEl.addClass("is-current");
-				}
-			});
-			const canEdit = this.canEditSoul(definition);
-			row.addButton((button) => {
-				button
-					.setIcon("pencil")
-					.setTooltip(canEdit
-						? this.t("settings.agent.manage.edit", "编辑")
-						: this.t("settings.agent.manage.editUnavailable", "不可编辑"))
-					.setDisabled(!canEdit);
-				if (canEdit) {
-					button.onClick(async () => {
-						await this.openSoulProfileEditor(soul.id);
-					});
-				}
-				button.buttonEl.addClass("friday-soul-manage-icon-button");
-				button.buttonEl.setAttribute(
-					"aria-label",
-					canEdit
-						? this.t("settings.agent.manage.edit", "编辑")
-						: this.t("settings.agent.manage.editUnavailable", "不可编辑"),
-				);
-				if (!canEdit) {
-					button.buttonEl.addClass("friday-soul-manage-placeholder");
-				}
-			});
-			const canDelete = this.canDeleteSoul(definition, souls.length);
-			row.addButton((button) => {
-				button
-					.setIcon("trash-2")
-					.setTooltip(canDelete
-						? this.t("settings.agent.manage.delete", "删除")
-						: this.t("settings.agent.manage.deleteUnavailable", "不可删除"))
-					.setDisabled(!canDelete);
-				if (canDelete) {
-					button.onClick(async () => {
-						await this.deleteSoulFromSettings(soul.id);
-					});
-				}
-				button.buttonEl.addClass("friday-soul-manage-icon-button");
-				button.buttonEl.setAttribute(
-					"aria-label",
-					canDelete
-						? this.t("settings.agent.manage.delete", "删除")
-						: this.t("settings.agent.manage.deleteUnavailable", "不可删除"),
-				);
-				if (canDelete) {
-					button.buttonEl.addClass("is-danger");
-				} else {
-					button.buttonEl.addClass("friday-soul-manage-placeholder");
-				}
-			});
-		}
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.runtime.name", "启用 Agent 工具运行时"))
-			.setDesc(this.t("settings.agent.runtime.desc", "开启后，AI 将按需调用 read/grep/glob/ls/memory/write/delete。"))
-			.addToggle((toggle) =>
-				toggle.setValue(this.host.settings.agentRuntime.toolRuntimeEnabled).onChange(async (value) => {
-					this.host.settings.agentRuntime.toolRuntimeEnabled = value;
-					await this.host.saveSettings();
-				}),
-			);
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.toolCalling.name", "Tool Calling 模式"))
-			.setDesc(
-				this.t(
-					"settings.agent.toolCalling.desc",
-					"auto：优先 native tools，失败后回退 prompt；native：仅 native；prompt：仅提示词 JSON 模式。",
-				),
-			)
-			.addDropdown((dropdown) => {
-				dropdown.addOption("auto", this.t("settings.agent.toolCalling.auto", "auto（推荐）"));
-				dropdown.addOption("native", this.t("settings.agent.toolCalling.native", "native only"));
-				dropdown.addOption("prompt", this.t("settings.agent.toolCalling.prompt", "prompt only"));
-				dropdown.setValue(this.host.settings.agentRuntime.toolCallingMode ?? "auto");
-				dropdown.onChange(async (value) => {
-					this.host.settings.agentRuntime.toolCallingMode = value as "auto" | "native" | "prompt";
-					await this.host.saveSettings();
-				});
-			});
-
-		new Setting(runtimeGroup)
-			.setName(this.t("settings.agent.permissionMode.name", "工具权限模式"))
-			.setDesc(
-				this.t(
-					"settings.agent.permissionMode.desc",
-					"全自动：所有工具自动通过 | 标准：读操作自动，写入/执行需审批 | 严格：全部需审批",
-				),
-			)
-			.addDropdown((dropdown) => {
-				dropdown.addOption("auto", this.t("settings.agent.permissionMode.auto", "全自动"));
-				dropdown.addOption("standard", this.t("settings.agent.permissionMode.standard", "标准"));
-				dropdown.addOption("strict", this.t("settings.agent.permissionMode.strict", "严格"));
-				dropdown.setValue(this.host.settings.agentRuntime.toolPermissionMode);
-				dropdown.onChange(async (value) => {
-					const mode = value as ToolPermissionMode;
-					this.host.settings.agentRuntime.toolPermissionMode = mode;
-					this.host.settings.agentRuntime.fileMutationMode = deriveFileMutationModeFromToolPermissionMode(mode);
-					await this.host.saveSettings();
-				});
-			});
-
-		if (this.host.settings.projects.length > 0) {
-			const policyGroup = this.createNativeSettingsGroup(containerEl, {
-				title: this.t("settings.soul.policy.title", "项目工具策略"),
-				description: this.t(
-					"settings.soul.policy.desc",
-					"持久化层按 project > global 合并；session 级临时覆写在工作台对话页设置，只影响当前会话。",
-				),
-			});
-			this.renderProjectPolicyEditor(policyGroup);
-		}
-
-		this.renderPathListSetting(
-			pathGroup,
-			this.t("settings.agent.path.vaultFocus.name", "Vault 聚焦路径"),
-			this.t("settings.agent.path.vaultFocus.desc", "每行一个相对 Vault 的目录；为空表示允许读取整个 Vault。"),
-			this.host.settings.agentRuntime.vaultFocusPaths,
-			async (paths) => {
-				this.host.settings.agentRuntime.vaultFocusPaths = paths;
-				await this.host.saveSettings();
-			},
-		);
-
-		this.renderPathListSetting(
-			pathGroup,
-			this.t("settings.agent.path.externalReadonly.name", "外路径只读白名单"),
-			this.t("settings.agent.path.externalReadonly.desc", "每行一个绝对路径，供 Agent 只读访问。"),
-			this.host.settings.agentRuntime.externalReadOnlyPaths,
-			async (paths) => {
-				this.host.settings.agentRuntime.externalReadOnlyPaths = paths;
-				await this.host.saveSettings();
-			},
-		);
-
-		this.renderPathListSetting(
-			pathGroup,
-			this.t("settings.agent.path.skillExternal.name", "Skill 外路径"),
-			this.t("settings.agent.path.skillExternal.desc", "每行一个绝对路径，用于加载外部 skill 元数据。"),
-			this.host.settings.agentRuntime.externalSkillPaths,
-			async (paths) => {
-				this.host.settings.agentRuntime.externalSkillPaths = paths;
-				await this.host.saveSettings();
-			},
-		);
-
-		if (this.host.legacyAgentCleanupService.hasLegacyAgentData()) {
-			const cleanupGroup = this.createNativeSettingsGroup(containerEl, {
-				title: this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"),
-				description: this.t(
-					this.pendingSoulCleanupConfirm
-						? "settings.soul.cleanup.danger"
-						: "settings.soul.cleanup.desc",
-					this.pendingSoulCleanupConfirm
-						? "这会强制删除 F.R.I.D.A.Y/Agents 下的旧会话、快照、memory、preset、global knowledge 与 agent knowledge。仅部分文件会先备份到本地状态层，备份内容不会继续出现在 Obsidian 正常编辑流里。再次点击按钮才会真正执行。"
-						: "自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作，会删除旧 preset 与知识文件。",
-				),
-			});
-			const cleanupSetting = new Setting(cleanupGroup)
-				.setName(this.t("settings.soul.cleanup.name", "迁移并清理旧 Agent 数据"))
-				.setDesc(
-					this.pendingSoulCleanupConfirm
-						? this.t(
-								"settings.soul.cleanup.danger",
-								"这会强制删除旧 Agent 目录中的可见资产。再次点击按钮才会真正执行。",
-						  )
-						: this.t(
-								"settings.soul.cleanup.desc",
-								"自动迁移完成后，可清理 F.R.I.D.A.Y/Agents 中的旧运行数据；这是强清理动作。",
-						  ),
-				);
-			markNativeDangerSetting(cleanupSetting);
-			cleanupSetting.addButton((button) =>
-					button
-						.setButtonText(
-							this.pendingSoulCleanupConfirm
-								? this.t("settings.soul.cleanup.confirm", "确认删除旧 Agent 目录")
-								: this.t("settings.soul.cleanup.button", "清理旧 Agent 数据"),
-						)
-						.setWarning()
-						.onClick(async () => {
-							if (!this.pendingSoulCleanupConfirm) {
-								this.pendingSoulCleanupConfirm = true;
-								this.display();
-								return;
-							}
-							try {
-								const result = await this.host.legacyAgentCleanupService.cleanupLegacyAgentData();
-								this.pendingSoulCleanupConfirm = false;
-								if (result.removedCount === 0 && result.backedUpCount === 0) {
-									new Notice(this.t("settings.soul.cleanup.noop", "没有检测到可清理的旧 Agent 数据。"), 3000);
-								} else {
-									new Notice(
-										this.t("settings.soul.cleanup.success", "旧 Agent 数据已清理，已备份 {count} 个文件。", {
-											count: result.backedUpCount,
-										}),
-										4000,
-									);
-								}
-								this.display();
-							} catch (error) {
-								this.pendingSoulCleanupConfirm = false;
-								new Notice(
-									this.t("settings.soul.cleanup.failed", "清理旧 Agent 数据失败：{error}", {
-										error: error instanceof Error ? error.message : String(error ?? ""),
-									}),
-									6000,
-								);
-							}
-						}),
-				);
-		}
-
+		renderSoulSettingsSection(this, containerEl);
 	}
 
-	private renderSoulEditorSection(containerEl: HTMLElement): void {
-		const targetId = this.soulEditorDraftId || this.host.settings.activeSoulId.trim();
-		const target = targetId ? this.host.soulStore.getSoulSync(targetId) : null;
-		const editorGroup = this.createNativeSettingsGroup(containerEl, {
-			extraClass: "friday-soul-editor-group",
-		});
-		const headerEl = editorGroup.createDiv({ cls: "friday-soul-editor-header" });
-		const copyEl = headerEl.createDiv({ cls: "friday-soul-editor-copy" });
-		copyEl.createDiv({
-			cls: "friday-native-settings-group-title friday-soul-editor-title",
-			text: this.t("settings.agent.profile.title", "编辑 Soul"),
-		});
-		copyEl.createDiv({
-			cls: "friday-native-settings-group-description friday-soul-editor-desc",
-			text: this.t("settings.agent.profile.desc", "配置自定义 Soul 的显示信息、人格定义和表达方式。"),
-		});
-		const backButton = headerEl.createEl("button", {
-			cls: "friday-soul-editor-back-button",
-			text: this.t("settings.agent.profile.back", "返回 Soul 管理"),
-		});
-		backButton.type = "button";
-		backButton.onclick = () => {
-			this.soulPanelMode = "manage";
-			this.display();
-		};
-		if (!target || !this.canEditSoul(target)) {
-			renderNativeSettingsEmptyState(editorGroup, {
-				title: this.t("settings.agent.profile.readonlyTitle", "这个 Soul 不能编辑"),
-				description: this.t("settings.agent.profile.readonlyDesc", "原生 FRIDAY 和实验性 Soul 由系统维护，只能选择或移除。"),
-			});
-			return;
-		}
-		this.ensureSoulEditorDraft(target);
 
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.name", "Soul 名称"))
-			.setDesc(this.t("settings.agent.profile.nameDesc", "这是这个 Soul 的显示名称。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.agent.defaultName", "原生 FRIDAY"))
-					.setValue(this.soulEditorNameDraft)
-					.onChange((value) => {
-						this.soulEditorNameDraft = value;
-					}),
-			);
-
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.summary", "一句话简介"))
-			.setDesc(this.t("settings.agent.profile.summaryDesc", "用于快速说明这个 Soul 的定位和特点。"))
-			.addText((text) =>
-				text
-					.setPlaceholder(this.t("settings.agent.profile.summaryPlaceholder", "例如：偏研究和结构化表达"))
-					.setValue(this.soulEditorSummaryDraft)
-					.onChange((value) => {
-						this.soulEditorSummaryDraft = value;
-					}),
-			);
-
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.definition", "人格与风格定义"))
-			.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 FRIDAY 的人格、风格和行为方式。"))
-			.addTextArea((textArea) => {
-				textArea
-					.setPlaceholder(this.t("settings.agent.profile.definitionPlaceholder", "例如：先给结论，再展开；语气克制、清晰，少说空话。"))
-					.setValue(this.soulEditorDefinitionDraft)
-					.onChange((value) => {
-						this.soulEditorDefinitionDraft = value;
-					});
-				textArea.inputEl.rows = 4;
-				textArea.inputEl.style.width = "100%";
-			});
-
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.tonePreset", "语气风格"))
-			.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 FRIDAY 默认的表达气质。"))
-			.addDropdown((dropdown) => {
-				dropdown.addOption("balanced", this.t("settings.agent.profile.tonePreset.balanced", "平衡"));
-				dropdown.addOption("calm", this.t("settings.agent.profile.tonePreset.calm", "冷静"));
-				dropdown.addOption("warm", this.t("settings.agent.profile.tonePreset.warm", "亲和"));
-				dropdown.setValue(this.soulEditorTonePresetDraft);
-				dropdown.onChange((value) => {
-					this.soulEditorTonePresetDraft = (value as SoulTonePreset) ?? "balanced";
-				});
-			});
-
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.toneNote", "补充说明（可选）"))
-			.setDesc(this.t("settings.agent.profile.toneNoteDesc", "只补一句微调要求，例如先给结论、少用术语。"))
-			.addTextArea((textArea) => {
-				textArea
-					.setPlaceholder(this.t("settings.agent.profile.toneNotePlaceholder", "例如：先给结论，少用术语。"))
-					.setValue(this.soulEditorToneDraft)
-					.onChange((value) => {
-						this.soulEditorToneDraft = value;
-					});
-				textArea.inputEl.rows = 2;
-				textArea.inputEl.style.width = "100%";
-			});
-
-		new Setting(editorGroup)
-			.setName(this.t("settings.agent.profile.save", "保存 Soul 定义"))
-			.setDesc(this.t("settings.agent.profile.saveDesc", "会保存这个自定义 Soul 的显示信息和背后的定义。"))
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.agent.profile.save", "保存 Soul 定义")).setCta().onClick(async () => {
-					await this.saveActiveSoulProfile(target.id);
-				}),
-			);
-	}
-
-	private renderSoulLabSection(containerEl: HTMLElement): void {
-		const introGroup = this.createNativeSettingsGroup(containerEl, {
-			extraClass: "friday-soul-lab-intro",
-		});
-		const introHeaderEl = introGroup.createDiv({ cls: "friday-soul-lab-intro-header" });
-		const introCopyEl = introHeaderEl.createDiv({ cls: "friday-soul-lab-intro-copy" });
-		introCopyEl.createDiv({
-			cls: "friday-native-settings-group-title friday-soul-lab-intro-title",
-			text: this.t("settings.soulLab.title", "Soul 实验室"),
-		});
-		introCopyEl.createDiv({
-			cls: "friday-native-settings-group-description friday-soul-lab-intro-desc",
-			text: this.t("settings.soulLab.desc", "从实验模板生成一个可编辑的 FRIDAY Soul。"),
-		});
-		const backButton = introHeaderEl.createEl("button", {
-			cls: "friday-soul-lab-back-button",
-			text: this.t("settings.soulLab.back", "返回 Soul 管理"),
-		});
-		backButton.type = "button";
-		backButton.onclick = () => {
-			this.soulPanelMode = "manage";
-			this.display();
-		};
-
-		for (const series of SOUL_EXPERIMENT_TEMPLATE_SERIES) {
-			const isMbtiSeries = series.id === "mbti-communication";
-			const detailsExpanded = isMbtiSeries && this.soulLabDetailsExpanded;
-			const seriesTitle = isMbtiSeries
-				? this.t("settings.soulLab.mbti.title", series.title)
-				: series.title;
-			const seriesDescription = isMbtiSeries
-				? this.t("settings.soulLab.mbti.desc", series.description)
-				: series.description;
-			const seriesGroup = this.createNativeSettingsGroup(containerEl, {
-				extraClass: `friday-soul-lab-series-group${detailsExpanded ? " is-detail-expanded" : ""}`,
-			});
-			const seriesHeaderEl = seriesGroup.createDiv({ cls: "friday-soul-lab-series-header" });
-			const seriesCopyEl = seriesHeaderEl.createDiv({ cls: "friday-soul-lab-series-copy" });
-			seriesCopyEl.createDiv({
-				cls: "friday-native-settings-group-title friday-soul-lab-series-title",
-				text: seriesTitle,
-			});
-			seriesCopyEl.createDiv({
-				cls: "friday-native-settings-group-description friday-soul-lab-series-desc",
-				text: seriesDescription,
-			});
-			if (isMbtiSeries) {
-				const detailButton = seriesHeaderEl.createEl("button", {
-					cls: "friday-soul-lab-detail-toggle",
-					text: detailsExpanded
-						? this.t("settings.soulLab.detailsCollapse", "收起 Soul 详情")
-						: this.t("settings.soulLab.detailsExpand", "展开 Soul 详情"),
-				});
-				detailButton.type = "button";
-				detailButton.setAttribute("aria-expanded", detailsExpanded ? "true" : "false");
-				detailButton.onclick = () => {
-					this.soulLabDetailsExpanded = !this.soulLabDetailsExpanded;
-					this.display();
-				};
-			}
-
-			const activeSoul = this.host.getActiveSoul();
-			const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
-			const seriesSectionEl = seriesGroup.createDiv({
-				cls: "friday-soul-lab-series",
-				attr: {
-					"data-series-id": series.id,
-				},
-			});
-			const gridEl = seriesSectionEl.createDiv({ cls: "friday-soul-template-grid" });
-			for (const template of series.templates) {
-				this.renderSoulTemplateCard(
-					gridEl,
-					template,
-					this.isCurrentSoulTemplate(template, activeSoulDefinition),
-					this.isSoulTemplateInstalled(template),
-					detailsExpanded,
-				);
-			}
-		}
-
-		this.renderSoulSuggestionPanel(containerEl);
-	}
 
 	private renderSoulSuggestionPanel(containerEl: HTMLElement): void {
 		const panelEl = containerEl.createEl("section", {
@@ -2117,35 +1214,7 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private renderProjectSection(containerEl: HTMLElement): void {
-		const shell = containerEl.createDiv({ cls: "friday-project-settings-shell" });
-		void this.ensureLegacyFridayRootReportLoaded();
-		this.renderActiveProjectSelector(shell);
-
-		if (this.projectEditorDraft) {
-			this.renderProjectEditorCard(shell);
-		}
-
-		this.renderProjectGroupSection(shell);
-		this.renderLegacyFridayRootSection(shell);
-
-		if (this.host.settings.projects.length === 0) {
-			this.createNativeSettingsGroup(shell, {
-				title: this.t("settings.project.empty", "尚未注册项目。"),
-				description: this.t("settings.project.active.desc", "Agent 与工具读写将严格限制在该项目根目录下。"),
-				extraClass: "friday-empty-state friday-project-settings-panel",
-			});
-			return;
-		}
-
-		for (const group of this.getProjectGroupsForDisplay()) {
-			const projectsInGroup = this.host.settings.projects.filter(
-				(item) => (item.groupId || "default-group") === group.id,
-			);
-			if (projectsInGroup.length === 0) {
-				continue;
-			}
-			this.renderProjectListGroup(shell, group, projectsInGroup);
-		}
+		renderProjectSettingsSection(this, containerEl);
 	}
 
 	private renderActiveProjectSelector(containerEl: HTMLElement): void {

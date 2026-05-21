@@ -6,7 +6,7 @@ export const zhCNMessages: I18nMessages = {
 	"status.thinking": "FRIDAY: Thinking",
 	"status.executing": "FRIDAY: Executing",
 
-	"settings.title": "FRIDAY 设置",
+	"settings.title": "配置你的FRIDAY",
 	"settings.section.user": "基础配置",
 	"settings.section.sync": "同步",
 	"settings.section.llm": "LLM",
@@ -848,7 +848,9 @@ export const zhCNMessages: I18nMessages = {
 	"settings.subscriptions.legacy.archiveSuccess": "已归档旧版本文件夹：{path}。你可以稍后自行迁移其中与项目相关的信息。",
 	"settings.subscriptions.legacy.archiveFailed": "归档旧版本文件夹失败：{error}",
 	"settings.user.gitToken.desc": "作为所有项目同步认证的统一令牌。",
+	"settings.user.gitToken.hide": "隐藏令牌",
 	"settings.user.gitToken.name": "Git 令牌",
+	"settings.user.gitToken.show": "显示令牌",
 	"settings.user.gitUserEmail.desc": "用于所有项目的 Git 提交身份。",
 	"settings.user.gitUserEmail.name": "Git 邮箱",
 	"settings.user.gitUsername.desc": "作为所有项目同步认证的统一用户名。",

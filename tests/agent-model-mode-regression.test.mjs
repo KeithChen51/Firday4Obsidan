@@ -9,19 +9,21 @@ const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const settingTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const soulSettingsSectionPath = path.join(projectRoot, "src/settings/sections/SoulSettingsSection.ts");
 const soulTypePath = path.join(projectRoot, "src/types/soul.ts");
 
 test("soul definition stores model source and main resolves effective llm settings from it", () => {
 	const mainSource = fs.readFileSync(mainPath, "utf8");
 	const settingsSource = fs.readFileSync(settingTabPath, "utf8");
+	const soulSettingsSectionSource = fs.readFileSync(soulSettingsSectionPath, "utf8");
 	const soulTypeSource = fs.readFileSync(soulTypePath, "utf8");
 
 	assert.match(soulTypeSource, /preferredModelMode\?: "openai" \| "group"/);
 	assert.match(mainSource, /switchLlmMode/);
 	assert.match(mainSource, /activeSoul\?\.preferredModelMode/);
 	assert.match(settingsSource, /buildAgentModelCatalogFromSettings/);
-	assert.match(settingsSource, /parseAgentModelChoice/);
-	assert.match(settingsSource, /addDropdown\(\(dropdown\) =>/);
+	assert.match(soulSettingsSectionSource, /parseAgentModelChoice/);
+	assert.match(soulSettingsSectionSource, /addDropdown\(\(dropdown\) =>/);
 });
 
 test("main bootstraps and migrates the native friday soul preset explicitly", () => {

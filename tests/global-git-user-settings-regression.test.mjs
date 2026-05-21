@@ -99,6 +99,29 @@ test("git identity inputs defer settings rerender until blur so the first keystr
 	}
 });
 
+test("git token input is hidden by default and can be revealed from an eye icon", async () => {
+	const source = read(settingTabPath);
+	const userSectionMatch = source.match(/private renderUserSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
+	assert.ok(userSectionMatch, "renderUserSection block should exist");
+	const block = userSectionMatch[1] ?? "";
+	const gitTokenIndex = block.indexOf('settings.user.gitToken.name');
+	const gitRuntimeIndex = block.indexOf('settings.user.update.gitRuntime.name');
+	assert.ok(gitTokenIndex >= 0, "git token input should exist");
+	assert.ok(gitRuntimeIndex > gitTokenIndex, "git runtime row should render below git token");
+	const gitTokenBlock = block.slice(gitTokenIndex, gitRuntimeIndex);
+
+	assert.match(source, /private userGitTokenVisible = false;/);
+	assert.match(gitTokenBlock, /text\.inputEl\.type = this\.userGitTokenVisible \? "text" : "password";/);
+	assert.match(gitTokenBlock, /text\.inputEl\.setAttribute\("autocomplete", "off"\)/);
+	assert.match(gitTokenBlock, /\.addExtraButton\(\(button\) => \{/);
+	assert.match(gitTokenBlock, /gitTokenInputEl\?\.insertAdjacentElement\("beforebegin", button\.extraSettingsEl\);/);
+	assert.match(gitTokenBlock, /button\s*\n\s*\.setIcon\(this\.userGitTokenVisible \? "eye-off" : "eye"\)/);
+	assert.match(gitTokenBlock, /button\.extraSettingsEl\.classList\.add\("friday-secret-visibility-toggle", "friday-token-visibility-leading"\);/);
+	assert.match(gitTokenBlock, /this\.userGitTokenVisible = !this\.userGitTokenVisible;/);
+	assert.match(gitTokenBlock, /settings\.user\.gitToken\.show/);
+	assert.match(gitTokenBlock, /settings\.user\.gitToken\.hide/);
+});
+
 test("settings nav places project immediately after user", async () => {
 	const source = read(settingTabPath);
 	const renderTabsIndex = source.indexOf("private renderSectionTabs");

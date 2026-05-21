@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const soulSettingsSectionPath = path.join(projectRoot, "src/settings/sections/SoulSettingsSection.ts");
 const soulTypePath = path.join(projectRoot, "src/types/soul.ts");
 const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
@@ -25,7 +26,7 @@ test("soul definition stores a structured tone preset alongside optional tone te
 });
 
 test("settings tab replaces freeform tone prompt editing with preset dropdown plus optional note", () => {
-	const source = read(settingsPath);
+	const source = read(soulSettingsSectionPath);
 	assert.match(source, /settings\.agent\.profile\.tonePreset/);
 	assert.match(source, /settings\.agent\.profile\.tonePresetDesc/);
 	assert.match(source, /dropdown\.addOption\("balanced"/);

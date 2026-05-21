@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
+const chatMessageSegmentsPath = path.join(projectRoot, "src/views/chatMessageSegments.ts");
+const conversationIngressPath = path.join(projectRoot, "src/core/chat/ConversationIngressService.ts");
 const activeFilePolicyPath = path.join(projectRoot, "src/core/context/ActiveFileContext.ts");
 const runtimePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
 const toolHandlersPath = path.join(projectRoot, "src/services/tools/ObsidianToolHandlers.ts");
@@ -19,6 +21,14 @@ const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function readViewSource() {
 	return fs.readFileSync(viewPath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readChatMessageSegmentsSource() {
+	return fs.readFileSync(chatMessageSegmentsPath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readConversationIngressSource() {
+	return fs.readFileSync(conversationIngressPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readActiveFilePolicySource() {
@@ -717,9 +727,10 @@ test("skill descriptions can prefer chinese localized metadata", async () => {
 
 test("skill names render without Skill slash prefixes across ordinary Daily Board surfaces", async () => {
 	const source = readViewSource();
-	const messageSegmentMatch = source.match(/private buildUserMessageSegments\([\s\S]*?\): ChatMessageUiSegment\[\] \{([\s\S]*?)\n\t\}\n\n\tprivate normalizeUserMessageSegments/);
-	assert.ok(messageSegmentMatch, "buildUserMessageSegments block should exist");
-	const messageSegmentBlock = messageSegmentMatch[1] ?? "";
+	const segmentSource = readChatMessageSegmentsSource();
+	const messageMetaMatch = source.match(/private buildUserMessageUiMeta\([\s\S]*?\): ChatMessageUiMeta \| undefined \{([\s\S]*?)\n\t\}\n\n\tprivate formatMentionBadgeLabel/);
+	assert.ok(messageMetaMatch, "buildUserMessageUiMeta block should exist");
+	const messageMetaBlock = messageMetaMatch[1] ?? "";
 	const skillItemMatch = source.match(/private renderSkillControlItem\([\s\S]*?\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSkillReviewNote/);
 	assert.ok(skillItemMatch, "renderSkillControlItem block should exist");
 	const skillItemBlock = skillItemMatch[1] ?? "";
@@ -731,11 +742,17 @@ test("skill names render without Skill slash prefixes across ordinary Daily Boar
 	const relationBlock = relationMatch[1] ?? "";
 
 	assert.match(source, /private formatSkillDisplayName\(command: string\): string/);
-	assert.match(messageSegmentBlock, /label:\s*this\.formatSkillDisplayName\(skillName\)/);
+	assert.match(source, /import \{ buildUserMessageSegments \} from "\.\/chatMessageSegments"/);
+	assert.match(messageMetaBlock, /buildUserMessageSegments\(\{/);
+	assert.match(messageMetaBlock, /formatSkillDisplayName:\s*\(command\) => this\.formatSkillDisplayName\(command\)/);
+	assert.match(messageMetaBlock, /formatMentionBadgeLabel:\s*\(entry\) => this\.formatMentionBadgeLabel\(entry\)/);
+	assert.doesNotMatch(source, /private buildUserMessageSegments\(/);
+	assert.doesNotMatch(source, /private normalizeUserMessageSegments\(/);
+	assert.match(segmentSource, /label:\s*input\.formatSkillDisplayName\(skillName\)/);
 	assert.match(skillItemBlock, /text:\s*this\.formatSkillDisplayName\(skill\.command\)/);
 	assert.match(catalogBlock, /this\.formatSkillDisplayName\(skill\.command\)/);
 	assert.match(relationBlock, /policy\.tools\.relation\.sameNameSkillNative/);
-	assert.doesNotMatch(messageSegmentBlock, /Skill \//);
+	assert.doesNotMatch(segmentSource, /Skill \//);
 	assert.doesNotMatch(skillItemBlock, /`\/\$\{skill\.command\}`/);
 	assert.doesNotMatch(catalogBlock, /`- \/\$\{skill\.command\}/);
 	assert.doesNotMatch(relationBlock, /policy\.tools\.relation\.sameNameSkill"/);
@@ -793,10 +810,13 @@ test("chat composer routes mentions through structured composer and resolver ins
 
 test("chat submit uses explicit active-file context policy instead of naked active editor path", async () => {
 	const source = readViewSource();
+	const ingressSource = readConversationIngressSource();
 	const match = source.match(/private async submitAiPrompt\([^)]*\): Promise<void> \{([\s\S]*?)\n\t\}\n\n\tprivate async compileWikiByButton/);
 	assert.ok(match, "submitAiPrompt block should exist");
 	const block = match[1] ?? "";
-	assert.match(block, /resolveActiveFileContextPolicy\(/);
+	assert.match(block, /createActiveFileContext\(draftDocument, rawPrompt, activeFilePath\)/);
+	assert.match(block, /createConversationIngressPayload\(\{/);
+	assert.match(ingressSource, /resolveActiveFileContextPolicy\(/);
 	assert.match(block, /activeFileContext/);
 	assert.doesNotMatch(block, /const currentFilePath = this\.app\.workspace\.getActiveFile\(\)\?\.path \?\? ""/);
 	assert.doesNotMatch(block, /executionPlanner\.plan\(resolution, \{ currentFilePath \}\)/);
@@ -910,6 +930,19 @@ test("workbench top bar keeps brand lockup project selector and compact native-k
 	assert.match(headerBlock, /friday-shell-project-select/);
 	assert.match(iconButtonBlock, /button\.addClass\("kit-control-button-v1"\)/);
 	assert.doesNotMatch(headerBlock, /friday-shell-hero-icon|friday-shell-icon-container/);
+});
+
+test("workbench shell header keeps a stable height when page content scrolls", async () => {
+	const styles = readStylesSource();
+	const headerMatches = Array.from(styles.matchAll(/\.friday-shell > \.friday-shell-header\s*\{([\s\S]*?)\}/g));
+	const headerMatch = headerMatches.at(-1);
+	assert.ok(headerMatch, "live shell header correction block should exist");
+	const headerBlock = headerMatch[1] ?? "";
+
+	assert.match(headerBlock, /flex:\s*0\s+0\s+42px;/);
+	assert.match(headerBlock, /box-sizing:\s*border-box;/);
+	assert.match(headerBlock, /height:\s*42px;/);
+	assert.match(headerBlock, /min-height:\s*42px;/);
 });
 
 test("chat message meta uses the configured display name for user messages and FRIDAY avatar for assistant messages", async () => {

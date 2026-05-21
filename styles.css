@@ -11,6 +11,11 @@
 	flex-wrap: wrap;
 	align-items: baseline;
 	gap: 0.2em;
+	padding-left: 20px;
+}
+
+.vertical-tab-content .friday-settings-title {
+	padding: 0 20px;
 }
 
 .friday-settings-title-brand.friday-wordmark {
@@ -5236,7 +5241,10 @@ button.kit-event-row-v1.kit-running-surface-v1.assistant-step-toggle-v6 {
 }
 
 .friday-shell > .friday-shell-header {
-	min-height: 36px;
+	flex: 0 0 42px;
+	box-sizing: border-box;
+	height: 42px;
+	min-height: 42px;
 	padding: 5px 6px;
 	border-color: color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
 	border-radius: 8px;
@@ -5836,7 +5844,7 @@ button.kit-event-row-v1.kit-running-surface-v1.assistant-step-toggle-v6 {
 	flex-wrap: wrap;
 	gap: 4px;
 	margin: 0 0 14px;
-	padding: 0;
+	padding: 0 0 0 10px;
 	border: 0;
 	border-radius: 0;
 	background: transparent;
@@ -5866,4 +5874,17 @@ button.kit-event-row-v1.kit-running-surface-v1.assistant-step-toggle-v6 {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 	box-shadow: none;
+}
+
+.friday-secret-visibility-toggle {
+	color: var(--text-muted);
+}
+
+.friday-secret-visibility-toggle.is-visible {
+	color: var(--text-normal);
+}
+
+.modal.mod-settings .friday-token-visibility-leading {
+	flex: 0 0 auto;
+	margin-inline: 0 6px;
 }

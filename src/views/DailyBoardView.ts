@@ -29,6 +29,12 @@ import { patchLlmModeConfig, switchLlmMode } from "../core/llm/LlmSettingsResolv
 import { parseOpencodeConfig, selectOpencodeProvider } from "../core/llm/OpencodeConfigResolver";
 import { extractRuntimeAssistantText, parseRuntimeEnvelopeText } from "../core/orchestrator/RuntimeEnvelopeParser";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
+import {
+	createActiveFileContext,
+	createConversationIngressPayload,
+	getStructuredPromptDocument,
+	isPromptDocumentEmpty,
+} from "../core/chat/ConversationIngressService";
 import { ConversationSession } from "../services/ConversationService";
 import type { AgentTask, AgentTaskStatus as CoreAgentTaskStatus } from "../core/tasks/AgentTask";
 import type { AgentTrajectoryAction, AgentTrajectorySnapshot } from "../core/trajectory/AgentTrajectory";
@@ -62,17 +68,14 @@ import {
 import {
 	MentionResolver,
 	parseLegacyMentionMarkup,
-	type MentionDocumentSnapshot,
 	type MentionResolutionResult,
 	type MentionToken,
 	type MentionTokenType,
 } from "../core/context/mention/MentionResolver";
 import { resolveActiveFileContextPolicy } from "../core/context/ActiveFileContext";
+import type { PromptMentionContext } from "../core/context/PromptContextEngine";
 import {
 	createEmptyMentionComposerSnapshot,
-	formatMentionTokenLabel,
-	listMentionComposerParts,
-	restoreMentionComposerDoc,
 	type MentionComposerSnapshot,
 } from "../core/editor/mention/MentionComposerDocument";
 import { MentionComposer, type MentionComposerQuery } from "./components/MentionComposer";
@@ -93,37 +96,12 @@ import {
 	productizeRuntimeText,
 } from "./agentUserFacingPresenter";
 import { buildMutationDiffPreview } from "./mutationDiffPreview";
+import { buildUserMessageSegments } from "./chatMessageSegments";
+import { getMentionFileTypeIcon, isMentionableFile } from "./mentionSuggestions";
 
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
-
-const CODE_MENTION_FILE_EXTENSIONS = new Set([
-	"c",
-	"cc",
-	"cpp",
-	"cs",
-	"css",
-	"go",
-	"h",
-	"htm",
-	"html",
-	"java",
-	"js",
-	"json",
-	"jsx",
-	"mjs",
-	"py",
-	"rs",
-	"sh",
-	"ts",
-	"tsx",
-	"xml",
-	"yaml",
-	"yml",
-]);
-
-const NOTE_MENTION_FILE_EXTENSIONS = new Set(["", "txt"]);
 
 type AgentTaskStatus = CoreAgentTaskStatus;
 
@@ -4254,9 +4232,9 @@ export class DailyBoardView extends ItemView {
 
 	private async submitAiPrompt(snapshotOverride?: MentionComposerSnapshot): Promise<void> {
 		const draftSnapshot = snapshotOverride ? this.cloneComposerSnapshot(snapshotOverride) : this.getComposerSnapshot();
-		const draftDocument = this.getStructuredPromptDocument(draftSnapshot);
+		const draftDocument = getStructuredPromptDocument(draftSnapshot);
 		const rawPrompt = draftDocument.text.trim();
-		if (this.isPromptDocumentEmpty(draftDocument)) {
+		if (isPromptDocumentEmpty(draftDocument)) {
 			return;
 		}
 		if (this.aiBusy) {
@@ -4283,11 +4261,6 @@ export class DailyBoardView extends ItemView {
 		if (!this.aiSessionId.trim()) {
 			this.aiSessionId = this.plugin.conversationService.createSessionId();
 		}
-		const turnTarget: AiTurnTarget = {
-			sessionId: this.aiSessionId,
-			projectId: this.plugin.settings.activeProjectId || undefined,
-			conversation: [...this.aiConversation],
-		};
 		const turnActiveProject = this.getActiveProjectEntry();
 
 		this.aiLocalIntakePreview = this.buildLocalIntakePreview(rawPrompt);
@@ -4297,12 +4270,7 @@ export class DailyBoardView extends ItemView {
 		this.syncAiLiveChatShell();
 
 		const activeFilePath = this.app.workspace.getActiveFile()?.path ?? "";
-		const hasExplicitActiveNoteMention = draftDocument.tokens.some((token) => token.type === "active_note");
-		const activeFileContext = resolveActiveFileContextPolicy({
-			userPrompt: rawPrompt,
-			activeFilePath,
-			hasExplicitActiveNoteMention,
-		});
+		const activeFileContext = createActiveFileContext(draftDocument, rawPrompt, activeFilePath);
 		const mentionResolution = await this.mentionResolver.resolve({
 			document: draftDocument,
 			currentFilePath: activeFileContext.mode === "explicit_mention" ? activeFileContext.path : "",
@@ -4324,14 +4292,6 @@ export class DailyBoardView extends ItemView {
 					.map((child) => child.path);
 			},
 		});
-		if (mentionResolution.errors.length > 0) {
-			this.aiLocalIntakePreview = "";
-			this.aiLastError = mentionResolution.errors.map((item) => item.message).join(" ");
-			this.syncAiLiveChatShell();
-			return;
-		}
-		const promptMentionContext = this.buildPromptMentionContext(mentionResolution);
-		const userFacingPrompt = rawPrompt || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
 		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
 		const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
 		if (resolution.type === "invalid") {
@@ -4340,11 +4300,30 @@ export class DailyBoardView extends ItemView {
 			this.syncAiLiveChatShell();
 			return;
 		}
+		const ingress = createConversationIngressPayload({
+			sessionId: this.aiSessionId,
+			history: this.aiConversation,
+			snapshot: draftSnapshot,
+			activeProject: turnActiveProject,
+			currentFilePath: activeFilePath,
+			mentionResolution,
+			selectedModel: effectiveModel,
+			selectedPermissionMode: this.plugin.settings.agentRuntime.toolPermissionMode,
+			userFacingPromptFallback: this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。"),
+		});
+		if (!ingress.ok) {
+			this.aiLocalIntakePreview = "";
+			this.aiLastError = ingress.message ?? "";
+			this.syncAiLiveChatShell();
+			return;
+		}
 
+		const turnTarget: AiTurnTarget = ingress.turnTarget;
+		const promptMentionContext = ingress.runtimePayload.mentionContext;
 		const history = [...turnTarget.conversation];
 		turnTarget.conversation.push({
 			role: "user",
-			content: userFacingPrompt,
+			content: ingress.userFacingPrompt,
 			uiMeta: this.buildUserMessageUiMeta({
 				snapshot: draftSnapshot,
 				mentionResolution,
@@ -4383,7 +4362,7 @@ export class DailyBoardView extends ItemView {
 		}
 
 		try {
-			let modelOverride = effectiveModel || undefined;
+			let modelOverride = ingress.runtimePayload.modelOverride;
 			let allowedTools: string[] | undefined;
 			let allowedModels: string[] | undefined;
 			let assistantText = "";
@@ -5244,16 +5223,6 @@ export class DailyBoardView extends ItemView {
 		};
 	}
 
-	private getStructuredPromptDocument(snapshot: MentionComposerSnapshot = this.getComposerSnapshot()): MentionDocumentSnapshot {
-		if (snapshot.tokens.length > 0 || snapshot.doc) {
-			return {
-				text: snapshot.text,
-				tokens: snapshot.tokens,
-			};
-		}
-		return parseLegacyMentionMarkup(snapshot.text || this.aiDraft);
-	}
-
 	private cloneComposerSnapshot(snapshot: MentionComposerSnapshot): MentionComposerSnapshot {
 		return {
 			doc: snapshot.doc
@@ -5266,17 +5235,13 @@ export class DailyBoardView extends ItemView {
 		};
 	}
 
-	private isPromptDocumentEmpty(document: MentionDocumentSnapshot): boolean {
-		return document.text.trim().length === 0 && document.tokens.length === 0;
-	}
-
 	private isComposerDraftEmpty(): boolean {
-		return this.isPromptDocumentEmpty(this.getStructuredPromptDocument());
+		return isPromptDocumentEmpty(getStructuredPromptDocument(this.getComposerSnapshot()));
 	}
 
 	private enqueueAiPrompt(snapshot: MentionComposerSnapshot, position: "front" | "back" = "back"): void {
 		const queuedSnapshot = this.cloneComposerSnapshot(snapshot);
-		if (this.isPromptDocumentEmpty(this.getStructuredPromptDocument(queuedSnapshot))) {
+		if (isPromptDocumentEmpty(getStructuredPromptDocument(queuedSnapshot))) {
 			return;
 		}
 		if (position === "front") {
@@ -5320,18 +5285,8 @@ export class DailyBoardView extends ItemView {
 		return this.aiBusy && this.isComposerDraftEmpty() ? "square" : "send";
 	}
 
-	private buildPromptMentionContext(mentionResolution: MentionResolutionResult) {
-		if (mentionResolution.entries.length === 0) {
-			return undefined;
-		}
-		return {
-			...mentionResolution.summary,
-			entries: mentionResolution.entries,
-		};
-	}
-
 	private renderMentionSystemContext(
-		mentionContext: ReturnType<DailyBoardView["buildPromptMentionContext"]>,
+		mentionContext: PromptMentionContext | undefined,
 	): string {
 		if (!mentionContext || mentionContext.entries.length === 0) {
 			return "";
@@ -5441,16 +5396,16 @@ export class DailyBoardView extends ItemView {
 			kind: "mention_token",
 			trigger: "@",
 			category: "active_note",
-			fileTypeIcon: activeFile instanceof TFile ? this.getMentionFileTypeIcon(activeFile) : "note",
+			fileTypeIcon: activeFile instanceof TFile ? getMentionFileTypeIcon(activeFile) : "note",
 			fileTypeLabel: activeFile instanceof TFile
-				? this.getMentionFileTypeLabel(this.getMentionFileTypeIcon(activeFile))
+				? this.getMentionFileTypeLabel(getMentionFileTypeIcon(activeFile))
 				: this.getMentionFileTypeLabel("note"),
 			token: this.createMentionToken("active_note"),
 		};
 	}
 
 	private buildFileMentionSuggestion(file: TFile): MentionSuggestion {
-		const icon = this.getMentionFileTypeIcon(file);
+		const icon = getMentionFileTypeIcon(file);
 		return {
 			label: file.basename || file.name,
 			description: file.path,
@@ -5461,20 +5416,6 @@ export class DailyBoardView extends ItemView {
 			fileTypeLabel: this.getMentionFileTypeLabel(icon),
 			token: this.createMentionToken("note", file.path),
 		};
-	}
-
-	private getMentionFileTypeIcon(file: TFile): MentionFileTypeIconKind {
-		const extension = (file.extension ?? "").toLowerCase();
-		if (extension === "md") {
-			return "markdown";
-		}
-		if (extension === "canvas") {
-			return "canvas";
-		}
-		if (CODE_MENTION_FILE_EXTENSIONS.has(extension)) {
-			return "code";
-		}
-		return "note";
 	}
 
 	private getMentionFileTypeLabel(kind: MentionFileTypeIconKind): string {
@@ -5488,14 +5429,6 @@ export class DailyBoardView extends ItemView {
 			default:
 				return this.t("ai.mention.fileType.note", "Note");
 		}
-	}
-
-	private isMentionableFile(file: TFile): boolean {
-		const extension = (file.extension ?? "").toLowerCase();
-		return extension === "md"
-			|| extension === "canvas"
-			|| CODE_MENTION_FILE_EXTENSIONS.has(extension)
-			|| NOTE_MENTION_FILE_EXTENSIONS.has(extension);
 	}
 
 	private createMentionToken(type: MentionTokenType, pathValue = ""): MentionToken {
@@ -5512,7 +5445,7 @@ export class DailyBoardView extends ItemView {
 		const activeProject = this.getActiveProjectEntry();
 		const currentPath = this.app.workspace.getActiveFile()?.path ?? "";
 		const normalizedQuery = query.trim().toLowerCase();
-		const files = this.app.vault.getFiles().filter((file) => this.isMentionableFile(file));
+		const files = this.app.vault.getFiles().filter((file) => isMentionableFile(file));
 		const scopePrefixes = resolveMentionScopePrefixes(
 			activeProject ?? undefined,
 			files.map((file) => file.path),
@@ -5572,78 +5505,19 @@ export class DailyBoardView extends ItemView {
 		mentionResolution: MentionResolutionResult;
 		resolution: { type: string; requestedSkillName?: string };
 	}): ChatMessageUiMeta | undefined {
-		const segments = this.buildUserMessageSegments(input.snapshot, input.mentionResolution, input.resolution);
+		const segments = buildUserMessageSegments({
+			snapshot: input.snapshot,
+			mentionResolution: input.mentionResolution,
+			resolution: input.resolution,
+			formatSkillDisplayName: (command) => this.formatSkillDisplayName(command),
+			formatMentionBadgeLabel: (entry) => this.formatMentionBadgeLabel(entry),
+		});
 		if (segments.length === 0) {
 			return undefined;
 		}
 		return {
 			segments,
 		};
-	}
-
-	private buildUserMessageSegments(
-		snapshot: MentionComposerSnapshot,
-		mentionResolution: MentionResolutionResult,
-		resolution: { type: string; requestedSkillName?: string },
-	): ChatMessageUiSegment[] {
-		const contextByTokenId = new Map(
-			mentionResolution.entries.map((entry) => [entry.tokenId, entry] as const),
-		);
-		const parts = listMentionComposerParts(restoreMentionComposerDoc(snapshot));
-		const segments: ChatMessageUiSegment[] = [];
-		for (const part of parts) {
-			if (part.type === "text") {
-				if (part.text) {
-					segments.push({ type: "text", text: part.text });
-				}
-				continue;
-			}
-			const mention = part.mention;
-			if (mention.type === "skill") {
-				const skillName = mention.path?.trim() || resolution.requestedSkillName?.trim() || "skill";
-				segments.push({
-					type: "token",
-					token: {
-						kind: "skill",
-						label: this.formatSkillDisplayName(skillName),
-						tokenType: "skill",
-						target: skillName,
-					},
-				});
-				continue;
-			}
-			const entry = contextByTokenId.get(mention.id);
-			segments.push({
-				type: "token",
-				token: {
-					kind: "context",
-					label: entry ? this.formatMentionBadgeLabel(entry) : formatMentionTokenLabel(mention),
-					tokenType: mention.type,
-					target: mention.path?.trim() || entry?.target,
-				},
-			});
-		}
-		return this.normalizeUserMessageSegments(segments);
-	}
-
-	private normalizeUserMessageSegments(segments: ChatMessageUiSegment[]): ChatMessageUiSegment[] {
-		const next: ChatMessageUiSegment[] = [];
-		for (const segment of segments) {
-			if (segment.type === "text") {
-				if (!segment.text) {
-					continue;
-				}
-				const previous = next[next.length - 1];
-				if (previous?.type === "text") {
-					previous.text += segment.text;
-				} else {
-					next.push({ ...segment });
-				}
-				continue;
-			}
-			next.push(segment);
-		}
-		return next;
 	}
 
 	private formatMentionBadgeLabel(entry: MentionResolutionResult["entries"][number]): string {

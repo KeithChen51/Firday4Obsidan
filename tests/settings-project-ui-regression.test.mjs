@@ -8,12 +8,17 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const projectSettingsSectionPath = path.join(projectRoot, "src/settings/sections/ProjectSettingsSection.ts");
 const stylesPath = path.join(projectRoot, "styles.css");
 const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 
 function readSettingsSource() {
 	return fs.readFileSync(settingsPath, "utf8").replace(/\r\n?/g, "\n");
+}
+
+function readProjectSettingsSectionSource() {
+	return fs.readFileSync(projectSettingsSectionPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
 function readStylesSource() {
@@ -43,14 +48,11 @@ test("settings project editor opens inline instead of redirecting to workspace",
 });
 
 test("settings project section renders inline editor before empty-state return", async () => {
-	const source = readSettingsSource();
-	const match = source.match(/private renderProjectSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderActiveProjectSelector/);
-	assert.ok(match, "renderProjectSection block should exist");
-	const block = match[1] ?? "";
-	const activeIndex = block.indexOf("this.renderActiveProjectSelector(shell);");
-	const editorIndex = block.indexOf("if (this.projectEditorDraft) {");
-	const groupIndex = block.indexOf("this.renderProjectGroupSection(shell);");
-	const emptyIndex = block.indexOf("if (this.host.settings.projects.length === 0) {");
+	const block = readProjectSettingsSectionSource();
+	const activeIndex = block.indexOf("ctx.renderActiveProjectSelector(shell);");
+	const editorIndex = block.indexOf("if (ctx.projectEditorDraft) {");
+	const groupIndex = block.indexOf("ctx.renderProjectGroupSection(shell);");
+	const emptyIndex = block.indexOf("if (ctx.host.settings.projects.length === 0) {");
 	assert.ok(activeIndex >= 0, "register-project row should exist");
 	assert.ok(editorIndex >= 0, "settings project editor branch should exist");
 	assert.ok(groupIndex >= 0, "project group management should exist");
@@ -58,38 +60,30 @@ test("settings project section renders inline editor before empty-state return",
 	assert.ok(editorIndex < groupIndex, "editor should render before project group management");
 	assert.ok(emptyIndex >= 0, "settings project empty-state branch should exist");
 	assert.ok(editorIndex < emptyIndex, "inline editor should render before the early return");
-	assert.match(block, /this\.renderProjectEditorCard\(shell\)/);
+	assert.match(block, /ctx\.renderProjectEditorCard\(shell\)/);
 });
 
 test("settings project section no longer runs sync actions directly", async () => {
-	const source = readSettingsSource();
-	const match = source.match(/private renderProjectSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderActiveProjectSelector/);
-	assert.ok(match, "renderProjectSection block should exist");
-	const block = match[1] ?? "";
+	const block = readProjectSettingsSectionSource();
 	assert.doesNotMatch(block, /settings\.project\.sync/);
 	assert.doesNotMatch(block, /syncService\.sync\(/);
 });
 
 test("settings project section renders grouped native panels instead of a floating toolbar and project cards", async () => {
-	const source = readSettingsSource();
-	const match = source.match(/private renderProjectSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderActiveProjectSelector/);
-	assert.ok(match, "renderProjectSection block should exist");
-	const block = match[1] ?? "";
+	const block = readProjectSettingsSectionSource();
 	assert.doesNotMatch(block, /settings\.section\.project/);
 	assert.match(block, /const shell = containerEl\.createDiv\(\{ cls: "friday-project-settings-shell" \}\)/);
-	assert.match(block, /this\.renderActiveProjectSelector\(shell\)/);
-	assert.match(block, /this\.renderProjectGroupSection\(shell\)/);
+	assert.match(block, /ctx\.renderActiveProjectSelector\(shell\)/);
+	assert.match(block, /ctx\.renderProjectGroupSection\(shell\)/);
 	assert.doesNotMatch(block, /friday-project-settings-toolbar/);
 	assert.doesNotMatch(block, /friday-project-grid/);
-	assert.doesNotMatch(block, /this\.renderProjectCard\(/);
-	assert.match(block, /this\.renderProjectListGroup\(shell, group, projectsInGroup\)/);
+	assert.doesNotMatch(block, /ctx\.renderProjectCard\(/);
+	assert.match(block, /ctx\.renderProjectListGroup\(shell, group, projectsInGroup\)/);
 });
 
 test("settings project area does not migrate the held project status group into Native Kit", async () => {
 	const source = readSettingsSource();
-	const match = source.match(/private renderProjectSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderActiveProjectSelector/);
-	assert.ok(match, "renderProjectSection block should exist");
-	const block = match[1] ?? "";
+	const block = readProjectSettingsSectionSource();
 
 	assert.doesNotMatch(source, /renderNativeProjectStatusGroup/);
 	assert.doesNotMatch(source, /friday-native-project-status-group/);

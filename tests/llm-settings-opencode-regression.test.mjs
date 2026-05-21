@@ -8,10 +8,15 @@ import { fileURLToPath } from "node:url";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 const settingTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const llmSettingsSectionPath = path.join(projectRoot, "src/settings/sections/LlmSettingsSection.ts");
 const settingsTypePath = path.join(projectRoot, "src/types/settings.ts");
 
 function readSettingTabSource() {
 	return fs.readFileSync(settingTabPath, "utf8");
+}
+
+function readLlmSettingsSectionSource() {
+	return fs.readFileSync(llmSettingsSectionPath, "utf8");
 }
 
 function readSettingsTypeSource() {
@@ -27,15 +32,16 @@ function readBuiltinGroupModels() {
 
 test("llm settings reads opencode.json and exposes opencode sync wiring", () => {
 	const source = readSettingTabSource();
+	const sectionSource = readLlmSettingsSectionSource();
 	assert.match(source, /opencode\.json/);
 	assert.match(source, /syncSelectedOpencodeProvider/);
 	assert.match(source, /extraHeaders/);
-	assert.match(source, /settings\.llm\.opencodeProvider[\s\S]*settings\.llm\.apiUrl/);
-	assert.match(source, /if \(mode === "group"\)[\s\S]*settings\.llm\.defaultModel\.name/);
-	assert.match(source, /if \(mode !== "group"\)[\s\S]*settings\.llm\.defaultModel\.name/);
-	assert.doesNotMatch(source, /MANUAL_MODEL_OPTION/);
+	assert.match(sectionSource, /settings\.llm\.opencodeProvider[\s\S]*settings\.llm\.apiUrl/);
+	assert.match(sectionSource, /if \(mode === "group"\)[\s\S]*settings\.llm\.defaultModel\.name/);
+	assert.match(sectionSource, /if \(mode !== "group"\)[\s\S]*settings\.llm\.defaultModel\.name/);
+	assert.doesNotMatch(sectionSource, /MANUAL_MODEL_OPTION/);
 	assert.match(source, /runVisionCapabilityTest/);
-	assert.match(source, /settings\.llm\.vision\.test/);
+	assert.match(sectionSource, /settings\.llm\.vision\.test/);
 	assert.doesNotMatch(source, /runLlmConnectionTest[\s\S]*checkConnectionCapabilities/);
 	assert.match(source, /runVisionCapabilityTest[\s\S]*probeVisionCapability/);
 	assert.match(source, /testedVisionCapability = null/);
