@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"pluginId": "friday-obsidian-plugin",
-	"version": "0.2.11",
+	"version": "0.2.12",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-05-15T03:46:04.249Z",
+	"publishedAt": "2026-05-19T02:25:43.575Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
 		"styles.css": "release/friday-obsidian-plugin/styles.css"
 	},
-	"releaseNotes": "- 优化对话页 UI 和 UX：消息、执行过程、结果和产物展示更统一，运行中和完成后的信息更一致，在侧边栏里也更容易阅读和分辨。\n- 复杂问题更不容易卡住：有新发现时会继续推进，明显绕圈时会停下来说明情况。\n- 读取工作区更顺：可以更快看清有哪些文件、一次阅读多个相关文件，并从搜索结果里抓住重点。\n- 文件路径更宽容：常见的项目内路径和文件名写法更容易被识别；找不到时会给出更有帮助的提示。\n- 查找资料会更快；真正修改文件时仍会保持谨慎，先让你看清楚改动。\n- 最终回答更像正常对话，不会把内部过程摘要直接显示给你。\n- 复杂任务会先显示模型自己拆出的步骤，并随着进展更新状态。\n- 过程区更清爽：计划放在 Task Bar，过程面板只显示真实进展、找到的内容和遇到的问题。\n- 运行中的任务可以手动停止，停止后会显示清楚的中文状态。\n- 普通用户界面不再展示命令执行入口，避免把高风险能力当成日常功能。\n- 设置页减少内部安全参数，只保留日常需要理解和操作的选项。"
+	"releaseNotes": "- 新增 Soul 实验室，可以从实验模板创建一个可编辑的 FRIDAY Soul；首批加入 6 个 MBTI 沟通风格 Alpha，包括战略军师、反方辩手、深度洞察者、灵感火花、秩序管家和现场推进者。\n- Soul 底层升级为 Profile v2：FRIDAY 的身份保持稳定，Soul 只改变沟通节奏、信息组织、反馈方式和不同场景下的表达策略。\n- 身份和风格说明更自然：问“你是谁”时会用当前 Soul 的语气介绍 FRIDAY；只有明确询问 Soul、风格或 MBTI 设置时，才说明当前使用的沟通风格。\n- MBTI 模板会继续作为沟通偏好入口，而不是人格测评或用户身份判断；FRIDAY 不会把自己说成某个 MBTI 类型，也不会把用户贴成某个类型。"
 }

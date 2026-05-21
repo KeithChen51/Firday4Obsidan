@@ -116,7 +116,7 @@ test("native friday preset seeds the warm tone preset", () => {
 
 test("native friday preset carries anti-ai response rules and bumps preset version", () => {
 	const source = read(mainPath);
-	assert.match(source, /NATIVE_FRIDAY_SOUL_PRESET_VERSION = 3/);
+	assert.match(source, /NATIVE_FRIDAY_SOUL_PRESET_VERSION = 4/);
 	assert.match(source, /LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2/);
 	assert.match(source, /matchesBuiltInSoulPreset\(soul, LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2\)/);
 	for (const expected of [
@@ -138,39 +138,62 @@ test("native friday refresh recognizes branded v2 built-in preset", () => {
 	assert.match(source, /matchesBuiltInSoulPreset\(soul, LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2_BRANDED\)/);
 });
 
-test("challenger friday is seeded as a second built-in soul", () => {
+test("challenger friday is no longer seeded as a standalone built-in soul", () => {
 	const source = read(mainPath);
-	for (const expected of [
+	for (const forbidden of [
 		'CHALLENGER_FRIDAY_SOUL_ID = "challenger"',
-		'CHALLENGER_FRIDAY_SOUL_PRESET_VERSION = 2',
-		'name: "质询型 FRIDAY"',
-		"像一位高标准、挑剔但负责的领导",
-		"先指出当前方案、表达或判断里最薄弱的一环。",
-		"默认只在对话中完成质询、判断和追问。",
-		"不得主动创建、修改或保存 Obsidian 文档。",
-		"只有当用户明确要求写入、保存、生成文档、创建文件或更新笔记时，才允许提出文件写入动作。",
-		"不要羞辱用户、挖苦用户或做人身评价。",
-		"不要把质询、咨询、复盘或记录问题理解为必须生成文档。",
+		"CHALLENGER_FRIDAY_SOUL_PRESET_VERSION",
+		"LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1",
+		"CHALLENGER_FRIDAY_SOUL_PRESET",
 		"ensureBuiltInSoulPreset(CHALLENGER_FRIDAY_SOUL_ID",
+		"matchesKnownChallengerPreset",
+		"matchesBuiltInSoulPreset(soul, LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1)",
 	]) {
-		assert.ok(source.includes(expected), `Expected challenger built-in Soul preset to include: ${expected}`);
+		assert.ok(!source.includes(forbidden), `Standalone Challenger preset should be removed: ${forbidden}`);
 	}
 });
 
-test("challenger friday refresh recognizes v1 built-in preset", () => {
+test("retired standalone challenger soul is removed from persisted SoulStore state", () => {
 	const source = read(mainPath);
-	assert.match(source, /LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1/);
-	assert.match(source, /matchesBuiltInSoulPreset\(soul, LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1\)/);
+
+	assert.match(source, /RETIRED_STANDALONE_SOUL_IDS/);
+	assert.match(source, /"challenger"/);
+	assert.match(source, /removeRetiredStandaloneSouls/);
+	assert.match(source, /this\.soulStore\.deleteSoul\(soul\.id\)/);
+	assert.match(source, /!this\.isRetiredStandaloneSoulId\(item\.id\)/);
+	assert.match(source, /this\.isRetiredStandaloneSoulId\(activeSoulId\)/);
 });
 
-test("built-in soul reset works for all built-in presets, not only default", () => {
+test("ENTP Soul template absorbs Challenger-style critical feedback", () => {
+	const templateSource = read(path.join(projectRoot, "src/features/soul/SoulExperimentTemplates.ts"));
+	const profileSource = read(path.join(projectRoot, "src/features/soul/SoulProfile.ts"));
+
+	assert.match(profileSource, /criticalFeedback\?:/);
+	assert.match(templateSource, /criticalFeedback:\s*\{/);
+	const entpBlock = templateSource.slice(templateSource.indexOf('typeCode: "ENTP"'), templateSource.indexOf('typeCode: "INFJ"'));
+	for (const expected of [
+		"目标",
+		"证据",
+		"边界",
+		"取舍",
+		"验收标准",
+		"最薄弱的一环",
+		"修正方向",
+		"不要羞辱用户",
+	]) {
+		assert.ok(entpBlock.includes(expected), `ENTP should absorb Challenger capability: ${expected}`);
+	}
+});
+
+test("built-in soul reset remains internal and is not exposed on read-only Soul rows", () => {
 	const mainSource = read(mainPath);
 	const settingsSource = read(settingsPath);
 	const pluginTypeSource = read(pluginTypePath);
 
 	assert.match(mainSource, /canResetBuiltInSoulPreset\(soulId: string\): boolean/);
 	assert.match(mainSource, /resolveBuiltInSoulPreset\(soulId\)/);
-	assert.match(settingsSource, /this\.host\.canResetBuiltInSoulPreset\(activeSoulDefinition\.id\)/);
+	assert.doesNotMatch(settingsSource, /this\.host\.canResetBuiltInSoulPreset\(activeSoulDefinition\.id\)/);
+	assert.doesNotMatch(settingsSource, /new Setting\(editorGroup\)[\s\S]{0,500}settings\.agent\.profile\.reset/);
 	assert.doesNotMatch(settingsSource, /activeSoulDefinition\.id\.startsWith\("default"\)/);
 	assert.match(pluginTypeSource, /canResetBuiltInSoulPreset\(soulId: string\): boolean;/);
 });

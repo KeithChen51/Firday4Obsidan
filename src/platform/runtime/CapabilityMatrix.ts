@@ -14,6 +14,10 @@ const MATRIX: Record<RuntimeProfileId, RuntimeCapabilityMatrix> = {
 		supportsExecTool: true,
 		supportsExternalRead: true,
 	},
+	"linux-desktop": {
+		supportsExecTool: true,
+		supportsExternalRead: true,
+	},
 	unsupported: {
 		supportsExecTool: false,
 		supportsExternalRead: false,

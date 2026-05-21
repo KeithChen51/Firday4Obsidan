@@ -123,6 +123,7 @@ test("settings model exposes activeSoulId before the full soul UI switch", () =>
 
 test("settings tab keeps Agent as the user-facing section while exposing soul definition controls", () => {
 	const source = read(settingsPath);
+	const zhLocale = read(zhLocalePath);
 	assert.match(source, /settings\.section\.agent/);
 	assert.match(source, /private renderSoulSection\(containerEl: HTMLElement\): void \{/);
 	assert.doesNotMatch(source, /private renderAgentSection\(containerEl: HTMLElement\): void \{/);
@@ -140,9 +141,28 @@ test("settings tab keeps Agent as the user-facing section while exposing soul de
 	assert.match(source, /settings\.agent\.currentModel\.name/);
 	assert.match(source, /settings\.agent\.manage\.title/);
 	assert.match(source, /settings\.agent\.manage\.setCurrent/);
+	assert.match(source, /settings\.agent\.manage\.current/);
 	assert.match(source, /settings\.agent\.manage\.edit/);
+	assert.match(source, /settings\.agent\.manage\.editUnavailable/);
 	assert.match(source, /settings\.agent\.manage\.delete/);
+	assert.match(source, /settings\.agent\.manage\.deleteUnavailable/);
 	assert.match(source, /settings\.agent\.manage\.deleteBlocked/);
+	assert.match(source, /settings\.agent\.create\.fromTemplateAction/);
+	assert.match(zhLocale, /"settings\.agent\.create\.fromTemplateAction": "去实验室看看"/);
+	assert.match(source, /friday-soul-manage-icon-button/);
+	assert.match(source, /friday-soul-manage-row/);
+	assert.match(source, /friday-soul-manage-actions/);
+	assert.match(source, /friday-soul-manage-placeholder/);
+	assert.match(source, /setIcon\(isCurrent \? "check-circle-2" : "circle"\)/);
+	assert.match(source, /setIcon\("pencil"\)/);
+	assert.match(source, /setIcon\("trash-2"\)/);
+	assert.match(source, /setDisabled\(!canEdit\)/);
+	assert.match(source, /setDisabled\(!canDelete\)/);
+	assert.match(source, /if \(isCurrent && this\.isExperimentSoul\(definition\)\)/);
+	assert.match(source, /await this\.setCurrentSoulFromSettings\(this\.getNativeSoulFallbackId\(souls, soul\.id\)\)/);
+	assert.match(source, /private canEditSoul/);
+	assert.match(source, /private isExperimentSoul/);
+	assert.match(source, /private renderSoulEditorSection\(containerEl: HTMLElement\): void/);
 	assert.doesNotMatch(source, /"新建 Agent"/);
 	assert.doesNotMatch(source, /"Agent 名称"/);
 	assert.doesNotMatch(source, /"保存 Agent 设定"/);
@@ -153,16 +173,25 @@ test("settings tab keeps Agent as the user-facing section while exposing soul de
 	assert.match(source, /settings\.agent\.profile\.name/);
 	assert.match(source, /settings\.agent\.profile\.summary/);
 	assert.match(source, /settings\.agent\.profile\.definition/);
-	assert.match(source, /settings\.agent\.profile\.reset/);
-	assert.match(source, /settings\.agent\.profile\.resetDesc/);
-	assert.match(source, /resetActiveSoulToBuiltInPreset/);
+	assert.doesNotMatch(source, /new Setting\(editorGroup\)[\s\S]{0,500}settings\.agent\.profile\.reset/);
 	assert.match(source, /settings\.agent\.profile\.save/);
-	assert.match(source, /await this\.host\.soulStore\.updateSoul\(activeSoulDefinition\.id,\s*\{/);
+	assert.match(source, /await this\.host\.soulStore\.updateSoul\(soulId,\s*\{/);
 	assert.match(source, /await this\.host\.soulStore\.deleteSoul\(/);
+	assert.match(source, /await this\.host\.setActiveSoul\(fallbackId\)/);
 	assert.match(source, /name:/);
 	assert.match(source, /summary:/);
 	assert.match(source, /description:/);
 	assert.match(source, /rolePrompt:/);
+});
+
+test("soul management icon controls keep a fixed three-column action rail", () => {
+	const styles = read(stylesPath);
+	assert.match(styles, /\.friday-soul-manage-row[\s\S]*?\.setting-item-control\s*\{/);
+	assert.match(styles, /grid-template-columns:\s*repeat\(3,\s*34px\)/);
+	assert.match(styles, /\.friday-soul-manage-icon-button\s*\{[\s\S]*?border:\s*1px solid var\(--friday-kit-border\)/);
+	assert.match(styles, /\.friday-soul-manage-icon-button\.is-current\s*\{[\s\S]*?var\(--interactive-accent\)/);
+	assert.match(styles, /\.friday-soul-manage-icon-button\.friday-soul-manage-placeholder/);
+	assert.match(styles, /\.friday-soul-manage-icon-button:disabled/);
 });
 
 test("plugin api exposes soul-only identity controls", () => {

@@ -29,9 +29,16 @@ test("runtime profile maps darwin to supported profile", async () => {
 	assert.equal(profile.supported, true);
 });
 
-test("runtime profile maps unsupported platform", async () => {
+test("runtime profile maps linux to supported profile", async () => {
 	const mod = await loadProfile();
 	const profile = mod.detectRuntimeProfile("linux");
+	assert.equal(profile.id, "linux-desktop");
+	assert.equal(profile.supported, true);
+});
+
+test("runtime profile maps unknown platform to unsupported profile", async () => {
+	const mod = await loadProfile();
+	const profile = mod.detectRuntimeProfile("freebsd");
 	assert.equal(profile.id, "unsupported");
 	assert.equal(profile.supported, false);
 });

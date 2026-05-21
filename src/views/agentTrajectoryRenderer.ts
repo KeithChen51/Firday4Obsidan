@@ -42,6 +42,9 @@ export interface RenderAgentAnswerFlowOptions {
 	onAction?: (action: AgentTrajectoryAction) => void;
 	renderContent: (containerEl: HTMLElement) => void;
 	renderAssistantAvatar: (containerEl: HTMLElement) => void;
+	assistantSoulStyleCode?: string;
+	assistantSoulStyleLabel?: string;
+	assistantSoulStyleFullLabel?: string;
 	renderIcon?: RenderAgentProcessIcon;
 	onOpenArtifact?: (path: string) => void;
 }
@@ -235,14 +238,29 @@ function renderTimelineProcess(
 		onToggle: () => void;
 		onAction?: (action: AgentTrajectoryAction) => void;
 		renderAssistantAvatar: (containerEl: HTMLElement) => void;
+		assistantSoulStyleCode?: string;
+		assistantSoulStyleLabel?: string;
+		assistantSoulStyleFullLabel?: string;
 		renderIcon?: RenderAgentProcessIcon;
 	},
 ): void {
-	const { variant, expanded, onToggle, onAction, renderIcon } = options;
+	const {
+		variant,
+		expanded,
+		onToggle,
+		onAction,
+		renderIcon,
+		assistantSoulStyleCode,
+		assistantSoulStyleLabel,
+		assistantSoulStyleFullLabel,
+	} = options;
 	if (variant === "live") {
 		renderAssistantResultMeta(containerEl, {
 			statusText: timeline.status === "thinking" ? "正在思考" : "正在工作",
 			elapsed: extractElapsedLabel(timeline.title),
+			assistantSoulStyleCode,
+			assistantSoulStyleLabel,
+			assistantSoulStyleFullLabel,
 		});
 		if (timeline.items.length === 0) {
 			return;
@@ -263,6 +281,9 @@ function renderTimelineProcess(
 	renderAssistantResultMeta(containerEl, {
 		statusText: timeline.title.includes("已思考") ? "已思考" : "已完成工作",
 		elapsed: extractElapsedLabel(timeline.title),
+		assistantSoulStyleCode,
+		assistantSoulStyleLabel,
+		assistantSoulStyleFullLabel,
 		canToggle,
 		expanded,
 		controlsId: canToggle ? detailId : undefined,
@@ -299,9 +320,23 @@ function renderAssistantResultMeta(
 		controlsId?: string;
 		onToggle?: () => void;
 		renderIcon?: RenderAgentProcessIcon;
+		assistantSoulStyleCode?: string;
+		assistantSoulStyleLabel?: string;
+		assistantSoulStyleFullLabel?: string;
 	},
 ): HTMLElement {
-	const { statusText, elapsed, canToggle = false, expanded = false, controlsId, onToggle, renderIcon } = options;
+	const {
+		statusText,
+		elapsed,
+		canToggle = false,
+		expanded = false,
+		controlsId,
+		onToggle,
+		renderIcon,
+		assistantSoulStyleCode,
+		assistantSoulStyleLabel,
+		assistantSoulStyleFullLabel,
+	} = options;
 	const metaEl = containerEl.createEl(canToggle ? "button" : "div", {
 		cls: `assistant-meta-v2 assistant-result-meta-v6${canToggle ? " assistant-process-toggle-v6" : ""}`,
 		attr: {
@@ -317,6 +352,16 @@ function renderAssistantResultMeta(
 	}
 	const wordmarkEl = metaEl.createSpan({ cls: "friday-wordmark", text: "FRIDAY" });
 	wordmarkEl.style.fontFamily = FRIDAY_WORDMARK_FONT_FAMILY;
+	if (assistantSoulStyleCode) {
+		metaEl.createSpan({ cls: "assistant-meta-separator-v1", text: "·" });
+		metaEl.createSpan({
+			cls: "assistant-soul-label-v1",
+			text: assistantSoulStyleLabel || assistantSoulStyleCode,
+			attr: {
+				title: assistantSoulStyleFullLabel || assistantSoulStyleCode,
+			},
+		});
+	}
 	metaEl.createSpan({ text: statusText });
 	if (elapsed) {
 		metaEl.createSpan({ text: elapsed });
@@ -803,6 +848,9 @@ export function renderAgentAnswerFlow(options: RenderAgentAnswerFlowOptions): vo
 		onAction,
 		renderContent,
 		renderAssistantAvatar,
+		assistantSoulStyleCode,
+		assistantSoulStyleLabel,
+		assistantSoulStyleFullLabel,
 		renderIcon,
 		onOpenArtifact,
 	} = options;
@@ -816,10 +864,18 @@ export function renderAgentAnswerFlow(options: RenderAgentAnswerFlowOptions): vo
 			onToggle,
 			onAction,
 			renderAssistantAvatar,
+			assistantSoulStyleCode,
+			assistantSoulStyleLabel,
+			assistantSoulStyleFullLabel,
 			renderIcon,
 		});
 	} else {
-		renderAssistantResultMeta(flowEl, { statusText: isStreaming ? "正在工作" : "已思考" });
+		renderAssistantResultMeta(flowEl, {
+			statusText: isStreaming ? "正在工作" : "已思考",
+			assistantSoulStyleCode,
+			assistantSoulStyleLabel,
+			assistantSoulStyleFullLabel,
+		});
 	}
 	const outputStackEl = flowEl.createDiv({ cls: "assistant-output-stack-v3" });
 	renderAssistantProseBlock(outputStackEl, isStreaming, renderContent);

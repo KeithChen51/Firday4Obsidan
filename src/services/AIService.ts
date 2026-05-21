@@ -61,6 +61,9 @@ export interface ChatMessageUiMeta {
 	taskId?: string;
 	turnId?: string;
 	conversationId?: string;
+	soulStyleCode?: string;
+	soulStyleLabel?: string;
+	soulStyleFullLabel?: string;
 }
 
 export type ChatMessagePart =

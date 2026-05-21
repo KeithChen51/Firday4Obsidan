@@ -1,12 +1,12 @@
 import { getRuntimeCapabilityMatrix, RuntimeCapabilityMatrix } from "./CapabilityMatrix";
 
-export type RuntimeProfileId = "windows-desktop" | "mac-desktop" | "unsupported";
+export type RuntimeProfileId = "windows-desktop" | "mac-desktop" | "linux-desktop" | "unsupported";
 
 export interface RuntimeProfile {
 	id: RuntimeProfileId;
 	platform: string;
 	supported: boolean;
-	shell: "powershell" | "zsh" | "unknown";
+	shell: "powershell" | "zsh" | "bash" | "unknown";
 	capabilities: RuntimeCapabilityMatrix;
 }
 
@@ -28,6 +28,15 @@ export function detectRuntimeProfile(platformOverride?: string): RuntimeProfile 
 			supported: true,
 			shell: "zsh",
 			capabilities: getRuntimeCapabilityMatrix("mac-desktop"),
+		};
+	}
+	if (runtimePlatform === "linux") {
+		return {
+			id: "linux-desktop",
+			platform: runtimePlatform,
+			supported: true,
+			shell: "bash",
+			capabilities: getRuntimeCapabilityMatrix("linux-desktop"),
 		};
 	}
 	return {

@@ -48,6 +48,7 @@ import {
 import type { SkillDescriptor } from "../services/SkillCommandService";
 import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
+import type { SoulDefinition } from "../types/soul";
 import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
 import type { SyncConflictRecord } from "../types/sync";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
@@ -3106,6 +3107,7 @@ export class DailyBoardView extends ItemView {
 	): void {
 		const isUser = message.role === "user";
 		if (!isUser) {
+			const soulStyleSnapshot = this.resolveMessageSoulStyleSnapshot(message, isStreaming);
 			renderAgentAnswerFlow({
 				containerEl,
 				snapshot: resultSnapshot,
@@ -3119,6 +3121,9 @@ export class DailyBoardView extends ItemView {
 				},
 				renderContent: (contentEl) => this.renderAiMessageContent(contentEl, message),
 				renderAssistantAvatar: (metaEl) => this.renderAssistantAvatar(metaEl),
+				assistantSoulStyleCode: soulStyleSnapshot?.soulStyleCode,
+				assistantSoulStyleLabel: soulStyleSnapshot?.soulStyleLabel,
+				assistantSoulStyleFullLabel: soulStyleSnapshot?.soulStyleFullLabel,
 				renderIcon: (iconEl, icon) => setIcon(iconEl, icon),
 				onOpenArtifact: (pathValue) => {
 					void this.openAgentArtifactInWorkspace(pathValue);
@@ -3156,6 +3161,44 @@ export class DailyBoardView extends ItemView {
 			attr: { "aria-hidden": "true" },
 		});
 		setIcon(avatarEl, FRIDAY_ICON_ID);
+	}
+
+	private resolveAssistantSoulStyleSnapshot(soulDefinition: SoulDefinition | null | undefined): Pick<
+		ChatMessageUiMeta,
+		"soulStyleCode" | "soulStyleLabel" | "soulStyleFullLabel"
+	> | undefined {
+		const fullLabel = soulDefinition?.profile?.stylePolicy?.label?.trim() || "";
+		const code = fullLabel.match(/^([A-Z]{4})\b/)?.[1] ?? "";
+		if (!code) {
+			return undefined;
+		}
+		return {
+			soulStyleCode: code,
+			soulStyleLabel: code,
+			soulStyleFullLabel: fullLabel,
+		};
+	}
+
+	private resolveMessageSoulStyleSnapshot(
+		message: ChatMessage,
+		isStreaming: boolean,
+	): Pick<ChatMessageUiMeta, "soulStyleCode" | "soulStyleLabel" | "soulStyleFullLabel"> | undefined {
+		const code = message.uiMeta?.soulStyleCode?.trim() || "";
+		const label = message.uiMeta?.soulStyleLabel?.trim() || code;
+		const fullLabel = message.uiMeta?.soulStyleFullLabel?.trim() || label;
+		if (code) {
+			return {
+				soulStyleCode: code,
+				soulStyleLabel: label,
+				soulStyleFullLabel: fullLabel,
+			};
+		}
+		if (!isStreaming) {
+			return undefined;
+		}
+		const activeSoul = this.plugin.getActiveSoul();
+		const activeSoulDefinition = activeSoul ? this.plugin.soulStore.getSoulSync(activeSoul.id) : null;
+		return this.resolveAssistantSoulStyleSnapshot(activeSoulDefinition);
 	}
 
 	private normalizeDisplayedAssistantMessageContent(content: string): string {
@@ -4204,6 +4247,7 @@ export class DailyBoardView extends ItemView {
 		result: RuntimeTurnResult,
 		task?: AgentTask,
 		targetConversationId = this.aiSessionId,
+		activeSoulDefinition?: SoulDefinition | null,
 	): ChatMessageUiMeta | undefined {
 		const resultIdentity = result as RuntimeTurnResult & {
 			conversationId?: string;
@@ -4212,13 +4256,15 @@ export class DailyBoardView extends ItemView {
 		const conversationId = resultIdentity.conversationId?.trim() || task?.conversationId?.trim() || targetConversationId.trim();
 		const turnId = resultIdentity.turnId?.trim() || task?.turnId?.trim() || "";
 		const taskId = resultIdentity.taskId?.trim() || task?.id?.trim() || result.task?.id?.trim() || "";
-		if (!conversationId && !turnId && !taskId) {
+		const soulStyleSnapshot = this.resolveAssistantSoulStyleSnapshot(activeSoulDefinition);
+		if (!conversationId && !turnId && !taskId && !soulStyleSnapshot) {
 			return undefined;
 		}
 		return {
 			...(conversationId ? { conversationId } : {}),
 			...(turnId ? { turnId } : {}),
 			...(taskId ? { taskId } : {}),
+			...(soulStyleSnapshot ?? {}),
 		};
 	}
 
@@ -4241,6 +4287,7 @@ export class DailyBoardView extends ItemView {
 			new Notice(this.plugin.t("ai.error.noAgent"), 4000);
 			return;
 		}
+		const activeSoulDefinition = this.plugin.soulStore.getSoulSync(activeSoul.id);
 		if (!this.plugin.aiService.isConfigured()) {
 			const message = this.plugin.t("ai.error.notConfigured");
 			this.aiLastError = message;
@@ -4301,7 +4348,6 @@ export class DailyBoardView extends ItemView {
 		}
 		const promptMentionContext = this.buildPromptMentionContext(mentionResolution);
 		const userFacingPrompt = rawPrompt || this.t("ai.prompt.useMentions", "请基于已引用内容继续处理。");
-		const activeSoulDefinition = this.plugin.soulStore.getSoulSync(activeSoul.id);
 		const effectiveModel = this.resolveEffectiveModel(activeSoulDefinition);
 		const resolution = this.buildInvocationResolver().resolveChatPrompt(rawPrompt);
 		if (resolution.type === "invalid") {
@@ -4407,7 +4453,7 @@ export class DailyBoardView extends ItemView {
 				await this.streamAssistantText(normalizedAssistantText);
 			}
 			const assistantUiMeta = runtimeResult
-				? this.buildAssistantMessageUiMeta(runtimeResult, runtimeTask, turnTarget.sessionId)
+				? this.buildAssistantMessageUiMeta(runtimeResult, runtimeTask, turnTarget.sessionId, activeSoulDefinition)
 				: undefined;
 
 			this.aiLocalIntakePreview = "";
@@ -4494,6 +4540,7 @@ export class DailyBoardView extends ItemView {
 			new Notice(this.plugin.t("ai.error.noAgent"), 4000);
 			return;
 		}
+		const activeSoulDefinition = this.plugin.soulStore.getSoulSync(activeSoul.id);
 		if (!this.plugin.aiService.isConfigured()) {
 			const message = this.plugin.t("ai.error.notConfigured");
 			this.aiLastError = message;
@@ -4539,7 +4586,7 @@ export class DailyBoardView extends ItemView {
 			await this.streamAssistantText(reply);
 			const completedSnapshot = await this.buildCompletedTrajectorySnapshot(runtimeResult);
 			this.rememberCompletedTrajectorySnapshot(completedSnapshot);
-			const assistantUiMeta = this.buildAssistantMessageUiMeta(runtimeResult, runtimeResult.task);
+			const assistantUiMeta = this.buildAssistantMessageUiMeta(runtimeResult, runtimeResult.task, this.aiSessionId, activeSoulDefinition);
 			this.aiConversation.push({
 				role: "assistant",
 				content: reply,

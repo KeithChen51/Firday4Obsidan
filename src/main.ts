@@ -63,9 +63,8 @@ import { FridaySettingTab, isFridaySettingsSection } from "./settings/FridaySett
 const DEFAULT_PROJECT_GROUP_ID = "default-group";
 const ROOT_INDEX_RECOVERY_STORAGE_KEY = "friday:root-index-recovery";
 const ROOT_INDEX_RECOVERY_WINDOW_MS = 12 * 60 * 60 * 1000;
-const NATIVE_FRIDAY_SOUL_PRESET_VERSION = 3;
-const CHALLENGER_FRIDAY_SOUL_ID = "challenger";
-const CHALLENGER_FRIDAY_SOUL_PRESET_VERSION = 2;
+const NATIVE_FRIDAY_SOUL_PRESET_VERSION = 4;
+const RETIRED_STANDALONE_SOUL_IDS = new Set(["challenger"]);
 const LEGACY_NATIVE_FRIDAY_SOUL_PRESET: Pick<
 	SoulDefinition,
 	| "name"
@@ -100,7 +99,7 @@ const LEGACY_NATIVE_FRIDAY_SOUL_PRESET: Pick<
 		"不要使用过度鼓励或营销式语气。",
 	],
 	builtIn: true,
-	editable: true,
+	editable: false,
 };
 const LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2: Pick<
 	SoulDefinition,
@@ -191,78 +190,8 @@ const NATIVE_FRIDAY_SOUL_PRESET: Pick<
 	],
 	builtInPresetVersion: NATIVE_FRIDAY_SOUL_PRESET_VERSION,
 	builtIn: true,
-	editable: true,
+	editable: false,
 };
-const LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1: Pick<
-	SoulDefinition,
-	| "name"
-	| "summary"
-	| "description"
-	| "rolePrompt"
-	| "tonePreset"
-	| "tonePrompt"
-	| "behaviorRules"
-	| "antiPatterns"
-	| "builtInPresetVersion"
-	| "builtIn"
-	| "editable"
-> = {
-	name: "质询型 FRIDAY",
-	summary: "高标准、挑剔、专门挑战薄弱假设的工作伙伴。",
-	description:
-		"质询型 FRIDAY 像一位难搞但负责的领导，会主动指出方案里的漏洞、低标准和未被验证的假设，帮助用户把判断做扎实。",
-	rolePrompt:
-		"你是质询型 FRIDAY。你的职责不是安抚用户，而是像一位高标准、挑剔但负责的领导，主动挑战用户的目标、证据、边界、取舍和验收标准。你应先判断当前问题里最薄弱的一环，再直接指出风险、漏洞或低标准之处。你的质询必须服务于把事情做扎实：批评要有依据，追问要有方向，挑战之后要给出可修正的下一步。你可以严厉、直接、少客套，但不要羞辱用户、挖苦用户或做人身评价。",
-	tonePreset: "calm",
-	tonePrompt:
-		"冷静、直接、挑剔。少安抚，少客套；用事实、标准和反例提出挑战。语气像负责的高标准领导，不像嘲讽者。",
-	behaviorRules: [
-		"先指出当前方案、表达或判断里最薄弱的一环。",
-		"优先追问目标、证据、边界、取舍和验收标准。",
-		"把模糊表达压成可验证的问题、风险或下一步动作。",
-		"当用户在回避关键问题时，要直接点出回避点。",
-		"如果用户判断扎实，先承认有效部分，再继续提高标准。",
-		"给出挑战后必须提供下一步修正方向。",
-	],
-	antiPatterns: [
-		"不要羞辱用户、挖苦用户或做人身评价。",
-		"不要为了显得严厉而否定一切。",
-		"不要只批评不给修正方向。",
-		"不要把个人偏好包装成客观标准。",
-		"不要替用户做未经确认的关键决策。",
-		"不要在早期探索阶段过早扼杀想法。",
-	],
-	builtInPresetVersion: 1,
-	builtIn: true,
-	editable: true,
-};
-const CHALLENGER_FRIDAY_SOUL_PRESET: typeof LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1 = {
-	...LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1,
-	rolePrompt:
-		"你是质询型 FRIDAY。你的职责不是安抚用户，而是像一位高标准、挑剔但负责的领导，主动挑战用户的目标、证据、边界、取舍和验收标准。你应先判断当前问题里最薄弱的一环，再直接指出风险、漏洞或低标准之处。你的质询必须服务于把事情做扎实：批评要有依据，追问要有方向，挑战之后要给出可修正的下一步。默认只在对话中完成质询、判断和追问，不主动创建、修改或保存 Obsidian 文档。只有当用户明确要求写入、保存、生成文档、创建文件或更新笔记时，才允许提出文件写入动作；即便如此，也必须尊重当前 mutation review 和用户确认流程。你可以严厉、直接、少客套，但不要羞辱用户、挖苦用户或做人身评价。",
-	behaviorRules: [
-		"先指出当前方案、表达或判断里最薄弱的一环。",
-		"优先追问目标、证据、边界、取舍和验收标准。",
-		"把模糊表达压成可验证的问题、风险或下一步动作。",
-		"默认只在对话中完成质询、判断和追问。",
-		"不得主动创建、修改或保存 Obsidian 文档。",
-		"只有当用户明确要求写入、保存、生成文档、创建文件或更新笔记时，才允许提出文件写入动作。",
-		"当用户在回避关键问题时，要直接点出回避点。",
-		"如果用户判断扎实，先承认有效部分，再继续提高标准。",
-		"给出挑战后必须提供下一步修正方向。",
-	],
-	antiPatterns: [
-		"不要羞辱用户、挖苦用户或做人身评价。",
-		"不要为了显得严厉而否定一切。",
-		"不要只批评不给修正方向。",
-		"不要把质询、咨询、复盘或记录问题理解为必须生成文档。",
-		"不要把个人偏好包装成客观标准。",
-		"不要替用户做未经确认的关键决策。",
-		"不要在早期探索阶段过早扼杀想法。",
-	],
-	builtInPresetVersion: CHALLENGER_FRIDAY_SOUL_PRESET_VERSION,
-};
-
 function builtInSoulPresetFingerprint(
 	preset: Pick<
 		SoulDefinition,
@@ -761,12 +690,14 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	listSouls(): SoulSummary[] {
-		return this.soulStore.listSoulsSync().filter((item) => !item.archived);
+		return this.soulStore
+			.listSoulsSync()
+			.filter((item) => !item.archived && !this.isRetiredStandaloneSoulId(item.id));
 	}
 
 	getActiveSoul(): SoulSummary | null {
 		const activeSoulId = this.settings.activeSoulId.trim();
-		if (activeSoulId) {
+		if (activeSoulId && !this.isRetiredStandaloneSoulId(activeSoulId)) {
 			const activeSoul = this.soulStore.getSoulSync(activeSoulId);
 			if (activeSoul && !activeSoul.archived) {
 				return activeSoul;
@@ -776,6 +707,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	}
 
 	async setActiveSoul(soulId: string): Promise<void> {
+		if (this.isRetiredStandaloneSoulId(soulId)) {
+			throw new Error(`未找到 Soul: ${soulId}`);
+		}
 		const target = this.soulStore.getSoulSync(soulId);
 		if (!target || target.archived) {
 			throw new Error(`未找到 Soul: ${soulId}`);
@@ -1077,7 +1011,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	private getActiveSoulDefinition(): SoulDefinition | null {
 		const activeSoulId = this.settings.activeSoulId.trim();
-		if (activeSoulId) {
+		if (activeSoulId && !this.isRetiredStandaloneSoulId(activeSoulId)) {
 			const activeSoul = this.soulStore.getSoulSync(activeSoulId);
 			if (activeSoul && !activeSoul.archived) {
 				return activeSoul as SoulDefinition;
@@ -1093,13 +1027,12 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 	private async ensureSoulBootstrap(): Promise<boolean> {
 		let souls = await this.soulStore.listSouls();
 		let changed = false;
-		if (souls.length === 0) {
-			changed = await this.ensureBuiltInSoulPreset("default", NATIVE_FRIDAY_SOUL_PRESET);
+		if (await this.removeRetiredStandaloneSouls(souls)) {
+			changed = true;
 			souls = await this.soulStore.listSouls();
 		}
-
-		if (await this.ensureBuiltInSoulPreset(CHALLENGER_FRIDAY_SOUL_ID, CHALLENGER_FRIDAY_SOUL_PRESET)) {
-			changed = true;
+		if (souls.length === 0) {
+			changed = await this.ensureBuiltInSoulPreset("default", NATIVE_FRIDAY_SOUL_PRESET);
 			souls = await this.soulStore.listSouls();
 		}
 
@@ -1130,6 +1063,25 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		}
 		if (resolvedSoulId) {
 			await this.soulStore.setActiveSoul(resolvedSoulId);
+		}
+		return changed;
+	}
+
+	private isRetiredStandaloneSoulId(soulId: string): boolean {
+		return RETIRED_STANDALONE_SOUL_IDS.has(soulId.trim());
+	}
+
+	private async removeRetiredStandaloneSouls(souls: SoulSummary[]): Promise<boolean> {
+		let changed = false;
+		for (const soul of souls) {
+			if (!this.isRetiredStandaloneSoulId(soul.id)) {
+				continue;
+			}
+			await this.soulStore.deleteSoul(soul.id);
+			if (this.settings.activeSoulId === soul.id) {
+				this.settings.activeSoulId = "";
+			}
+			changed = true;
 		}
 		return changed;
 	}
@@ -1199,12 +1151,8 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				matchesBuiltInSoulPreset(soul, LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2) ||
 				matchesBuiltInSoulPreset(soul, LEGACY_NATIVE_FRIDAY_SOUL_PRESET_V2_BRANDED) ||
 				matchesBuiltInSoulPreset(soul, NATIVE_FRIDAY_SOUL_PRESET));
-		const matchesKnownChallengerPreset =
-			soul.id === CHALLENGER_FRIDAY_SOUL_ID &&
-			matchesBuiltInSoulPreset(soul, LEGACY_CHALLENGER_FRIDAY_SOUL_PRESET_V1);
 		return (
 			matchesKnownNativePreset ||
-			matchesKnownChallengerPreset ||
 			matchesBuiltInSoulPreset(soul, preset)
 		);
 	}
@@ -1227,9 +1175,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		| null {
 		if (soulId.startsWith("default")) {
 			return NATIVE_FRIDAY_SOUL_PRESET;
-		}
-		if (soulId === CHALLENGER_FRIDAY_SOUL_ID) {
-			return CHALLENGER_FRIDAY_SOUL_PRESET;
 		}
 		return null;
 	}

@@ -34,6 +34,13 @@ export interface SoulSituationPolicy {
 	examples?: string[];
 }
 
+export interface SoulPolicyOverride {
+	objective?: string;
+	method?: string[];
+	avoid?: string[];
+	examples?: string[];
+}
+
 export interface SoulProfile {
 	id: string;
 	identityPolicy: SoulIdentityPolicy;
@@ -51,7 +58,23 @@ export function createMbtiSoulProfile(input: {
 	identityExamples: string[];
 	disclosureExamples: string[];
 	posture: string[];
+	criticalFeedback?: SoulPolicyOverride;
 }): SoulProfile {
+	const criticalFeedbackPolicy = mergeSituationPolicy(
+		{
+			id: "critical_feedback",
+			objective: "Give useful challenge in the active style.",
+			method: [
+				"Separate judgment from evidence.",
+				"End with a concrete revision or test.",
+			],
+			avoid: [
+				"Do not use style as an excuse for harshness.",
+			],
+		},
+		input.criticalFeedback,
+	);
+
 	return {
 		id: input.id,
 		identityPolicy: {
@@ -133,18 +156,24 @@ export function createMbtiSoulProfile(input: {
 					"Do not diagnose personality, trauma, or mental health.",
 				],
 			},
-			{
-				id: "critical_feedback",
-				objective: "Give useful challenge in the active style.",
-				method: [
-					"Separate judgment from evidence.",
-					"End with a concrete revision or test.",
-				],
-				avoid: [
-					"Do not use style as an excuse for harshness.",
-				],
-			},
+			criticalFeedbackPolicy,
 		],
+	};
+}
+
+function mergeSituationPolicy(
+	base: SoulSituationPolicy,
+	override: SoulPolicyOverride | undefined,
+): SoulSituationPolicy {
+	if (!override) {
+		return base;
+	}
+	return {
+		...base,
+		objective: override.objective?.trim() || base.objective,
+		method: override.method?.length ? override.method : base.method,
+		avoid: override.avoid?.length ? [...base.avoid, ...override.avoid] : base.avoid,
+		...(override.examples?.length ? { examples: override.examples } : {}),
 	};
 }
 

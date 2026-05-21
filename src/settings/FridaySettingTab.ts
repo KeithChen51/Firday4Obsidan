@@ -37,8 +37,9 @@ import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
 import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
 import type { GroupModelCatalogModel } from "../types/groupModelCatalog";
-import type { SoulTonePreset } from "../types/soul";
+import type { SoulDefinition, SoulSummary, SoulTonePreset } from "../types/soul";
 import {
+	getSoulExperimentTemplate,
 	SOUL_EXPERIMENT_TEMPLATE_SERIES,
 	type SoulExperimentTemplate,
 } from "../features/soul/SoulExperimentTemplates";
@@ -69,6 +70,8 @@ type VisionProbeStatus = "idle" | "checking";
 type ProjectEditorSelectOption = string | { value: string; label: string };
 type RemoteBootstrapDirectoryState = "unknown" | "empty" | "non_empty";
 type RemoteBootstrapResolution = "unset" | "direct" | "create_child";
+const SOUL_SUGGESTION_FORM_URL =
+	"https://doc.weixin.qq.com/smartsheet/form/1_wpUqE6CAAALSz4zPkCQY74bj5Fy9lPBw_69e0b4?journal_source=chat&notreplace=true&clickStart=1779327428534&clientdb=1&fontScale=1.00";
 const BUILTIN_GROUP_MODELS = [
 	"glm-4.7",
 	"kimi-k2.5",
@@ -101,8 +104,8 @@ export class FridaySettingTab extends PluginSettingTab {
 	private testedVisionModel = "";
 	private modelPresetResult: ModelPresetResult | null = null;
 	private activeSection: SettingsSection = "user";
-	private soulPanelMode: "manage" | "lab" = "manage";
-	private soulLabPreviewTemplateId = "";
+	private soulPanelMode: "manage" | "lab" | "editor" = "manage";
+	private soulLabDetailsExpanded = false;
 	private newAgentDraft = "";
 	private soulEditorDraftId = "";
 	private soulEditorNameDraft = "";
@@ -1241,6 +1244,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			this.renderSoulLabSection(containerEl);
 			return;
 		}
+		if (this.soulPanelMode === "editor") {
+			this.renderSoulEditorSection(containerEl);
+			return;
+		}
 		const souls = this.host.listSouls();
 		const activeSoul = this.host.getActiveSoul();
 		const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
@@ -1249,14 +1256,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			title: this.t("settings.agent.manage.title", "Soul 管理"),
 			description: this.t(
 				"settings.agent.manage.desc",
-				"先看当前有哪些已配置的 Soul，再决定切换、编辑或删除。下面的定义编辑区用于修改当前选中的 Soul。",
-			),
-		});
-		const profileGroup = this.createNativeSettingsGroup(containerEl, {
-			title: this.t("settings.agent.profile.title", "当前 Soul 定义"),
-			description: this.t(
-				"settings.agent.profile.desc",
-				"这里配置当前 Soul，也就是 FRIDAY 的人格、风格和行为方式。",
+				"管理已经加入的 Soul。原生 FRIDAY 和实验性 Soul 只能选择或移除；自定义 Soul 可进入配置页编辑。",
 			),
 		});
 		const runtimeGroup = this.createNativeSettingsGroup(containerEl);
@@ -1284,7 +1284,6 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 		if (activeSoulDefinition) {
-			this.ensureSoulEditorDraft(activeSoulDefinition);
 			new Setting(identityGroup)
 				.setName(this.t("settings.agent.currentModel.name", "当前 FRIDAY Model"))
 				.setDesc(this.t("settings.agent.model.desc", "优先级高于全局默认模型。留空则使用全局模型。"))
@@ -1310,165 +1309,121 @@ export class FridaySettingTab extends PluginSettingTab {
 					});
 				});
 
-			new Setting(managementGroup)
-				.setName(this.t("settings.agent.create.name", "新建 Soul"))
-				.setDesc(this.t("settings.agent.create.desc", "先创建一个新的 Soul，再补充它的定义。"))
-				.addText((text) =>
-					text
-						.setPlaceholder(this.t("settings.agent.create.placeholder", "新 Soul 名称"))
-						.setValue(this.newAgentDraft)
-						.onChange((value) => {
-							this.newAgentDraft = value.trim();
-						}),
-				)
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.agent.create.button", "新建 Soul")).setCta().onClick(async () => {
-						const suggestedName = `Soul-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
-						const nextName = this.newAgentDraft || suggestedName;
-						const created = await this.host.createSoul({
-							name: nextName,
-							summary: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
-							description: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
-						});
-						this.newAgentDraft = "";
-						const createdDefinition = this.host.soulStore.getSoulSync(created.id);
-						if (createdDefinition) {
-							this.setSoulEditorDraft(createdDefinition);
+		}
+
+		new Setting(managementGroup)
+			.setName(this.t("settings.agent.create.name", "新建 Soul"))
+			.setDesc(this.t("settings.agent.create.desc", "进入配置页创建一个只属于你的自定义 Soul。"))
+			.addButton((button) =>
+				button
+					.setButtonText(this.t("settings.agent.create.button", "新建 Soul"))
+					.setIcon("plus")
+					.setCta()
+					.onClick(async () => {
+						await this.createCustomSoulFromSettings();
+					}),
+			);
+
+		new Setting(managementGroup)
+			.setName(this.t("settings.agent.create.fromTemplate", "Soul 实验室"))
+			.setDesc(this.t("settings.agent.create.fromTemplateDesc", "打开 Soul 实验室，勾选要加入的 MBTI 等实验性 Soul。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.agent.create.fromTemplateAction", "去实验室看看")).onClick(() => {
+					this.soulPanelMode = "lab";
+					this.display();
+				}),
+			);
+
+		for (const soul of souls) {
+			const definition = this.host.soulStore.getSoulSync(soul.id) ?? soul;
+			const summary = soul.summary?.trim() || this.t("settings.agent.manage.emptySummary", "尚未补充简介");
+			const isCurrent = soul.id === activeSoulDefinition?.id;
+			const row = new Setting(managementGroup)
+				.setName(this.resolveSoulDisplayName(soul))
+				.setDesc(
+					isCurrent
+						? this.t("settings.agent.manage.currentBadge", "当前使用中 · {summary}", { summary })
+					: summary,
+				);
+			row.settingEl.addClass("friday-soul-manage-row");
+			row.controlEl.addClass("friday-soul-manage-actions");
+			row.addButton((button) => {
+				const currentToggleLabel = isCurrent && this.isExperimentSoul(definition)
+					? this.t("settings.agent.manage.unsetExperiment", "取消当前并回到原生 FRIDAY")
+					: this.t("settings.agent.manage.current", "当前使用");
+				button
+					.setIcon(isCurrent ? "check-circle-2" : "circle")
+					.setTooltip(isCurrent
+						? currentToggleLabel
+						: this.t("settings.agent.manage.setCurrent", "设为当前"))
+					.onClick(async () => {
+						if (isCurrent && this.isExperimentSoul(definition)) {
+							await this.setCurrentSoulFromSettings(this.getNativeSoulFallbackId(souls, soul.id));
+							return;
 						}
-						new Notice(this.t("settings.agent.create.success", "已创建 Soul: {name}", { name: created.name }), 3000);
-						this.display();
-					}),
+						if (!isCurrent) {
+							await this.setCurrentSoulFromSettings(soul.id);
+						}
+					});
+				button.buttonEl.addClass("friday-soul-manage-icon-button");
+				button.buttonEl.setAttribute(
+					"aria-label",
+					isCurrent ? currentToggleLabel : this.t("settings.agent.manage.setCurrent", "设为当前"),
 				);
-
-			new Setting(managementGroup)
-				.setName(this.t("settings.agent.create.fromTemplate", "从实验模板创建"))
-				.setDesc(this.t("settings.agent.create.fromTemplateDesc", "打开 Soul 实验室，从 MBTI 等实验系列复制一个可编辑的 Soul。"))
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.agent.create.fromTemplate", "从实验模板创建")).onClick(() => {
-						this.soulPanelMode = "lab";
-						this.display();
-					}),
-				);
-
-			for (const soul of souls) {
-				const summary = soul.summary?.trim() || this.t("settings.agent.manage.emptySummary", "尚未补充简介");
-				const row = new Setting(managementGroup)
-					.setName(this.resolveSoulDisplayName(soul))
-					.setDesc(
-						soul.id === activeSoulDefinition.id
-							? this.t("settings.agent.manage.currentBadge", "当前使用中 · {summary}", { summary })
-							: summary,
-					);
-				if (soul.id !== activeSoulDefinition.id) {
-					row.addButton((button) =>
-						button.setButtonText(this.t("settings.agent.manage.setCurrent", "设为当前")).onClick(async () => {
-							await this.openSoulProfileEditor(soul.id);
-						}),
-					);
+				if (isCurrent) {
+					button.buttonEl.addClass("is-current");
 				}
-				row.addButton((button) =>
-					button.setButtonText(this.t("settings.agent.manage.edit", "编辑")).onClick(async () => {
+			});
+			const canEdit = this.canEditSoul(definition);
+			row.addButton((button) => {
+				button
+					.setIcon("pencil")
+					.setTooltip(canEdit
+						? this.t("settings.agent.manage.edit", "编辑")
+						: this.t("settings.agent.manage.editUnavailable", "不可编辑"))
+					.setDisabled(!canEdit);
+				if (canEdit) {
+					button.onClick(async () => {
 						await this.openSoulProfileEditor(soul.id);
-					}),
+					});
+				}
+				button.buttonEl.addClass("friday-soul-manage-icon-button");
+				button.buttonEl.setAttribute(
+					"aria-label",
+					canEdit
+						? this.t("settings.agent.manage.edit", "编辑")
+						: this.t("settings.agent.manage.editUnavailable", "不可编辑"),
 				);
-				row.addButton((button) => {
-					button.setButtonText(this.t("settings.agent.manage.delete", "删除"));
-					if (!this.canDeleteSoul(soul, souls.length)) {
-						button.setDisabled(true);
-						button.setTooltip(this.t("settings.agent.manage.deleteBlocked", "内置 Soul 或最后一个 Soul 不能删除。"));
-						return;
-					}
+				if (!canEdit) {
+					button.buttonEl.addClass("friday-soul-manage-placeholder");
+				}
+			});
+			const canDelete = this.canDeleteSoul(definition, souls.length);
+			row.addButton((button) => {
+				button
+					.setIcon("trash-2")
+					.setTooltip(canDelete
+						? this.t("settings.agent.manage.delete", "删除")
+						: this.t("settings.agent.manage.deleteUnavailable", "不可删除"))
+					.setDisabled(!canDelete);
+				if (canDelete) {
 					button.onClick(async () => {
 						await this.deleteSoulFromSettings(soul.id);
 					});
-					});
-			}
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.name", "Soul 名称"))
-				.setDesc(this.t("settings.agent.profile.nameDesc", "这是这个 Soul 的显示名称。"))
-				.addText((text) =>
-					text
-						.setPlaceholder(this.t("settings.agent.defaultName", "原生 FRIDAY"))
-						.setValue(this.soulEditorNameDraft)
-						.onChange((value) => {
-							this.soulEditorNameDraft = value;
-						}),
+				}
+				button.buttonEl.addClass("friday-soul-manage-icon-button");
+				button.buttonEl.setAttribute(
+					"aria-label",
+					canDelete
+						? this.t("settings.agent.manage.delete", "删除")
+						: this.t("settings.agent.manage.deleteUnavailable", "不可删除"),
 				);
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.summary", "一句话简介"))
-				.setDesc(this.t("settings.agent.profile.summaryDesc", "用于快速说明这个 Soul 的定位和特点。"))
-				.addText((text) =>
-					text
-						.setPlaceholder(this.t("settings.agent.profile.summaryPlaceholder", "例如：偏研究和结构化表达"))
-						.setValue(this.soulEditorSummaryDraft)
-						.onChange((value) => {
-							this.soulEditorSummaryDraft = value;
-						}),
-				);
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.definition", "人格与风格定义"))
-				.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 FRIDAY 的人格、风格和行为方式。"))
-				.addTextArea((textArea) => {
-					textArea
-						.setPlaceholder(this.t("settings.agent.profile.definitionPlaceholder", "例如：先给结论，再展开；语气克制、清晰，少说空话。"))
-						.setValue(this.soulEditorDefinitionDraft)
-						.onChange((value) => {
-							this.soulEditorDefinitionDraft = value;
-						});
-					textArea.inputEl.rows = 4;
-					textArea.inputEl.style.width = "100%";
-				});
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.tonePreset", "语气风格"))
-				.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 FRIDAY 默认的表达气质。"))
-				.addDropdown((dropdown) => {
-					dropdown.addOption("balanced", this.t("settings.agent.profile.tonePreset.balanced", "平衡"));
-					dropdown.addOption("calm", this.t("settings.agent.profile.tonePreset.calm", "冷静"));
-					dropdown.addOption("warm", this.t("settings.agent.profile.tonePreset.warm", "亲和"));
-					dropdown.setValue(this.soulEditorTonePresetDraft);
-					dropdown.onChange((value) => {
-						this.soulEditorTonePresetDraft = (value as SoulTonePreset) ?? "balanced";
-					});
-				});
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.toneNote", "补充说明（可选）"))
-				.setDesc(this.t("settings.agent.profile.toneNoteDesc", "只补一句微调要求，例如先给结论、少用术语。"))
-				.addTextArea((textArea) => {
-					textArea
-						.setPlaceholder(this.t("settings.agent.profile.toneNotePlaceholder", "例如：先给结论，少用术语。"))
-						.setValue(this.soulEditorToneDraft)
-						.onChange((value) => {
-							this.soulEditorToneDraft = value;
-						});
-					textArea.inputEl.rows = 2;
-					textArea.inputEl.style.width = "100%";
-				});
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.reset", "重置为最新内置默认配置"))
-				.setDesc(this.t("settings.agent.profile.resetDesc", "仅对内置 Soul 可用，会用最新默认参数覆盖当前 Soul 定义。"))
-				.addButton((button) =>
-					button
-						.setButtonText(this.t("settings.agent.profile.reset", "重置为最新内置默认配置"))
-						.setDisabled(!this.host.canResetBuiltInSoulPreset(activeSoulDefinition.id))
-						.onClick(async () => {
-							await this.resetActiveSoulToBuiltInPreset(activeSoulDefinition.id);
-						}),
-				);
-
-			new Setting(profileGroup)
-				.setName(this.t("settings.agent.profile.save", "保存 Soul 定义"))
-				.setDesc(this.t("settings.agent.profile.saveDesc", "会保存当前 Soul 的显示信息和背后的定义。"))
-				.addButton((button) =>
-					button.setButtonText(this.t("settings.agent.profile.save", "保存 Soul 定义")).setCta().onClick(async () => {
-						await this.saveActiveSoulProfile(activeSoulDefinition.id);
-					}),
-				);
+				if (canDelete) {
+					button.buttonEl.addClass("is-danger");
+				} else {
+					button.buttonEl.addClass("friday-soul-manage-placeholder");
+				}
+			});
 		}
 
 		new Setting(runtimeGroup)
@@ -1634,87 +1589,326 @@ export class FridaySettingTab extends PluginSettingTab {
 
 	}
 
-	private renderSoulLabSection(containerEl: HTMLElement): void {
-		const introGroup = this.createNativeSettingsGroup(containerEl, {
-			title: this.t("settings.soulLab.title", "Soul 实验室"),
-			description: this.t(
-				"settings.soulLab.desc",
-				"从实验模板生成一个可编辑的 FRIDAY Soul。模板只作为起点，不会自动改变你当前使用的 Soul。",
-			),
+	private renderSoulEditorSection(containerEl: HTMLElement): void {
+		const targetId = this.soulEditorDraftId || this.host.settings.activeSoulId.trim();
+		const target = targetId ? this.host.soulStore.getSoulSync(targetId) : null;
+		const editorGroup = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-soul-editor-group",
 		});
+		const headerEl = editorGroup.createDiv({ cls: "friday-soul-editor-header" });
+		const copyEl = headerEl.createDiv({ cls: "friday-soul-editor-copy" });
+		copyEl.createDiv({
+			cls: "friday-native-settings-group-title friday-soul-editor-title",
+			text: this.t("settings.agent.profile.title", "编辑 Soul"),
+		});
+		copyEl.createDiv({
+			cls: "friday-native-settings-group-description friday-soul-editor-desc",
+			text: this.t("settings.agent.profile.desc", "配置自定义 Soul 的显示信息、人格定义和表达方式。"),
+		});
+		const backButton = headerEl.createEl("button", {
+			cls: "friday-soul-editor-back-button",
+			text: this.t("settings.agent.profile.back", "返回 Soul 管理"),
+		});
+		backButton.type = "button";
+		backButton.onclick = () => {
+			this.soulPanelMode = "manage";
+			this.display();
+		};
+		if (!target || !this.canEditSoul(target)) {
+			renderNativeSettingsEmptyState(editorGroup, {
+				title: this.t("settings.agent.profile.readonlyTitle", "这个 Soul 不能编辑"),
+				description: this.t("settings.agent.profile.readonlyDesc", "原生 FRIDAY 和实验性 Soul 由系统维护，只能选择或移除。"),
+			});
+			return;
+		}
+		this.ensureSoulEditorDraft(target);
 
-		new Setting(introGroup)
-			.setName(this.t("settings.soulLab.back", "返回 Soul 管理"))
-			.setDesc(this.t("settings.soulLab.backDesc", "回到当前 Soul、模型和运行时设置。"))
-			.addButton((button) =>
-				button.setButtonText(this.t("settings.soulLab.back", "返回 Soul 管理")).onClick(() => {
-					this.soulPanelMode = "manage";
-					this.display();
-				}),
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.name", "Soul 名称"))
+			.setDesc(this.t("settings.agent.profile.nameDesc", "这是这个 Soul 的显示名称。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.agent.defaultName", "原生 FRIDAY"))
+					.setValue(this.soulEditorNameDraft)
+					.onChange((value) => {
+						this.soulEditorNameDraft = value;
+					}),
 			);
 
-		renderNativeInlineAlert(introGroup, {
-			tone: "muted",
-			title: this.t("settings.soulLab.notice.title", "实验模板不会直接改写当前 Soul"),
-			message: this.t(
-				"settings.soulLab.notice.desc",
-				"先复制成新的 Soul，再决定是否设为当前。MBTI 系列只表示沟通偏好，不是心理测评或人格判断。",
-			),
-		});
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.summary", "一句话简介"))
+			.setDesc(this.t("settings.agent.profile.summaryDesc", "用于快速说明这个 Soul 的定位和特点。"))
+			.addText((text) =>
+				text
+					.setPlaceholder(this.t("settings.agent.profile.summaryPlaceholder", "例如：偏研究和结构化表达"))
+					.setValue(this.soulEditorSummaryDraft)
+					.onChange((value) => {
+						this.soulEditorSummaryDraft = value;
+					}),
+			);
 
-		for (const series of SOUL_EXPERIMENT_TEMPLATE_SERIES) {
-			const seriesGroup = this.createNativeSettingsGroup(containerEl, {
-				title:
-					series.id === "mbti-communication"
-						? this.t("settings.soulLab.mbti.title", series.title)
-						: series.title,
-				description:
-					series.id === "mbti-communication"
-						? this.t("settings.soulLab.mbti.desc", series.description)
-						: series.description,
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.definition", "人格与风格定义"))
+			.setDesc(this.t("settings.agent.profile.definitionDesc", "用自然语言描述 FRIDAY 的人格、风格和行为方式。"))
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder(this.t("settings.agent.profile.definitionPlaceholder", "例如：先给结论，再展开；语气克制、清晰，少说空话。"))
+					.setValue(this.soulEditorDefinitionDraft)
+					.onChange((value) => {
+						this.soulEditorDefinitionDraft = value;
+					});
+				textArea.inputEl.rows = 4;
+				textArea.inputEl.style.width = "100%";
 			});
 
-			for (const template of series.templates) {
-				new Setting(seriesGroup)
-					.setName(template.name)
-					.setDesc(template.summary)
-					.addButton((button) =>
-						button.setButtonText(this.t("settings.soulLab.preview", "预览风格")).onClick(() => {
-							this.soulLabPreviewTemplateId =
-								this.soulLabPreviewTemplateId === template.id ? "" : template.id;
-							this.display();
-						}),
-					)
-					.addButton((button) =>
-						button.setButtonText(this.t("settings.soulLab.create", "基于此创建")).onClick(async () => {
-							await this.createSoulFromExperimentTemplate(template, false);
-						}),
-					)
-					.addButton((button) =>
-						button
-							.setButtonText(this.t("settings.soulLab.createCurrent", "创建并设为当前"))
-							.setCta()
-							.onClick(async () => {
-								await this.createSoulFromExperimentTemplate(template, true);
-							}),
-					);
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.tonePreset", "语气风格"))
+			.setDesc(this.t("settings.agent.profile.tonePresetDesc", "选择 FRIDAY 默认的表达气质。"))
+			.addDropdown((dropdown) => {
+				dropdown.addOption("balanced", this.t("settings.agent.profile.tonePreset.balanced", "平衡"));
+				dropdown.addOption("calm", this.t("settings.agent.profile.tonePreset.calm", "冷静"));
+				dropdown.addOption("warm", this.t("settings.agent.profile.tonePreset.warm", "亲和"));
+				dropdown.setValue(this.soulEditorTonePresetDraft);
+				dropdown.onChange((value) => {
+					this.soulEditorTonePresetDraft = (value as SoulTonePreset) ?? "balanced";
+				});
+			});
 
-				if (this.soulLabPreviewTemplateId === template.id) {
-					renderNativeInlineAlert(seriesGroup, {
-						tone: "muted",
-						title: template.name,
-						message: [
-							template.tonePrompt,
-							`回应节奏：${template.responseRhythm}`,
-							`信息组织：${template.informationStructure}`,
-							`反馈方式：${template.feedbackStyle}`,
-							`风险边界：${template.riskBoundary}`,
-							`适用场景：${template.bestFor.join("、")}`,
-						].join(" "),
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.toneNote", "补充说明（可选）"))
+			.setDesc(this.t("settings.agent.profile.toneNoteDesc", "只补一句微调要求，例如先给结论、少用术语。"))
+			.addTextArea((textArea) => {
+				textArea
+					.setPlaceholder(this.t("settings.agent.profile.toneNotePlaceholder", "例如：先给结论，少用术语。"))
+					.setValue(this.soulEditorToneDraft)
+					.onChange((value) => {
+						this.soulEditorToneDraft = value;
 					});
-				}
+				textArea.inputEl.rows = 2;
+				textArea.inputEl.style.width = "100%";
+			});
+
+		new Setting(editorGroup)
+			.setName(this.t("settings.agent.profile.save", "保存 Soul 定义"))
+			.setDesc(this.t("settings.agent.profile.saveDesc", "会保存这个自定义 Soul 的显示信息和背后的定义。"))
+			.addButton((button) =>
+				button.setButtonText(this.t("settings.agent.profile.save", "保存 Soul 定义")).setCta().onClick(async () => {
+					await this.saveActiveSoulProfile(target.id);
+				}),
+			);
+	}
+
+	private renderSoulLabSection(containerEl: HTMLElement): void {
+		const introGroup = this.createNativeSettingsGroup(containerEl, {
+			extraClass: "friday-soul-lab-intro",
+		});
+		const introHeaderEl = introGroup.createDiv({ cls: "friday-soul-lab-intro-header" });
+		const introCopyEl = introHeaderEl.createDiv({ cls: "friday-soul-lab-intro-copy" });
+		introCopyEl.createDiv({
+			cls: "friday-native-settings-group-title friday-soul-lab-intro-title",
+			text: this.t("settings.soulLab.title", "Soul 实验室"),
+		});
+		introCopyEl.createDiv({
+			cls: "friday-native-settings-group-description friday-soul-lab-intro-desc",
+			text: this.t("settings.soulLab.desc", "从实验模板生成一个可编辑的 FRIDAY Soul。"),
+		});
+		const backButton = introHeaderEl.createEl("button", {
+			cls: "friday-soul-lab-back-button",
+			text: this.t("settings.soulLab.back", "返回 Soul 管理"),
+		});
+		backButton.type = "button";
+		backButton.onclick = () => {
+			this.soulPanelMode = "manage";
+			this.display();
+		};
+
+		for (const series of SOUL_EXPERIMENT_TEMPLATE_SERIES) {
+			const isMbtiSeries = series.id === "mbti-communication";
+			const detailsExpanded = isMbtiSeries && this.soulLabDetailsExpanded;
+			const seriesTitle = isMbtiSeries
+				? this.t("settings.soulLab.mbti.title", series.title)
+				: series.title;
+			const seriesDescription = isMbtiSeries
+				? this.t("settings.soulLab.mbti.desc", series.description)
+				: series.description;
+			const seriesGroup = this.createNativeSettingsGroup(containerEl, {
+				extraClass: `friday-soul-lab-series-group${detailsExpanded ? " is-detail-expanded" : ""}`,
+			});
+			const seriesHeaderEl = seriesGroup.createDiv({ cls: "friday-soul-lab-series-header" });
+			const seriesCopyEl = seriesHeaderEl.createDiv({ cls: "friday-soul-lab-series-copy" });
+			seriesCopyEl.createDiv({
+				cls: "friday-native-settings-group-title friday-soul-lab-series-title",
+				text: seriesTitle,
+			});
+			seriesCopyEl.createDiv({
+				cls: "friday-native-settings-group-description friday-soul-lab-series-desc",
+				text: seriesDescription,
+			});
+			if (isMbtiSeries) {
+				const detailButton = seriesHeaderEl.createEl("button", {
+					cls: "friday-soul-lab-detail-toggle",
+					text: detailsExpanded
+						? this.t("settings.soulLab.detailsCollapse", "收起 Soul 详情")
+						: this.t("settings.soulLab.detailsExpand", "展开 Soul 详情"),
+				});
+				detailButton.type = "button";
+				detailButton.setAttribute("aria-expanded", detailsExpanded ? "true" : "false");
+				detailButton.onclick = () => {
+					this.soulLabDetailsExpanded = !this.soulLabDetailsExpanded;
+					this.display();
+				};
+			}
+
+			const activeSoul = this.host.getActiveSoul();
+			const activeSoulDefinition = activeSoul ? this.host.soulStore.getSoulSync(activeSoul.id) : null;
+			const seriesSectionEl = seriesGroup.createDiv({
+				cls: "friday-soul-lab-series",
+				attr: {
+					"data-series-id": series.id,
+				},
+			});
+			const gridEl = seriesSectionEl.createDiv({ cls: "friday-soul-template-grid" });
+			for (const template of series.templates) {
+				this.renderSoulTemplateCard(
+					gridEl,
+					template,
+					this.isCurrentSoulTemplate(template, activeSoulDefinition),
+					this.isSoulTemplateInstalled(template),
+					detailsExpanded,
+				);
 			}
 		}
+
+		this.renderSoulSuggestionPanel(containerEl);
+	}
+
+	private renderSoulSuggestionPanel(containerEl: HTMLElement): void {
+		const panelEl = containerEl.createEl("section", {
+			cls: "friday-soul-suggestion-panel",
+			attr: {
+				"aria-label": this.t("settings.soulLab.suggestion.title", "想要另一种 FRIDAY？"),
+			},
+		});
+		const copyEl = panelEl.createDiv({ cls: "friday-soul-suggestion-copy" });
+		copyEl.createDiv({
+			cls: "friday-soul-suggestion-title",
+			text: this.t("settings.soulLab.suggestion.title", "想要另一种 FRIDAY？"),
+		});
+		copyEl.createDiv({
+			cls: "friday-soul-suggestion-desc",
+			text: this.t(
+				"settings.soulLab.suggestion.desc",
+				"推荐你期待的 Soul、人格或沟通风格，我们会定期整理进 Soul 实验室候选池。",
+			),
+		});
+		copyEl.createDiv({
+			cls: "friday-soul-suggestion-note",
+			text: this.t(
+				"settings.soulLab.suggestion.note",
+				"内容会提交到企业微信收集表，请不要填写敏感信息。",
+			),
+		});
+		const actionButton = panelEl.createEl("button", {
+			cls: "friday-soul-suggestion-action",
+			text: this.t("settings.soulLab.suggestion.action", "推荐一个 Soul"),
+		});
+		actionButton.type = "button";
+		actionButton.onclick = () => {
+			window.open(SOUL_SUGGESTION_FORM_URL, "_blank", "noopener,noreferrer");
+		};
+	}
+
+	private renderSoulTemplateCard(
+		containerEl: HTMLElement,
+		template: SoulExperimentTemplate,
+		isCurrent: boolean,
+		isInstalled: boolean,
+		detailsExpanded: boolean,
+	): void {
+		const cardEl = containerEl.createEl("article", {
+			cls: `friday-soul-template-card${isCurrent ? " is-current" : ""}${isInstalled ? " is-installed" : ""}${detailsExpanded ? " is-detail-open" : ""}`,
+			attr: {
+				"data-template-id": template.id,
+				"data-template-code": template.typeCode,
+			},
+		});
+		const headerEl = cardEl.createDiv({ cls: "friday-soul-template-header" });
+		const titleEl = headerEl.createDiv({ cls: "friday-soul-template-title-block" });
+		const titleRowEl = titleEl.createDiv({ cls: "friday-soul-template-title-row" });
+		titleRowEl.createDiv({ cls: "friday-soul-template-code", text: template.typeCode });
+		titleRowEl.createDiv({ cls: "friday-soul-template-title", text: template.name });
+		headerEl.createDiv({
+			cls: `friday-soul-template-status${isCurrent ? " is-current" : ""}${isInstalled && !isCurrent ? " is-installed" : ""}`,
+			text: isCurrent
+				? this.t("settings.soulLab.current", "当前使用")
+				: isInstalled
+					? this.t("settings.soulLab.subscribed", "已加入")
+					: this.t("settings.soulLab.template", "实验模板"),
+		});
+		const bodyEl = cardEl.createDiv({ cls: "friday-soul-template-body" });
+		bodyEl.createDiv({ cls: "friday-soul-template-summary", text: template.summary });
+		const chipsEl = bodyEl.createDiv({ cls: "friday-soul-template-chips" });
+		for (const chip of [
+			{ label: this.t("settings.soulLab.rhythm", "节奏"), title: template.responseRhythm },
+			{ label: this.t("settings.soulLab.structure", "结构"), title: template.informationStructure },
+			{ label: this.t("settings.soulLab.feedback", "反馈"), title: template.feedbackStyle },
+		]) {
+			chipsEl.createSpan({
+				cls: "friday-soul-template-chip",
+				text: chip.label,
+				attr: {
+					title: chip.title,
+				},
+			});
+		}
+
+		if (detailsExpanded) {
+			const previewEl = cardEl.createDiv({ cls: "friday-soul-template-preview" });
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewTone", "语气"), template.tonePrompt);
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewRhythm", "回应节奏"), template.responseRhythm);
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewStructure", "信息组织"), template.informationStructure);
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewFeedback", "反馈方式"), template.feedbackStyle);
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewBoundary", "风险边界"), template.riskBoundary);
+			this.renderSoulTemplatePreviewRow(previewEl, this.t("settings.soulLab.previewBestFor", "适用场景"), template.bestFor.join("、"));
+			const famousEl = previewEl.createDiv({ cls: "friday-soul-template-famous" });
+			famousEl.createDiv({
+				cls: "friday-soul-template-famous-title",
+				text: this.t("settings.soulLab.previewFamous", "名人参考"),
+			});
+			famousEl.createDiv({
+				cls: "friday-soul-template-famous-value",
+				text: template.famousExamples.join("、"),
+			});
+		}
+
+		const actionsEl = cardEl.createDiv({ cls: "friday-soul-template-actions" });
+		const subscribeButton = actionsEl.createEl("button", {
+			cls: `friday-soul-template-subscribe${isInstalled ? " is-installed" : ""}`,
+			text: isInstalled
+				? this.t("settings.soulLab.subscribed", "已加入")
+				: this.t("settings.soulLab.subscribe", "加入我的 Soul"),
+		});
+		subscribeButton.type = "button";
+		subscribeButton.setAttribute("aria-pressed", isInstalled ? "true" : "false");
+		subscribeButton.onclick = () => {
+			void this.toggleSoulExperimentTemplate(template);
+		};
+	}
+
+	private renderSoulTemplatePreviewRow(containerEl: HTMLElement, label: string, value: string): void {
+		const rowEl = containerEl.createDiv({ cls: "friday-soul-template-preview-row" });
+		rowEl.createSpan({ cls: "friday-soul-template-preview-label", text: label });
+		rowEl.createSpan({ cls: "friday-soul-template-preview-value", text: value });
+	}
+
+	private isCurrentSoulTemplate(template: SoulExperimentTemplate, soulDefinition: SoulDefinition | null): boolean {
+		if (!soulDefinition || soulDefinition.archived) {
+			return false;
+		}
+		return Boolean(
+			soulDefinition.presetRefs?.includes(template.id) ||
+			soulDefinition.profile?.id === template.profile.id,
+		);
 	}
 
 	private renderProjectPolicyEditor(containerEl: HTMLElement): void {
@@ -2782,16 +2976,72 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private canDeleteSoul(
-		soul: { id: string; builtIn?: boolean; editable?: boolean },
+		soul: Pick<SoulSummary, "id" | "builtIn" | "editable" | "presetRefs"> & Partial<Pick<SoulDefinition, "tags" | "profile">>,
 		totalSouls: number,
 	): boolean {
 		if (totalSouls <= 1) {
 			return false;
 		}
-		if (soul.builtIn || soul.editable === false || soul.id.startsWith("default")) {
+		if (soul.builtIn || this.isNativeSoul(soul)) {
+			return false;
+		}
+		if (this.isExperimentSoul(soul)) {
+			return true;
+		}
+		if (soul.editable === false) {
 			return false;
 		}
 		return true;
+	}
+
+	private canEditSoul(
+		soul: Pick<SoulSummary, "id" | "builtIn" | "editable" | "presetRefs"> & Partial<Pick<SoulDefinition, "tags" | "profile">>,
+	): boolean {
+		return !soul.builtIn && !this.isNativeSoul(soul) && !this.isExperimentSoul(soul) && soul.editable !== false;
+	}
+
+	private isNativeSoul(soul: Pick<SoulSummary, "id">): boolean {
+		return soul.id.startsWith("default");
+	}
+
+	private isExperimentSoul(
+		soul: Pick<SoulSummary, "presetRefs"> & Partial<Pick<SoulDefinition, "tags" | "profile">>,
+	): boolean {
+		return Boolean(
+			soul.presetRefs?.some((presetRef) => getSoulExperimentTemplate(presetRef)) ||
+			soul.tags?.includes("soul-lab") ||
+			soul.profile?.id?.startsWith("mbti-"),
+		);
+	}
+
+	private getNativeSoulFallbackId(souls = this.host.listSouls(), excludedSoulId = ""): string {
+		const candidates = souls.filter((soul) => soul.id !== excludedSoulId);
+		return (
+			candidates.find((soul) => soul.builtIn || this.isNativeSoul(soul))?.id ||
+			candidates[0]?.id ||
+			""
+		);
+	}
+
+	private async setCurrentSoulFromSettings(soulId: string): Promise<void> {
+		await this.host.setActiveSoul(soulId);
+		this.display();
+	}
+
+	private async createCustomSoulFromSettings(): Promise<void> {
+		const suggestedName = `Soul-${new Date().toISOString().slice(11, 19).replace(/:/g, "")}`;
+		const created = await this.host.createSoul({
+			name: suggestedName,
+			summary: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
+			description: this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义"),
+		});
+		const createdDefinition = this.host.soulStore.getSoulSync(created.id);
+		if (createdDefinition) {
+			this.setSoulEditorDraft(createdDefinition);
+			this.soulPanelMode = "editor";
+		}
+		new Notice(this.t("settings.agent.create.success", "已创建 Soul: {name}", { name: created.name }), 3000);
+		this.display();
 	}
 
 	private async openSoulProfileEditor(soulId: string): Promise<void> {
@@ -2799,8 +3049,11 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!target) {
 			throw new Error(this.t("settings.agent.profile.missing", "当前 Agent 不存在或已被移除。"));
 		}
-		await this.host.setActiveSoul(soulId);
+		if (!this.canEditSoul(target)) {
+			throw new Error(this.t("settings.agent.profile.readonlyTitle", "这个 Soul 不能编辑"));
+		}
 		this.setSoulEditorDraft(target);
+		this.soulPanelMode = "editor";
 		this.display();
 	}
 
@@ -2810,16 +3063,18 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!target || !this.canDeleteSoul(target, souls.length)) {
 			throw new Error(this.t("settings.agent.manage.deleteBlocked", "内置 Soul 或最后一个 Soul 不能删除。"));
 		}
-		const fallback = souls.find((item) => item.id !== soulId);
+		const fallbackId = this.getNativeSoulFallbackId(souls, soulId);
+		const fallback = fallbackId ? this.host.soulStore.getSoulSync(fallbackId) : null;
+		const wasActive = this.host.settings.activeSoulId === soulId;
 		await this.host.soulStore.deleteSoul(soulId);
-		if (this.host.settings.activeSoulId === soulId && fallback) {
-			await this.host.setActiveSoul(fallback.id);
+		if (wasActive && fallbackId) {
+			await this.host.setActiveSoul(fallbackId);
 		}
 		if (this.soulEditorDraftId === soulId) {
-			const nextTarget = fallback ? this.host.soulStore.getSoulSync(fallback.id) : null;
-			if (nextTarget) {
-				this.setSoulEditorDraft(nextTarget);
+			if (fallback && this.canEditSoul(fallback)) {
+				this.setSoulEditorDraft(fallback);
 			} else {
+				this.soulPanelMode = "manage";
 				this.soulEditorDraftId = "";
 				this.soulEditorNameDraft = "";
 				this.soulEditorSummaryDraft = "";
@@ -2868,6 +3123,9 @@ export class FridaySettingTab extends PluginSettingTab {
 		if (!existing) {
 			throw new Error(this.t("settings.agent.profile.missing", "当前 Agent 不存在或已被移除。"));
 		}
+		if (!this.canEditSoul(existing)) {
+			throw new Error(this.t("settings.agent.profile.readonlyTitle", "这个 Soul 不能编辑"));
+		}
 		const nextName = this.soulEditorNameDraft.trim() || this.resolveSoulDisplayName(existing);
 		const nextSummary = this.soulEditorSummaryDraft.trim() || this.t("settings.agent.create.manualDesc", "新的 Soul，待补充定义");
 		const nextDefinition = this.soulEditorDefinitionDraft.trim() || nextSummary;
@@ -2908,17 +3166,45 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.display();
 	}
 
-	private async createSoulFromExperimentTemplate(
-		template: SoulExperimentTemplate,
-		setCurrent: boolean,
-	): Promise<void> {
-		const created = await this.host.soulStore.createSoul({
+	private isSoulTemplateInstalled(template: SoulExperimentTemplate): boolean {
+		return Boolean(this.findInstalledSoulForTemplate(template));
+	}
+
+	private findInstalledSoulForTemplate(template: SoulExperimentTemplate): SoulDefinition | null {
+		for (const soul of this.host.listSouls()) {
+			const definition = this.host.soulStore.getSoulSync(soul.id);
+			if (definition && this.isSoulTemplateDefinition(template, definition)) {
+				return definition;
+			}
+		}
+		return null;
+	}
+
+	private isSoulTemplateDefinition(template: SoulExperimentTemplate, soulDefinition: SoulDefinition): boolean {
+		return Boolean(
+			soulDefinition.id === this.buildExperimentSoulId(template) ||
+			soulDefinition.presetRefs?.includes(template.id) ||
+			soulDefinition.profile?.id === template.profile.id,
+		);
+	}
+
+	private async toggleSoulExperimentTemplate(template: SoulExperimentTemplate): Promise<void> {
+		if (this.isSoulTemplateInstalled(template)) {
+			await this.removeSoulExperimentTemplate(template);
+			return;
+		}
+		await this.installSoulExperimentTemplate(template);
+	}
+
+	private async installSoulExperimentTemplate(template: SoulExperimentTemplate): Promise<void> {
+		const existing = this.findInstalledSoulForTemplate(template);
+		const base = existing ?? await this.host.soulStore.createSoul({
 			id: this.buildExperimentSoulId(template),
 			name: template.name,
 			summary: template.summary,
 			description: template.description,
 		});
-		const updated = await this.host.soulStore.updateSoul(created.id, {
+		const updated = await this.host.soulStore.updateSoul(base.id, {
 			name: template.name,
 			summary: template.summary,
 			description: template.description,
@@ -2932,18 +3218,13 @@ export class FridaySettingTab extends PluginSettingTab {
 			presetRefs: [template.id],
 			tags: template.tags,
 			builtIn: false,
-			editable: true,
+			editable: false,
 			archived: false,
 			builtInPresetVersion: undefined,
 		});
-		if (setCurrent) {
-			await this.host.setActiveSoul(updated.id);
-			this.setSoulEditorDraft(updated);
-			this.soulPanelMode = "manage";
-		}
 		await this.host.saveSettings();
 		new Notice(
-			this.t("settings.soulLab.created", "已从实验模板创建 Soul：{name}", {
+			this.t("settings.soulLab.installed", "已加入 Soul：{name}", {
 				name: updated.name,
 			}),
 			3000,
@@ -2951,9 +3232,29 @@ export class FridaySettingTab extends PluginSettingTab {
 		this.display();
 	}
 
+	private async removeSoulExperimentTemplate(template: SoulExperimentTemplate): Promise<void> {
+		const installed = this.findInstalledSoulForTemplate(template);
+		if (!installed) {
+			return;
+		}
+		const fallbackId = this.getNativeSoulFallbackId(this.host.listSouls(), installed.id);
+		const wasActive = this.host.settings.activeSoulId === installed.id;
+		await this.host.soulStore.deleteSoul(installed.id);
+		if (wasActive && fallbackId) {
+			await this.host.setActiveSoul(fallbackId);
+		}
+		await this.host.saveSettings();
+		new Notice(
+			this.t("settings.soulLab.unsubscribed", "已从 Soul 管理移除：{name}", {
+				name: installed.name,
+			}),
+			3000,
+		);
+		this.display();
+	}
+
 	private buildExperimentSoulId(template: SoulExperimentTemplate): string {
-		const suffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-		return `${template.id}-${suffix}`;
+		return template.id;
 	}
 
 	private async openRegisterProjectModal(initial?: ProjectEntry): Promise<void> {
