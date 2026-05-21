@@ -383,6 +383,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			});
 
 		new Setting(gitGroup)
+			.setName(this.t("settings.user.credentialStorage.name", "凭据存储"))
+			.setDesc(this.getCredentialStorageStatusDesc());
+
+		new Setting(gitGroup)
 			.setName(this.t("settings.user.update.gitRuntime.name", "Git 环境"))
 			.setDesc(this.getGitRuntimeStatusDesc())
 			.addButton((button) =>
@@ -3311,6 +3315,12 @@ export class FridaySettingTab extends PluginSettingTab {
 			path: "",
 		};
 		return this.host.settings.officialContent.channels[entryId];
+	}
+
+	private getCredentialStorageStatusDesc(): string {
+		return this.host.getCredentialStorageMode() === "secure"
+			? this.t("settings.user.credentialStorage.secure", "系统安全存储可用，Git 凭据会加密保存在当前设备上。")
+			: this.t("settings.user.credentialStorage.local", "未检测到系统安全存储，Git 凭据仅保存在当前设备的本地插件存储中。");
 	}
 
 	private getGitRuntimeStatusDesc(): string {

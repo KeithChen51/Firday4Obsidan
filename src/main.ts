@@ -318,7 +318,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 			this.secureStorage = new SecureStorage(this.manifest.id);
 			if (this.secureStorage.getMode() !== "secure") {
 				console.warn("[Friday] System secure credential storage unavailable. Falling back to local plugin storage.");
-			new Notice("FRIDAY 未检测到系统安全存储，Git 凭据将仅保存在当前设备的本地插件存储中。", 8000);
 			}
 			this.localStateRootService = new LocalStateRootService(
 				(this.app.vault.adapter as { getBasePath?: () => string }).getBasePath?.() ?? ".",
@@ -817,6 +816,10 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 
 	async setUserGitCredential(credential: ProjectGitCredential | null): Promise<void> {
 		await this.secureStorage.setUserGitCredential(credential);
+	}
+
+	getCredentialStorageMode(): "secure" | "plaintext_local" {
+		return this.secureStorage?.getMode() ?? "plaintext_local";
 	}
 
 	async upsertProjectGroup(group: ProjectGroupEntry): Promise<void> {

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
+const mainPath = path.join(projectRoot, "src/main.ts");
 const settingsPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
 const settingsTypePath = path.join(projectRoot, "src/types/settings.ts");
 const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
@@ -16,6 +17,34 @@ const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
+
+test("secure storage fallback is surfaced in basic configuration instead of startup notice", () => {
+	const main = read(mainPath);
+	const settings = read(settingsPath);
+	const pluginType = read(pluginTypePath);
+	const zh = read(zhLocalePath);
+	const en = read(enLocalePath);
+
+	assert.doesNotMatch(main, /new Notice\("FRIDAY 未检测到系统安全存储/);
+	assert.match(main, /getCredentialStorageMode\(\): "secure" \| "plaintext_local"/);
+	assert.match(pluginType, /getCredentialStorageMode\(\): "secure" \| "plaintext_local";/);
+	assert.match(settings, /settings\.user\.credentialStorage\.name/);
+	assert.match(settings, /getCredentialStorageStatusDesc\(\)/);
+	assert.match(zh, /"settings\.user\.credentialStorage\.name": "凭据存储"/);
+	assert.match(zh, /本地插件存储/);
+	assert.match(en, /"settings\.user\.credentialStorage\.name": "Credential storage"/);
+	assert.match(en, /local plugin storage/);
+
+	const match = settings.match(/private renderUserSection\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncSection/);
+	assert.ok(match, "renderUserSection block should exist");
+	const block = match[1] ?? "";
+	const gitTokenIndex = block.indexOf("settings.user.gitToken.name");
+	const credentialStorageIndex = block.indexOf("settings.user.credentialStorage.name");
+	const gitRuntimeIndex = block.indexOf("settings.user.update.gitRuntime.name");
+	assert.ok(gitTokenIndex >= 0, "git token input should exist");
+	assert.ok(credentialStorageIndex > gitTokenIndex, "credential storage status should render after git token input");
+	assert.ok(gitRuntimeIndex > credentialStorageIndex, "git runtime status should render after credential storage status");
+});
 
 test("settings model includes update state for plugin auto-update", () => {
 	const source = read(settingsTypePath);

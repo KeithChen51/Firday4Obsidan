@@ -91,6 +91,7 @@ export interface FridayPluginApi {
 	setProjectGitCredential(projectId: string, credential: ProjectGitCredential | null): Promise<void>;
 	getUserGitCredential(): Promise<ProjectGitCredential | null>;
 	setUserGitCredential(credential: ProjectGitCredential | null): Promise<void>;
+	getCredentialStorageMode(): "secure" | "plaintext_local";
 	setSyncMode(mode: FridaySettings["sync"]["mode"]): Promise<void>;
 	setProjectAutoSync(projectId: string, enabled: boolean): Promise<void>;
 	compileWikiForActiveProject(rawPaths?: string[], forceRebuild?: boolean): Promise<RuntimeWikiCompileSummary>;
