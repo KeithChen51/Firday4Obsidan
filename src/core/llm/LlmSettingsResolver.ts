@@ -1,4 +1,4 @@
-import type { FridaySettings, LlmModeConfig, LlmReasoningSettings } from "../../types/settings";
+import type { FridaySettings, LlmModeConfig, LlmReasoningSettings, ModelPresetSource } from "../../types/settings";
 import type { ReasoningProvider, ReasoningSourceProtocol } from "./ReasoningArtifact";
 
 type LlmSettings = FridaySettings["llm"];
@@ -90,6 +90,10 @@ function normalizeModeConfig(input?: PartialModeConfig | null): LlmModeConfig {
 	};
 }
 
+function normalizeModelPresetSource(value: unknown): ModelPresetSource {
+	return value === "remote" ? "remote" : "opencode";
+}
+
 function hasMeaningfulModeConfig(input?: PartialModeConfig | null): boolean {
 	if (!input) {
 		return false;
@@ -127,6 +131,7 @@ function toCurrentRootConfig(input?: Partial<LlmSettings> | null): PartialModeCo
 
 export function normalizeLlmSettings(input?: Partial<LlmSettings> | null): LlmSettings {
 	const mode: LlmMode = input?.mode === "group" ? "group" : "openai";
+	const modelPresetSource = normalizeModelPresetSource(input?.modelPresetSource);
 	let openaiConfig = normalizeModeConfig(input?.openaiConfig);
 	let groupConfig = normalizeModeConfig(input?.groupConfig);
 	const currentRootConfig = normalizeModeConfig(toCurrentRootConfig(input));
@@ -141,6 +146,7 @@ export function normalizeLlmSettings(input?: Partial<LlmSettings> | null): LlmSe
 	const activeConfig = mode === "group" ? groupConfig : openaiConfig;
 	return {
 		mode,
+		modelPresetSource,
 		...activeConfig,
 		openaiConfig,
 		groupConfig,

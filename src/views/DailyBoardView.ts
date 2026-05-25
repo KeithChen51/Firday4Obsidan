@@ -6238,22 +6238,35 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private getAvailableAgentModelOptions() {
-		const snapshot = this.readOpencodeSnapshot();
-		const groupProvider = selectOpencodeProvider(snapshot, this.plugin.settings.llm.groupConfig.opencodeProviderId);
-		const catalogModels = this.plugin.settings.groupModelCatalog.enabled
-			? this.plugin.settings.groupModelCatalog.models
-				.filter((model) => model.enabled && model.id.trim())
-				.map((model) => ({
-					id: model.id.trim(),
-					label: model.label.trim() || model.id.trim(),
-				}))
-			: [];
+		const modelPresetSource = this.plugin.settings.llm.modelPresetSource === "remote" ? "remote" : "opencode";
 		const fallbackGroupModels = this.plugin.settings.llm.groupConfig.model?.trim()
 			? [{ id: this.plugin.settings.llm.groupConfig.model.trim(), label: this.plugin.settings.llm.groupConfig.model.trim() }]
 			: [];
+		if (modelPresetSource === "remote") {
+			const catalogModels = this.plugin.settings.groupModelCatalog.enabled
+				? this.plugin.settings.groupModelCatalog.models
+					.filter((model) => model.enabled && model.id.trim())
+					.map((model) => ({
+						id: model.id.trim(),
+						label: model.label.trim() || model.id.trim(),
+					}))
+				: [];
+			return buildAgentModelCatalogFromSettings(
+				this.plugin.settings.llm,
+				catalogModels.length > 0 ? catalogModels : fallbackGroupModels,
+			);
+		}
+		if (modelPresetSource === "opencode") {
+			const snapshot = this.readOpencodeSnapshot();
+			const groupProvider = selectOpencodeProvider(snapshot, this.plugin.settings.llm.groupConfig.opencodeProviderId);
+			return buildAgentModelCatalogFromSettings(
+				this.plugin.settings.llm,
+				groupProvider?.models ?? fallbackGroupModels,
+			);
+		}
 		return buildAgentModelCatalogFromSettings(
 			this.plugin.settings.llm,
-			groupProvider?.models ?? (catalogModels.length > 0 ? catalogModels : fallbackGroupModels),
+			fallbackGroupModels,
 		);
 	}
 

@@ -33,7 +33,12 @@ import type { LegacyFridayRootReport } from "../services/LegacyFridayRootMigrati
 import { FridayPluginApi, type FridaySettingsSection } from "../types/plugin";
 import type { OfficialContentSyncProgress } from "../types/officialContent";
 import { ProjectEntry, ProjectGroupEntry } from "../types/project";
-import { SlashCommandTemplate, isWorkbenchStartupPlacement, type LlmReasoningSettings } from "../types/settings";
+import {
+	SlashCommandTemplate,
+	isWorkbenchStartupPlacement,
+	type LlmReasoningSettings,
+	type ModelPresetSource,
+} from "../types/settings";
 import type { GroupModelCatalogModel } from "../types/groupModelCatalog";
 import type { SoulDefinition, SoulSummary, SoulTonePreset } from "../types/soul";
 import {
@@ -1777,18 +1782,14 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getModelPresetResult(): ModelPresetResult {
-		const loaded = this.loadModelPresetsFromOpencodeConfig();
-		if (loaded) {
-			this.modelPresetResult = loaded;
-			return loaded;
-		}
-		const syncedCatalog = this.loadModelPresetsFromGroupModelCatalog();
-		if (syncedCatalog) {
-			this.modelPresetResult = syncedCatalog;
-			return syncedCatalog;
-		}
-
-		this.modelPresetResult = {
+		const modelPresetSource = this.getModelPresetSource();
+		const selected =
+			modelPresetSource === "remote"
+				? this.loadModelPresetsFromGroupModelCatalog()
+				: modelPresetSource === "opencode"
+					? this.loadModelPresetsFromOpencodeConfig()
+					: null;
+		this.modelPresetResult = selected ?? {
 			models: [...BUILTIN_GROUP_MODELS],
 			modelLabels: Object.fromEntries(BUILTIN_GROUP_MODELS.map((item) => [item, item])),
 			source: this.t("settings.llm.presetModel.builtinSource", "内置集团模型预设"),
@@ -1800,13 +1801,21 @@ export class FridaySettingTab extends PluginSettingTab {
 	}
 
 	private getAvailableAgentModelOptions() {
+		const modelPresetSource = this.getModelPresetSource();
+		const selectedGroupModels =
+			modelPresetSource === "remote"
+				? this.getGroupModelCatalogOptions()
+				: modelPresetSource === "opencode"
+					? this.getOpencodeProviderModelOptions()
+					: [];
+		return buildAgentModelCatalogFromSettings(this.host.settings.llm, selectedGroupModels);
+	}
+
+	private getOpencodeProviderModelOptions(): Array<{ id: string; label: string }> {
 		const snapshot = this.readOpencodeSnapshot();
 		const groupConfig = readModeConfig(this.host.settings.llm, "group");
 		const groupProvider = selectOpencodeProvider(snapshot, groupConfig.opencodeProviderId);
-		return buildAgentModelCatalogFromSettings(
-			this.host.settings.llm,
-			groupProvider?.models ?? this.getGroupModelCatalogOptions(),
-		);
+		return groupProvider?.models ?? [];
 	}
 
 	private loadModelPresetsFromOpencodeConfig(): ModelPresetResult | null {
@@ -1857,6 +1866,10 @@ export class FridaySettingTab extends PluginSettingTab {
 			}));
 	}
 
+	private getModelPresetSource(): ModelPresetSource {
+		return this.host.settings.llm.modelPresetSource === "remote" ? "remote" : "opencode";
+	}
+
 	private readOpencodeSnapshot() {
 		for (const configPath of this.getOpencodeConfigPaths()) {
 			try {
@@ -1892,6 +1905,7 @@ export class FridaySettingTab extends PluginSettingTab {
 			extraHeaders: { ...provider.headers },
 		});
 		if (
+			this.getModelPresetSource() === "opencode" &&
 			provider.models.length > 0 &&
 			!provider.models.some((item) => item.id === this.host.settings.llm.model.trim())
 		) {

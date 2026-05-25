@@ -11,6 +11,8 @@ const settingsPath = path.join(projectRoot, "src/types/settings.ts");
 const pluginTypePath = path.join(projectRoot, "src/types/plugin.ts");
 const mainPath = path.join(projectRoot, "src/main.ts");
 const settingsTabPath = path.join(projectRoot, "src/settings/FridaySettingTab.ts");
+const llmSettingsSectionPath = path.join(projectRoot, "src/settings/sections/LlmSettingsSection.ts");
+const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const constantsPath = path.join(projectRoot, "src/constants/groupModelCatalog.ts");
 const samplePath = path.join(projectRoot, "docs/examples/group-model-catalog.sample.json");
 
@@ -42,6 +44,31 @@ test("settings model selector falls back to the synced group model catalog befor
 	assert.match(source, /groupModelCatalogService\.refreshCatalog/);
 	assert.match(source, /settings\.llm\.groupModelCatalog\.refresh/);
 	assert.match(source, /settings\.llm\.groupModelCatalog\.source/);
+});
+
+test("settings model source selector makes opencode and remote catalog mutually exclusive", () => {
+	const settingsSource = read(settingsPath);
+	const settingsTabSource = read(settingsTabPath);
+	const sectionSource = read(llmSettingsSectionPath);
+	const dailyBoardSource = read(dailyBoardPath);
+
+	assert.match(settingsSource, /export type ModelPresetSource = "opencode" \| "remote";/);
+	assert.match(settingsSource, /modelPresetSource:\s*ModelPresetSource;/);
+	assert.match(settingsSource, /modelPresetSource:\s*"opencode"/);
+	assert.match(sectionSource, /settings\.llm\.modelPresetSource\.name/);
+	assert.match(sectionSource, /addOption\("opencode"[\s\S]*addOption\("remote"/);
+	assert.match(settingsTabSource, /modelPresetSource === "remote"[\s\S]*loadModelPresetsFromGroupModelCatalog/);
+	assert.match(settingsTabSource, /modelPresetSource === "opencode"[\s\S]*loadModelPresetsFromOpencodeConfig/);
+	const presetResolverBlock = settingsTabSource.match(
+		/private getModelPresetResult\(\): ModelPresetResult \{([\s\S]*?)\n\t}\n\n\tprivate getAvailableAgentModelOptions/,
+	);
+	assert.ok(presetResolverBlock, "model preset resolver block should be present");
+	assert.doesNotMatch(
+		presetResolverBlock[1] ?? "",
+		/loadModelPresetsFromOpencodeConfig\(\)[\s\S]*loadModelPresetsFromGroupModelCatalog\(\)/,
+	);
+	assert.match(dailyBoardSource, /modelPresetSource === "remote"[\s\S]*groupModelCatalog/);
+	assert.match(dailyBoardSource, /modelPresetSource === "opencode"[\s\S]*readOpencodeSnapshot/);
 });
 
 test("group model catalog status only shows last check time and available model count", () => {

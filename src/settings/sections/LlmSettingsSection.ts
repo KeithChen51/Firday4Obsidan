@@ -1,7 +1,7 @@
 import { Notice, Setting } from "obsidian";
 import { selectOpencodeProvider } from "../../core/llm/OpencodeConfigResolver";
 import { patchActiveLlmConfig, patchLlmModeConfig, switchLlmMode } from "../../core/llm/LlmSettingsResolver";
-import type { LlmReasoningSettings } from "../../types/settings";
+import type { LlmReasoningSettings, ModelPresetSource } from "../../types/settings";
 import { renderNativeSettingStatus, renderNativeSettingsFeedback } from "../../ui/obsidian-native/SettingsKit";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- transitional extraction keeps using FridaySettingTab helper surface.
@@ -65,9 +65,42 @@ export function renderLlmSettingsSection(ctx: SettingsSectionContext, containerE
 		});
 
 	if (mode === "group") {
+		const modelPresetSource: ModelPresetSource =
+			ctx.host.settings.llm.modelPresetSource === "remote" ? "remote" : "opencode";
+		new Setting(statusGroup)
+			.setName(ctx.t("settings.llm.modelPresetSource.name", "模型列表来源"))
+			.setDesc(
+				ctx.t(
+					"settings.llm.modelPresetSource.desc",
+					"选择 FRIDAY 用哪一处模型目录生成默认模型和 Agent 模型选项；未选中的来源会被忽略。",
+				),
+			)
+			.addDropdown((dropdown) => {
+				dropdown.addOption("opencode", ctx.t("settings.llm.modelPresetSource.opencode", "本地 OpenCode 配置"));
+				dropdown.addOption("remote", ctx.t("settings.llm.modelPresetSource.remote", "远端模型目录"));
+				dropdown.setValue(modelPresetSource);
+				dropdown.onChange(async (value) => {
+					const nextSource: ModelPresetSource = value === "remote" ? "remote" : "opencode";
+					ctx.host.settings.llm = {
+						...ctx.host.settings.llm,
+						modelPresetSource: nextSource,
+					};
+					ctx.modelPresetResult = null;
+					const nextPresets = ctx.getModelPresetResult();
+					const currentModel = ctx.host.settings.llm.model.trim();
+					if (nextPresets.models.length > 0 && !nextPresets.models.includes(currentModel)) {
+						ctx.host.settings.llm = patchLlmModeConfig(ctx.host.settings.llm, "group", {
+							model: nextPresets.models[0] ?? "",
+						});
+					}
+					await ctx.host.saveSettings();
+					ctx.markLlmStatusDirty();
+					ctx.display();
+				});
+			});
 		const modelPresets = ctx.getModelPresetResult();
 		const activeProvider = modelPresets.activeProvider;
-		if (modelPresets.providers.length > 0) {
+		if (modelPresetSource === "opencode" && modelPresets.providers.length > 0) {
 			new Setting(statusGroup)
 				.setName(ctx.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
 				.setDesc(
@@ -122,7 +155,7 @@ export function renderLlmSettingsSection(ctx: SettingsSectionContext, containerE
 							ctx.display();
 						}),
 				);
-		} else {
+		} else if (modelPresetSource === "opencode") {
 			new Setting(statusGroup)
 				.setName(ctx.t("settings.llm.opencodeProvider.name", "OpenCode Provider"))
 				.setDesc(
@@ -132,7 +165,9 @@ export function renderLlmSettingsSection(ctx: SettingsSectionContext, containerE
 					),
 				);
 		}
-		ctx.renderGroupModelCatalogSetting(statusGroup);
+		if (modelPresetSource === "remote") {
+			ctx.renderGroupModelCatalogSetting(statusGroup);
+		}
 	}
 
 	new Setting(connectionGroup)

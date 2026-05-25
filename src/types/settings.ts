@@ -42,6 +42,8 @@ export interface LlmModeConfig {
 	reasoning: LlmReasoningSettings;
 }
 
+export type ModelPresetSource = "opencode" | "remote";
+
 export type WorkbenchStartupPlacement =
 	| "right-sidebar"
 	| "left-sidebar";
@@ -65,6 +67,7 @@ export interface FridaySettings {
 	};
 	llm: {
 		mode: "openai" | "group";
+		modelPresetSource: ModelPresetSource;
 		apiUrl: string;
 		apiKey: string;
 		extraHeaders: Record<string, string>;
@@ -132,7 +135,7 @@ export interface FridaySettings {
 	slashCommands: SlashCommandTemplate[];
 }
 
-export const SETTINGS_VERSION = 10;
+export const SETTINGS_VERSION = 11;
 
 export const DEFAULT_SETTINGS: FridaySettings = {
 	version: SETTINGS_VERSION,
@@ -146,6 +149,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 	},
 	llm: {
 		mode: "openai",
+		modelPresetSource: "opencode",
 		apiUrl: "",
 		apiKey: "",
 		extraHeaders: {},

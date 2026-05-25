@@ -24,7 +24,7 @@ test("settings model exposes default workbench startup behavior", () => {
 	assert.match(source, /export type WorkbenchStartupPlacement =[\s\S]*"right-sidebar"[\s\S]*"left-sidebar"/);
 	assert.doesNotMatch(source, /"workspace-right"|"workspace-left"|"workspace-below"|"workspace-above"/);
 	assert.match(source, /workbench:\s*\{\s*openOnStartup: boolean;\s*startupPlacement: WorkbenchStartupPlacement;\s*onboardingDismissed: boolean;\s*\};/);
-	assert.match(source, /export const SETTINGS_VERSION = 10;/);
+	assert.match(source, /export const SETTINGS_VERSION = 11;/);
 	assert.match(source, /workbench:\s*\{\s*openOnStartup: true,\s*startupPlacement: "right-sidebar",\s*onboardingDismissed: false,\s*\}/);
 });
 
