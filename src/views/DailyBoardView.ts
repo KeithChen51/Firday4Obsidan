@@ -55,7 +55,7 @@ import type { SkillDescriptor } from "../services/SkillCommandService";
 import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
 import type { SoulDefinition } from "../types/soul";
-import { ProjectEntry, ProjectMember, SyncResult } from "../types/project";
+import { ProjectEntry, ProjectMember, SyncResult, SyncStatus } from "../types/project";
 import type { SyncConflictRecord } from "../types/sync";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { SkillRegistry } from "../core/execution/SkillRegistry";
@@ -102,6 +102,26 @@ import { getMentionFileTypeIcon, isMentionableFile } from "./mentionSuggestions"
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
+
+interface SyncDecisionElements {
+	titleEl: HTMLElement;
+	descriptionEl: HTMLElement;
+	metaEl: HTMLElement;
+	chipEl: HTMLElement;
+	syncButton: HTMLButtonElement;
+	localValueEl: HTMLElement;
+	remoteValueEl: HTMLElement;
+	dirtyValueEl: HTMLElement;
+	conflictValueEl: HTMLElement;
+	currentBranchEl: HTMLElement;
+	branchListEl: HTMLElement;
+}
+
+interface SyncDetailSection {
+	detailsEl: HTMLElement;
+	stateEl: HTMLElement;
+	bodyEl: HTMLElement;
+}
 
 type AgentTaskStatus = CoreAgentTaskStatus;
 
@@ -946,21 +966,6 @@ export class DailyBoardView extends ItemView {
 	private renderSyncPage(containerEl: HTMLElement): void {
 		const projects = this.plugin.settings.projects;
 		const activeProject = this.getActiveProjectEntry();
-		const header = containerEl.createDiv({ cls: "friday-page-header" });
-		header.createEl("h3", { text: this.plugin.t("projects.header") });
-		const actionBar = header.createDiv({ cls: "friday-page-actions" });
-		this.addPageButton(actionBar, this.t("projects.button.settings", "Project Settings"), async () => {
-			this.plugin.openSettingsTab("project");
-		});
-		if (projects.length > 0) {
-			this.addPageButton(actionBar, this.t("projects.button.syncAll", "Sync All"), async () => {
-				await this.syncAllProjects();
-			});
-			this.addPageButton(actionBar, this.plugin.t("button.refresh"), async () => {
-				await this.safeRenderBoard();
-			});
-		}
-
 		if (projects.length === 0) {
 			const emptyEl = containerEl.createDiv({ cls: "friday-empty-state" });
 			emptyEl.createEl("h4", { text: this.t("projects.empty.title", "Sync is not available yet") });
@@ -976,108 +981,238 @@ export class DailyBoardView extends ItemView {
 		if (!activeProject) {
 			return;
 		}
-		this.renderSyncProjectCard(containerEl, activeProject);
+		const workbench = containerEl.createDiv({ cls: "project-sync-workbench-v1 friday-project-sync-workbench" });
+		this.renderSyncProjectCard(workbench, activeProject);
 	}
 
 	private renderSyncProjectCard(containerEl: HTMLElement, project: ProjectEntry): void {
-		const card = containerEl.createDiv({ cls: "friday-project-card" });
-		if (this.getProjectKey(project) === this.plugin.settings.activeProjectId) {
-			card.addClass("is-active");
-		}
+		const decisionPanel = containerEl.createDiv({ cls: "friday-sync-decision-panel project-command-surface-v2 friday-sync-command-bar-v1" });
+		const decisionCopy = decisionPanel.createDiv({ cls: "friday-sync-decision-copy project-command-copy-v2" });
+		decisionCopy.createSpan({
+			cls: "project-overline-v2",
+			text: this.t("projects.sync.decision.label", "同步决策"),
+		});
+		const titleEl = decisionCopy.createEl("strong", { text: this.getProjectSyncTitle(project) });
+		const descriptionEl = decisionCopy.createSpan({ cls: "friday-sync-decision-note", text: "" });
+		const metaEl = decisionCopy.createDiv({ cls: "friday-sync-decision-meta project-decision-meta-v2" });
+		const decisionActions = decisionPanel.createDiv({ cls: "friday-sync-decision-actions project-command-actions-v2" });
+		this.addPageIconButton(decisionActions, this.t("projects.button.checkStatus", "检查状态"), "refresh-cw", async () => {
+			await this.safeRenderBoard();
+		});
+		const branchMenu = this.renderProjectBranchMenu(decisionActions, project, null);
 
-		card.onclick = () => {
-			void this.switchActiveProject(this.getProjectKey(project));
+		const preview = containerEl.createDiv({ cls: "friday-sync-preview-v1 friday-sync-ledger-v1 project-sync-ledger-v2" });
+		const localValueEl = this.createSyncPreviewItem(
+			preview,
+			this.t("projects.sync.matrix.ahead", "待推送"),
+			this.t("projects.sync.pendingCheck", "待检查"),
+		);
+		const remoteValueEl = this.createSyncPreviewItem(
+			preview,
+			this.t("projects.sync.matrix.behind", "待拉取"),
+			this.t("projects.sync.pendingCheck", "待检查"),
+		);
+		const dirtyValueEl = this.createSyncPreviewItem(
+			preview,
+			this.t("projects.sync.preview.confirmFiles", "待确认文件"),
+			this.t("projects.sync.pendingCheck", "待检查"),
+		);
+		const conflictValueEl = this.createSyncPreviewItem(
+			preview,
+			this.t("projects.sync.matrix.conflicts", "冲突"),
+			this.t("projects.sync.pendingCheck", "待检查"),
+		);
+
+		const detailLane = containerEl.createDiv({ cls: "project-detail-lane-v2 friday-sync-detail-lane" });
+		const localLane = detailLane.createDiv({ cls: "project-main-lane-v2 project-local-workspace-v2" });
+		this.renderWorkingTreeChanges(localLane, []);
+		const functionCard = detailLane.createEl("aside", {
+			cls: "project-function-card-v2 friday-sync-function-card",
+			attr: { "aria-label": this.t("projects.sync.function.info", "同步功能信息") },
+		});
+		const statusDetail = this.createSyncFunctionSection(
+			functionCard,
+			this.t("projects.sync.function.status", "同步状态"),
+		);
+		const treeDetail = this.createSyncFunctionSection(
+			functionCard,
+			this.t("projects.sync.function.tree", "Git更新树"),
+			"project-git-rail-v2",
+		);
+		const collabDetail = this.createSyncFunctionSection(
+			functionCard,
+			this.t("projects.sync.function.collab", "协作状态"),
+			"project-collab-stream-v2",
+		);
+		const ignoreDetail = this.createSyncFunctionSection(
+			functionCard,
+			this.t("projects.sync.function.ignore", "忽略规则"),
+			"project-ignore-rules-v2",
+		);
+		this.renderSyncReadinessChecks(statusDetail.bodyEl, project, null);
+		const syncButton = this.addPageButton(statusDetail.bodyEl, this.t("projects.button.sync", "同步当前项目"), async () => {
+			await this.syncSingleProject(project);
+		});
+		syncButton.addClass("friday-sync-primary-action");
+		this.renderSyncAutomationControls(statusDetail.bodyEl, project);
+		this.renderProjectGitUpdateTree(treeDetail.bodyEl, project, null);
+		this.renderProjectCollaborationLog(collabDetail.bodyEl, project);
+		this.renderProjectStatusPanel(collabDetail.bodyEl, project);
+		this.renderIgnoreRulesSummary(ignoreDetail.bodyEl);
+
+		const decision: SyncDecisionElements = {
+			titleEl,
+			descriptionEl,
+			metaEl,
+			chipEl: statusDetail.stateEl,
+			syncButton,
+			localValueEl,
+			remoteValueEl,
+			dirtyValueEl,
+			conflictValueEl,
+			currentBranchEl: branchMenu.currentBranchEl,
+			branchListEl: branchMenu.listEl,
 		};
 
-		const titleEl = card.createDiv({ cls: "friday-project-title" });
-		titleEl.createEl("h4", { text: this.getProjectLabel(project) });
+		const nextStepEl = decisionPanel.createDiv({ cls: "friday-sync-next-step" });
 
-		const badgesEl = card.createDiv({ cls: "friday-project-badges" });
-		badgesEl.createEl("span", {
-			cls: "friday-badge",
-			text: project.autoSync
-				? this.t("projects.badge.autoSync", "Auto Sync")
-				: this.t("projects.badge.manualSync", "Manual Sync"),
-		});
-		badgesEl.createEl("span", {
-			cls: "friday-badge",
-			text: project.gitRemote
-				? this.t("projects.badge.repoLinked", "Repo linked")
-				: this.t("projects.badge.repoUnlinked", "Repo unlinked"),
-		});
-
-		const metaEl = card.createDiv({ cls: "friday-project-meta" });
-		metaEl.createEl("p", {
-			text: this.t("projects.meta.localPath", "Local Path: {value}", {
-				value: project.boundaryPath || this.t("common.notSet", "Not set"),
-			}),
-		});
-		metaEl.createEl("p", {
-			text: this.t("projects.meta.remoteRepo", "Remote Repo: {value}", {
-				value: project.gitRemote || this.t("common.notSet", "Not set"),
-			}),
-		});
-		metaEl.createEl("p", {
-			text: this.t("projects.meta.lastSync", "Last Sync: {value}", {
-				value: project.lastSyncAt || this.t("common.never", "Never"),
-			}),
-		});
-
-		const actionsEl = card.createDiv({ cls: "friday-project-actions" });
-		const stateEl = card.createDiv({ cls: "friday-project-status-group" });
 		if (project.gitState === "none") {
-			stateEl.createDiv({
-				cls: "friday-approval-detail",
-				text: this.t(
-					"projects.sync.none",
-					"当前没有关联远端仓库，需配置后启用同步功能。",
-				),
+			this.updateSyncDecisionPanel(decision, project, null, {
+				description: this.t("projects.sync.none", "当前没有关联远端仓库，需配置后启用同步功能。"),
+				variant: "warning",
+				chipText: this.t("projects.sync.notReady", "未就绪"),
+				syncEnabled: false,
 			});
-			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
+			this.addPageButton(nextStepEl, this.t("projects.button.configure", "立即配置"), async () => {
 				this.plugin.openSettingsTab("project");
 			});
 		} else if (project.gitState === "git_local") {
-			stateEl.createDiv({
-				cls: "friday-approval-detail",
-				text: this.t(
-					"projects.sync.gitLocal",
-					"当前项目尚未绑定远端仓库，远端同步功能不可用。",
-				),
+			this.updateSyncDecisionPanel(decision, project, null, {
+				description: this.t("projects.sync.gitLocal", "当前项目尚未绑定远端仓库，远端同步功能不可用。"),
+				variant: "warning",
+				chipText: this.t("projects.sync.localOnly", "仅本地"),
+				syncEnabled: false,
 			});
-			const syncButton = actionsEl.createEl("button", { text: this.t("projects.button.sync", "Sync") });
-			syncButton.disabled = true;
-			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
+			this.addPageButton(nextStepEl, this.t("projects.button.configure", "立即配置"), async () => {
 				this.plugin.openSettingsTab("project");
 			});
-			void this.populateProjectSyncStatus(stateEl, project);
-			void this.populateIgnoreCandidates(card, project);
+			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl);
+			void this.populateIgnoreCandidates(ignoreDetail.bodyEl, project, ignoreDetail.stateEl);
 		} else if (project.gitState === "git_remote_bound") {
-			stateEl.createDiv({
-				cls: "friday-approval-detail",
-				text: this.t(
-					"projects.sync.gitRemoteBound",
-					"当前项目已绑定远端仓库，可执行完整同步。",
-				),
+			this.updateSyncDecisionPanel(decision, project, null, {
+				description: this.t("projects.sync.gitRemoteBound", "当前项目已绑定远端仓库，可执行完整同步。"),
+				variant: "active",
+				chipText: this.t("projects.sync.ready", "就绪"),
+				syncEnabled: true,
 			});
-			this.addPageButton(actionsEl, this.t("projects.button.sync", "Sync"), async () => {
-				await this.syncSingleProject(project);
-			});
-			this.addPageButton(actionsEl, this.t("projects.button.configure", "立即配置"), async () => {
-				this.plugin.openSettingsTab("project");
-			});
-			void this.populateProjectSyncStatus(stateEl, project);
-			void this.populateIgnoreCandidates(card, project);
+			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl);
+			void this.populateIgnoreCandidates(ignoreDetail.bodyEl, project, ignoreDetail.stateEl);
 		}
+	}
 
-		this.renderSyncAutomationControls(card, project);
-		this.renderProjectStatusPanel(card, project);
+	private renderProjectBranchMenu(
+		containerEl: HTMLElement,
+		project: ProjectEntry,
+		status: SyncStatus | null,
+	): { currentBranchEl: HTMLElement; listEl: HTMLElement } {
+		const branchMenu = containerEl.createEl("details", { cls: "project-branch-menu-v2 friday-sync-branch-menu" });
+		const summary = branchMenu.createEl("summary", {
+			cls: "project-branch-summary-v2",
+			attr: { "aria-label": this.t("projects.sync.branch.select", "选择分支") },
+		});
+		summary.createSpan({ cls: "project-dot-v2", attr: { "aria-hidden": "true" } });
+		const currentBranchEl = summary.createSpan({ cls: "project-current-branch-v2", text: status?.branch || this.t("projects.sync.branch.unknown", "待检查") });
+		const listEl = branchMenu.createDiv({
+			cls: "project-branch-menu-list-v2",
+			attr: {
+				role: "listbox",
+				"aria-label": this.t("projects.sync.branch.options", "可选分支"),
+			},
+		});
+		this.renderProjectBranchChoices(listEl, project, status);
+		return { currentBranchEl, listEl };
+	}
+
+	private renderProjectBranchChoices(containerEl: HTMLElement, project: ProjectEntry, status: SyncStatus | null): void {
+		containerEl.empty();
+		const branch = status?.branch || this.t("projects.sync.branch.unknown", "待检查");
+		this.renderProjectBranchChoice(
+			containerEl,
+			branch,
+			this.t("projects.sync.branch.currentDesc", "当前分支 · 跟踪 origin/{branch} · 待推送 {ahead}", {
+				branch: status?.branch || "main",
+				ahead: status?.ahead ?? 0,
+			}),
+			this.t("projects.sync.branch.current", "当前"),
+			"active",
+			true,
+		);
+		this.renderProjectBranchChoice(
+			containerEl,
+			status?.branch ? `origin/${status.branch}` : "origin/main",
+			this.t("projects.sync.branch.remoteDesc", "远端跟踪分支 · 待拉取 {behind}", {
+				behind: status?.behind ?? 0,
+			}),
+			status && status.behind > 0 ? this.t("projects.sync.branch.needsUpdate", "需更新") : this.t("projects.sync.branch.tracking", "跟踪"),
+			status && status.behind > 0 ? "warning" : "muted",
+			false,
+		);
+		this.renderProjectBranchChoice(
+			containerEl,
+			this.t("projects.sync.branch.switchPlaceholder", "选择其他分支"),
+			this.t("projects.sync.branch.switchPending", "分支切换入口已预留，切换前会提示同步风险。"),
+			this.t("projects.sync.branch.pending", "待启用"),
+			"muted",
+			false,
+			true,
+		);
+	}
+
+	private renderProjectBranchChoice(
+		containerEl: HTMLElement,
+		name: string,
+		description: string,
+		chipText: string,
+		variant: "active" | "warning" | "muted",
+		current: boolean,
+		muted = false,
+	): void {
+		const choice = containerEl.createEl("button", {
+			cls: `project-branch-choice-v2${current ? " is-current" : ""}`,
+			attr: {
+				type: "button",
+				role: "option",
+				"aria-selected": current ? "true" : "false",
+			},
+		});
+		choice.createSpan({ cls: `project-dot-v2${muted ? " is-muted" : variant === "warning" ? " is-warning" : ""}`, attr: { "aria-hidden": "true" } });
+		const copy = choice.createSpan({ cls: "project-branch-choice-copy-v2" });
+		copy.createEl("strong", { text: name });
+		copy.createSpan({ text: description });
+		this.createSoftChip(choice, chipText, variant);
+		choice.onclick = () => {
+			new Notice(this.t("projects.sync.branch.switchPending", "分支切换入口已预留，切换前会提示同步风险。"), 3000);
+		};
+	}
+
+	private createSyncFunctionSection(containerEl: HTMLElement, title: string, extraClass = ""): SyncDetailSection {
+		const detailsEl = containerEl.createEl("details", {
+			cls: `project-function-section-v2${extraClass ? ` ${extraClass}` : ""}`,
+			attr: { "aria-label": title },
+		});
+		const summary = detailsEl.createEl("summary", { cls: "project-function-summary-v2" });
+		summary.createEl("strong", { text: title });
+		const stateEl = detailsEl.createSpan({ cls: "project-function-state-v2 friday-sync-detail-state" });
+		stateEl.hidden = true;
+		const bodyEl = detailsEl.createDiv({ cls: "friday-sync-detail-body project-function-detail-v2" });
+		return { detailsEl, stateEl, bodyEl };
 	}
 
 	private renderSyncAutomationControls(containerEl: HTMLElement, project: ProjectEntry): void {
 		if (project.gitState !== "git_remote_bound") {
 			return;
 		}
-		const panel = containerEl.createDiv({ cls: "friday-project-status-group" });
+		const panel = containerEl.createDiv({ cls: "friday-project-status-group friday-sync-automation-panel" });
 		panel.createEl("h5", { text: this.t("projects.sync.autoTitle", "自动同步") });
 		panel.createEl("p", {
 			text: this.t("projects.sync.autoMode", "当前模式：{mode}", {
@@ -1113,44 +1248,543 @@ export class DailyBoardView extends ItemView {
 		});
 	}
 
-	private async populateProjectSyncStatus(containerEl: HTMLElement, project: ProjectEntry): Promise<void> {
+	private getProjectSyncTitle(project: ProjectEntry): string {
+		if (project.gitState === "git_remote_bound") {
+			return this.t("projects.sync.title.ready", "{project} 已准备同步", {
+				project: this.getProjectLabel(project),
+			});
+		}
+		if (project.gitState === "git_local") {
+			return this.t("projects.sync.title.local", "{project} 是本地 Git 仓库", {
+				project: this.getProjectLabel(project),
+			});
+		}
+		return this.t("projects.sync.title.needsRemote", "{project} 需要配置远端", {
+			project: this.getProjectLabel(project),
+		});
+	}
+
+	private getProjectGitStateLabel(project: ProjectEntry): string {
+		if (project.gitState === "git_remote_bound") {
+			return this.t("projects.sync.state.remoteConnected", "远端已连接");
+		}
+		if (project.gitState === "git_local") {
+			return this.t("projects.sync.state.localRepo", "本地仓库");
+		}
+		return this.t("projects.sync.state.noRemote", "未配置");
+	}
+
+	private createSoftChip(
+		containerEl: HTMLElement,
+		text: string,
+		variant: "active" | "warning" | "muted" = "muted",
+	): HTMLElement {
+		const chip = containerEl.createSpan({ cls: "kit-soft-chip-v1", text });
+		if (variant === "active") {
+			chip.addClass("is-active");
+		} else if (variant === "warning") {
+			chip.addClass("is-warning");
+		}
+		return chip;
+	}
+
+	private createSyncPreviewItem(containerEl: HTMLElement, label: string, value: string): HTMLElement {
+		const item = containerEl.createDiv({ cls: "friday-sync-preview-item" });
+		item.createSpan({ cls: "friday-sync-preview-label", text: label });
+		return item.createEl("strong", { text: value });
+	}
+
+	private createSyncDetailSection(containerEl: HTMLElement, title: string, description = ""): SyncDetailSection {
+		const detailsEl = containerEl.createEl("details", { cls: "friday-sync-detail-section" });
+		const summary = detailsEl.createEl("summary", { cls: "friday-sync-detail-summary" });
+		const text = summary.createDiv({ cls: "friday-sync-detail-copy" });
+		text.createEl("strong", { text: title });
+		if (description) {
+			text.createSpan({ text: description });
+		}
+		const stateEl = summary.createSpan({
+			cls: "friday-sync-detail-state",
+			text: this.t("projects.sync.pendingCheck", "待检查"),
+		});
+		const bodyEl = detailsEl.createDiv({ cls: "friday-sync-detail-body" });
+		return { detailsEl, stateEl, bodyEl };
+	}
+
+	private updateSyncDecisionPanel(
+		elements: SyncDecisionElements,
+		project: ProjectEntry,
+		status: SyncStatus | null,
+		override: {
+			description?: string;
+			variant?: "active" | "warning" | "muted";
+			chipText?: string;
+			syncEnabled?: boolean;
+		} = {},
+	): void {
+		const projectLabel = this.getProjectLabel(project);
+		let title = this.getProjectSyncTitle(project);
+		let description =
+			override.description ||
+			this.t("projects.sync.decision.readyDesc", "同步前会提交本地变化，再拉取和推送远端更新。");
+		let variant: "active" | "warning" | "muted" = override.variant ?? "muted";
+		let chipText = override.chipText ?? this.t("projects.sync.pendingCheck", "待检查");
+		let syncEnabled = override.syncEnabled ?? project.gitState === "git_remote_bound";
+
+		if (project.gitState === "git_remote_bound" && status) {
+			if (!status.connected) {
+				title = this.t("projects.sync.decision.remoteBlockedTitle", "{project} 暂时不能同步", { project: projectLabel });
+				description = this.t("projects.sync.decision.remoteBlockedDesc", "先检查网络、仓库地址或访问权限，然后重新检查状态。");
+				variant = "warning";
+				chipText = this.t("projects.sync.remoteBlocked", "受阻");
+				syncEnabled = false;
+			} else if (status.conflicts > 0) {
+				title = this.t("projects.sync.decision.conflictTitle", "{project} 有冲突需要处理", { project: projectLabel });
+				description = this.t("projects.sync.decision.conflictDesc", "先处理冲突文件，再执行同步。");
+				variant = "warning";
+				chipText = this.t("projects.sync.blockedShort", "受阻");
+				syncEnabled = false;
+			} else {
+				title = this.t("projects.sync.decision.readyTitle", "{project} 可以同步", { project: projectLabel });
+				description = this.t("projects.sync.decision.readyDesc", "同步前会提交本地变化，再拉取和推送远端更新。");
+				variant = "active";
+				chipText = this.t("projects.sync.ready", "就绪");
+				syncEnabled = true;
+			}
+		}
+
+		elements.titleEl.setText(title);
+		elements.descriptionEl.setText(description);
+		elements.descriptionEl.toggleClass("is-empty", description.length === 0);
+		elements.metaEl.empty();
+		this.renderDecisionMetaRow(
+			elements.metaEl,
+			this.t("projects.sync.projectScope", "项目范围"),
+			this.getProjectBoundaryLabel(project),
+		);
+		this.renderDecisionMetaRow(
+			elements.metaEl,
+			this.t("projects.sync.remoteAddress", "远端地址"),
+			project.gitRemote || this.t("common.notSet", "Not set"),
+		);
+		elements.chipEl.setText(chipText);
+		elements.chipEl.removeClass("is-active");
+		elements.chipEl.removeClass("is-warning");
+		if (variant === "active") {
+			elements.chipEl.addClass("is-active");
+		} else if (variant === "warning") {
+			elements.chipEl.addClass("is-warning");
+		}
+		elements.syncButton.disabled = !syncEnabled;
+
+		elements.localValueEl.setText(this.getSyncAheadPreview(status));
+		elements.remoteValueEl.setText(this.getSyncBehindPreview(project, status));
+		elements.dirtyValueEl.setText(this.getSyncLocalPreview(status));
+		elements.conflictValueEl.setText(this.getSyncConflictPreview(status));
+		elements.currentBranchEl.setText(status?.branch || this.t("projects.sync.branch.unknown", "待检查"));
+		this.renderProjectBranchChoices(elements.branchListEl, project, status);
+	}
+
+	private renderDecisionMetaRow(containerEl: HTMLElement, label: string, value: string): void {
+		const row = containerEl.createSpan({ cls: "project-decision-row-v2" });
+		row.createEl("strong", { text: `${label}:` });
+		row.createSpan({ text: value });
+	}
+
+	private getProjectBoundaryLabel(project: ProjectEntry): string {
+		return project.boundaryPath || this.getProjectLabel(project);
+	}
+
+	private getSyncAheadPreview(status: SyncStatus | null): string {
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		return status.ahead > 0
+			? this.t("projects.sync.count.commits", "{count} 个提交", { count: status.ahead })
+			: "0";
+	}
+
+	private getSyncBehindPreview(project: ProjectEntry, status: SyncStatus | null): string {
+		if (project.gitState !== "git_remote_bound") {
+			return this.t("projects.sync.notReady", "未就绪");
+		}
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		if (!status.connected) {
+			return this.t("projects.sync.preview.remoteBlocked", "待重新检查");
+		}
+		return status.behind > 0
+			? this.t("projects.sync.count.commits", "{count} 个提交", { count: status.behind })
+			: "0";
+	}
+
+	private getSyncLocalPreview(status: SyncStatus | null): string {
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		return status.dirty > 0
+			? this.t("projects.sync.preview.localFiles", "{count} 个文件，将在同步前提交", { count: status.dirty })
+			: this.t("projects.sync.preview.localClean", "无本地改动");
+	}
+
+	private getSyncRemotePreview(project: ProjectEntry, status: SyncStatus | null): string {
+		if (project.gitState !== "git_remote_bound") {
+			return this.t("projects.sync.notReady", "未就绪");
+		}
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		if (!status.connected) {
+			return this.t("projects.sync.preview.remoteBlocked", "待重新检查");
+		}
+		return status.behind > 0
+			? this.t("projects.sync.preview.remoteBehind", "{count} 个提交待拉取", { count: status.behind })
+			: this.t("projects.sync.preview.remoteClean", "无待拉取");
+	}
+
+	private getSyncConflictPreview(status: SyncStatus | null): string {
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		return status.conflicts > 0
+			? this.t("projects.sync.preview.conflictFiles", "{count} 个文件需处理", { count: status.conflicts })
+			: this.t("projects.sync.preview.conflictClean", "无冲突");
+	}
+
+	private renderProjectSyncEvent(
+		containerEl: HTMLElement,
+		title: string,
+		chipText: string,
+		variant: "active" | "warning" | "muted" = "muted",
+		detail = "",
+	): void {
+		const row = containerEl.createDiv({ cls: "kit-event-row-v1 friday-project-sync-event" });
+		const main = row.createDiv({ cls: "kit-event-row-main-v1" });
+		main.createEl("strong", { text: title });
+		if (detail) {
+			main.createSpan({ text: detail });
+		}
+		this.createSoftChip(row, chipText, variant);
+	}
+
+	private renderSyncReadinessChecks(
+		containerEl: HTMLElement,
+		project: ProjectEntry,
+		status: SyncStatus | null,
+	): void {
+		containerEl.empty();
+		this.renderSyncCheckRow(
+			containerEl,
+			this.t("projects.sync.checks.gitRepo", "Git 仓库已初始化"),
+			project.gitState === "none" ? this.t("projects.sync.notReady", "未就绪") : this.t("projects.sync.ready", "就绪"),
+			project.gitState === "none" ? "warning" : "active",
+		);
+		this.renderSyncCheckRow(
+			containerEl,
+			this.t("projects.sync.checks.remote", "远端仓库可访问"),
+			this.getRemoteAccessLabel(project, status),
+			project.gitState === "git_remote_bound" && status?.connected !== false ? "active" : "warning",
+		);
+		this.renderSyncCheckRow(
+			containerEl,
+			this.t("projects.sync.checks.localChanges", "本地改动"),
+			status ? this.formatSyncFileCount(status.dirty) : this.t("projects.sync.pendingCheck", "待检查"),
+			status && status.dirty > 0 ? "warning" : "muted",
+		);
+		this.renderSyncCheckRow(
+			containerEl,
+			this.t("projects.sync.checks.conflicts", "冲突文件"),
+			status ? this.formatSyncFileCount(status.conflicts) : this.t("projects.sync.pendingCheck", "待检查"),
+			status && status.conflicts > 0 ? "warning" : "muted",
+		);
+	}
+
+	private renderSyncCheckRow(
+		containerEl: HTMLElement,
+		label: string,
+		value: string,
+		variant: "active" | "warning" | "muted",
+	): void {
+		const row = containerEl.createDiv({ cls: "project-sync-check-row-v1 project-function-row-v2" });
+		const copy = row.createDiv();
+		copy.createEl("strong", { text: label });
+		copy.createSpan({ text: value });
+		this.createSoftChip(row, value, variant);
+	}
+
+	private getRemoteAccessLabel(project: ProjectEntry, status: SyncStatus | null): string {
+		if (project.gitState !== "git_remote_bound") {
+			return this.t("projects.sync.notReady", "未就绪");
+		}
+		if (!status) {
+			return this.t("projects.sync.pendingCheck", "待检查");
+		}
+		return status.connected
+			? this.t("projects.sync.ready", "就绪")
+			: this.t("projects.sync.remoteBlocked", "受阻");
+	}
+
+	private formatSyncFileCount(count: number): string {
+		return count > 0
+			? this.t("projects.sync.count.files", "{count} 个文件", { count })
+			: this.t("projects.sync.noneShort", "无");
+	}
+
+	private renderProjectBranchPicker(
+		containerEl: HTMLElement,
+		project: ProjectEntry,
+		status: SyncStatus | null,
+	): void {
+		containerEl.empty();
+		const picker = containerEl.createDiv({ cls: "project-branch-picker-v1" });
+		const title = picker.createDiv({ cls: "project-title-stack-v1" });
+		title.createEl("strong", { text: this.t("projects.sync.branch.title", "分支选择") });
+		title.createSpan({
+			text: this.t("projects.sync.branch.desc", "先显示当前分支、跟踪关系和切换风险。"),
+		});
+		const branch = status?.branch || this.t("projects.sync.branch.unknown", "待检查");
+		const trackingBranch = status?.branch ? `origin/${status.branch}` : "origin/main";
+		const active = picker.createDiv({ cls: "project-branch-active-v1" });
+		const activeText = active.createDiv();
+		activeText.createEl("strong", { text: branch });
+		activeText.createSpan({
+			text: this.t("projects.sync.branch.currentDesc", "当前分支 · 跟踪 origin/{branch} · 待推送 {ahead}", {
+				branch: status?.branch || "main",
+				ahead: status?.ahead ?? 0,
+			}),
+		});
+		this.createSoftChip(active, this.t("projects.sync.branch.current", "当前"), "active");
+
+		this.renderProjectBranchRow(
+			picker,
+			trackingBranch,
+			this.t("projects.sync.branch.remoteDesc", "远端跟踪分支 · 待拉取 {behind}", {
+				behind: status?.behind ?? 0,
+			}),
+			status && status.behind > 0 ? this.t("projects.sync.branch.needsUpdate", "需更新") : this.t("projects.sync.branch.tracking", "跟踪"),
+			status && status.behind > 0 ? "warning" : "muted",
+		);
+		this.renderProjectBranchRow(
+			picker,
+			this.t("projects.sync.branch.switchPlaceholder", "选择其他分支"),
+			this.t("projects.sync.branch.switchPending", "分支切换入口已预留，切换前会提示同步风险。"),
+			this.t("projects.sync.branch.pending", "待启用"),
+			"muted",
+			true,
+		);
+	}
+
+	private renderProjectBranchRow(
+		containerEl: HTMLElement,
+		name: string,
+		description: string,
+		chipText: string,
+		variant: "active" | "warning" | "muted",
+		muted = false,
+	): void {
+		const row = containerEl.createDiv({ cls: "project-branch-row-v1" });
+		row.createSpan({ cls: `project-branch-dot-v1${muted ? " is-muted" : variant === "warning" ? " is-warning" : ""}`, attr: { "aria-hidden": "true" } });
+		const text = row.createDiv();
+		text.createEl("strong", { text: name });
+		text.createSpan({ text: description });
+		this.createSoftChip(row, chipText, variant);
+	}
+
+	private renderProjectCollaborationLog(containerEl: HTMLElement, project: ProjectEntry): void {
+		containerEl.empty();
+		const panel = containerEl.createDiv({ cls: "project-collab-log-v1 project-collab-stream-v2" });
+		const syncReport = this.plugin.workbenchStateStore.getSyncReports().find((item) => item.projectId === project.projectId) ?? null;
+		if (!syncReport) {
+			this.renderProjectCollabRow(
+				panel,
+				"F",
+				this.t("projects.sync.collab.emptyTitle", "暂无新的协作记录"),
+				this.t("projects.sync.collab.emptyDesc", "完成一次同步后，这里会显示最近的本地和远端变化。"),
+				this.t("projects.sync.noneShort", "无"),
+				"muted",
+			);
+			return;
+		}
+		const changedFiles = syncReport.result.pulledFiles.length + syncReport.result.pushedFiles.length;
+		this.renderProjectCollabRow(
+			panel,
+			"F",
+			syncReport.result.success
+				? this.t("projects.sync.collab.lastSuccess", "上次同步已完成")
+				: this.t("projects.sync.collab.lastFailed", "上次同步未完成"),
+			this.t("projects.sync.collab.lastDesc", "{time} · {count} 个文件变化", {
+				time: syncReport.recordedAt,
+				count: changedFiles,
+			}),
+			syncReport.result.success ? this.t("projects.sync.done", "完成") : this.t("projects.sync.blockedShort", "受阻"),
+			syncReport.result.success ? "active" : "warning",
+		);
+	}
+
+	private renderProjectCollabRow(
+		containerEl: HTMLElement,
+		avatar: string,
+		title: string,
+		detail: string,
+		chipText: string,
+		variant: "active" | "warning" | "muted",
+	): void {
+		const row = containerEl.createDiv({ cls: "project-collab-row-v1 project-collab-item-v2" });
+		const avatarStack = row.createDiv({ cls: "project-avatar-stack-v1", attr: { "aria-label": this.t("projects.sync.collab.avatar", "协作者") } });
+		avatarStack.createSpan({ cls: "project-avatar-v1 is-active", text: avatar });
+		const text = row.createDiv();
+		text.createEl("strong", { text: title });
+		text.createSpan({ text: detail });
+		this.createSoftChip(row, chipText, variant);
+	}
+
+	private renderProjectGitUpdateTree(
+		containerEl: HTMLElement,
+		project: ProjectEntry,
+		status: SyncStatus | null,
+	): void {
+		containerEl.empty();
+		const tree = containerEl.createDiv({ cls: "project-git-tree-v1 project-git-rail-v2" });
+		const branch = status?.branch || this.t("common.notSet", "Not set");
+		this.renderProjectGitNode(
+			tree,
+			this.t("projects.sync.tree.local", "本地 {branch}", { branch }),
+			this.t("projects.sync.tree.localDesc", "当前工作分支 · 待推送 {ahead}", {
+				ahead: status?.ahead ?? 0,
+			}),
+			status && status.ahead > 0 ? "Ahead" : this.t("projects.sync.tree.aligned", "对齐"),
+			status && status.ahead > 0 ? "warning" : "active",
+		);
+		this.renderProjectGitNode(
+			tree,
+			`origin/${branch}`,
+			this.t("projects.sync.tree.remoteDesc", "远端跟踪分支 · 待拉取 {behind}", {
+				behind: status?.behind ?? 0,
+			}),
+			status && status.behind > 0 ? this.t("projects.sync.tree.pullable", "可拉取") : this.t("projects.sync.tree.aligned", "对齐"),
+			status && status.behind > 0 ? "warning" : "active",
+			true,
+		);
+	}
+
+	private renderProjectGitNode(
+		containerEl: HTMLElement,
+		title: string,
+		detail: string,
+		chipText: string,
+		variant: "active" | "warning" | "muted",
+		remote = false,
+	): void {
+		const row = containerEl.createDiv({ cls: `project-git-node-v1 project-rail-node-v2${remote ? " is-remote" : ""}` });
+		row.createSpan({ cls: `project-git-dot-v1${remote ? " is-muted" : variant === "warning" ? " is-warning" : ""}`, attr: { "aria-hidden": "true" } });
+		const text = row.createDiv();
+		text.createEl("strong", { text: title });
+		text.createSpan({ text: detail });
+		this.createSoftChip(row, chipText, variant);
+	}
+
+	private async populateProjectSyncStatus(
+		project: ProjectEntry,
+		decision: SyncDecisionElements,
+		statusPanel: HTMLElement,
+		gitTreePanel: HTMLElement,
+		localChangesPanel: HTMLElement,
+		collabPanel: HTMLElement,
+	): Promise<void> {
 		try {
 			const status = await this.plugin.syncService.getStatus(project);
+			this.updateSyncDecisionPanel(decision, project, status);
+			this.renderSyncReadinessChecks(statusPanel, project, status);
+			this.renderSyncAutomationControls(statusPanel, project);
+			this.renderProjectGitUpdateTree(gitTreePanel, project, status);
+			this.renderProjectCollaborationLog(collabPanel, project);
+			this.renderProjectStatusPanel(collabPanel, project);
+			this.updateSyncDetailState(
+				gitTreePanel,
+				status.ahead > 0 || status.behind > 0
+					? this.t("projects.sync.branch.needsUpdate", "需更新")
+					: this.t("projects.sync.tree.aligned", "对齐"),
+				status.ahead > 0 || status.behind > 0 ? "warning" : "active",
+			);
+			localChangesPanel.empty();
 			const runtimeState = this.plugin.syncRuntimeStore.getProjectState(this.getProjectKey(project));
 			if (runtimeState) {
 				let runtimeKey = "projects.sync.runtime";
+				let chipText: string = runtimeState.stage;
+				let variant: "active" | "warning" | "muted" = "muted";
 				if (runtimeState.stage === "offline") {
 					runtimeKey = "projects.sync.offline";
 				} else if (runtimeState.stage === "blocked" || runtimeState.stage === "failed") {
 					runtimeKey = "projects.sync.blocked";
 				}
-				containerEl.createEl("p", {
-					text: this.t(runtimeKey, "运行态：{stage}", {
+				if (runtimeState.stage === "checking" || runtimeState.stage === "pulling" || runtimeState.stage === "pushing") {
+					variant = "active";
+					chipText = this.t("projects.sync.running", "运行中");
+				} else if (runtimeState.stage === "offline" || runtimeState.stage === "blocked" || runtimeState.stage === "failed") {
+					variant = "warning";
+					chipText = this.t("projects.sync.blockedShort", "受阻");
+				}
+				this.renderProjectSyncEvent(
+					statusPanel,
+					this.t(runtimeKey, "运行态：{stage}", {
 						stage: runtimeState.stage,
 						message: runtimeState.message || this.t("common.notSet", "Not set"),
 					}),
-				});
+					chipText,
+					variant,
+					runtimeState.recordedAt,
+				);
 			}
-			containerEl.createEl("p", {
-				text: this.t(
-					"projects.sync.statusLine",
-					"分支：{branch} | Ahead {ahead} | Behind {behind} | Dirty {dirty} | Conflicts {conflicts}",
-					{
-						branch: status.branch || this.t("common.notSet", "Not set"),
-						ahead: status.ahead,
-						behind: status.behind,
-						dirty: status.dirty,
-						conflicts: status.conflicts,
-					},
-				),
-			});
-			this.renderWorkingTreeChanges(containerEl, status.workingTreeChanges);
+			this.renderWorkingTreeChanges(localChangesPanel, status.workingTreeChanges);
+			this.updateSyncDetailState(
+				statusPanel,
+				this.formatSyncFileCount(status.workingTreeChanges.length),
+				status.conflicts > 0 ? "warning" : status.workingTreeChanges.length > 0 ? "muted" : "active",
+			);
 		} catch (error) {
-			containerEl.createEl("p", {
-				text: this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
+			this.updateSyncDecisionPanel(decision, project, null, {
+				description: this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
 					error: String(error),
 				}),
+				variant: "warning",
+				chipText: this.t("projects.sync.blockedShort", "受阻"),
+				syncEnabled: false,
 			});
+			localChangesPanel.empty();
+			this.renderWorkingTreeChanges(localChangesPanel, []);
+			this.updateSyncDetailState(statusPanel, this.t("projects.sync.remoteBlocked", "受阻"), "warning");
+			this.updateSyncDetailState(gitTreePanel, this.t("projects.sync.remoteBlocked", "受阻"), "warning");
+			this.renderProjectSyncEvent(
+				statusPanel,
+				this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
+					error: String(error),
+				}),
+				this.t("projects.sync.blockedShort", "受阻"),
+				"warning",
+			);
+		}
+	}
+
+	private updateSyncDetailState(
+		bodyEl: HTMLElement,
+		state: string,
+		variant: "active" | "warning" | "muted" = "muted",
+	): void {
+		const sectionEl = bodyEl.closest(".friday-sync-detail-section, .project-function-section-v2");
+		if (!(sectionEl instanceof HTMLElement)) {
+			return;
+		}
+		const stateEl = sectionEl.querySelector(".friday-sync-detail-state, .project-function-state-v2");
+		if (!(stateEl instanceof HTMLElement)) {
+			return;
+		}
+		stateEl.setText(state);
+		stateEl.removeClass("is-active");
+		stateEl.removeClass("is-warning");
+		if (variant === "active") {
+			stateEl.addClass("is-active");
+		} else if (variant === "warning") {
+			stateEl.addClass("is-warning");
 		}
 	}
 
@@ -1158,22 +1792,51 @@ export class DailyBoardView extends ItemView {
 		containerEl: HTMLElement,
 		workingTreeChanges: Array<{ path: string; kind: string }>,
 	): void {
-		const panel = containerEl.createDiv({ cls: "friday-project-status-group" });
-		panel.createEl("h5", {
-			text: this.t("projects.sync.changesTitle", "工作区变化"),
+		containerEl.empty();
+		const panel = containerEl.createEl("section", {
+			cls: "project-local-changes-v2",
+			attr: { "aria-label": this.t("projects.sync.changesTitle", "工作区变化") },
+		});
+		const head = panel.createDiv({ cls: "project-section-head-v2" });
+		head.createEl("strong", {
+			text: this.t("projects.sync.localChangesTitle", "本地改动"),
+		});
+		head.createSpan({
+			text: workingTreeChanges.length > 0
+				? this.t("projects.sync.localChangesCount", "{count} 个待确认", { count: workingTreeChanges.length })
+				: this.t("projects.sync.noChangesShort", "无改动"),
 		});
 		if (workingTreeChanges.length === 0) {
-			panel.createEl("p", {
+			const empty = panel.createDiv({ cls: "project-local-empty-v2" });
+			empty.createEl("strong", {
+				text: this.t("projects.sync.noChangesShort", "无改动"),
+			});
+			empty.createSpan({
 				text: this.t("projects.sync.noChanges", "当前工作区无待同步变化。"),
 			});
 			return;
 		}
-		for (const change of workingTreeChanges) {
+		const visibleChanges = workingTreeChanges.slice(0, 5);
+		for (const change of visibleChanges) {
+			const row = panel.createDiv({ cls: "project-file-row-v2" });
+			row.createSpan({
+				cls: `project-file-status-v2${change.kind === "untracked" ? " is-new" : change.kind === "conflicted" ? " is-warning" : ""}`,
+				text: this.getWorkingTreeChangeLabel(change.kind),
+			});
+			const copy = row.createDiv({ cls: "project-file-copy-v2" });
+			copy.createEl("strong", { text: change.path });
+			copy.createSpan({
+				text: this.t("projects.sync.filePending", "待同步判断"),
+			});
+			this.addPageButton(row, this.t("projects.sync.viewFile", "查看"), async () => {
+				await this.openAgentArtifactInWorkspace(change.path);
+			});
+		}
+		if (workingTreeChanges.length > visibleChanges.length) {
 			panel.createDiv({
-				cls: "friday-approval-detail",
-				text: this.t("projects.sync.changeItem", "{kind}: {path}", {
-					kind: this.getWorkingTreeChangeLabel(change.kind),
-					path: change.path,
+				cls: "friday-sync-list-more",
+				text: this.t("projects.sync.moreChanges", "另外 {count} 个文件在同步详情中处理", {
+					count: workingTreeChanges.length - visibleChanges.length,
 				}),
 			});
 		}
@@ -1227,13 +1890,28 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private async populateIgnoreCandidates(containerEl: HTMLElement, project: ProjectEntry): Promise<void> {
+	private renderIgnoreRulesSummary(containerEl: HTMLElement): void {
+		containerEl.empty();
+		containerEl.createEl("p", {
+			text: this.t("projects.ignore.summary", "这些路径不会进入本地改动列表。"),
+		});
+		const list = containerEl.createDiv({ cls: "project-ignore-list-v2" });
+		for (const rule of [".friday/", "workspace/cache/", "*.tmp"]) {
+			list.createSpan({ cls: "project-ignore-token-v2", text: rule });
+		}
+	}
+
+	private async populateIgnoreCandidates(containerEl: HTMLElement, project: ProjectEntry, stateEl?: HTMLElement): Promise<void> {
 		try {
 			const candidates = await this.gitIgnoreService.listCandidates(project);
+			this.renderIgnoreRulesSummary(containerEl);
+			if (stateEl) {
+				stateEl.setText(candidates.length > 0 ? this.formatSyncFileCount(candidates.length) : this.t("projects.sync.noneShort", "无"));
+			}
 			if (candidates.length === 0) {
 				return;
 			}
-			const panel = containerEl.createDiv({ cls: "friday-project-status-group" });
+			const panel = containerEl.createDiv({ cls: "friday-project-status-group friday-sync-ignore-candidates" });
 			panel.createEl("h5", { text: this.t("projects.ignore.title", "Ignore candidates") });
 			for (const candidate of candidates.slice(0, 6)) {
 				const row = panel.createDiv({ cls: "friday-sync-conflict-row" });
@@ -1260,11 +1938,16 @@ export class DailyBoardView extends ItemView {
 				}
 			}
 		} catch (error) {
+			containerEl.empty();
 			containerEl.createEl("p", {
 				text: this.t("projects.ignore.failed", "Ignore candidates unavailable: {error}", {
 					error: String(error),
 				}),
 			});
+			if (stateEl) {
+				stateEl.setText(this.t("projects.sync.remoteBlocked", "受阻"));
+				stateEl.addClass("is-warning");
+			}
 		}
 	}
 
@@ -5977,7 +6660,7 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private addPageButton(containerEl: HTMLElement, label: string, action: () => Promise<void>): void {
+	private addPageButton(containerEl: HTMLElement, label: string, action: () => Promise<void>): HTMLButtonElement {
 		const button = containerEl.createEl("button", { text: label });
 		button.onclick = async (event) => {
 			event.preventDefault();
@@ -5995,6 +6678,37 @@ export class DailyBoardView extends ItemView {
 				);
 			}
 		};
+		return button;
+	}
+
+	private addPageIconButton(
+		containerEl: HTMLElement,
+		label: string,
+		icon: string,
+		action: () => Promise<void>,
+	): HTMLButtonElement {
+		const button = containerEl.createEl("button", { cls: "kit-control-button-v1 friday-project-sync-icon-button" });
+		button.type = "button";
+		button.setAttribute("aria-label", label);
+		button.title = label;
+		setIcon(button, icon);
+		button.onclick = async (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			try {
+				await action();
+			} catch (error) {
+				console.error("[Friday] Action failed:", label, error);
+				new Notice(
+					this.t("common.actionFailed", "{label} failed: {error}", {
+						label,
+						error: String(error),
+					}),
+					6000,
+				);
+			}
+		};
+		return button;
 	}
 
 	private captureAiMessageListScrollState(listEl: HTMLElement | null = this.contentEl.querySelector(".friday-ai-message-list")): void {

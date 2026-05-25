@@ -1,7 +1,8 @@
 ﻿import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import path from "path";
-import { App, Notice, Plugin, PluginSettingTab, Setting, TFolder } from "obsidian";
+import QRCode from "qrcode";
+import { App, Modal, Notice, Plugin, PluginSettingTab, Setting, TFolder } from "obsidian";
 import { normalizeProjectGroupIdCandidate } from "./projectGroupId";
 import { renderLlmSettingsSection } from "./sections/LlmSettingsSection";
 import { renderProjectSettingsSection } from "./sections/ProjectSettingsSection";
@@ -40,6 +41,7 @@ import {
 	type SoulExperimentTemplate,
 } from "../features/soul/SoulExperimentTemplates";
 import type { LocaleCode } from "../i18n/types";
+import { PLUGIN_UPDATE_REPO_URL } from "../constants/update";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import { OFFICIAL_CONTENT_LEGACY_TOP_LEVEL_PATHS } from "../constants/officialContent";
 import { CapabilityRegistry } from "../core/capability/CapabilityRegistry";
@@ -66,6 +68,24 @@ type RemoteBootstrapDirectoryState = "unknown" | "empty" | "non_empty";
 type RemoteBootstrapResolution = "unset" | "direct" | "create_child";
 const SOUL_SUGGESTION_FORM_URL =
 	"https://doc.weixin.qq.com/smartsheet/form/1_wpUqE6CAAALSz4zPkCQY74bj5Fy9lPBw_69e0b4?journal_source=chat&notreplace=true&clickStart=1779327428534&clientdb=1&fontScale=1.00";
+const SOUL_SUGGESTION_ISSUE_TITLE = "Soul 推荐：";
+const SOUL_SUGGESTION_ISSUE_BODY = [
+	"想推荐的 Soul / 人格 / 沟通风格：",
+	"",
+	"推荐理由：",
+	"",
+	"适合的使用场景：",
+	"",
+	"请不要填写敏感信息。",
+].join("\n");
+const SOUL_SUGGESTION_ISSUE_URL = buildSoulSuggestionIssueUrl(PLUGIN_UPDATE_REPO_URL);
+
+function buildSoulSuggestionIssueUrl(repoUrl: string): string {
+	const issueUrl = new URL(`${repoUrl.replace(/\.git$/i, "").replace(/\/+$/, "")}/issues/new`);
+	issueUrl.searchParams.set("issue[title]", SOUL_SUGGESTION_ISSUE_TITLE);
+	issueUrl.searchParams.set("issue[description]", SOUL_SUGGESTION_ISSUE_BODY);
+	return issueUrl.toString();
+}
 const BUILTIN_GROUP_MODELS = [
 	"glm-4.7",
 	"kimi-k2.5",
@@ -909,14 +929,110 @@ export class FridaySettingTab extends PluginSettingTab {
 				"内容会提交到企业微信收集表，请不要填写敏感信息。",
 			),
 		});
-		const actionButton = panelEl.createEl("button", {
-			cls: "friday-soul-suggestion-action",
-			text: this.t("settings.soulLab.suggestion.action", "推荐一个 Soul"),
+		const actionsEl = panelEl.createDiv({ cls: "friday-soul-suggestion-actions" });
+		const formButton = actionsEl.createEl("button", {
+			cls: "friday-soul-suggestion-action is-primary",
+			text: this.t("settings.soulLab.suggestion.formAction", "通过收集表提交"),
+			attr: {
+				type: "button",
+			},
 		});
-		actionButton.type = "button";
-		actionButton.onclick = () => {
-			window.open(SOUL_SUGGESTION_FORM_URL, "_blank", "noopener,noreferrer");
-		};
+		formButton.addEventListener("click", () => this.openSoulSuggestionFormModal());
+		actionsEl.createEl("a", {
+			cls: "friday-soul-suggestion-action is-secondary external-link",
+			text: this.t("settings.soulLab.suggestion.issueAction", "通过 issue 发送"),
+			attr: {
+				href: SOUL_SUGGESTION_ISSUE_URL,
+				rel: "noopener nofollow",
+			},
+		});
+	}
+
+	private openSoulSuggestionFormModal(): void {
+		const modal = new Modal(this.app);
+		modal.titleEl.setText(this.t("settings.soulLab.suggestion.modalTitle", "通过收集表提交"));
+		modal.contentEl.empty();
+		modal.contentEl.addClass("friday-soul-suggestion-modal");
+
+		const qrEl = modal.contentEl.createDiv({ cls: "friday-soul-suggestion-qr" });
+		qrEl.createDiv({
+			cls: "friday-soul-suggestion-qr-loading",
+			text: this.t("settings.soulLab.suggestion.qrLoading", "正在生成二维码..."),
+		});
+		void QRCode.toDataURL(SOUL_SUGGESTION_FORM_URL, {
+			errorCorrectionLevel: "M",
+			margin: 2,
+			width: 220,
+		})
+			.then((src) => {
+				qrEl.empty();
+				qrEl.createEl("img", {
+					cls: "friday-soul-suggestion-qr-image",
+					attr: {
+						src,
+						alt: this.t("settings.soulLab.suggestion.qrAlt", "Soul 推荐收集表二维码"),
+					},
+				});
+			})
+			.catch(() => {
+				qrEl.empty();
+				qrEl.createDiv({
+					cls: "friday-soul-suggestion-qr-fallback",
+					text: this.t("settings.soulLab.suggestion.qrFailed", "二维码生成失败，请复制链接打开。"),
+				});
+			});
+
+		const urlRowEl = modal.contentEl.createDiv({ cls: "friday-soul-suggestion-url-row" });
+		urlRowEl.createEl("input", {
+			cls: "friday-soul-suggestion-url-input",
+			attr: {
+				type: "text",
+				readonly: "true",
+				value: SOUL_SUGGESTION_FORM_URL,
+				"aria-label": this.t("settings.soulLab.suggestion.linkLabel", "收集表链接"),
+			},
+		});
+		const copyButton = urlRowEl.createEl("button", {
+			cls: "friday-soul-suggestion-copy-button",
+			text: this.t("settings.soulLab.suggestion.copyLink", "复制链接"),
+			attr: {
+				type: "button",
+			},
+		});
+		copyButton.addEventListener("click", () => {
+			void this.copySoulSuggestionFormUrl();
+		});
+		modal.contentEl.createDiv({
+			cls: "friday-soul-suggestion-modal-hint",
+			text: this.t(
+				"settings.soulLab.suggestion.modalHint",
+				"内网环境可能无法直接访问；也可以把链接粘贴到企业微信会话中打开。",
+			),
+		});
+		modal.open();
+	}
+
+	private async copySoulSuggestionFormUrl(): Promise<void> {
+		try {
+			if (navigator.clipboard?.writeText) {
+				await navigator.clipboard.writeText(SOUL_SUGGESTION_FORM_URL);
+			} else {
+				const textArea = document.createElement("textarea");
+				textArea.value = SOUL_SUGGESTION_FORM_URL;
+				textArea.style.position = "fixed";
+				textArea.style.opacity = "0";
+				document.body.appendChild(textArea);
+				textArea.select();
+				const copied = document.execCommand("copy");
+				textArea.remove();
+				if (!copied) {
+					throw new Error("execCommand copy returned false");
+				}
+			}
+			new Notice(this.t("settings.soulLab.suggestion.copied", "已复制收集表链接"));
+		} catch {
+			new Notice(this.t("settings.soulLab.suggestion.copyFailed", "复制失败，请手动复制链接"));
+		}
 	}
 
 	private renderSoulTemplateCard(

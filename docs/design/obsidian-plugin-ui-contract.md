@@ -254,6 +254,37 @@ Rules:
 - Place actions at the bottom or trailing edge.
 - Avoid image-like decoration unless the project has real visual content.
 
+### Project Sync Workbench
+
+Use for the project sync page and project-level Git readiness checks.
+
+Rules:
+
+- Treat the page as an Obsidian-native management surface, not a branded landing page.
+- Start with the active project, local path, remote repository, branch, and last sync state.
+- Treat the selected project folder as already established on this page. Show it
+  as context, not as a readiness checklist item.
+- Use one primary action: `同步当前项目`.
+- Keep `检查状态`, `项目设置`, and broad actions such as `同步全部` secondary.
+- Express Git state as short user-facing Chinese labels: `远端已连接`, `待推送`,
+  `待拉取`, `本地改动`, and `冲突`.
+- When branch switching is available, distinguish project selection from branch
+  selection. Show the current branch, upstream tracking branch, and switching
+  risk before the user changes branches.
+- Collaboration records should summarize recent authors, commit scope, and
+  whether changes are local, remote, merged, or pending. Do not turn the sync
+  page into a full commit-history viewer.
+- Use an update tree only for sync decisions: local ahead, remote behind,
+  diverged branches, and candidate branch switches. Keep deep history in a
+  detail view.
+- Use status badges, low-emphasis event rows, running surfaces, file-type icons,
+  and compact control buttons before adding any project-specific visual language.
+- Put raw commands, snapshot paths, and diff details behind detail rows or conflict
+  panels, not in the first visible status line.
+- Keep dangerous actions such as deleting project records, resetting sync state,
+  or changing remotes at the end of the relevant settings group with explicit
+  confirmation.
+
 ### Empty State
 
 Empty states are valid FRIDAY-branded moments.

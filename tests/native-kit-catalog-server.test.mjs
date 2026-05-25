@@ -103,8 +103,9 @@ test("native kit accepted spec matches the reviewed catalog decisions", async ()
 	const spec = await readFile(specPath, "utf8");
 	const migrationMap = await readFile(migrationMapPath, "utf8");
 
-	assert.deepEqual(decisions.counts, { keep: 13, adjust: 0, hold: 1 });
+	assert.deepEqual(decisions.counts, { keep: 13, adjust: 1, hold: 1 });
 	assert.equal(decisions.choices["项目状态组"], "hold");
+	assert.equal(decisions.choices["分支选择器"], "adjust");
 
 	for (const component of [
 		"品牌页头",
@@ -352,6 +353,128 @@ test("native kit catalog includes assistant process taskbar system refinements",
 	assert.match(projectMarkup, /project-health-meter-v4/);
 });
 
+test("native kit catalog sketches the ideal project page v2 structure", async () => {
+	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
+	const html = await readFile(htmlPath, "utf8");
+	const previewMarkup = html.match(/data-component="项目页预览"[\s\S]*?<\/article>/u)?.[0] || "";
+
+	for (const className of [
+		"project-page-preview-v2",
+		"project-command-surface-v2",
+		"project-command-actions-v2",
+		"project-decision-meta-v2",
+		"project-decision-row-v2",
+		"project-sync-ledger-v2",
+		"project-detail-lane-v2",
+		"project-branch-menu-v2",
+		"project-branch-summary-v2",
+		"project-current-branch-v2",
+		"project-branch-menu-list-v2",
+		"project-branch-choice-v2",
+		"project-local-workspace-v2",
+		"project-git-rail-v2",
+		"project-local-changes-v2",
+		"project-local-empty-v2",
+		"project-file-row-v2",
+		"project-function-card-v2",
+		"project-function-section-v2",
+		"project-function-summary-v2",
+		"project-function-detail-v2",
+		"project-collab-stream-v2",
+		"project-ignore-rules-v2",
+		"project-ignore-token-v2",
+	]) {
+		assert.match(previewMarkup, new RegExp(className, "u"));
+		assert.match(html, new RegExp(`\\.${className}\\b`, "u"));
+	}
+
+	const topbarMarkup = previewMarkup.match(/<div class="friday-workbench-bar-v2 project-ideal-topbar-v2">[\s\S]*?<div class="project-page-shell-v2">/u)?.[0] || "";
+	assert.doesNotMatch(topbarMarkup, /aria-label="刷新"/u);
+	assert.doesNotMatch(topbarMarkup, /icon-refresh/u);
+	assert.match(topbarMarkup, /aria-label="设置"/u);
+
+	const decisionCopyMarkup = previewMarkup.match(/<div class="project-command-copy-v2">[\s\S]*?<\/div>\s*<div class="project-command-actions-v2">/u)?.[0] || "";
+	assert.match(decisionCopyMarkup, />项目范围：<\/strong>\s*<span>Projects\/Friday-beta-evm<\/span>/u);
+	assert.match(decisionCopyMarkup, />远端地址：<\/strong>\s*<span>github\.com\/user\/friday-beta-evm<\/span>/u);
+	assert.doesNotMatch(decisionCopyMarkup, /项目范围已确定：/u);
+	assert.doesNotMatch(decisionCopyMarkup, / · 远端/u);
+
+	const contextPillMarkup = previewMarkup.match(/<div class="project-context-pill-v2">[\s\S]*?<div class="workbench-tools-v2">/u)?.[0] || "";
+	assert.doesNotMatch(contextPillMarkup, /project-branch-menu-v2/u);
+	assert.match(previewMarkup, /project-command-actions-v2[\s\S]*project-branch-menu-v2/u);
+	assert.match(previewMarkup, /<details class="project-branch-menu-v2">/u);
+	assert.doesNotMatch(previewMarkup, /<details class="project-branch-menu-v2" open>/u);
+	assert.match(previewMarkup, /data-branch-choice="feature\/native-kit"/u);
+	assert.doesNotMatch(previewMarkup, /<button type="button" class="mod-cta">同步当前项目<\/button>/u);
+
+	const commandActionsMarkup = previewMarkup.match(/<div class="project-command-actions-v2">[\s\S]*?<\/details>\s*<\/div>/u)?.[0] || "";
+	assert.match(commandActionsMarkup, /aria-label="检查状态"[\s\S]*icon-refresh/u);
+	assert.doesNotMatch(commandActionsMarkup, /aria-label="项目设置"/u);
+	assert.doesNotMatch(commandActionsMarkup, />同步当前项目</u);
+
+	const ledgerMarkup = previewMarkup.match(/<div class="project-sync-ledger-v2"[\s\S]*?<\/div>\s*<\/div>/u)?.[0] || "";
+	assert.equal((ledgerMarkup.match(/project-ledger-item-v2/g) || []).length, 4);
+	assert.doesNotMatch(ledgerMarkup, />分支<\/span>\s*<strong>main<\/strong>/u);
+	assert.doesNotMatch(previewMarkup, /Friday-beta-evm 可以同步/u);
+	assert.ok(
+		previewMarkup.indexOf("project-local-workspace-v2") < previewMarkup.indexOf("project-function-card-v2"),
+		"local changes should remain the primary area before functional sync details",
+	);
+	const localChangesMarkup = previewMarkup.match(/<section class="project-local-changes-v2"[\s\S]*?<\/section>/u)?.[0] || "";
+	assert.equal((localChangesMarkup.match(/project-file-row-v2/g) || []).length, 4);
+	assert.match(localChangesMarkup, /workspace\/FRIDAY 介绍\.md/u);
+	assert.match(localChangesMarkup, />忽略目录</u);
+	assert.match(localChangesMarkup, /project-local-empty-v2/u);
+	assert.match(localChangesMarkup, />无改动</u);
+	const functionCardMarkup = previewMarkup.match(/<aside class="project-function-card-v2"[\s\S]*?<\/aside>/u)?.[0] || "";
+	assert.equal((functionCardMarkup.match(/project-function-section-v2/g) || []).length, 4);
+	assert.deepEqual(
+		Array.from(functionCardMarkup.matchAll(/<summary class="project-function-summary-v2">[\s\S]*?<strong>([^<]+)<\/strong>/gu)).map((match) => match[1]),
+		["同步状态", "Git更新树", "协作状态", "忽略规则"],
+	);
+	assert.doesNotMatch(functionCardMarkup, /<details class="project-function-section-v2[^"]*" open/u);
+	assert.doesNotMatch(functionCardMarkup, />同步检查</u);
+	const ignoreRulesMarkup = functionCardMarkup.match(/<details class="project-function-section-v2 project-ignore-rules-v2"[\s\S]*?<\/details>/u)?.[0] || "";
+	assert.equal((ignoreRulesMarkup.match(/project-ignore-token-v2/g) || []).length, 3);
+	assert.match(ignoreRulesMarkup, /\.friday\//u);
+	assert.match(ignoreRulesMarkup, /workspace\/cache\//u);
+	assert.match(ignoreRulesMarkup, />管理忽略</u);
+	assert.doesNotMatch(previewMarkup, /project-side-rail-v2/u);
+	assert.doesNotMatch(functionCardMarkup, />项目设置</u);
+	assert.doesNotMatch(functionCardMarkup, />项目设置摘要</u);
+	assert.doesNotMatch(functionCardMarkup, />工作范围</u);
+	assert.doesNotMatch(functionCardMarkup, />同步策略</u);
+	assert.doesNotMatch(functionCardMarkup, /Projects\/Friday-beta-evm/u);
+	assert.doesNotMatch(previewMarkup, /project-branch-dock-v2/u);
+	assert.doesNotMatch(previewMarkup, /project-status-matrix-v1/u);
+	assert.doesNotMatch(previewMarkup, /选择项目/u);
+	assert.match(html, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*\.project-detail-lane-v2\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*\.project-function-card-v2\s*\{[\s\S]*order:\s*2/u);
+	assert.match(html, /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*\.project-local-workspace-v2\s*\{[\s\S]*order:\s*1/u);
+	assert.match(html, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.project-function-card-v2\s*\{[\s\S]*order:\s*2/u);
+	assert.match(html, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.project-local-workspace-v2\s*\{[\s\S]*order:\s*1/u);
+	assert.match(html, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.project-command-actions-v2\s+\.project-branch-menu-v2\s*\{[\s\S]*width:\s*max-content/u);
+	assert.match(html, /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*\.project-command-actions-v2\s+\.project-branch-summary-v2\s*\{[\s\S]*width:\s*auto/u);
+	assert.doesNotMatch(html, /@media\s*\(max-width:\s*760px\)[\s\S]*\.project-branch-menu-v2,\s*\.project-branch-summary-v2,\s*\.project-branch-menu-list-v2\s*\{[\s\S]*width:\s*100%/u);
+	assert.match(html, /\.project-page-shell-v2\s*\{[\s\S]*container-type:\s*inline-size/u);
+	assert.match(html, /\.project-decision-row-v2 span\s*\{[\s\S]*white-space:\s*normal/u);
+	assert.match(html, /\.project-decision-row-v2 span\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
+	assert.match(html, /\.project-ledger-item-v2 strong\s*\{[\s\S]*white-space:\s*normal/u);
+	assert.match(html, /\.project-ledger-item-v2 strong\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
+	assert.match(html, /\.project-file-copy-v2 strong\s*\{[\s\S]*white-space:\s*normal/u);
+	assert.match(html, /\.project-file-copy-v2 strong\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
+	assert.match(html, /@container\s*\(max-width:\s*860px\)\s*\{[\s\S]*\.project-detail-lane-v2\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@container\s*\(max-width:\s*720px\)\s*\{[\s\S]*\.project-sync-ledger-v2\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@container\s*\(max-width:\s*640px\)\s*\{[\s\S]*\.project-command-surface-v2,[\s\S]*grid-template-columns:\s*1fr/u);
+	assert.match(html, /@container\s*\(max-width:\s*520px\)\s*\{[\s\S]*\.project-file-row-v2\s*\{[\s\S]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/u);
+	assert.match(html, /\.project-collab-row-v1,\s*\n\t\t\.project-collab-item-v2\s*\{[\s\S]*grid-template-columns:\s*32px minmax\(0,\s*1fr\) auto/u);
+	assert.match(html, /\.project-avatar-stack-v1\s*\{[\s\S]*width:\s*32px/u);
+	assert.match(html, /\.project-avatar-stack-v1\s*\{[\s\S]*overflow:\s*visible/u);
+	assert.match(html, /\.project-function-detail-v2\s*\{[\s\S]*font-size:\s*0\.74rem/u);
+	assert.match(html, /\.project-function-detail-v2\s+\.project-collab-item-v2 strong,[\s\S]*font-size:\s*0\.76rem/u);
+	assert.match(html, /@container\s*\(max-width:\s*520px\)\s*\{[\s\S]*\.project-collab-row-v1,[\s\S]*grid-template-columns:\s*32px minmax\(0,\s*1fr\)/u);
+});
+
 test("native kit catalog preserves theme responsive and reduced-motion CSS contracts", async () => {
 	const htmlPath = path.resolve("docs", "design", "native-kit-catalog.html");
 	const html = await readFile(htmlPath, "utf8");
@@ -387,6 +510,12 @@ test("native kit catalog includes scanned components and reusable primitives", a
 		"能力控制中心",
 		"对话记录抽屉",
 		"同步冲突差异",
+		"项目同步状态元素",
+		"项目同步工作台",
+		"项目页预览",
+		"分支选择器",
+		"协作记录",
+		"Git 更新树",
 	]) {
 		assert.match(html, new RegExp(`data-component="${component}"`, "u"));
 		assert.match(spec, new RegExp(component.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
@@ -410,6 +539,15 @@ test("native kit catalog includes scanned components and reusable primitives", a
 		"control-center-kit-v1",
 		"session-drawer-kit-v1",
 		"sync-conflict-layout-v1",
+		"project-status-palette-v1",
+		"project-sync-workbench-v1",
+		"project-page-preview-v1",
+		"project-readiness-strip-v1",
+		"project-status-matrix-v1",
+		"project-branch-picker-v1",
+		"project-collab-log-v1",
+		"project-git-tree-v1",
+		"project-avatar-stack-v1",
 		"scan-row-v1 is-text-only",
 		"friday-kit-running-sheen",
 		"prefers-reduced-motion",
@@ -434,6 +572,18 @@ test("native kit catalog includes scanned components and reusable primitives", a
 	assert.match(sections.get("control") || "", /data-component="能力控制中心"/u);
 	assert.match(sections.get("ai") || "", /data-component="对话记录抽屉"/u);
 	assert.match(sections.get("project") || "", /data-component="同步冲突差异"/u);
+	assert.match(sections.get("project") || "", /data-component="项目同步状态元素"/u);
+	assert.match(sections.get("project") || "", /data-component="项目同步工作台"/u);
+	assert.match(sections.get("project") || "", /data-component="项目页预览"/u);
+	assert.match(sections.get("project") || "", /data-component="分支选择器"/u);
+	assert.match(sections.get("project") || "", /data-component="协作记录"/u);
+	assert.match(sections.get("project") || "", /data-component="Git 更新树"/u);
+	assert.match(sections.get("project") || "", />同步检查</u);
+	assert.match(sections.get("project") || "", /aria-label="选择分支"/u);
+	assert.match(sections.get("project") || "", />最近协作</u);
+	assert.match(sections.get("project") || "", />更新树</u);
+	assert.doesNotMatch(sections.get("project") || "", />同步前置条件</u);
+	assert.doesNotMatch(sections.get("project") || "", />已选择工作范围</u);
 
 	const runningSurfaceMarkup = html.match(/data-component="运行中表面"[\s\S]*?<\/article>/u)?.[0] || "";
 	assert.match(runningSurfaceMarkup, /CSS 背景扫光/u);
@@ -453,6 +603,8 @@ test("native kit catalog includes scanned components and reusable primitives", a
 		"新增组件候选已进 HTML 画板",
 		"这些候选不改变当前 `native-kit-catalog-decisions.json` 的 13/0/1 选择计数",
 		"同步冲突差异不是解除项目状态组暂缓",
+		"项目页候选同样不解除 `项目状态组` 暂缓",
+		"不等于引入完整 Git 历史浏览器",
 	]) {
 		assert.match(migrationMap, new RegExp(requiredMapText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "u"));
 	}

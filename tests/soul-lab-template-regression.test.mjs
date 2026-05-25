@@ -13,6 +13,7 @@ const soulSettingsSectionPath = path.join(projectRoot, "src/settings/sections/So
 const stylesPath = path.join(projectRoot, "styles.css");
 const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
+const updateConstantsPath = path.join(projectRoot, "src/constants/update.ts");
 
 function read(filePath) {
 	assert.ok(fs.existsSync(filePath), `${path.basename(filePath)} should exist`);
@@ -162,6 +163,7 @@ test("mbti soul templates model profile strategy instead of fixed identity scrip
 test("settings soul section opens Soul Lab and subscribes read-only experiment souls", () => {
 	const settingsSource = read(settingsPath);
 	const sectionSource = read(soulSettingsSectionPath);
+	const updateConstantsSource = read(updateConstantsPath);
 
 	assert.match(settingsSource, /SoulExperimentTemplate/);
 	assert.match(sectionSource, /SOUL_EXPERIMENT_TEMPLATE_SERIES/);
@@ -213,10 +215,37 @@ test("settings soul section opens Soul Lab and subscribes read-only experiment s
 		"Soul Lab should link to the configured Enterprise WeChat collection form",
 	);
 	assert.match(settingsSource, /renderSoulSuggestionPanel/);
+	assert.match(settingsSource, /openSoulSuggestionFormModal/);
+	assert.match(settingsSource, /copySoulSuggestionFormUrl/);
 	assert.match(settingsSource, /friday-soul-suggestion-panel/);
 	assert.match(settingsSource, /settings\.soulLab\.suggestion\.title/);
 	assert.match(settingsSource, /settings\.soulLab\.suggestion\.note/);
-	assert.match(settingsSource, /window\.open\(SOUL_SUGGESTION_FORM_URL,\s*"_blank",\s*"noopener,noreferrer"\)/);
+	assert.match(settingsSource, /settings\.soulLab\.suggestion\.formAction/);
+	assert.match(settingsSource, /settings\.soulLab\.suggestion\.issueAction/);
+	assert.match(settingsSource, /settings\.soulLab\.suggestion\.modalHint/);
+	assert.match(settingsSource, /settings\.soulLab\.suggestion\.copyLink/);
+	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-actions"/);
+	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-action is-primary"/);
+	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-action is-secondary external-link"/);
+	assert.match(settingsSource, /QRCode\.toDataURL\(SOUL_SUGGESTION_FORM_URL/);
+	assert.match(settingsSource, /navigator\.clipboard\.writeText\(SOUL_SUGGESTION_FORM_URL\)/);
+	assert.match(settingsSource, /friday-soul-suggestion-modal/);
+	assert.match(settingsSource, /friday-soul-suggestion-qr/);
+	assert.match(settingsSource, /friday-soul-suggestion-url-row/);
+	assert.match(settingsSource, /SOUL_SUGGESTION_ISSUE_URL/);
+	assert.match(settingsSource, /PLUGIN_UPDATE_REPO_URL/);
+	assert.match(settingsSource, /buildSoulSuggestionIssueUrl/);
+	assert.match(settingsSource, /\/issues\/new/);
+	assert.match(settingsSource, /issue\[title\]/);
+	assert.match(settingsSource, /issue\[description\]/);
+	assert.match(settingsSource, /href:\s*SOUL_SUGGESTION_ISSUE_URL/);
+	assert.match(updateConstantsSource, /PLUGIN_UPDATE_REPO_URL = "https:\/\/devops\.byd\.com\/QCSHFW\/houshichangjiazhifazhanbu\/F\.R\.I\.D\.A\.Y\.git"/);
+	assert.doesNotMatch(settingsSource, /github\.com\/KeithChen51\/Firday4Obsidan\/issues\/new/);
+	assert.doesNotMatch(settingsSource, /target:\s*"_blank"/);
+	assert.doesNotMatch(settingsSource, /SOUL_SUGGESTION_WXWORK_URL/);
+	assert.doesNotMatch(settingsSource, /wxwork:\/\/jump/);
+	assert.doesNotMatch(settingsSource, /window\.open\(SOUL_SUGGESTION/);
+	assert.doesNotMatch(settingsSource, /href:\s*SOUL_SUGGESTION_FORM_URL/);
 	assert.match(sectionSource, /friday-soul-lab-series/);
 	assert.match(sectionSource, /friday-soul-template-grid/);
 	assert.match(settingsSource, /friday-soul-template-card/);
@@ -264,7 +293,12 @@ test("Soul Lab template cards have responsive native styles", () => {
 		".friday-soul-lab-intro-header",
 		".friday-soul-lab-back-button",
 		".friday-soul-suggestion-panel",
+		".friday-soul-suggestion-actions",
 		".friday-soul-suggestion-action",
+		".friday-soul-suggestion-action.is-secondary",
+		".friday-soul-suggestion-modal",
+		".friday-soul-suggestion-qr",
+		".friday-soul-suggestion-url-row",
 	]) {
 		assert.ok(styles.includes(expected), `Expected Soul Lab card style: ${expected}`);
 	}
@@ -287,6 +321,13 @@ test("Soul Lab template cards have responsive native styles", () => {
 	assert.match(styles, /\.friday-soul-lab-intro-header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 	assert.match(styles, /\.friday-soul-lab-back-button\s*\{[^}]*height:\s*30px/);
 	assert.match(styles, /\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+	assert.match(styles, /\.friday-soul-suggestion-actions\s*\{[^}]*display:\s*inline-flex/);
+	assert.match(styles, /\.friday-soul-suggestion-action\s*\{[^}]*display:\s*inline-flex/);
+	assert.match(styles, /\.friday-soul-suggestion-action\s*\{[^}]*text-decoration:\s*none/);
+	assert.match(styles, /\.friday-soul-suggestion-action\.is-secondary\s*\{[^}]*background:\s*var\(--background-primary\)/);
+	assert.match(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*display:\s*grid/);
+	assert.match(styles, /\.friday-soul-suggestion-qr\s*\{[^}]*justify-content:\s*center/);
+	assert.match(styles, /\.friday-soul-suggestion-url-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 	assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*1fr/);
 });
 
@@ -304,7 +345,14 @@ test("locales cover Soul Lab entry and MBTI series copy", () => {
 		assert.match(source, /settings\.soulLab\.subscribed/);
 		assert.match(source, /settings\.soulLab\.unsubscribed/);
 		assert.match(source, /settings\.soulLab\.suggestion\.title/);
-		assert.match(source, /settings\.soulLab\.suggestion\.action/);
+		assert.match(source, /settings\.soulLab\.suggestion\.formAction/);
+		assert.match(source, /settings\.soulLab\.suggestion\.issueAction/);
+		assert.match(source, /settings\.soulLab\.suggestion\.modalTitle/);
+		assert.match(source, /settings\.soulLab\.suggestion\.modalHint/);
+		assert.match(source, /settings\.soulLab\.suggestion\.copyLink/);
+		assert.match(source, /settings\.soulLab\.suggestion\.copied/);
+		assert.doesNotMatch(source, /settings\.soulLab\.suggestion\.action/);
+		assert.doesNotMatch(source, /settings\.soulLab\.suggestion\.weCom/);
 	}
 
 	assert.ok(zh.includes('"settings.soulLab.mbti.title": "MBTI 沟通风格实验"'));
@@ -319,6 +367,8 @@ test("locales cover Soul Lab entry and MBTI series copy", () => {
 	assert.ok(zh.includes("收起 Soul 详情"));
 	assert.ok(en.includes("Expand Soul details"));
 	assert.ok(en.includes("Collapse Soul details"));
-	assert.ok(en.includes("Recommend a Soul"));
+	assert.ok(en.includes("Submit via form"));
+	assert.ok(en.includes("Send via issue"));
+	assert.ok(en.includes("Copy link"));
 	assert.ok(en.includes("Enterprise WeChat collection form"));
 });

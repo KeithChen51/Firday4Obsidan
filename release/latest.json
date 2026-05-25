@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"pluginId": "friday-obsidian-plugin",
-	"version": "0.2.12",
+	"version": "0.2.14",
 	"minAppVersion": "1.0.0",
 	"branch": "master",
-	"publishedAt": "2026-05-19T02:25:43.575Z",
+	"publishedAt": "2026-05-25T03:52:31.675Z",
 	"files": {
 		"main.js": "release/friday-obsidian-plugin/main.js",
 		"manifest.json": "release/friday-obsidian-plugin/manifest.json",
 		"styles.css": "release/friday-obsidian-plugin/styles.css"
 	},
-	"releaseNotes": "- 新增 Soul 实验室，可以从实验模板创建一个可编辑的 FRIDAY Soul；首批加入 6 个 MBTI 沟通风格 Alpha，包括战略军师、反方辩手、深度洞察者、灵感火花、秩序管家和现场推进者。\n- Soul 底层升级为 Profile v2：FRIDAY 的身份保持稳定，Soul 只改变沟通节奏、信息组织、反馈方式和不同场景下的表达策略。\n- 身份和风格说明更自然：问“你是谁”时会用当前 Soul 的语气介绍 FRIDAY；只有明确询问 Soul、风格或 MBTI 设置时，才说明当前使用的沟通风格。\n- MBTI 模板会继续作为沟通偏好入口，而不是人格测评或用户身份判断；FRIDAY 不会把自己说成某个 MBTI 类型，也不会把用户贴成某个类型。"
+	"releaseNotes": "- 项目同步页重新整理为“同步决策 + 本地改动 + 功能信息”的结构。当前项目、项目范围和远端地址会先显示清楚，本地待提交文件成为主内容，检查状态、Git 更新树、协作状态和忽略规则默认收起，需要时再展开。\n- 分支选择改成靠近同步操作的紧凑下拉入口，可以看到当前分支并切换到其他分支；窄窗口下不会撑满整行。\n- 本地改动列表补上查看和忽略目录入口；没有改动时会显示空状态，忽略规则也有单独的管理入口。"
 }

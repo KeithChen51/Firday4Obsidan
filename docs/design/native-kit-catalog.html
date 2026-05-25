@@ -359,6 +359,7 @@
 		.section-mode {
 			display: inline-flex;
 			align-items: center;
+			justify-self: start;
 			min-height: 24px;
 			padding: 0 8px;
 			border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
@@ -1159,11 +1160,16 @@
 		}
 
 		.workbench-primary-v2,
+		.workbench-brand-v2,
 		.workbench-project-v2,
 		.workbench-tools-v2 {
 			display: flex;
 			align-items: center;
 			min-width: 0;
+		}
+
+		.workbench-brand-v2 {
+			gap: var(--space-2);
 		}
 
 		.workbench-primary-v2 {
@@ -1686,7 +1692,7 @@
 		}
 
 		.kit-control-button-v1.is-permission {
-			border-color: color-mix(in srgb, var(--text-warning) 38%, var(--background-modifier-border));
+			border-color: color-mix(in srgb, var(--color-orange) 38%, var(--background-modifier-border));
 		}
 
 		.kit-control-button-v1.is-context,
@@ -2120,7 +2126,7 @@
 		}
 
 		.project-health-meter-v4 .is-warning {
-			background: var(--text-warning);
+			background: var(--color-orange);
 		}
 
 		.project-health-meter-v4 .is-muted {
@@ -2174,6 +2180,1110 @@
 		.project-field-row span:first-child {
 			color: var(--text-faint);
 			font-weight: 700;
+		}
+
+		.project-status-palette-v1 {
+			display: grid;
+			grid-template-columns: repeat(3, minmax(0, 1fr));
+			gap: var(--space-2);
+		}
+
+		.project-status-token-v1 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+			padding: 9px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.project-status-token-v1 strong,
+		.project-status-token-v1 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-status-token-v1 strong {
+			font-size: 0.82rem;
+		}
+
+		.project-status-token-v1 span {
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.project-status-token-v1.is-ready {
+			border-color: color-mix(in srgb, var(--color-green) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-green) 7%, var(--background-primary));
+		}
+
+		.project-status-token-v1.is-warning {
+			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary));
+		}
+
+		.project-status-token-v1.is-danger {
+			border-color: color-mix(in srgb, var(--color-red) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-red) 7%, var(--background-primary));
+		}
+
+		.project-readiness-strip-v1 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.project-readiness-head-v1,
+		.project-sync-action-row-v1,
+		.project-workbench-toolbar-v1,
+		.project-page-toolbar-v1 {
+			display: flex;
+			flex-wrap: wrap;
+			align-items: center;
+			justify-content: space-between;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.project-title-stack-v1 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+		}
+
+		.project-title-stack-v1 strong,
+		.project-title-stack-v1 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-title-stack-v1 span {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+		}
+
+		.project-status-matrix-v1 {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: var(--space-2);
+		}
+
+		.project-status-cell-v1 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+			padding: 8px 9px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+			border-radius: var(--radius-s);
+			background: color-mix(in srgb, var(--background-primary-alt) 58%, transparent);
+		}
+
+		.project-status-cell-v1 strong,
+		.project-status-cell-v1 span {
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-status-cell-v1 strong {
+			font-size: 0.78rem;
+		}
+
+		.project-status-cell-v1 span {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+		}
+
+		.project-sync-workbench-v1,
+		.project-page-preview-v1 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.project-workbench-toolbar-v1 {
+			padding-bottom: var(--space-2);
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+		}
+
+		.project-workbench-body-v1,
+		.project-page-grid-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1.45fr) minmax(240px, 0.85fr);
+			gap: var(--space-3);
+			align-items: start;
+		}
+
+		.project-detail-stack-v1,
+		.project-activity-stack-v1,
+		.project-settings-preview-v1,
+		.project-page-main-v1,
+		.project-page-side-v1 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.project-sync-check-row-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 7px 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+		}
+
+		.project-sync-check-row-v1:last-child {
+			border-bottom: 0;
+		}
+
+		.project-sync-check-row-v1 span:first-child {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-settings-preview-v1 {
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 84%, transparent);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary-alt) 66%, transparent);
+		}
+
+		.project-setting-preview-row-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 8px 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+		}
+
+		.project-setting-preview-row-v1:last-child {
+			border-bottom: 0;
+		}
+
+		.project-setting-preview-row-v1 strong,
+		.project-setting-preview-row-v1 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-setting-preview-row-v1 span {
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.project-page-frame-v1 {
+			display: grid;
+			gap: 0;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary-alt);
+			overflow: hidden;
+		}
+
+		.project-page-shell-v1 {
+			display: grid;
+			gap: var(--space-3);
+			padding: var(--space-3);
+			background: var(--background-primary);
+		}
+
+		.project-page-side-v1 {
+			padding: var(--space-3);
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--background-primary-alt) 72%, transparent);
+		}
+
+		.project-page-side-v1 h4 {
+			margin: 0;
+			font-size: 0.86rem;
+		}
+
+		.project-branch-picker-v1,
+		.project-collab-log-v1,
+		.project-git-tree-v1 {
+			display: grid;
+			gap: var(--space-2);
+			min-width: 0;
+			padding: var(--space-3);
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-m);
+			background: var(--background-primary);
+		}
+
+		.project-branch-active-v1 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			padding: 9px 10px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 28%, var(--background-modifier-border));
+			border-radius: var(--radius-m);
+			background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+		}
+
+		.project-branch-active-v1 strong,
+		.project-branch-active-v1 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-branch-active-v1 span {
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.project-branch-row-v1,
+		.project-collab-row-v1,
+		.project-git-node-v1 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 8px 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 70%, transparent);
+		}
+
+		.project-collab-row-v1,
+		.project-collab-item-v2 {
+			grid-template-columns: 32px minmax(0, 1fr) auto;
+			column-gap: 12px;
+		}
+
+		.project-branch-row-v1:last-child,
+		.project-collab-row-v1:last-child,
+		.project-git-node-v1:last-child {
+			border-bottom: 0;
+		}
+
+		.project-branch-row-v1 strong,
+		.project-branch-row-v1 span,
+		.project-collab-row-v1 strong,
+		.project-collab-row-v1 span,
+		.project-git-node-v1 strong,
+		.project-git-node-v1 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-branch-row-v1 span,
+		.project-collab-row-v1 span,
+		.project-git-node-v1 span {
+			color: var(--text-muted);
+			font-size: 0.76rem;
+		}
+
+		.project-branch-dot-v1,
+		.project-git-dot-v1 {
+			width: 10px;
+			height: 10px;
+			border: 2px solid var(--interactive-accent);
+			border-radius: 999px;
+			background: var(--background-primary);
+		}
+
+		.project-branch-dot-v1.is-muted,
+		.project-git-dot-v1.is-muted {
+			border-color: var(--background-modifier-border);
+		}
+
+		.project-branch-dot-v1.is-warning,
+		.project-git-dot-v1.is-warning {
+			border-color: var(--color-orange);
+		}
+
+		.project-avatar-stack-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: flex-start;
+			width: 32px;
+			min-width: 32px;
+			max-width: 32px;
+			overflow: visible;
+		}
+
+		.project-avatar-v1 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 24px;
+			height: 24px;
+			margin-left: -6px;
+			border: 1px solid var(--background-primary);
+			border-radius: 999px;
+			background: var(--background-primary-alt);
+			color: var(--text-muted);
+			font-size: 0.68rem;
+			font-weight: 760;
+		}
+
+		.project-avatar-v1:first-child {
+			margin-left: 0;
+		}
+
+		.project-avatar-v1.is-active {
+			background: color-mix(in srgb, var(--interactive-accent) 18%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.project-git-tree-v1 {
+			position: relative;
+		}
+
+		.project-git-tree-v1::before {
+			content: "";
+			position: absolute;
+			top: 54px;
+			bottom: 18px;
+			left: 29px;
+			width: 1px;
+			background: color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+		}
+
+		.project-git-node-v1 {
+			position: relative;
+			z-index: 1;
+			grid-template-columns: 28px minmax(0, 1fr) auto;
+		}
+
+		.project-git-node-v1.is-remote {
+			padding-left: 18px;
+		}
+
+		.project-git-node-v1.is-remote::before {
+			content: "";
+			position: absolute;
+			left: 30px;
+			top: 50%;
+			width: 18px;
+			height: 1px;
+			background: color-mix(in srgb, var(--background-modifier-border) 80%, transparent);
+		}
+
+		.project-page-preview-v2 {
+			display: grid;
+			gap: 0;
+			min-width: 0;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-l);
+			background: var(--background-primary);
+			overflow: hidden;
+		}
+
+		.project-page-frame-v2 {
+			display: grid;
+			min-width: 0;
+			background:
+				linear-gradient(180deg, color-mix(in srgb, var(--background-primary-alt) 58%, transparent), transparent 180px),
+				var(--background-primary);
+		}
+
+		.project-ideal-topbar-v2 {
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 72%, transparent);
+			background: color-mix(in srgb, var(--background-primary) 86%, transparent);
+		}
+
+		.project-context-pill-v2 {
+			display: grid;
+			gap: 1px;
+			min-width: min(280px, 100%);
+			padding-left: var(--space-3);
+			border-left: 1px solid color-mix(in srgb, var(--background-modifier-border) 74%, transparent);
+		}
+
+		.project-context-pill-v2 > span,
+		.project-overline-v2 {
+			color: var(--text-faint);
+			font-size: 0.68rem;
+			font-weight: 760;
+			text-transform: uppercase;
+			letter-spacing: 0;
+		}
+
+		.project-identity-stack-v2 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 5px var(--space-2);
+			align-items: center;
+			min-width: 0;
+		}
+
+		.project-context-pill-v2 > strong,
+		.project-identity-stack-v2 > strong {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-size: 0.84rem;
+		}
+
+		.project-branch-menu-v2 {
+			position: relative;
+			z-index: 4;
+			display: inline-grid;
+			min-width: 0;
+		}
+
+		.project-branch-summary-v2 {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			min-width: 0;
+			max-width: min(236px, 100%);
+			min-height: 26px;
+			padding: 3px 7px 3px 6px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 26%, var(--background-modifier-border));
+			border-radius: 7px;
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+			color: var(--text-normal);
+			cursor: pointer;
+			font-size: 0.74rem;
+			font-weight: 760;
+			list-style: none;
+		}
+
+		.project-branch-summary-v2::-webkit-details-marker {
+			display: none;
+		}
+
+		.project-branch-summary-v2::marker {
+			content: "";
+		}
+
+		.project-branch-summary-v2::after {
+			content: "";
+			width: 6px;
+			height: 6px;
+			margin-left: 1px;
+			border-right: 1.5px solid currentColor;
+			border-bottom: 1.5px solid currentColor;
+			opacity: 0.62;
+			transform: rotate(45deg) translateY(-1px);
+		}
+
+		.project-branch-menu-v2[open] .project-branch-summary-v2::after {
+			transform: rotate(225deg) translateY(-1px);
+		}
+
+		.project-current-branch-v2 {
+			display: block;
+			min-width: 0;
+			max-width: 132px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-branch-menu-list-v2 {
+			position: absolute;
+			top: calc(100% + 6px);
+			right: 0;
+			display: grid;
+			gap: 4px;
+			width: min(328px, calc(100vw - 48px));
+			padding: 6px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+			border-radius: 8px;
+			background: var(--background-primary);
+			box-shadow: 0 14px 30px color-mix(in srgb, var(--background-modifier-border) 34%, transparent);
+		}
+
+		.project-branch-choice-v2 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			width: 100%;
+			min-width: 0;
+			padding: 7px 8px;
+			border: 1px solid transparent;
+			border-radius: 6px;
+			background: transparent;
+			color: var(--text-normal);
+			font: inherit;
+			text-align: left;
+		}
+
+		.project-branch-choice-v2.is-current {
+			border-color: color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+			background: color-mix(in srgb, var(--interactive-accent) 7%, var(--background-primary));
+		}
+
+		.project-branch-choice-copy-v2,
+		.project-branch-choice-copy-v2 strong,
+		.project-branch-choice-copy-v2 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-branch-choice-copy-v2 strong {
+			font-size: 0.78rem;
+			font-weight: 760;
+		}
+
+		.project-branch-choice-copy-v2 span {
+			color: var(--text-muted);
+			font-size: 0.7rem;
+		}
+
+		.project-branch-choice-v2 > .kit-soft-chip-v1 {
+			justify-self: end;
+		}
+
+		.project-page-shell-v2 {
+			container-type: inline-size;
+			display: grid;
+			gap: 0;
+			min-width: 0;
+			padding: 16px 18px 18px;
+		}
+
+		.project-command-surface-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: center;
+			min-width: 0;
+			padding: 2px 0 14px;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
+		}
+
+		.project-command-copy-v2 {
+			display: grid;
+			gap: 3px;
+			min-width: 0;
+		}
+
+		.project-command-copy-v2 strong {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-size: 1.05rem;
+			font-weight: 780;
+		}
+
+		.project-decision-meta-v2 {
+			display: grid;
+			gap: 2px;
+			min-width: 0;
+			color: var(--text-muted);
+			font-size: 0.8rem;
+		}
+
+		.project-decision-row-v2 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			gap: 6px;
+			align-items: baseline;
+			min-width: 0;
+		}
+
+		.project-decision-row-v2 strong,
+		.project-decision-row-v2 span {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-decision-row-v2 strong {
+			color: var(--text-muted);
+			font-size: 0.78rem;
+			font-weight: 720;
+		}
+
+		.project-decision-row-v2 span {
+			line-height: 1.45;
+			overflow: visible;
+			overflow-wrap: anywhere;
+			text-overflow: clip;
+			white-space: normal;
+		}
+
+		.project-command-actions-v2 {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: flex-end;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.project-command-actions-v2 .project-branch-summary-v2 {
+			min-height: 32px;
+			padding: 5px 10px 5px 8px;
+		}
+
+		.project-command-actions-v2 .project-branch-menu-list-v2 {
+			top: calc(100% + 8px);
+		}
+
+		.project-sync-ledger-v2 {
+			display: grid;
+			grid-template-columns: repeat(4, minmax(0, 1fr));
+			gap: 0;
+			min-width: 0;
+			padding: 9px 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+		}
+
+		.project-ledger-item-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr);
+			gap: 2px;
+			align-items: start;
+			min-width: 0;
+			padding: 6px 12px;
+		}
+
+		.project-ledger-item-v2:first-child {
+			padding-left: 0;
+		}
+
+		.project-ledger-item-v2 + .project-ledger-item-v2 {
+			border-left: 1px solid color-mix(in srgb, var(--background-modifier-border) 60%, transparent);
+		}
+
+		.project-ledger-item-v2 span,
+		.project-ledger-item-v2 strong {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-ledger-item-v2 span {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 680;
+		}
+
+		.project-ledger-item-v2 strong {
+			font-size: 0.78rem;
+			line-height: 1.35;
+			overflow: visible;
+			overflow-wrap: anywhere;
+			text-align: left;
+			text-overflow: clip;
+			white-space: normal;
+		}
+
+		.project-detail-lane-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(280px, 0.45fr);
+			gap: 16px;
+			min-width: 0;
+			padding-top: 14px;
+		}
+
+		.project-main-lane-v2,
+		.project-function-card-v2 {
+			display: grid;
+			gap: 0;
+			min-width: 0;
+			align-content: start;
+		}
+
+		.project-main-lane-v2 {
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+		}
+
+		.project-local-workspace-v2 {
+			order: 0;
+		}
+
+		.project-function-card-v2 {
+			order: 0;
+			padding: 12px 14px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+			border-radius: 8px;
+			background: color-mix(in srgb, var(--background-primary-alt) 42%, var(--background-primary));
+		}
+
+		.project-branch-dock-v2,
+		.project-local-changes-v2,
+		.project-function-section-v2 {
+			display: grid;
+			gap: 0;
+			min-width: 0;
+			border-bottom: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+		}
+
+		.project-function-section-v2 {
+			padding: 0;
+		}
+
+		.project-function-section-v2 + .project-function-section-v2 {
+			padding-top: 0;
+		}
+
+		.project-function-section-v2:last-child {
+			border-bottom: 0;
+		}
+
+		.project-function-summary-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 11px 0;
+			cursor: pointer;
+			list-style: none;
+		}
+
+		.project-function-summary-v2::-webkit-details-marker {
+			display: none;
+		}
+
+		.project-function-summary-v2::marker {
+			content: "";
+		}
+
+		.project-function-summary-v2::after {
+			content: "";
+			width: 7px;
+			height: 7px;
+			border-right: 1.5px solid currentColor;
+			border-bottom: 1.5px solid currentColor;
+			color: var(--text-muted);
+			opacity: 0.68;
+			transform: rotate(45deg) translateY(-1px);
+		}
+
+		.project-function-section-v2[open] .project-function-summary-v2::after {
+			transform: rotate(225deg) translateY(-1px);
+		}
+
+		.project-function-summary-v2 strong {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			font-size: 0.86rem;
+			font-weight: 760;
+		}
+
+		.project-function-detail-v2 {
+			display: grid;
+			gap: 0;
+			min-width: 0;
+			padding: 0 0 10px;
+			font-size: 0.74rem;
+		}
+
+		.project-function-section-v2:last-child .project-function-detail-v2 {
+			padding-bottom: 0;
+		}
+
+		.project-git-rail-v2,
+		.project-collab-stream-v2 {
+			min-width: 0;
+		}
+
+		.project-section-head-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: baseline;
+			min-width: 0;
+			padding: 11px 0 8px;
+		}
+
+		.project-section-head-v2 strong,
+		.project-section-head-v2 span {
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-section-head-v2 strong {
+			font-size: 0.86rem;
+			font-weight: 760;
+		}
+
+		.project-section-head-v2 span {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+		}
+
+		.project-branch-option-v2,
+		.project-rail-node-v2,
+		.project-collab-item-v2,
+		.project-function-row-v2 {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 9px 0;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
+		}
+
+		.project-collab-item-v2 {
+			grid-template-columns: 32px minmax(0, 1fr) auto;
+			column-gap: 12px;
+		}
+
+		.project-branch-option-v2:first-of-type,
+		.project-rail-node-v2:first-of-type,
+		.project-collab-item-v2:first-of-type,
+		.project-function-row-v2:first-of-type {
+			border-top: 0;
+		}
+
+		.project-branch-option-v2 strong,
+		.project-branch-option-v2 span,
+		.project-rail-node-v2 strong,
+		.project-rail-node-v2 span,
+		.project-collab-item-v2 strong,
+		.project-collab-item-v2 span,
+		.project-function-row-v2 strong,
+		.project-function-row-v2 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-branch-option-v2 span,
+		.project-rail-node-v2 span,
+		.project-collab-item-v2 span,
+		.project-function-row-v2 span {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+		}
+
+		.project-function-detail-v2 .project-collab-item-v2 strong,
+		.project-function-detail-v2 .project-collab-row-v1 strong,
+		.project-function-detail-v2 .project-function-row-v2 strong,
+		.project-function-detail-v2 .project-rail-node-v2 strong,
+		.project-function-detail-v2 .project-git-node-v1 strong,
+		.project-function-detail-v2 .project-collab-item-v2 span,
+		.project-function-detail-v2 .project-collab-row-v1 span,
+		.project-function-detail-v2 .project-function-row-v2 span,
+		.project-function-detail-v2 .project-rail-node-v2 span,
+		.project-function-detail-v2 .project-git-node-v1 span {
+			font-size: 0.76rem;
+			line-height: 1.35;
+		}
+
+		.project-function-detail-v2 .kit-soft-chip-v1 {
+			min-height: 22px;
+			padding: 1px 7px;
+			font-size: 0.7rem;
+		}
+
+		.project-branch-option-v2.is-selected strong {
+			color: var(--text-accent);
+		}
+
+		.project-dot-v2 {
+			width: 10px;
+			height: 10px;
+			border: 2px solid var(--interactive-accent);
+			border-radius: 999px;
+			background: var(--background-primary);
+		}
+
+		.project-dot-v2.is-muted {
+			border-color: var(--background-modifier-border);
+		}
+
+		.project-dot-v2.is-warning {
+			border-color: var(--color-orange);
+		}
+
+		.project-rail-node-v2 {
+			position: relative;
+			grid-template-columns: 28px minmax(0, 1fr) auto;
+		}
+
+		.project-rail-node-v2.is-remote {
+			padding-left: 16px;
+		}
+
+		.project-rail-node-v2.is-remote::before {
+			content: "";
+			position: absolute;
+			left: 28px;
+			top: 50%;
+			width: 16px;
+			height: 1px;
+			background: color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+		}
+
+		.project-file-row-v2 {
+			display: grid;
+			grid-template-columns: 64px minmax(0, 1fr) auto;
+			gap: var(--space-3);
+			align-items: start;
+			min-width: 0;
+			padding: 12px 0;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
+		}
+
+		.project-local-changes-v2 .project-section-head-v2 + .project-file-row-v2 {
+			border-top: 0;
+		}
+
+		.project-local-empty-v2 {
+			display: grid;
+			gap: 4px;
+			padding: 22px 0;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
+			color: var(--text-muted);
+		}
+
+		.project-local-empty-v2[hidden] {
+			display: none;
+		}
+
+		.project-local-empty-v2 strong,
+		.project-local-empty-v2 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-local-empty-v2 strong {
+			color: var(--text-normal);
+			font-size: 0.82rem;
+			font-weight: 760;
+		}
+
+		.project-file-status-v2 {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			justify-self: start;
+			min-width: 46px;
+			min-height: 24px;
+			margin-top: 2px;
+			padding: 2px 8px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+			color: var(--text-muted);
+			font-size: 0.68rem;
+			font-weight: 760;
+		}
+
+		.project-file-status-v2.is-new {
+			border-color: color-mix(in srgb, var(--color-green) 32%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-green) 7%, var(--background-primary));
+		}
+
+		.project-file-status-v2.is-ignore {
+			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary));
+		}
+
+		.project-file-copy-v2,
+		.project-file-copy-v2 strong,
+		.project-file-copy-v2 span {
+			display: block;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-file-copy-v2 strong {
+			font-size: 0.78rem;
+			font-weight: 760;
+			line-height: 1.35;
+			overflow: visible;
+			overflow-wrap: anywhere;
+			text-overflow: clip;
+			white-space: normal;
+		}
+
+		.project-file-copy-v2 span {
+			color: var(--text-muted);
+			font-size: 0.72rem;
+		}
+
+		.project-file-row-v2 button,
+		.project-function-row-v2 button {
+			min-height: 30px;
+			padding: 4px 10px;
+			border: 1px solid var(--background-modifier-border);
+			border-radius: 7px;
+			background: var(--background-primary);
+			color: var(--text-normal);
+			font: inherit;
+			font-size: 0.74rem;
+			font-weight: 700;
+		}
+
+		.project-ignore-rules-v2 {
+			display: grid;
+			gap: 8px;
+			min-width: 0;
+		}
+
+		.project-ignore-rules-v2 p {
+			margin: 0;
+			color: var(--text-muted);
+			font-size: 0.74rem;
+			line-height: 1.45;
+		}
+
+		.project-ignore-list-v2 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			min-width: 0;
+		}
+
+		.project-ignore-token-v2 {
+			display: inline-flex;
+			max-width: 100%;
+			padding: 4px 8px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+			border-radius: 999px;
+			background: color-mix(in srgb, var(--background-primary-alt) 68%, transparent);
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.7rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+		}
+
+		.project-function-row-v2 {
+			grid-template-columns: minmax(0, 1fr) auto;
 		}
 
 		.project-panel-head-v2,
@@ -2281,6 +3391,21 @@
 			border-color: color-mix(in srgb, var(--color-orange) 38%, var(--background-modifier-border));
 			background: color-mix(in srgb, var(--color-orange) 9%, var(--background-primary));
 			color: var(--text-normal);
+		}
+
+		.project-sync-check-row-v1 .kit-soft-chip-v1,
+		.project-branch-active-v1 .kit-soft-chip-v1,
+		.project-branch-row-v1 .kit-soft-chip-v1,
+		.project-collab-row-v1 .kit-soft-chip-v1,
+		.project-git-node-v1 .kit-soft-chip-v1,
+		.project-setting-preview-row-v1 .kit-soft-chip-v1,
+		.project-mini-row .kit-soft-chip-v1,
+		.kit-event-row-v1 .kit-soft-chip-v1,
+		.scan-row-v1 .kit-soft-chip-v1 {
+			display: inline-flex;
+			justify-self: start;
+			width: fit-content;
+			max-width: 100%;
 		}
 
 		.kit-icon-button-v1 {
@@ -2723,6 +3848,88 @@
 			}
 		}
 
+		@media (max-width: 900px) {
+			.project-detail-lane-v2 {
+				grid-template-columns: 1fr;
+			}
+
+			.project-local-workspace-v2 {
+				order: 1;
+			}
+
+			.project-function-card-v2 {
+				order: 2;
+			}
+		}
+
+		@container (max-width: 860px) {
+			.project-command-surface-v2,
+			.project-detail-lane-v2 {
+				grid-template-columns: 1fr;
+			}
+
+			.project-command-actions-v2 {
+				justify-content: flex-start;
+			}
+
+			.project-local-workspace-v2 {
+				order: 1;
+			}
+
+			.project-function-card-v2 {
+				order: 2;
+			}
+		}
+
+		@container (max-width: 720px) {
+			.project-sync-ledger-v2 {
+				grid-template-columns: 1fr;
+			}
+
+			.project-ledger-item-v2 {
+				padding: 7px 0;
+			}
+
+			.project-ledger-item-v2 + .project-ledger-item-v2 {
+				border-left: 0;
+				border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+			}
+		}
+
+		@container (max-width: 640px) {
+			.project-command-surface-v2 {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		@container (max-width: 520px) {
+			.project-file-row-v2 {
+				grid-template-columns: auto minmax(0, 1fr);
+				align-items: start;
+			}
+
+			.project-file-row-v2 > :last-child {
+				grid-column: 2;
+				justify-self: start;
+				width: fit-content;
+				max-width: 100%;
+			}
+
+			.project-collab-row-v1,
+			.project-collab-item-v2 {
+				grid-template-columns: 32px minmax(0, 1fr);
+				align-items: start;
+			}
+
+			.project-collab-row-v1 > .kit-soft-chip-v1,
+			.project-collab-item-v2 > .kit-soft-chip-v1 {
+				grid-column: 2;
+				justify-self: start;
+				width: fit-content;
+				max-width: 100%;
+			}
+		}
+
 		@media (max-width: 760px) {
 			.catalog-header-inner {
 				grid-template-columns: 1fr;
@@ -2739,7 +3946,13 @@
 			.foundation-grid-v1,
 			.scan-component-grid-v1,
 			.control-center-kit-v1,
-			.sync-conflict-layout-v1 {
+			.sync-conflict-layout-v1,
+			.project-status-palette-v1,
+			.project-status-matrix-v1,
+			.project-workbench-body-v1,
+			.project-page-grid-v1,
+			.project-detail-lane-v2,
+			.project-sync-ledger-v2 {
 				grid-template-columns: 1fr;
 			}
 
@@ -2760,6 +3973,15 @@
 			.project-candidate-grid-v3,
 			.project-mini-row,
 			.project-field-row,
+			.project-sync-check-row-v1,
+			.project-branch-active-v1,
+			.project-branch-row-v1,
+			.project-git-node-v1,
+			.project-command-surface-v2,
+			.project-section-head-v2,
+			.project-branch-option-v2,
+			.project-rail-node-v2,
+			.project-function-row-v2,
 			.assistant-artifact-row-v4,
 			.project-focus-signal-v4,
 			.composer-state-grid-v5,
@@ -2783,9 +4005,144 @@
 			}
 
 			.session-drawer-head-v1,
-			.scan-panel-head-v1 {
+			.scan-panel-head-v1,
+			.project-readiness-head-v1,
+			.project-sync-action-row-v1,
+			.project-workbench-toolbar-v1,
+			.project-page-toolbar-v1 {
 				align-items: flex-start;
 				flex-direction: column;
+			}
+
+			.project-page-shell-v2 {
+				padding: 14px;
+			}
+
+			.project-command-actions-v2 {
+				justify-content: flex-start;
+			}
+
+			.project-ledger-item-v2 {
+				padding: 7px 0;
+			}
+
+			.project-ledger-item-v2 + .project-ledger-item-v2 {
+				border-left: 0;
+				border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 58%, transparent);
+			}
+
+			.project-local-workspace-v2 {
+				order: 1;
+			}
+
+			.project-function-card-v2 {
+				order: 2;
+			}
+
+			.project-context-pill-v2 {
+				width: 100%;
+				padding-left: 0;
+				border-left: 0;
+			}
+
+			.project-identity-stack-v2 {
+				align-items: flex-start;
+				flex-direction: column;
+			}
+
+			.project-command-actions-v2 .project-branch-menu-v2 {
+				width: max-content;
+				max-width: 100%;
+			}
+
+			.project-command-actions-v2 .project-branch-summary-v2 {
+				width: auto;
+				max-width: min(236px, 100%);
+			}
+
+			.project-branch-menu-list-v2 {
+				position: static;
+				width: min(328px, calc(100vw - 64px));
+				max-width: calc(100vw - 64px);
+				margin-top: 6px;
+				box-shadow: none;
+			}
+
+			.kit-event-row-v1.kit-running-surface-v1 {
+				grid-template-columns: minmax(0, 1fr);
+			}
+
+			.kit-event-row-v1.kit-running-surface-v1 > :last-child {
+				justify-self: start;
+			}
+
+			.project-sync-workbench-v1 .kit-running-surface-v1::after,
+			.project-page-preview-v1 .kit-running-surface-v1::after {
+				animation: none;
+				opacity: 0;
+			}
+
+			.project-sync-check-row-v1,
+			.project-branch-active-v1,
+			.project-setting-preview-row-v1 {
+				grid-template-columns: minmax(0, 1fr) auto;
+			}
+
+			.project-branch-row-v1,
+			.project-git-node-v1 {
+				grid-template-columns: auto minmax(0, 1fr);
+				align-items: start;
+			}
+
+			.project-branch-row-v1 > :last-child,
+			.project-git-node-v1 > :last-child {
+				grid-column: 2;
+				justify-self: start;
+				width: fit-content;
+				max-width: 100%;
+			}
+
+			#project .kit-event-row-v1,
+			#project .scan-row-v1 {
+				grid-template-columns: auto minmax(0, 1fr);
+				align-items: start;
+			}
+
+			#project .kit-event-row-v1.kit-running-surface-v1,
+			#project .scan-row-v1.is-text-only,
+			#project .project-mini-row {
+				grid-template-columns: minmax(0, 1fr) auto;
+				align-items: center;
+			}
+
+			#project .kit-event-row-v1 > .kit-soft-chip-v1,
+			#project .scan-row-v1 > .kit-soft-chip-v1 {
+				grid-column: 2;
+				justify-self: start;
+			}
+
+			#project .kit-event-row-v1.kit-running-surface-v1 > .kit-soft-chip-v1,
+			#project .scan-row-v1.is-text-only > .kit-soft-chip-v1,
+			#project .project-mini-row > .kit-soft-chip-v1 {
+				grid-column: auto;
+				justify-self: end;
+			}
+
+			.project-page-preview-v1 .friday-workbench-bar-v2 {
+				gap: var(--space-2);
+			}
+
+			.project-page-preview-v1 .workbench-project-v2 {
+				width: 100%;
+				padding: 7px;
+				border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+				border-radius: var(--radius-m);
+				background: color-mix(in srgb, var(--background-primary-alt) 64%, transparent);
+			}
+
+			.project-page-preview-v1 .workbench-project-v2 .native-select {
+				flex: 1 1 132px;
+				min-width: 0;
 			}
 
 			.workbench-project-v2 {
@@ -2809,6 +4166,20 @@
 			.composer-footer {
 				align-items: flex-start;
 				flex-direction: column;
+			}
+		}
+
+		@media (max-width: 520px) {
+			.project-file-row-v2 {
+				grid-template-columns: auto minmax(0, 1fr);
+				align-items: start;
+			}
+
+			.project-file-row-v2 > :last-child {
+				grid-column: 2;
+				justify-self: start;
+				width: fit-content;
+				max-width: 100%;
 			}
 		}
 	</style>
@@ -2909,7 +4280,7 @@
 					<a href="#shell">工作台外壳 <span class="nav-count">3</span></a>
 					<a href="#control">能力控制 <span class="nav-count">1</span></a>
 					<a href="#ai">助手组件 <span class="nav-count">3</span></a>
-					<a href="#project">项目组件 <span class="nav-count">2</span></a>
+					<a href="#project">项目组件 <span class="nav-count">8</span></a>
 				</nav>
 				<div class="selection-summary">
 					<strong>本页选择</strong>
@@ -4339,6 +5710,318 @@
 						<span class="section-mode">原生管理</span>
 					</div>
 					<div class="component-grid">
+						<article class="component-specimen is-wide" data-component="项目同步状态元素" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">项目同步状态元素</h3>
+									<div class="specimen-meta">远端、分支、待推送、待拉取、本地改动和冲突共用低密度状态词，不重新发明项目卡片语言</div>
+									<div class="component-version">
+										<span class="adjustment-badge">项目页候选</span>
+										<span class="adjustment-badge is-version">Native Kit v0.3 草案</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-status-palette-v1" aria-label="项目同步状态词">
+									<div class="project-status-token-v1 is-ready">
+										<strong>远端已连接</strong>
+										<span>origin/main 可访问</span>
+									</div>
+									<div class="project-status-token-v1">
+										<strong>待推送 2</strong>
+										<span>本地提交还没到远端</span>
+									</div>
+									<div class="project-status-token-v1">
+										<strong>待拉取 1</strong>
+										<span>远端有新提交</span>
+									</div>
+									<div class="project-status-token-v1 is-warning">
+										<strong>本地改动 5</strong>
+										<span>同步前会先提交</span>
+									</div>
+									<div class="project-status-token-v1 is-danger">
+										<strong>冲突 2</strong>
+										<span>需要确认文件来源</span>
+									</div>
+									<div class="project-status-token-v1">
+										<strong>手动同步</strong>
+										<span>不会在后台自动推送</span>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="项目同步工作台" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">项目同步工作台</h3>
+									<div class="specimen-meta">同步页的主组件：当前项目、同步就绪、主要动作和最近记录放在一个原生工作面里</div>
+									<div class="component-version">
+										<span class="adjustment-badge">项目页候选</span>
+										<span class="adjustment-badge is-version">Obsidian-native surface</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-sync-workbench-v1">
+									<div class="project-workbench-toolbar-v1">
+										<div class="friday-shell-project">
+											<span class="friday-shell-project-brand">当前项目</span>
+											<select class="friday-shell-project-select" aria-label="选择项目">
+												<option>Friday-beta-evm</option>
+												<option>Native Kit</option>
+											</select>
+										</div>
+										<div class="kit-inline-cluster-v1">
+											<button type="button" class="kit-icon-button-v1" aria-label="检查状态"><span class="friday-icon"><svg><use href="#icon-refresh"></use></svg></span></button>
+											<button type="button" class="kit-icon-button-v1" aria-label="项目设置"><span class="friday-icon"><svg><use href="#icon-settings"></use></svg></span></button>
+											<button type="button" class="mod-cta">同步当前项目</button>
+										</div>
+									</div>
+									<div class="project-workbench-body-v1">
+										<div class="project-detail-stack-v1">
+											<div class="project-readiness-strip-v1">
+												<div class="project-readiness-head-v1">
+													<div class="project-title-stack-v1">
+														<strong>Friday-beta-evm 已准备同步</strong>
+														<span>本地路径：Projects/Friday-beta-evm · 远端：github.com/user/friday-beta-evm</span>
+													</div>
+													<span class="kit-soft-chip-v1 is-active">远端已连接</span>
+												</div>
+												<div class="project-status-matrix-v1">
+													<div class="project-status-cell-v1">
+														<strong>分支</strong>
+														<span>main</span>
+													</div>
+													<div class="project-status-cell-v1">
+														<strong>待推送</strong>
+														<span>2 个提交</span>
+													</div>
+													<div class="project-status-cell-v1">
+														<strong>待拉取</strong>
+														<span>无</span>
+													</div>
+													<div class="project-status-cell-v1">
+														<strong>本地改动</strong>
+														<span>5 个文件</span>
+													</div>
+												</div>
+											</div>
+											<div class="project-activity-stack-v1">
+												<div class="kit-event-row-v1 kit-running-surface-v1">
+													<div class="kit-event-row-main-v1">
+														<strong>正在检查远端</strong>
+														<span>git fetch origin main</span>
+													</div>
+													<span class="kit-soft-chip-v1 is-active">运行中</span>
+												</div>
+												<div class="kit-event-row-v1">
+													<span class="kit-tool-icon-v1" aria-hidden="true"><span class="friday-icon"><svg><use href="#icon-tool-action"></use></svg></span></span>
+													<div class="kit-event-row-main-v1">
+														<strong>上次同步</strong>
+														<span>今天 16:42 · 推送 2 个提交</span>
+													</div>
+													<span class="kit-soft-chip-v1">完成</span>
+												</div>
+											</div>
+										</div>
+										<div class="project-settings-preview-v1">
+											<div class="project-title-stack-v1">
+												<strong>同步检查</strong>
+												<span>项目范围已确定，只显示会影响本次同步的 Git 状态。</span>
+											</div>
+											<div class="project-sync-check-row-v1">
+												<span>Git 仓库已初始化</span>
+												<span class="kit-soft-chip-v1 is-active">就绪</span>
+											</div>
+											<div class="project-sync-check-row-v1">
+												<span>远端仓库可访问</span>
+												<span class="kit-soft-chip-v1 is-active">就绪</span>
+											</div>
+											<div class="project-sync-check-row-v1">
+												<span>本地改动</span>
+												<span class="kit-soft-chip-v1 is-warning">5 个文件</span>
+											</div>
+											<div class="project-sync-check-row-v1">
+												<span>冲突文件</span>
+												<span class="kit-soft-chip-v1">无</span>
+											</div>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="分支选择器" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">分支选择器</h3>
+									<div class="specimen-meta">用户选择同步目标分支时，先显示当前分支、跟踪关系和切换风险，不做完整 Git 客户端</div>
+									<div class="component-version">
+										<span class="adjustment-badge">项目页候选</span>
+										<span class="adjustment-badge is-version">Branch Picker</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-branch-picker-v1">
+									<div class="project-branch-active-v1">
+										<div>
+											<strong>main</strong>
+											<span>当前分支 · 跟踪 origin/main · 待推送 2</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-active">当前</span>
+									</div>
+									<div class="project-branch-row-v1">
+										<span class="project-branch-dot-v1" aria-hidden="true"></span>
+										<div>
+											<strong>feature/native-kit</strong>
+											<span>本地分支 · Ahead 1 · 适合继续设计工作</span>
+										</div>
+										<button type="button">切换</button>
+									</div>
+									<div class="project-branch-row-v1">
+										<span class="project-branch-dot-v1 is-warning" aria-hidden="true"></span>
+										<div>
+											<strong>release/0.2.13</strong>
+											<span>远端分支 · Behind 3 · 切换前需要拉取</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">需更新</span>
+									</div>
+									<div class="project-branch-row-v1">
+										<span class="project-branch-dot-v1 is-muted" aria-hidden="true"></span>
+										<div>
+											<strong>archive/sync-spike</strong>
+											<span>只读参考 · 不建议作为同步目标</span>
+										</div>
+										<button type="button">查看</button>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="协作记录" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">协作记录</h3>
+									<div class="specimen-meta">多人协作信息只解释最近是谁改了什么，不替代完整提交历史</div>
+									<div class="component-version">
+										<span class="adjustment-badge">项目页候选</span>
+										<span class="adjustment-badge is-version">Collaboration log</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-collab-log-v1">
+									<div class="project-title-stack-v1">
+										<strong>最近协作</strong>
+										<span>显示会影响当前同步判断的提交、作者和文件范围。</span>
+									</div>
+									<div class="project-collab-row-v1">
+										<div class="project-avatar-stack-v1" aria-label="协作者">
+											<span class="project-avatar-v1 is-active">K</span>
+										</div>
+										<div>
+											<strong>Keith 更新同步页 Kit</strong>
+											<span>2 个提交 · docs/design · 待推送</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">本地</span>
+									</div>
+									<div class="project-collab-row-v1">
+										<div class="project-avatar-stack-v1" aria-label="协作者">
+											<span class="project-avatar-v1">M</span>
+											<span class="project-avatar-v1">L</span>
+										</div>
+										<div>
+											<strong>远端有人调整 release 文档</strong>
+											<span>origin/main · 1 个提交 · 需要拉取</span>
+										</div>
+										<span class="kit-soft-chip-v1">远端</span>
+									</div>
+									<div class="project-collab-row-v1">
+										<div class="project-avatar-stack-v1" aria-label="协作者">
+											<span class="project-avatar-v1">F</span>
+										</div>
+										<div>
+											<strong>FRIDAY 生成测试快照</strong>
+											<span>本地工作树 · 5 个文件未提交</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">改动</span>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="Git 更新树" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">Git 更新树</h3>
+									<div class="specimen-meta">用树状关系解释本地、远端和分支差异，帮助用户决定拉取、推送或切换</div>
+									<div class="component-version">
+										<span class="adjustment-badge">项目页候选</span>
+										<span class="adjustment-badge is-version">Update tree</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-git-tree-v1">
+									<div class="project-title-stack-v1">
+										<strong>更新树</strong>
+										<span>只展示和当前同步决策相关的节点。</span>
+									</div>
+									<div class="project-git-node-v1">
+										<span class="project-git-dot-v1" aria-hidden="true"></span>
+										<div>
+											<strong>本地 main</strong>
+											<span>当前工作分支 · 待推送 2</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">Ahead</span>
+									</div>
+									<div class="project-git-node-v1 is-remote">
+										<span class="project-git-dot-v1 is-muted" aria-hidden="true"></span>
+										<div>
+											<strong>origin/main</strong>
+											<span>远端主线 · 无待拉取</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-active">对齐</span>
+									</div>
+									<div class="project-git-node-v1 is-remote">
+										<span class="project-git-dot-v1 is-warning" aria-hidden="true"></span>
+										<div>
+											<strong>release/0.2.13</strong>
+											<span>远端分支领先 3 个提交</span>
+										</div>
+										<span class="kit-soft-chip-v1 is-warning">可拉取</span>
+									</div>
+								</div>
+							</div>
+						</article>
+
 						<article class="component-specimen is-wide" data-component="同步冲突差异" data-adjusted-candidate="true">
 							<div class="specimen-head">
 								<div>
@@ -4494,6 +6177,248 @@
 												<span>2 个文件等待确认来源</span>
 											</div>
 											<button type="button" class="mod-cta">打开项目检查器</button>
+										</div>
+									</div>
+								</div>
+							</div>
+						</article>
+
+						<article class="component-specimen is-wide" data-component="项目页预览" data-adjusted-candidate="true">
+							<div class="specimen-head">
+								<div>
+									<h3 class="specimen-title">项目页预览</h3>
+									<div class="specimen-meta">基于当前同步页信息结构的理想态：当前项目已确定，只呈现同步决策、分支选择、本地改动、更新树和忽略配置。</div>
+									<div class="component-version">
+										<span class="adjustment-badge">页面预览</span>
+										<span class="adjustment-badge is-version">Project page v2 ideal</span>
+									</div>
+								</div>
+								<div class="component-choice" aria-label="Choice">
+									<button type="button" data-choice="keep">保留</button>
+									<button type="button" data-choice="adjust">调整</button>
+									<button type="button" data-choice="hold">暂缓</button>
+								</div>
+							</div>
+							<div class="specimen-body">
+								<div class="project-page-preview-v2">
+									<div class="project-page-frame-v2">
+										<div class="friday-workbench-bar-v2 project-ideal-topbar-v2">
+											<div class="workbench-brand-v2">
+												<span class="workbench-brand-logo-v4"><img src="../../brand/logo/friday-icon.svg" alt="" width="18" height="18"></span>
+												<span class="workbench-brand-text-v3">FRIDAY</span>
+											</div>
+											<div class="project-context-pill-v2">
+												<span>当前项目</span>
+												<strong>Friday-beta-evm</strong>
+											</div>
+											<div class="workbench-tools-v2">
+												<button type="button" class="kit-icon-button-v1" aria-label="设置"><span class="friday-icon"><svg><use href="#icon-settings"></use></svg></span></button>
+											</div>
+										</div>
+										<div class="project-page-shell-v2">
+											<div class="project-command-surface-v2">
+												<div class="project-command-copy-v2">
+													<span class="project-overline-v2">同步决策</span>
+													<strong>可以同步</strong>
+													<div class="project-decision-meta-v2">
+														<span class="project-decision-row-v2"><strong>项目范围：</strong><span>Projects/Friday-beta-evm</span></span>
+														<span class="project-decision-row-v2"><strong>远端地址：</strong><span>github.com/user/friday-beta-evm</span></span>
+													</div>
+												</div>
+												<div class="project-command-actions-v2">
+													<button type="button" class="kit-icon-button-v1" aria-label="检查状态"><span class="friday-icon"><svg><use href="#icon-refresh"></use></svg></span></button>
+													<details class="project-branch-menu-v2">
+														<summary class="project-branch-summary-v2" aria-label="选择分支">
+															<span class="project-dot-v2" aria-hidden="true"></span>
+															<span class="project-current-branch-v2">main</span>
+														</summary>
+														<div class="project-branch-menu-list-v2" role="listbox" aria-label="可选分支">
+															<button type="button" class="project-branch-choice-v2 is-current" data-branch-choice="main" role="option" aria-selected="true">
+																<span class="project-dot-v2" aria-hidden="true"></span>
+																<span class="project-branch-choice-copy-v2">
+																	<strong>main</strong>
+																	<span>当前分支 · 跟踪 origin/main · 待推送 2</span>
+																</span>
+																<span class="kit-soft-chip-v1 is-active">当前</span>
+															</button>
+															<button type="button" class="project-branch-choice-v2" data-branch-choice="feature/native-kit" role="option" aria-selected="false">
+																<span class="project-dot-v2" aria-hidden="true"></span>
+																<span class="project-branch-choice-copy-v2">
+																	<strong>feature/native-kit</strong>
+																	<span>本地分支 · Ahead 1 · 适合继续设计工作</span>
+																</span>
+																<span class="kit-soft-chip-v1">切换</span>
+															</button>
+															<button type="button" class="project-branch-choice-v2" data-branch-choice="release/0.2.13" role="option" aria-selected="false">
+																<span class="project-dot-v2 is-warning" aria-hidden="true"></span>
+																<span class="project-branch-choice-copy-v2">
+																	<strong>release/0.2.13</strong>
+																	<span>远端分支 · Behind 3 · 切换前需要拉取</span>
+																</span>
+																<span class="kit-soft-chip-v1 is-warning">需更新</span>
+															</button>
+														</div>
+													</details>
+												</div>
+											</div>
+
+											<div class="project-sync-ledger-v2" aria-label="同步账本">
+												<div class="project-ledger-item-v2">
+													<span>待推送</span>
+													<strong>2</strong>
+												</div>
+												<div class="project-ledger-item-v2">
+													<span>待拉取</span>
+													<strong>0</strong>
+												</div>
+												<div class="project-ledger-item-v2">
+													<span>待确认文件</span>
+													<strong>5 个文件</strong>
+												</div>
+												<div class="project-ledger-item-v2">
+													<span>冲突</span>
+													<strong>无</strong>
+												</div>
+											</div>
+
+											<div class="project-detail-lane-v2">
+												<div class="project-main-lane-v2 project-local-workspace-v2">
+													<section class="project-local-changes-v2" aria-label="本地改动文件">
+														<div class="project-section-head-v2">
+															<strong>本地改动</strong>
+															<span>5 个待确认</span>
+														</div>
+														<div class="project-file-row-v2">
+															<span class="project-file-status-v2">修改</span>
+															<div class="project-file-copy-v2">
+																<strong>docs/design/native-kit-catalog.html</strong>
+																<span>Kit 预览 · 待提交</span>
+															</div>
+															<button type="button">查看</button>
+														</div>
+														<div class="project-file-row-v2">
+															<span class="project-file-status-v2">修改</span>
+															<div class="project-file-copy-v2">
+																<strong>workspace/FRIDAY 介绍.md</strong>
+																<span>项目文档 · 待提交</span>
+															</div>
+															<button type="button">查看</button>
+														</div>
+														<div class="project-file-row-v2">
+															<span class="project-file-status-v2 is-new">新增</span>
+															<div class="project-file-copy-v2">
+																<strong>workspace/native-kit-live-parity-789.canvas</strong>
+																<span>画布 · 未跟踪</span>
+															</div>
+															<button type="button">查看</button>
+														</div>
+														<div class="project-file-row-v2">
+															<span class="project-file-status-v2 is-ignore">目录</span>
+															<div class="project-file-copy-v2">
+																<strong>workspace/cache/</strong>
+																<span>生成内容 · 可加入忽略</span>
+															</div>
+															<button type="button">忽略目录</button>
+														</div>
+														<div class="project-local-empty-v2" hidden>
+															<strong>无改动</strong>
+															<span>当前项目范围没有待同步文件。</span>
+														</div>
+													</section>
+												</div>
+
+												<aside class="project-function-card-v2" aria-label="同步功能信息">
+													<details class="project-function-section-v2" aria-label="同步状态">
+														<summary class="project-function-summary-v2">
+															<strong>同步状态</strong>
+														</summary>
+														<div class="project-function-detail-v2">
+															<div class="project-function-row-v2">
+																<div>
+																	<strong>Git</strong>
+																	<span>本地仓库可用</span>
+																</div>
+																<span class="kit-soft-chip-v1 is-active">就绪</span>
+															</div>
+															<div class="project-function-row-v2">
+																<div>
+																	<strong>远端仓库</strong>
+																	<span>GitHub 已连接</span>
+																</div>
+																<span class="kit-soft-chip-v1 is-active">就绪</span>
+															</div>
+															<div class="project-function-row-v2">
+																<div>
+																	<strong>冲突</strong>
+																	<span>没有阻塞项</span>
+																</div>
+																<span class="kit-soft-chip-v1">无</span>
+															</div>
+														</div>
+													</details>
+													<details class="project-function-section-v2 project-git-rail-v2" aria-label="Git更新树">
+														<summary class="project-function-summary-v2">
+															<strong>Git更新树</strong>
+														</summary>
+														<div class="project-function-detail-v2">
+															<div class="project-rail-node-v2">
+																<span class="project-dot-v2 is-warning" aria-hidden="true"></span>
+																<div>
+																	<strong>本地 main</strong>
+																	<span>当前工作分支 · 有未推送提交</span>
+																</div>
+																<span class="kit-soft-chip-v1 is-warning">Ahead</span>
+															</div>
+															<div class="project-rail-node-v2 is-remote">
+																<span class="project-dot-v2 is-muted" aria-hidden="true"></span>
+																<div>
+																	<strong>origin/main</strong>
+																	<span>远端跟踪分支 · 无待拉取</span>
+																</div>
+																<span class="kit-soft-chip-v1 is-active">对齐</span>
+															</div>
+														</div>
+													</details>
+
+													<details class="project-function-section-v2 project-collab-stream-v2" aria-label="协作状态">
+														<summary class="project-function-summary-v2">
+															<strong>协作状态</strong>
+														</summary>
+														<div class="project-function-detail-v2">
+															<div class="project-collab-item-v2">
+																<div class="project-avatar-stack-v1" aria-label="协作者">
+																	<span class="project-avatar-v1 is-active">K</span>
+																</div>
+																<div>
+																	<strong>Keith 本地编辑</strong>
+																	<span>docs/design · 将随本次同步提交</span>
+																</div>
+																<span class="kit-soft-chip-v1 is-warning">本地</span>
+															</div>
+														</div>
+													</details>
+													<details class="project-function-section-v2 project-ignore-rules-v2" aria-label="忽略规则">
+														<summary class="project-function-summary-v2">
+															<strong>忽略规则</strong>
+														</summary>
+														<div class="project-function-detail-v2">
+															<p>这些路径不会进入本地改动列表。</p>
+															<div class="project-ignore-list-v2">
+																<span class="project-ignore-token-v2">.friday/</span>
+																<span class="project-ignore-token-v2">workspace/cache/</span>
+																<span class="project-ignore-token-v2">*.tmp</span>
+															</div>
+															<div class="project-function-row-v2">
+																<div>
+																	<strong>同步前过滤</strong>
+																	<span>可从本地改动列表直接加入规则。</span>
+																</div>
+																<button type="button">管理忽略</button>
+															</div>
+														</div>
+													</details>
+												</aside>
+											</div>
 										</div>
 									</div>
 								</div>

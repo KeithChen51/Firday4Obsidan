@@ -538,7 +538,7 @@ test("sync page branches on none, git_local, and git_remote_bound project states
 	assert.match(cardBlock, /openSettingsTab\(/);
 	assert.match(cardBlock, /projects\.sync\.none/);
 	assert.match(cardBlock, /projects\.sync\.gitLocal/);
-	assert.match(cardBlock, /projects\.button\.sync/);
+	assert.match(source, /projects\.button\.sync/);
 });
 
 test("sync page project-setting entry points jump directly to settings project section", async () => {
@@ -561,8 +561,140 @@ test("sync page renders only the active project context instead of a multi-proje
 	const block = match[1] ?? "";
 	assert.match(block, /const activeProject = this\.getActiveProjectEntry\(\)/);
 	assert.doesNotMatch(block, /friday-project-grid/);
-	assert.doesNotMatch(block, /for \(const project of projects\)/);
-	assert.match(block, /this\.renderSyncProjectCard\(containerEl, activeProject\)/);
+	assert.doesNotMatch(block, /this\.renderSyncProjectCard\([^,]+,\s*project\)/);
+	assert.match(block, /this\.renderSyncProjectCard\((containerEl|workbench), activeProject\)/);
+});
+
+test("sync page uses a compact sync decision surface with folded details", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const pageMatch = source.match(/private renderSyncPage\(containerEl: HTMLElement\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncProjectCard/);
+	assert.ok(pageMatch, "renderSyncPage block should exist");
+	const pageBlock = pageMatch[1] ?? "";
+	assert.match(pageBlock, /friday-project-sync-workbench/);
+	assert.doesNotMatch(pageBlock, /friday-sync-project-select/);
+	assert.doesNotMatch(pageBlock, /switchActiveProject\(projectSelect\.value\)/);
+	assert.doesNotMatch(pageBlock, /projects\.button\.syncAll/);
+
+	const cardMatch = source.match(/private renderSyncProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncAutomationControls/);
+	assert.ok(cardMatch, "renderSyncProjectCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+	assert.match(cardBlock, /friday-sync-decision-panel/);
+	assert.match(cardBlock, /friday-sync-preview-v1/);
+	assert.match(cardBlock, /project-detail-lane-v2/);
+	assert.match(cardBlock, /createSyncFunctionSection/);
+	assert.match(source, /createEl\("details", \{ cls: "friday-sync-detail-section"/);
+	assert.match(source, /projects\.button\.checkStatus/);
+	assert.match(source, /projects\.button\.sync/);
+	assert.doesNotMatch(cardBlock, /project-status-matrix-v1/);
+	assert.doesNotMatch(cardBlock, /project-workbench-body-v1/);
+	assert.doesNotMatch(cardBlock, /friday-project-card/);
+	assert.doesNotMatch(cardBlock, /friday-project-badges/);
+	assert.doesNotMatch(cardBlock, /friday-project-meta/);
+	assert.doesNotMatch(cardBlock, /settings\.project\.workFolder/);
+
+	assert.match(styles, /\.project-sync-workbench-v1\b/);
+	assert.match(styles, /\.friday-sync-decision-panel\b/);
+	assert.match(styles, /\.friday-sync-preview-v1\b/);
+	assert.match(styles, /\.friday-sync-detail-section\b/);
+	assert.doesNotMatch(styles, /\.project-status-matrix-v1\s*\{/);
+});
+
+test("sync page uses a native ledger layout instead of stacked visual cards", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const cardMatch = source.match(/private renderSyncProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncAutomationControls/);
+	assert.ok(cardMatch, "renderSyncProjectCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+
+	assert.match(cardBlock, /friday-sync-command-bar-v1/);
+	assert.match(cardBlock, /friday-sync-ledger-v1/);
+	assert.match(cardBlock, /project-sync-ledger-v2/);
+	assert.match(source, /friday-sync-detail-state/);
+	assert.match(styles, /\.friday-sync-command-bar-v1\b/);
+	assert.match(styles, /\.friday-sync-ledger-v1\b/);
+	assert.match(styles, /\.project-sync-ledger-v2\b/);
+	assert.match(styles, /\.friday-sync-detail-state\b/);
+	assert.doesNotMatch(styles, /\.friday-project-sync-workbench,\s*\n\.project-sync-workbench-v1\s*\{[^}]*border:/);
+	assert.doesNotMatch(styles, /\.friday-sync-decision-panel\s*\{[^}]*border:/);
+	assert.doesNotMatch(styles, /\.friday-sync-preview-item\s*\{[^}]*border:/);
+	assert.doesNotMatch(styles, /\.friday-sync-preview-item\s*\{[^}]*background:/);
+});
+
+test("sync page implements the project preview information architecture in the live view", async () => {
+	const source = readViewSource();
+	const styles = readStylesSource();
+	const cardMatch = source.match(/private renderSyncProjectCard\(containerEl: HTMLElement, project: ProjectEntry\): void \{([\s\S]*?)\n\t\}\n\n\tprivate renderSyncAutomationControls/);
+	assert.ok(cardMatch, "renderSyncProjectCard block should exist");
+	const cardBlock = cardMatch[1] ?? "";
+
+	assert.match(cardBlock, /project-command-surface-v2/);
+	assert.match(cardBlock, /project-command-copy-v2/);
+	assert.match(cardBlock, /project-decision-meta-v2/);
+	assert.match(cardBlock, /project-branch-menu-v2/);
+	assert.match(cardBlock, /project-sync-ledger-v2/);
+	assert.match(cardBlock, /project-detail-lane-v2/);
+	assert.match(source, /project-local-changes-v2/);
+	assert.match(cardBlock, /project-function-card-v2/);
+	assert.match(source, /createSyncFunctionSection/);
+	assert.match(source, /projects\.sync\.function\.status/);
+	assert.match(source, /projects\.sync\.function\.tree/);
+	assert.match(source, /projects\.sync\.function\.collab/);
+	assert.match(source, /projects\.sync\.function\.ignore/);
+	assert.doesNotMatch(cardBlock, /this\.renderSyncAutomationControls\(detailStack, project\)/);
+	assert.doesNotMatch(cardBlock, /this\.renderProjectStatusPanel\(detailStack, project\)/);
+	assert.doesNotMatch(cardBlock, /populateIgnoreCandidates\(detailStack, project\)/);
+
+	assert.match(styles, /\.project-command-surface-v2\b/);
+	assert.match(styles, /\.project-sync-ledger-v2\b/);
+	assert.match(styles, /\.project-detail-lane-v2\b/);
+	assert.match(styles, /\.project-local-changes-v2\b/);
+	assert.match(styles, /\.project-function-card-v2\b/);
+	assert.match(styles, /\.project-function-summary-v2\b/);
+	assert.match(styles, /\.friday-sync-decision-copy\s*>\s*strong\s*\{/);
+	assert.doesNotMatch(styles, /\.friday-sync-decision-copy\s+strong\s*\{/);
+	assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*?\.project-function-card-v2\s*\{[^}]*order:\s*2/);
+});
+
+test("sync ledger layout adapts to narrow project panes", async () => {
+	const styles = readStylesSource();
+
+	assert.match(styles, /@media \(max-width: 720px\) \{[\s\S]*?\.friday-sync-decision-header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@media \(max-width: 720px\) \{[\s\S]*?\.friday-sync-ledger-v1\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@media \(max-width: 900px\) \{[\s\S]*?\.project-detail-lane-v2\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@media \(max-width: 720px\) \{[\s\S]*?\.friday-sync-preview-item \+ \.friday-sync-preview-item\s*\{[^}]*border-left:\s*0/);
+});
+
+test("sync page responds to pane width and keeps primary sync data readable", async () => {
+	const styles = readStylesSource();
+
+	assert.match(styles, /\.project-sync-workbench-v1\s*\{[^}]*container-type:\s*inline-size/);
+	assert.match(styles, /\.project-decision-row-v2 span\s*\{[^}]*white-space:\s*normal/s);
+	assert.match(styles, /\.project-decision-row-v2 span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+	assert.match(styles, /\.friday-sync-preview-item\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /\.friday-sync-preview-item strong\s*\{[^}]*white-space:\s*normal/s);
+	assert.match(styles, /\.friday-sync-preview-item strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*white-space:\s*normal/s);
+	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+	assert.match(styles, /@container \(max-width: 720px\) \{[\s\S]*?\.friday-sync-ledger-v1\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-detail-lane-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-function-card-v2\s*\{[^}]*order:\s*2/);
+	assert.match(styles, /@container \(max-width: 640px\) \{[\s\S]*?\.project-command-surface-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-file-row-v2\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
+});
+
+test("sync collaboration rows and function details keep subordinate visual weight", async () => {
+	const styles = readStylesSource();
+
+	assert.match(styles, /\.project-collab-row-v1,\s*\n\.project-collab-item-v2\s*\{[^}]*grid-template-columns:\s*32px minmax\(0,\s*1fr\) auto/);
+	assert.match(styles, /\.project-avatar-stack-v1\s*\{[^}]*width:\s*32px/s);
+	assert.match(styles, /\.project-avatar-stack-v1\s*\{[^}]*min-width:\s*32px/s);
+	assert.match(styles, /\.project-avatar-stack-v1\s*\{[^}]*overflow:\s*visible/s);
+	assert.match(styles, /\.project-function-detail-v2\s*\{[^}]*font-size:\s*var\(--font-ui-smaller\)/s);
+	assert.match(styles, /\.project-function-detail-v2\s+\.project-collab-row-v1 strong,[\s\S]*?font-size:\s*var\(--font-ui-smaller\)/);
+	assert.match(styles, /\.project-function-detail-v2\s+\.kit-soft-chip-v1\s*\{[^}]*font-size:\s*var\(--font-ui-smaller\)/s);
+	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-collab-row-v1,[\s\S]*?grid-template-columns:\s*32px minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-collab-row-v1 > \.kit-soft-chip-v1,[\s\S]*?grid-column:\s*2/);
 });
 
 test("sync page exposes ignore management through dedicated integration points", async () => {
