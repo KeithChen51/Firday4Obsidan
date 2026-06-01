@@ -2711,12 +2711,18 @@
 			box-shadow: 0 14px 30px color-mix(in srgb, var(--background-modifier-border) 34%, transparent);
 		}
 
+		.project-branch-menu-v2:not([open]) > .project-branch-menu-list-v2 {
+			display: none;
+		}
+
 		.project-branch-choice-v2 {
 			display: grid;
 			grid-template-columns: auto minmax(0, 1fr) auto;
 			gap: var(--space-2);
 			align-items: center;
 			width: 100%;
+			height: auto;
+			min-height: 48px;
 			min-width: 0;
 			padding: 7px 8px;
 			border: 1px solid transparent;
@@ -2724,7 +2730,9 @@
 			background: transparent;
 			color: var(--text-normal);
 			font: inherit;
+			line-height: 1.25;
 			text-align: left;
+			white-space: normal;
 		}
 
 		.project-branch-choice-v2.is-current {
@@ -2753,6 +2761,7 @@
 		}
 
 		.project-branch-choice-v2 > .kit-soft-chip-v1 {
+			align-self: center;
 			justify-self: end;
 		}
 
@@ -2830,9 +2839,41 @@
 		.project-command-actions-v2 {
 			display: flex;
 			flex-wrap: wrap;
+			align-items: center;
 			justify-content: flex-end;
 			gap: var(--space-2);
 			min-width: 0;
+		}
+
+		.project-sync-primary-v2,
+		.project-secondary-action-v2,
+		.project-text-action-v2 {
+			min-height: 32px;
+			border-radius: 7px;
+			font: inherit;
+			font-size: 0.76rem;
+			font-weight: 760;
+		}
+
+		.project-sync-primary-v2 {
+			padding: 5px 13px;
+			border: 1px solid color-mix(in srgb, var(--interactive-accent) 34%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--interactive-accent) 13%, var(--background-primary));
+			color: var(--text-normal);
+		}
+
+		.project-secondary-action-v2,
+		.project-text-action-v2 {
+			padding: 5px 10px;
+			border: 1px solid var(--background-modifier-border);
+			background: var(--background-primary);
+			color: var(--text-normal);
+		}
+
+		.project-text-action-v2 {
+			min-height: 28px;
+			padding-inline: 9px;
+			font-size: 0.72rem;
 		}
 
 		.project-command-actions-v2 .project-branch-summary-v2 {
@@ -2949,7 +2990,7 @@
 
 		.project-function-summary-v2 {
 			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
+			grid-template-columns: minmax(0, 1fr) auto auto;
 			gap: var(--space-2);
 			align-items: center;
 			min-width: 0;
@@ -2988,6 +3029,14 @@
 			white-space: nowrap;
 			font-size: 0.86rem;
 			font-weight: 760;
+		}
+
+		.project-function-state-v2 {
+			justify-self: end;
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 740;
+			white-space: nowrap;
 		}
 
 		.project-function-detail-v2 {
@@ -3030,6 +3079,21 @@
 		}
 
 		.project-section-head-v2 span {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+		}
+
+		.project-section-actions-v2,
+		.project-file-actions-v2 {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 6px;
+			align-items: center;
+			justify-content: flex-end;
+			min-width: 0;
+		}
+
+		.project-section-head-v2 .project-section-actions-v2 span {
 			color: var(--text-muted);
 			font-size: 0.74rem;
 		}
@@ -3143,11 +3207,11 @@
 
 		.project-file-row-v2 {
 			display: grid;
-			grid-template-columns: 64px minmax(0, 1fr) auto;
-			gap: var(--space-3);
+			grid-template-columns: 56px minmax(0, 1fr) auto;
+			gap: var(--space-2);
 			align-items: start;
 			min-width: 0;
-			padding: 12px 0;
+			padding: 10px 0;
 			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
 		}
 
@@ -3187,26 +3251,28 @@
 			align-items: center;
 			justify-content: center;
 			justify-self: start;
-			min-width: 46px;
-			min-height: 24px;
+			min-width: 42px;
+			min-height: 22px;
 			margin-top: 2px;
-			padding: 2px 8px;
-			border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, var(--background-modifier-border));
+			padding: 1px 7px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 76%, transparent);
 			border-radius: 999px;
-			background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
+			background: color-mix(in srgb, var(--background-secondary) 58%, transparent);
 			color: var(--text-muted);
 			font-size: 0.68rem;
-			font-weight: 760;
+			font-weight: 560;
 		}
 
 		.project-file-status-v2.is-new {
-			border-color: color-mix(in srgb, var(--color-green) 32%, var(--background-modifier-border));
-			background: color-mix(in srgb, var(--color-green) 7%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--background-modifier-border) 82%, transparent);
+			background: color-mix(in srgb, var(--background-secondary) 46%, transparent);
+			color: var(--text-muted);
 		}
 
 		.project-file-status-v2.is-ignore {
-			border-color: color-mix(in srgb, var(--color-orange) 34%, var(--background-modifier-border));
-			background: color-mix(in srgb, var(--color-orange) 7%, var(--background-primary));
+			border-color: color-mix(in srgb, var(--color-orange) 24%, var(--background-modifier-border));
+			background: color-mix(in srgb, var(--color-orange) 5%, var(--background-primary));
+			color: color-mix(in srgb, var(--color-orange) 62%, var(--text-muted));
 		}
 
 		.project-file-copy-v2,
@@ -3221,7 +3287,7 @@
 
 		.project-file-copy-v2 strong {
 			font-size: 0.78rem;
-			font-weight: 760;
+			font-weight: 600;
 			line-height: 1.35;
 			overflow: visible;
 			overflow-wrap: anywhere;
@@ -3232,6 +3298,7 @@
 		.project-file-copy-v2 span {
 			color: var(--text-muted);
 			font-size: 0.72rem;
+			font-weight: 400;
 		}
 
 		.project-file-row-v2 button,
@@ -3245,6 +3312,86 @@
 			font: inherit;
 			font-size: 0.74rem;
 			font-weight: 700;
+		}
+
+		.project-file-row-v2 button {
+			min-height: 26px;
+			padding: 3px 7px;
+			border-color: transparent;
+			background: transparent;
+			box-shadow: none;
+			color: var(--text-muted);
+			font-size: 0.72rem;
+			font-weight: 560;
+		}
+
+		.project-file-row-v2 button:first-child {
+			border-color: color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
+			background: transparent;
+			color: color-mix(in srgb, var(--text-normal) 84%, var(--text-muted));
+		}
+
+		.project-file-actions-v2 .is-warning {
+			color: var(--text-muted);
+		}
+
+		.project-ignore-confirm-v2,
+		.project-local-more-v2,
+		.project-ignore-editor-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			align-items: center;
+			min-width: 0;
+			padding: 10px 0;
+			border-top: 1px solid color-mix(in srgb, var(--background-modifier-border) 54%, transparent);
+		}
+
+		.project-ignore-confirm-v2 {
+			margin-left: 76px;
+			color: var(--text-muted);
+			font-size: 0.72rem;
+		}
+
+		.project-ignore-confirm-v2 strong,
+		.project-local-more-v2 strong,
+		.project-ignore-editor-v2 strong {
+			display: block;
+			min-width: 0;
+			overflow-wrap: anywhere;
+			color: var(--text-normal);
+			font-size: 0.76rem;
+			font-weight: 760;
+		}
+
+		.project-local-more-v2 {
+			color: var(--text-muted);
+			font-size: 0.74rem;
+		}
+
+		.project-ignore-editor-v2 {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.project-ignore-input-row-v2 {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: var(--space-2);
+			min-width: 0;
+		}
+
+		.project-ignore-input-row-v2 code {
+			min-width: 0;
+			padding: 6px 8px;
+			border: 1px solid color-mix(in srgb, var(--background-modifier-border) 78%, transparent);
+			border-radius: 7px;
+			background: var(--background-primary);
+			color: var(--text-muted);
+			font-family: var(--font-monospace);
+			font-size: 0.72rem;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
 		.project-ignore-rules-v2 {
@@ -3915,6 +4062,18 @@
 				max-width: 100%;
 			}
 
+			.project-section-head-v2 .project-section-actions-v2,
+			.project-ignore-confirm-v2,
+			.project-local-more-v2,
+			.project-ignore-input-row-v2 {
+				display: grid;
+				grid-template-columns: 1fr;
+			}
+
+			.project-ignore-confirm-v2 {
+				margin-left: 0;
+			}
+
 			.project-collab-row-v1,
 			.project-collab-item-v2 {
 				grid-template-columns: 32px minmax(0, 1fr);
@@ -4180,6 +4339,18 @@
 				justify-self: start;
 				width: fit-content;
 				max-width: 100%;
+			}
+
+			.project-section-head-v2 .project-section-actions-v2,
+			.project-ignore-confirm-v2,
+			.project-local-more-v2,
+			.project-ignore-input-row-v2 {
+				display: grid;
+				grid-template-columns: 1fr;
+			}
+
+			.project-ignore-confirm-v2 {
+				margin-left: 0;
 			}
 		}
 	</style>
@@ -6226,7 +6397,8 @@
 													</div>
 												</div>
 												<div class="project-command-actions-v2">
-													<button type="button" class="kit-icon-button-v1" aria-label="检查状态"><span class="friday-icon"><svg><use href="#icon-refresh"></use></svg></span></button>
+													<button type="button" class="project-sync-primary-v2">同步当前项目</button>
+													<button type="button" class="project-secondary-action-v2">重新检查</button>
 													<details class="project-branch-menu-v2">
 														<summary class="project-branch-summary-v2" aria-label="选择分支">
 															<span class="project-dot-v2" aria-hidden="true"></span>
@@ -6273,7 +6445,7 @@
 												</div>
 												<div class="project-ledger-item-v2">
 													<span>待确认文件</span>
-													<strong>5 个文件</strong>
+													<strong>23 个文件</strong>
 												</div>
 												<div class="project-ledger-item-v2">
 													<span>冲突</span>
@@ -6286,39 +6458,69 @@
 													<section class="project-local-changes-v2" aria-label="本地改动文件">
 														<div class="project-section-head-v2">
 															<strong>本地改动</strong>
-															<span>5 个待确认</span>
+															<div class="project-section-actions-v2">
+																<span>23 个待确认</span>
+																<button type="button" class="project-text-action-v2">管理忽略</button>
+															</div>
 														</div>
 														<div class="project-file-row-v2">
 															<span class="project-file-status-v2">修改</span>
 															<div class="project-file-copy-v2">
 																<strong>docs/design/native-kit-catalog.html</strong>
-																<span>Kit 预览 · 待提交</span>
+																<span>Kit 预览 · 将随本次同步提交</span>
 															</div>
-															<button type="button">查看</button>
+															<div class="project-file-actions-v2">
+																<button type="button">打开</button>
+															</div>
 														</div>
 														<div class="project-file-row-v2">
 															<span class="project-file-status-v2">修改</span>
 															<div class="project-file-copy-v2">
 																<strong>workspace/FRIDAY 介绍.md</strong>
-																<span>项目文档 · 待提交</span>
+																<span>项目文档 · 将随本次同步提交</span>
 															</div>
-															<button type="button">查看</button>
+															<div class="project-file-actions-v2">
+																<button type="button">打开</button>
+															</div>
 														</div>
 														<div class="project-file-row-v2">
 															<span class="project-file-status-v2 is-new">新增</span>
 															<div class="project-file-copy-v2">
 																<strong>workspace/native-kit-live-parity-789.canvas</strong>
-																<span>画布 · 未跟踪</span>
+																<span>画布 · 未跟踪，将在同步前确认</span>
 															</div>
-															<button type="button">查看</button>
+															<div class="project-file-actions-v2">
+																<button type="button">打开</button>
+																<button type="button" class="is-warning">忽略</button>
+															</div>
 														</div>
 														<div class="project-file-row-v2">
 															<span class="project-file-status-v2 is-ignore">目录</span>
 															<div class="project-file-copy-v2">
 																<strong>workspace/cache/</strong>
-																<span>生成内容 · 可加入忽略</span>
+																<span>生成内容 · 建议写入忽略规则</span>
 															</div>
-															<button type="button">忽略目录</button>
+															<div class="project-file-actions-v2">
+																<button type="button">查看</button>
+																<button type="button" class="is-warning">忽略目录</button>
+															</div>
+														</div>
+														<div class="project-ignore-confirm-v2">
+															<div>
+																<strong>写入 .gitignore：workspace/cache/</strong>
+																<span>写入后这个目录不会再进入本地改动列表。</span>
+															</div>
+															<div class="project-file-actions-v2">
+																<button type="button" class="is-warning">确认写入</button>
+																<button type="button">取消</button>
+															</div>
+														</div>
+														<div class="project-local-more-v2">
+															<div>
+																<strong>另外 19 个文件</strong>
+																<span>可展开查看完整待同步清单。</span>
+															</div>
+															<button type="button">显示全部</button>
 														</div>
 														<div class="project-local-empty-v2" hidden>
 															<strong>无改动</strong>
@@ -6331,6 +6533,7 @@
 													<details class="project-function-section-v2" aria-label="同步状态">
 														<summary class="project-function-summary-v2">
 															<strong>同步状态</strong>
+															<span class="project-function-state-v2">就绪</span>
 														</summary>
 														<div class="project-function-detail-v2">
 															<div class="project-function-row-v2">
@@ -6359,6 +6562,7 @@
 													<details class="project-function-section-v2 project-git-rail-v2" aria-label="Git更新树">
 														<summary class="project-function-summary-v2">
 															<strong>Git更新树</strong>
+															<span class="project-function-state-v2">Ahead 2</span>
 														</summary>
 														<div class="project-function-detail-v2">
 															<div class="project-rail-node-v2">
@@ -6383,6 +6587,7 @@
 													<details class="project-function-section-v2 project-collab-stream-v2" aria-label="协作状态">
 														<summary class="project-function-summary-v2">
 															<strong>协作状态</strong>
+															<span class="project-function-state-v2">本地</span>
 														</summary>
 														<div class="project-function-detail-v2">
 															<div class="project-collab-item-v2">
@@ -6397,12 +6602,13 @@
 															</div>
 														</div>
 													</details>
-													<details class="project-function-section-v2 project-ignore-rules-v2" aria-label="忽略规则">
+													<details class="project-function-section-v2 project-ignore-rules-v2" aria-label="忽略规则" open>
 														<summary class="project-function-summary-v2">
 															<strong>忽略规则</strong>
+															<span class="project-function-state-v2">3 条</span>
 														</summary>
 														<div class="project-function-detail-v2">
-															<p>这些路径不会进入本地改动列表。</p>
+															<p>真实读取项目 .gitignore；可从本地改动列表直接加入规则。</p>
 															<div class="project-ignore-list-v2">
 																<span class="project-ignore-token-v2">.friday/</span>
 																<span class="project-ignore-token-v2">workspace/cache/</span>
@@ -6410,10 +6616,20 @@
 															</div>
 															<div class="project-function-row-v2">
 																<div>
-																	<strong>同步前过滤</strong>
-																	<span>可从本地改动列表直接加入规则。</span>
+																	<strong>候选路径</strong>
+																	<span>workspace/cache/ 已等待确认写入。</span>
 																</div>
-																<button type="button">管理忽略</button>
+																<button type="button">查看候选</button>
+															</div>
+															<div class="project-ignore-editor-v2">
+																<div>
+																	<strong>手动添加规则</strong>
+																	<span>适合生成目录、临时文件或本地私有配置。</span>
+																</div>
+																<div class="project-ignore-input-row-v2">
+																	<code>workspace/cache/</code>
+																	<button type="button">添加规则</button>
+																</div>
 															</div>
 														</div>
 													</details>

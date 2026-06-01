@@ -376,13 +376,21 @@ test("native kit catalog sketches the ideal project page v2 structure", async ()
 		"project-local-changes-v2",
 		"project-local-empty-v2",
 		"project-file-row-v2",
+		"project-file-actions-v2",
+		"project-section-actions-v2",
+		"project-sync-primary-v2",
+		"project-secondary-action-v2",
 		"project-function-card-v2",
 		"project-function-section-v2",
 		"project-function-summary-v2",
+		"project-function-state-v2",
 		"project-function-detail-v2",
 		"project-collab-stream-v2",
 		"project-ignore-rules-v2",
 		"project-ignore-token-v2",
+		"project-ignore-confirm-v2",
+		"project-ignore-editor-v2",
+		"project-ignore-input-row-v2",
 	]) {
 		assert.match(previewMarkup, new RegExp(className, "u"));
 		assert.match(html, new RegExp(`\\.${className}\\b`, "u"));
@@ -404,16 +412,19 @@ test("native kit catalog sketches the ideal project page v2 structure", async ()
 	assert.match(previewMarkup, /project-command-actions-v2[\s\S]*project-branch-menu-v2/u);
 	assert.match(previewMarkup, /<details class="project-branch-menu-v2">/u);
 	assert.doesNotMatch(previewMarkup, /<details class="project-branch-menu-v2" open>/u);
+	assert.match(html, /\.project-branch-menu-v2:not\(\[open\]\) > \.project-branch-menu-list-v2\s*\{[\s\S]*?display:\s*none/u);
 	assert.match(previewMarkup, /data-branch-choice="feature\/native-kit"/u);
 	assert.doesNotMatch(previewMarkup, /<button type="button" class="mod-cta">同步当前项目<\/button>/u);
 
 	const commandActionsMarkup = previewMarkup.match(/<div class="project-command-actions-v2">[\s\S]*?<\/details>\s*<\/div>/u)?.[0] || "";
-	assert.match(commandActionsMarkup, /aria-label="检查状态"[\s\S]*icon-refresh/u);
+	assert.match(commandActionsMarkup, /class="project-sync-primary-v2">同步当前项目<\/button>/u);
+	assert.match(commandActionsMarkup, /class="project-secondary-action-v2">重新检查<\/button>/u);
+	assert.doesNotMatch(commandActionsMarkup, /aria-label="检查状态"[\s\S]*icon-refresh/u);
 	assert.doesNotMatch(commandActionsMarkup, /aria-label="项目设置"/u);
-	assert.doesNotMatch(commandActionsMarkup, />同步当前项目</u);
 
 	const ledgerMarkup = previewMarkup.match(/<div class="project-sync-ledger-v2"[\s\S]*?<\/div>\s*<\/div>/u)?.[0] || "";
 	assert.equal((ledgerMarkup.match(/project-ledger-item-v2/g) || []).length, 4);
+	assert.match(ledgerMarkup, />23 个文件<\/strong>/u);
 	assert.doesNotMatch(ledgerMarkup, />分支<\/span>\s*<strong>main<\/strong>/u);
 	assert.doesNotMatch(previewMarkup, /Friday-beta-evm 可以同步/u);
 	assert.ok(
@@ -423,7 +434,11 @@ test("native kit catalog sketches the ideal project page v2 structure", async ()
 	const localChangesMarkup = previewMarkup.match(/<section class="project-local-changes-v2"[\s\S]*?<\/section>/u)?.[0] || "";
 	assert.equal((localChangesMarkup.match(/project-file-row-v2/g) || []).length, 4);
 	assert.match(localChangesMarkup, /workspace\/FRIDAY 介绍\.md/u);
+	assert.match(localChangesMarkup, />管理忽略</u);
 	assert.match(localChangesMarkup, />忽略目录</u);
+	assert.match(localChangesMarkup, />确认写入</u);
+	assert.match(localChangesMarkup, />显示全部</u);
+	assert.match(localChangesMarkup, /写入 \.gitignore：workspace\/cache\//u);
 	assert.match(localChangesMarkup, /project-local-empty-v2/u);
 	assert.match(localChangesMarkup, />无改动</u);
 	const functionCardMarkup = previewMarkup.match(/<aside class="project-function-card-v2"[\s\S]*?<\/aside>/u)?.[0] || "";
@@ -432,13 +447,18 @@ test("native kit catalog sketches the ideal project page v2 structure", async ()
 		Array.from(functionCardMarkup.matchAll(/<summary class="project-function-summary-v2">[\s\S]*?<strong>([^<]+)<\/strong>/gu)).map((match) => match[1]),
 		["同步状态", "Git更新树", "协作状态", "忽略规则"],
 	);
-	assert.doesNotMatch(functionCardMarkup, /<details class="project-function-section-v2[^"]*" open/u);
+	assert.match(functionCardMarkup, /project-function-state-v2">就绪/u);
+	assert.match(functionCardMarkup, /project-function-state-v2">Ahead 2/u);
+	assert.match(functionCardMarkup, /project-function-state-v2">3 条/u);
+	assert.doesNotMatch(functionCardMarkup, /<details class="project-function-section-v2" open/u);
 	assert.doesNotMatch(functionCardMarkup, />同步检查</u);
 	const ignoreRulesMarkup = functionCardMarkup.match(/<details class="project-function-section-v2 project-ignore-rules-v2"[\s\S]*?<\/details>/u)?.[0] || "";
 	assert.equal((ignoreRulesMarkup.match(/project-ignore-token-v2/g) || []).length, 3);
 	assert.match(ignoreRulesMarkup, /\.friday\//u);
 	assert.match(ignoreRulesMarkup, /workspace\/cache\//u);
-	assert.match(ignoreRulesMarkup, />管理忽略</u);
+	assert.match(ignoreRulesMarkup, /真实读取项目 \.gitignore/u);
+	assert.match(ignoreRulesMarkup, />查看候选</u);
+	assert.match(ignoreRulesMarkup, />添加规则</u);
 	assert.doesNotMatch(previewMarkup, /project-side-rail-v2/u);
 	assert.doesNotMatch(functionCardMarkup, />项目设置</u);
 	assert.doesNotMatch(functionCardMarkup, />项目设置摘要</u);
@@ -463,6 +483,13 @@ test("native kit catalog sketches the ideal project page v2 structure", async ()
 	assert.match(html, /\.project-ledger-item-v2 strong\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
 	assert.match(html, /\.project-file-copy-v2 strong\s*\{[\s\S]*white-space:\s*normal/u);
 	assert.match(html, /\.project-file-copy-v2 strong\s*\{[\s\S]*overflow-wrap:\s*anywhere/u);
+	assert.match(html, /\.project-file-copy-v2 strong\s*\{[\s\S]*font-weight:\s*600/u);
+	assert.match(html, /\.project-file-status-v2\s*\{[\s\S]*font-weight:\s*560/u);
+	assert.match(html, /\.project-file-status-v2\.is-new\s*\{[\s\S]*color:\s*var\(--text-muted\)/u);
+	assert.match(html, /\.project-file-row-v2 button\s*\{[\s\S]*box-shadow:\s*none/u);
+	assert.match(html, /\.project-branch-choice-v2\s*\{[\s\S]*height:\s*auto/u);
+	assert.match(html, /\.project-branch-choice-v2\s*\{[\s\S]*min-height:\s*48px/u);
+	assert.match(html, /\.project-branch-choice-v2\s*\{[\s\S]*white-space:\s*normal/u);
 	assert.match(html, /@container\s*\(max-width:\s*860px\)\s*\{[\s\S]*\.project-detail-lane-v2\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
 	assert.match(html, /@container\s*\(max-width:\s*720px\)\s*\{[\s\S]*\.project-sync-ledger-v2\s*\{[\s\S]*grid-template-columns:\s*1fr/u);
 	assert.match(html, /@container\s*\(max-width:\s*640px\)\s*\{[\s\S]*\.project-command-surface-v2,[\s\S]*grid-template-columns:\s*1fr/u);

@@ -584,8 +584,10 @@ test("sync page uses a compact sync decision surface with folded details", async
 	assert.match(cardBlock, /project-detail-lane-v2/);
 	assert.match(cardBlock, /createSyncFunctionSection/);
 	assert.match(source, /createEl\("details", \{ cls: "friday-sync-detail-section"/);
-	assert.match(source, /projects\.button\.checkStatus/);
+	assert.match(source, /projects\.button\.recheck/);
 	assert.match(source, /projects\.button\.sync/);
+	assert.match(cardBlock, /project-sync-primary-v2/);
+	assert.doesNotMatch(cardBlock, /this\.addPageButton\(statusDetail\.bodyEl,\s*this\.t\("projects\.button\.sync"/);
 	assert.doesNotMatch(cardBlock, /project-status-matrix-v1/);
 	assert.doesNotMatch(cardBlock, /project-workbench-body-v1/);
 	assert.doesNotMatch(cardBlock, /friday-project-card/);
@@ -676,9 +678,22 @@ test("sync page responds to pane width and keeps primary sync data readable", as
 	assert.match(styles, /\.friday-sync-preview-item strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*white-space:\s*normal/s);
 	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*font-size:\s*var\(--font-ui-small\)/s);
+	assert.match(styles, /\.project-file-copy-v2 strong\s*\{[^}]*font-weight:\s*600/s);
+	assert.match(styles, /\.project-file-status-v2\s*\{[^}]*font-weight:\s*560/s);
+	assert.match(styles, /\.project-file-status-v2\.is-new\s*\{[^}]*color:\s*var\(--text-muted\)/s);
+	assert.match(styles, /\.project-file-actions-v2 > button\s*\{[^}]*box-shadow:\s*none !important/s);
+	assert.match(styles, /\.project-file-actions-v2 > button\s*\{[^}]*font-weight:\s*560/s);
+	assert.match(styles, /\.project-branch-choice-v2\s*\{[^}]*height:\s*auto/s);
+	assert.match(styles, /\.project-branch-choice-v2\s*\{[^}]*min-height:\s*54px/s);
+	assert.match(styles, /\.project-branch-choice-v2\s*\{[^}]*white-space:\s*normal/s);
+	assert.match(styles, /\.project-branch-menu-list-v2\s*\{[^}]*gap:\s*4px/s);
+	assert.match(styles, /\.project-branch-menu-v2:not\(\[open\]\) > \.project-branch-menu-list-v2\s*\{[^}]*display:\s*none/s);
+	assert.match(styles, /@supports \(width: 1cqw\) \{[\s\S]*?\.project-branch-menu-list-v2\s*\{[^}]*100cqw/s);
 	assert.match(styles, /@container \(max-width: 720px\) \{[\s\S]*?\.friday-sync-ledger-v1\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-detail-lane-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-function-card-v2\s*\{[^}]*order:\s*2/);
+	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-command-actions-v2 \.project-branch-menu-list-v2\s*\{[^}]*position:\s*static/s);
 	assert.match(styles, /@container \(max-width: 640px\) \{[\s\S]*?\.project-command-surface-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-file-row-v2\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
 });
@@ -699,10 +714,21 @@ test("sync collaboration rows and function details keep subordinate visual weigh
 
 test("sync page exposes ignore management through dedicated integration points", async () => {
 	const source = readViewSource();
+	const styles = readStylesSource();
 	assert.match(source, /GitIgnoreService/);
+	assert.match(source, /listRules\(project\)/);
 	assert.match(source, /projects\.ignore\.title/);
 	assert.match(source, /projects\.ignore\.apply/);
+	assert.match(source, /projects\.ignore\.manage/);
+	assert.match(source, /projects\.ignore\.manualTitle/);
+	assert.match(source, /project-file-actions-v2/);
+	assert.match(source, /project-ignore-confirm-v2/);
+	assert.match(source, /project-ignore-editor-v2/);
 	assert.match(source, /applyIgnoreRule/);
+	assert.match(styles, /\.project-file-actions-v2\b/);
+	assert.match(styles, /\.project-ignore-confirm-v2\b/);
+	assert.match(styles, /\.project-ignore-editor-v2\b/);
+	assert.match(styles, /\.project-ignore-input-row-v2\b/);
 });
 
 test("project conflict proposal no longer calls builtin skill shortcut directly", async () => {
@@ -720,6 +746,9 @@ test("sync page renders typed conflict records with accept-local accept-remote a
 	const source = readViewSource();
 	assert.match(source, /getSyncConflicts\(/);
 	assert.match(source, /replaceProjectSyncConflicts\(/);
+	assert.match(source, /private async refreshObservedConflictRecords\(project: ProjectEntry, conflictCount: number\): Promise<SyncConflictRecord\[]>/);
+	assert.match(source, /const conflictRecords = await this\.refreshObservedConflictRecords\(project, status\.conflicts\)/);
+	assert.match(source, /this\.plugin\.syncService\.getConflictRecords\(project, existingRecords\)/);
 	assert.match(source, /projects\.conflicts\.type/);
 	assert.match(source, /projects\.conflicts\.useOurs/);
 	assert.match(source, /projects\.conflicts\.useTheirs/);

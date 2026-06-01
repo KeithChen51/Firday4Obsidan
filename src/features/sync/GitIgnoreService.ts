@@ -54,6 +54,25 @@ export class GitIgnoreService {
 		await fs.writeFile(gitIgnorePath, `${next}\n`, "utf8");
 	}
 
+	async listRules(project: ProjectEntry): Promise<string[]> {
+		const repoRoot = this.resolveProjectPath(project);
+		const gitIgnorePath = path.join(repoRoot, ".gitignore");
+		let existing = "";
+		try {
+			existing = await fs.readFile(gitIgnorePath, "utf8");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+				return [];
+			}
+			throw error;
+		}
+
+		return existing
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0 && !line.startsWith("#"));
+	}
+
 	private resolveProjectPath(project: ProjectEntry): string {
 		const candidate = this.resolveProjectAbsolutePath(project)?.trim() || "";
 		if (!candidate) {

@@ -58,7 +58,12 @@ test("release script builds plugin namespaced feed and a legacy bridge publish t
 		publishedAt: "2026-04-16T00:00:00+08:00",
 		legacyBridgeVersion: "0.2.0",
 		zipWriter: (sourceDir, zipPath) => {
-			zipCalls.push({ sourceDir, zipPath });
+			zipCalls.push({
+				sourceDir,
+				zipPath,
+				sourceBaseName: path.basename(sourceDir),
+				sourceFiles: fs.readdirSync(sourceDir).sort(),
+			});
 			fs.writeFileSync(zipPath, "zip-placeholder", "utf8");
 		},
 	});
@@ -89,6 +94,8 @@ test("release script builds plugin namespaced feed and a legacy bridge publish t
 	assert.ok(fs.existsSync(legacyStylesPath));
 	assert.ok(fs.existsSync(legacyChangelogPath));
 	assert.equal(zipCalls.length, 1);
+	assert.equal(zipCalls[0].sourceBaseName, "friday-obsidian-plugin");
+	assert.deepEqual(zipCalls[0].sourceFiles, ["main.js", "manifest.json", "styles.css"]);
 
 	const namespacedLatest = JSON.parse(fs.readFileSync(namespacedLatestJsonPath, "utf8"));
 	assert.deepEqual(namespacedLatest, {

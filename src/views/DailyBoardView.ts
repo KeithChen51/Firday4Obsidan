@@ -55,7 +55,7 @@ import type { SkillDescriptor } from "../services/SkillCommandService";
 import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../types/agent";
 import type { FridayPluginApi } from "../types/plugin";
 import type { SoulDefinition } from "../types/soul";
-import { ProjectEntry, ProjectMember, SyncResult, SyncStatus } from "../types/project";
+import { ProjectEntry, ProjectMember, SyncResult, SyncStatus, type SyncWorkingTreeChange } from "../types/project";
 import type { SyncConflictRecord } from "../types/sync";
 import { InvocationResolver } from "../core/execution/InvocationResolver";
 import { SkillRegistry } from "../core/execution/SkillRegistry";
@@ -179,6 +179,7 @@ export class DailyBoardView extends ItemView {
 	private memberEditorNewRole: ProjectMember["role"] = "editor";
 	private expandedConflictKey = "";
 	private pendingIgnoreConfirmationKey = "";
+	private expandedLocalChangesProjectId = "";
 	private readonly handleProjectStateChanged = () => {
 		void this.safeRenderBoard();
 	};
@@ -996,9 +997,16 @@ export class DailyBoardView extends ItemView {
 		const descriptionEl = decisionCopy.createSpan({ cls: "friday-sync-decision-note", text: "" });
 		const metaEl = decisionCopy.createDiv({ cls: "friday-sync-decision-meta project-decision-meta-v2" });
 		const decisionActions = decisionPanel.createDiv({ cls: "friday-sync-decision-actions project-command-actions-v2" });
-		this.addPageIconButton(decisionActions, this.t("projects.button.checkStatus", "检查状态"), "refresh-cw", async () => {
+		const syncButton = this.addPageButton(decisionActions, this.t("projects.button.sync", "同步当前项目"), async () => {
+			await this.syncSingleProject(project);
+		});
+		syncButton.addClass("friday-sync-primary-action");
+		syncButton.addClass("project-sync-primary-v2");
+		const checkButton = this.addPageButton(decisionActions, this.t("projects.button.recheck", "重新检查"), async () => {
 			await this.safeRenderBoard();
 		});
+		checkButton.addClass("friday-sync-secondary-action");
+		checkButton.addClass("project-secondary-action-v2");
 		const branchMenu = this.renderProjectBranchMenu(decisionActions, project, null);
 
 		const preview = containerEl.createDiv({ cls: "friday-sync-preview-v1 friday-sync-ledger-v1 project-sync-ledger-v2" });
@@ -1025,7 +1033,7 @@ export class DailyBoardView extends ItemView {
 
 		const detailLane = containerEl.createDiv({ cls: "project-detail-lane-v2 friday-sync-detail-lane" });
 		const localLane = detailLane.createDiv({ cls: "project-main-lane-v2 project-local-workspace-v2" });
-		this.renderWorkingTreeChanges(localLane, []);
+		this.renderWorkingTreeChanges(localLane, [], { project });
 		const functionCard = detailLane.createEl("aside", {
 			cls: "project-function-card-v2 friday-sync-function-card",
 			attr: { "aria-label": this.t("projects.sync.function.info", "同步功能信息") },
@@ -1050,15 +1058,15 @@ export class DailyBoardView extends ItemView {
 			"project-ignore-rules-v2",
 		);
 		this.renderSyncReadinessChecks(statusDetail.bodyEl, project, null);
-		const syncButton = this.addPageButton(statusDetail.bodyEl, this.t("projects.button.sync", "同步当前项目"), async () => {
-			await this.syncSingleProject(project);
-		});
-		syncButton.addClass("friday-sync-primary-action");
 		this.renderSyncAutomationControls(statusDetail.bodyEl, project);
 		this.renderProjectGitUpdateTree(treeDetail.bodyEl, project, null);
 		this.renderProjectCollaborationLog(collabDetail.bodyEl, project);
 		this.renderProjectStatusPanel(collabDetail.bodyEl, project);
 		this.renderIgnoreRulesSummary(ignoreDetail.bodyEl);
+		const openIgnoreRules = () => {
+			ignoreDetail.detailsEl.toggleAttribute("open", true);
+			ignoreDetail.detailsEl.scrollIntoView({ block: "nearest" });
+		};
 
 		const decision: SyncDecisionElements = {
 			titleEl,
@@ -1096,7 +1104,7 @@ export class DailyBoardView extends ItemView {
 			this.addPageButton(nextStepEl, this.t("projects.button.configure", "立即配置"), async () => {
 				this.plugin.openSettingsTab("project");
 			});
-			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl);
+			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl, openIgnoreRules);
 			void this.populateIgnoreCandidates(ignoreDetail.bodyEl, project, ignoreDetail.stateEl);
 		} else if (project.gitState === "git_remote_bound") {
 			this.updateSyncDecisionPanel(decision, project, null, {
@@ -1105,7 +1113,7 @@ export class DailyBoardView extends ItemView {
 				chipText: this.t("projects.sync.ready", "就绪"),
 				syncEnabled: true,
 			});
-			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl);
+			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl, openIgnoreRules);
 			void this.populateIgnoreCandidates(ignoreDetail.bodyEl, project, ignoreDetail.stateEl);
 		}
 	}
@@ -1202,8 +1210,10 @@ export class DailyBoardView extends ItemView {
 		});
 		const summary = detailsEl.createEl("summary", { cls: "project-function-summary-v2" });
 		summary.createEl("strong", { text: title });
-		const stateEl = detailsEl.createSpan({ cls: "project-function-state-v2 friday-sync-detail-state" });
-		stateEl.hidden = true;
+		const stateEl = summary.createSpan({
+			cls: "project-function-state-v2 friday-sync-detail-state",
+			text: this.t("projects.sync.pendingCheck", "待检查"),
+		});
 		const bodyEl = detailsEl.createDiv({ cls: "friday-sync-detail-body project-function-detail-v2" });
 		return { detailsEl, stateEl, bodyEl };
 	}
@@ -1690,15 +1700,24 @@ export class DailyBoardView extends ItemView {
 		gitTreePanel: HTMLElement,
 		localChangesPanel: HTMLElement,
 		collabPanel: HTMLElement,
+		openIgnoreRules?: () => void,
 	): Promise<void> {
 		try {
 			const status = await this.plugin.syncService.getStatus(project);
+			const conflictRecords = await this.refreshObservedConflictRecords(project, status.conflicts);
 			this.updateSyncDecisionPanel(decision, project, status);
 			this.renderSyncReadinessChecks(statusPanel, project, status);
 			this.renderSyncAutomationControls(statusPanel, project);
 			this.renderProjectGitUpdateTree(gitTreePanel, project, status);
 			this.renderProjectCollaborationLog(collabPanel, project);
 			this.renderProjectStatusPanel(collabPanel, project);
+			this.updateSyncDetailState(
+				collabPanel,
+				conflictRecords.length > 0
+					? this.t("projects.sync.preview.conflictFiles", "{count} 个文件需处理", { count: conflictRecords.length })
+					: this.t("projects.sync.noneShort", "无"),
+				conflictRecords.length > 0 ? "warning" : "muted",
+			);
 			this.updateSyncDetailState(
 				gitTreePanel,
 				status.ahead > 0 || status.behind > 0
@@ -1735,7 +1754,7 @@ export class DailyBoardView extends ItemView {
 					runtimeState.recordedAt,
 				);
 			}
-			this.renderWorkingTreeChanges(localChangesPanel, status.workingTreeChanges);
+			this.renderWorkingTreeChanges(localChangesPanel, status.workingTreeChanges, { project, openIgnoreRules });
 			this.updateSyncDetailState(
 				statusPanel,
 				this.formatSyncFileCount(status.workingTreeChanges.length),
@@ -1751,7 +1770,7 @@ export class DailyBoardView extends ItemView {
 				syncEnabled: false,
 			});
 			localChangesPanel.empty();
-			this.renderWorkingTreeChanges(localChangesPanel, []);
+			this.renderWorkingTreeChanges(localChangesPanel, [], { project, openIgnoreRules });
 			this.updateSyncDetailState(statusPanel, this.t("projects.sync.remoteBlocked", "受阻"), "warning");
 			this.updateSyncDetailState(gitTreePanel, this.t("projects.sync.remoteBlocked", "受阻"), "warning");
 			this.renderProjectSyncEvent(
@@ -1763,6 +1782,27 @@ export class DailyBoardView extends ItemView {
 				"warning",
 			);
 		}
+	}
+
+	private async refreshObservedConflictRecords(project: ProjectEntry, conflictCount: number): Promise<SyncConflictRecord[]> {
+		const existingRecords = this.plugin.workbenchStateStore.getSyncConflicts(project.projectId);
+		if (conflictCount <= 0) {
+			if (existingRecords.length > 0) {
+				this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.projectId, []);
+			}
+			if (this.expandedConflictKey.startsWith(`${project.projectId}::`)) {
+				this.expandedConflictKey = "";
+			}
+			return [];
+		}
+
+		const conflictRecords = await this.plugin.syncService.getConflictRecords(project, existingRecords);
+		this.plugin.workbenchStateStore.replaceProjectSyncConflicts(project.projectId, conflictRecords);
+		const firstConflictRecord = conflictRecords[0];
+		if (firstConflictRecord && !this.expandedConflictKey.startsWith(`${project.projectId}::`)) {
+			this.expandedConflictKey = this.getSyncConflictKey(project.projectId, firstConflictRecord.filePath);
+		}
+		return conflictRecords;
 	}
 
 	private updateSyncDetailState(
@@ -1778,6 +1818,7 @@ export class DailyBoardView extends ItemView {
 		if (!(stateEl instanceof HTMLElement)) {
 			return;
 		}
+		stateEl.hidden = false;
 		stateEl.setText(state);
 		stateEl.removeClass("is-active");
 		stateEl.removeClass("is-warning");
@@ -1790,7 +1831,8 @@ export class DailyBoardView extends ItemView {
 
 	private renderWorkingTreeChanges(
 		containerEl: HTMLElement,
-		workingTreeChanges: Array<{ path: string; kind: string }>,
+		workingTreeChanges: SyncWorkingTreeChange[],
+		options: { project?: ProjectEntry; openIgnoreRules?: () => void } = {},
 	): void {
 		containerEl.empty();
 		const panel = containerEl.createEl("section", {
@@ -1801,11 +1843,19 @@ export class DailyBoardView extends ItemView {
 		head.createEl("strong", {
 			text: this.t("projects.sync.localChangesTitle", "本地改动"),
 		});
-		head.createSpan({
-			text: workingTreeChanges.length > 0
-				? this.t("projects.sync.localChangesCount", "{count} 个待确认", { count: workingTreeChanges.length })
-				: this.t("projects.sync.noChangesShort", "无改动"),
+		const headActions = head.createDiv({ cls: "project-section-actions-v2" });
+		headActions.createSpan({
+			text:
+				workingTreeChanges.length > 0
+					? this.t("projects.sync.localChangesCount", "{count} 个待确认", { count: workingTreeChanges.length })
+					: this.t("projects.sync.noChangesShort", "无改动"),
 		});
+		if (options.openIgnoreRules) {
+			const manageButton = this.addPageButton(headActions, this.t("projects.ignore.manage", "管理忽略"), async () => {
+				options.openIgnoreRules?.();
+			});
+			manageButton.addClass("project-text-action-v2");
+		}
 		if (workingTreeChanges.length === 0) {
 			const empty = panel.createDiv({ cls: "project-local-empty-v2" });
 			empty.createEl("strong", {
@@ -1816,7 +1866,9 @@ export class DailyBoardView extends ItemView {
 			});
 			return;
 		}
-		const visibleChanges = workingTreeChanges.slice(0, 5);
+		const projectId = options.project?.projectId ?? "";
+		const isExpanded = projectId.length > 0 && this.expandedLocalChangesProjectId === projectId;
+		const visibleChanges = isExpanded ? workingTreeChanges : workingTreeChanges.slice(0, 5);
 		for (const change of visibleChanges) {
 			const row = panel.createDiv({ cls: "project-file-row-v2" });
 			row.createSpan({
@@ -1826,20 +1878,68 @@ export class DailyBoardView extends ItemView {
 			const copy = row.createDiv({ cls: "project-file-copy-v2" });
 			copy.createEl("strong", { text: change.path });
 			copy.createSpan({
-				text: this.t("projects.sync.filePending", "待同步判断"),
+				text: this.getWorkingTreeChangeDescription(change),
 			});
-			this.addPageButton(row, this.t("projects.sync.viewFile", "查看"), async () => {
-				await this.openAgentArtifactInWorkspace(change.path);
-			});
+			const actions = row.createDiv({ cls: "project-file-actions-v2" });
+			const openButton = this.addPageButton(
+				actions,
+				change.path.endsWith("/") ? this.t("projects.sync.viewPath", "查看") : this.t("projects.sync.openFile", "打开"),
+				async () => {
+					await this.openAgentArtifactInWorkspace(change.path.replace(/\/$/, ""));
+				},
+			);
+			openButton.addClass("project-secondary-action-v2");
+			if (options.project && change.kind === "untracked") {
+				const ignoreButton = this.addPageButton(actions, this.t("projects.ignore.apply", "忽略"), async () => {
+					this.pendingIgnoreConfirmationKey = this.getIgnoreConfirmationKey(options.project!.projectId, change.path);
+					this.renderBoard();
+				});
+				ignoreButton.addClass("project-text-action-v2");
+				if (this.getIgnoreConfirmationKey(options.project.projectId, change.path) === this.pendingIgnoreConfirmationKey) {
+					const confirm = panel.createDiv({ cls: "project-ignore-confirm-v2" });
+					confirm.createSpan({
+						text: this.t("projects.ignore.writeRule", "写入 .gitignore：{path}", { path: change.path }),
+					});
+					const confirmActions = confirm.createDiv({ cls: "project-ignore-confirm-actions-v2" });
+					const confirmButton = this.addPageButton(confirmActions, this.t("projects.ignore.confirmAction", "确认写入"), async () => {
+						await this.applyIgnoreRule(options.project!, change.path);
+					});
+					confirmButton.addClass("project-sync-primary-v2");
+					const cancelButton = this.addPageButton(confirmActions, this.t("projects.ignore.cancelAction", "取消"), async () => {
+						this.pendingIgnoreConfirmationKey = "";
+						this.renderBoard();
+					});
+					cancelButton.addClass("project-secondary-action-v2");
+				}
+			}
 		}
 		if (workingTreeChanges.length > visibleChanges.length) {
-			panel.createDiv({
-				cls: "friday-sync-list-more",
-				text: this.t("projects.sync.moreChanges", "另外 {count} 个文件在同步详情中处理", {
+			const more = panel.createDiv({ cls: "friday-sync-list-more project-local-more-v2" });
+			more.createSpan({
+				text: this.t("projects.sync.moreChanges", "另外 {count} 个文件", {
 					count: workingTreeChanges.length - visibleChanges.length,
 				}),
 			});
+			if (projectId) {
+				const moreButton = this.addPageButton(more, this.t("projects.sync.showAllChanges", "显示全部"), async () => {
+					this.expandedLocalChangesProjectId = projectId;
+					this.renderBoard();
+				});
+				moreButton.addClass("project-text-action-v2");
+			}
 		}
+	}
+
+	private getWorkingTreeChangeDescription(change: SyncWorkingTreeChange): string {
+		if (change.kind === "conflicted") {
+			return this.t("projects.sync.fileConflicted", "需先处理冲突");
+		}
+		if (change.kind === "untracked") {
+			return change.path.endsWith("/")
+				? this.t("projects.sync.fileUntrackedDirectory", "未跟踪目录，可加入忽略规则")
+				: this.t("projects.sync.fileUntracked", "未跟踪，将在同步前确认");
+		}
+		return this.t("projects.sync.fileWillCommit", "将随本次同步提交");
 	}
 
 	private getWorkingTreeChangeLabel(kind: string): string {
@@ -1890,51 +1990,90 @@ export class DailyBoardView extends ItemView {
 		this.renderBoard();
 	}
 
-	private renderIgnoreRulesSummary(containerEl: HTMLElement): void {
+	private renderIgnoreRulesSummary(containerEl: HTMLElement, rules: string[] = []): void {
 		containerEl.empty();
 		containerEl.createEl("p", {
 			text: this.t("projects.ignore.summary", "这些路径不会进入本地改动列表。"),
 		});
 		const list = containerEl.createDiv({ cls: "project-ignore-list-v2" });
-		for (const rule of [".friday/", "workspace/cache/", "*.tmp"]) {
+		for (const rule of rules.slice(0, 8)) {
 			list.createSpan({ cls: "project-ignore-token-v2", text: rule });
+		}
+		if (rules.length === 0) {
+			list.createSpan({
+				cls: "project-ignore-token-v2 is-muted",
+				text: this.t("projects.ignore.noRules", "暂无规则"),
+			});
 		}
 	}
 
 	private async populateIgnoreCandidates(containerEl: HTMLElement, project: ProjectEntry, stateEl?: HTMLElement): Promise<void> {
 		try {
-			const candidates = await this.gitIgnoreService.listCandidates(project);
-			this.renderIgnoreRulesSummary(containerEl);
+			const [rules, candidates] = await Promise.all([
+				this.gitIgnoreService.listRules(project),
+				this.gitIgnoreService.listCandidates(project),
+			]);
+			this.renderIgnoreRulesSummary(containerEl, rules);
 			if (stateEl) {
-				stateEl.setText(candidates.length > 0 ? this.formatSyncFileCount(candidates.length) : this.t("projects.sync.noneShort", "无"));
+				stateEl.setText(
+					rules.length > 0
+						? this.t("projects.ignore.ruleCount", "{count} 条", { count: rules.length })
+						: this.t("projects.sync.noneShort", "无"),
+				);
 			}
-			if (candidates.length === 0) {
-				return;
-			}
+			const editor = containerEl.createDiv({ cls: "project-ignore-editor-v2" });
+			editor.createEl("strong", { text: this.t("projects.ignore.manualTitle", "手动添加规则") });
+			const inputRow = editor.createDiv({ cls: "project-ignore-input-row-v2" });
+			const input = inputRow.createEl("input", {
+				type: "text",
+				placeholder: this.t("projects.ignore.manualPlaceholder", "例如 workspace/cache/"),
+			});
+			const addButton = this.addPageButton(inputRow, this.t("projects.ignore.addRule", "添加规则"), async () => {
+				const value = input.value.trim();
+				if (!value) {
+					new Notice(this.t("projects.ignore.emptyRule", "先输入要忽略的路径规则。"), 3000);
+					return;
+				}
+				await this.applyIgnoreRule(project, value);
+			});
+			addButton.addClass("project-secondary-action-v2");
+
 			const panel = containerEl.createDiv({ cls: "friday-project-status-group friday-sync-ignore-candidates" });
-			panel.createEl("h5", { text: this.t("projects.ignore.title", "Ignore candidates") });
+			const panelHead = panel.createDiv({ cls: "project-section-head-v2" });
+			panelHead.createEl("strong", { text: this.t("projects.ignore.title", "忽略候选") });
+			panelHead.createSpan({
+				text:
+					candidates.length > 0
+						? this.t("projects.ignore.candidateCount", "{count} 个候选", { count: candidates.length })
+						: this.t("projects.ignore.noCandidates", "无候选"),
+			});
 			for (const candidate of candidates.slice(0, 6)) {
-				const row = panel.createDiv({ cls: "friday-sync-conflict-row" });
-				row.createDiv({
+				const row = panel.createDiv({ cls: "project-ignore-candidate-v2" });
+				const copy = row.createDiv({ cls: "project-file-copy-v2" });
+				copy.createEl("strong", { text: candidate.path });
+				copy.createSpan({
 					text: this.t("projects.ignore.item", "{path} ({kind})", {
 						path: candidate.path,
 						kind: candidate.kind,
 					}),
 				});
-				const actions = row.createDiv({ cls: "friday-approval-actions" });
+				const actions = row.createDiv({ cls: "project-file-actions-v2" });
 				if (this.getIgnoreConfirmationKey(project.projectId, candidate.path) === this.pendingIgnoreConfirmationKey) {
-					this.addPageButton(actions, this.t("projects.ignore.confirmAction", "确认写入"), async () => {
+					const confirmButton = this.addPageButton(actions, this.t("projects.ignore.confirmAction", "确认写入"), async () => {
 						await this.applyIgnoreRule(project, candidate.path);
 					});
-					this.addPageButton(actions, this.t("projects.ignore.cancelAction", "取消"), async () => {
+					confirmButton.addClass("project-sync-primary-v2");
+					const cancelButton = this.addPageButton(actions, this.t("projects.ignore.cancelAction", "取消"), async () => {
 						this.pendingIgnoreConfirmationKey = "";
 						this.renderBoard();
 					});
+					cancelButton.addClass("project-secondary-action-v2");
 				} else {
-					this.addPageButton(actions, this.t("projects.ignore.apply", "Ignore"), async () => {
+					const ignoreButton = this.addPageButton(actions, this.t("projects.ignore.apply", "Ignore"), async () => {
 						this.pendingIgnoreConfirmationKey = this.getIgnoreConfirmationKey(project.projectId, candidate.path);
 						this.renderBoard();
 					});
+					ignoreButton.addClass("project-text-action-v2");
 				}
 			}
 		} catch (error) {

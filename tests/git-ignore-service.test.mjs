@@ -60,10 +60,44 @@ test("git ignore service appends unique rules into shared gitignore", async () =
 
 		await service.applyRule(createProject(), "cache/");
 		await service.applyRule(createProject(), "cache/");
+		await service.applyRule(createProject(), " cache\\ ");
 
 		const content = await fs.readFile(path.join(repoRoot, ".gitignore"), "utf8");
 		assert.match(content, /node_modules\//);
 		assert.equal(content.split("cache/").length - 1, 1);
+	} finally {
+		await fs.rm(repoRoot, { recursive: true, force: true });
+	}
+});
+
+test("git ignore service lists effective gitignore rules in file order", async () => {
+	const mod = await loadModule();
+	const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-ignore-list-"));
+	try {
+		await fs.writeFile(
+			path.join(repoRoot, ".gitignore"),
+			"\n# generated files\n dist/ \n\n*.log\n  # local notes\ncache/tmp.txt  \n",
+			"utf8",
+		);
+		const service = new mod.GitIgnoreService(() => repoRoot);
+
+		const rules = await service.listRules(createProject());
+
+		assert.deepEqual(rules, ["dist/", "*.log", "cache/tmp.txt"]);
+	} finally {
+		await fs.rm(repoRoot, { recursive: true, force: true });
+	}
+});
+
+test("git ignore service returns no rules when gitignore is missing", async () => {
+	const mod = await loadModule();
+	const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "friday-ignore-missing-"));
+	try {
+		const service = new mod.GitIgnoreService(() => repoRoot);
+
+		const rules = await service.listRules(createProject());
+
+		assert.deepEqual(rules, []);
 	} finally {
 		await fs.rm(repoRoot, { recursive: true, force: true });
 	}

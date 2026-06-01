@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,6 +16,7 @@ const LEGACY_RELEASE_LATEST_PATH = `${LEGACY_RELEASE_DIR}/latest.json`;
 const PLUGIN_ROOT_DIR = "plugin";
 const PLUGIN_LATEST_PATH = `${PLUGIN_ROOT_DIR}/latest.json`;
 const PLUGIN_ARTIFACT_DIRNAME = "artifacts";
+const PLUGIN_INSTALL_DIRNAME = "friday-obsidian-plugin";
 const PLUGIN_ARTIFACT_RELATIVE_DIR = `${PLUGIN_ROOT_DIR}/${PLUGIN_ARTIFACT_DIRNAME}`;
 const PLUGIN_ZIP_NAME = "friday-obsidian-plugin.zip";
 const PLUGIN_ZIP_PATH = `${PLUGIN_ROOT_DIR}/${PLUGIN_ZIP_NAME}`;
@@ -252,6 +254,22 @@ export function createZipArchive(sourceDir, zipPath) {
 	runCommand("zip", ["-rq", zipPath, path.basename(sourceDir)], path.dirname(sourceDir));
 }
 
+function createInstallZipArchive(projectRoot, zipPath, zipWriter) {
+	const stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "friday-plugin-zip-"));
+	const installDir = path.join(stagingRoot, PLUGIN_INSTALL_DIRNAME);
+	fs.mkdirSync(installDir, { recursive: true });
+	try {
+		for (const fileName of RELEASE_FILES) {
+			const sourcePath = ensureFile(projectRoot, fileName);
+			const targetPath = path.join(installDir, fileName);
+			fs.copyFileSync(sourcePath, targetPath);
+		}
+		zipWriter(installDir, zipPath);
+	} finally {
+		fs.rmSync(stagingRoot, { recursive: true, force: true });
+	}
+}
+
 export function syncReleaseArtifacts({
 	projectRoot,
 	publishedAt = new Date().toISOString(),
@@ -295,7 +313,7 @@ export function syncReleaseArtifacts({
 	writeJson(latestJsonPath, latestJson);
 
 	const zipPath = path.join(projectRoot, PLUGIN_ZIP_PATH);
-	zipWriter(artifactDir, zipPath);
+	createInstallZipArchive(projectRoot, zipPath, zipWriter);
 
 	if (writesLegacyBridge) {
 		const legacyArtifactDir = path.join(projectRoot, LEGACY_RELEASE_ARTIFACT_RELATIVE_DIR);
