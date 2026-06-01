@@ -692,7 +692,8 @@ test("sync page responds to pane width and keeps primary sync data readable", as
 	assert.match(styles, /\.project-branch-menu-list-v2\s*\{[^}]*gap:\s*4px/s);
 	assert.match(styles, /\.project-sync-progress-rail-v2\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
 	assert.match(styles, /\.project-sync-progress-copy-v2 span\s*\{[^}]*font-size:\s*var\(--font-ui-smaller\)/s);
-	assert.match(styles, /\.project-sync-progress-step-v2\.is-done,\s*\n\.project-sync-progress-step-v2\.is-current\s*\{[^}]*var\(--color-green\)/s);
+	assert.match(styles, /\.project-sync-progress-step-v2\.is-done\s*\{[^}]*var\(--color-green\)/s);
+	assert.match(styles, /\.project-sync-progress-step-v2\.is-current\s*\{[^}]*var\(--color-blue,\s*var\(--interactive-accent\)\)/s);
 	assert.match(styles, /\.project-sync-progress-step-v2\.is-error\s*\{[^}]*var\(--color-red\)/s);
 	assert.doesNotMatch(styles, /\.project-sync-progress-step-v2::before/);
 	assert.match(styles, /\.project-branch-menu-v2:not\(\[open\]\) > \.project-branch-menu-list-v2\s*\{[^}]*display:\s*none/s);

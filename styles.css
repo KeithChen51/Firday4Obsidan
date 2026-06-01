@@ -3947,11 +3947,17 @@ button.friday-ai-toolbar-choice-item {
 	white-space: nowrap;
 }
 
-.project-sync-progress-step-v2.is-done,
-.project-sync-progress-step-v2.is-current {
+.project-sync-progress-step-v2.is-done {
 	border-color: color-mix(in srgb, var(--color-green) 52%, var(--background-modifier-border));
 	background: color-mix(in srgb, var(--color-green) 14%, var(--background-primary));
 	color: color-mix(in srgb, var(--color-green) 84%, var(--text-normal));
+	font-weight: 720;
+}
+
+.project-sync-progress-step-v2.is-current {
+	border-color: color-mix(in srgb, var(--color-blue, var(--interactive-accent)) 54%, var(--background-modifier-border));
+	background: color-mix(in srgb, var(--color-blue, var(--interactive-accent)) 13%, var(--background-primary));
+	color: color-mix(in srgb, var(--color-blue, var(--interactive-accent)) 86%, var(--text-normal));
 	font-weight: 720;
 }
 
