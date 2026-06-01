@@ -45,6 +45,7 @@ test("sync runtime store classifies failures and tracks per-project stage", asyn
 	assert.match(source, /classifyGitError/);
 	assert.match(source, /getProjectState/);
 	assert.match(source, /setProjectState/);
+	assert.match(source, /lastActiveStage/);
 	assert.match(source, /offline|blocked|failed/);
 	assert.match(source, /sync_conflict_resolved_written_back/);
 	assert.match(source, /sync_recovery_failed/);
@@ -56,6 +57,17 @@ test("daily board view reads sync runtime store for the active project", async (
 	assert.match(source, /projects\.sync\.runtime/);
 	assert.match(source, /projects\.sync\.offline/);
 	assert.match(source, /projects\.sync\.blocked/);
+});
+
+test("daily board view refreshes the visible sync progress from runtime events", async () => {
+	const source = read(viewPath);
+	assert.match(source, /syncEventBus\.subscribe\(this\.handleSyncRuntimeEvent\)/);
+	assert.match(source, /event\.type === "sync_status_observed"/);
+	assert.match(source, /this\.scheduleRefresh\(\)/);
+	assert.match(source, /renderSyncProgressPanel/);
+	assert.match(source, /project-sync-progress-v2/);
+	assert.match(source, /isSyncRuntimeInFlight/);
+	assert.match(source, /getSyncProgressErrorStage/);
 });
 
 test("sync status bar subscribes to sync runtime store updates", async () => {

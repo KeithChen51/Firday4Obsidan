@@ -1,9 +1,12 @@
 import { classifyGitError } from "../../platform/git/classifyGitError";
 import { SyncEventBus, type SyncRuntimeEvent, type SyncRuntimeStage } from "./SyncEventBus";
 
+type SyncActiveStage = Extract<SyncRuntimeStage, "checking" | "pulling" | "committing" | "pushing">;
+
 export interface SyncRuntimeState {
 	projectId: string;
 	stage: SyncRuntimeStage;
+	lastActiveStage?: SyncActiveStage;
 	message: string;
 	branch: string;
 	connected: boolean | null;
@@ -58,6 +61,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: "checking",
+					lastActiveStage: "checking",
 					message: "",
 					branch: "",
 					connected: null,
@@ -70,6 +74,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: event.stage,
+					lastActiveStage: isSyncActiveStage(event.stage) ? event.stage : current?.lastActiveStage,
 					message: event.message ?? current?.message ?? "",
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
@@ -83,6 +88,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: current?.stage ?? "pulling",
+					lastActiveStage: current?.lastActiveStage ?? "pulling",
 					message: event.pulledFiles.length > 0 ? `Pulled ${event.pulledFiles.length} file(s).` : "",
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
@@ -98,6 +104,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: nextStage,
+					lastActiveStage: current?.lastActiveStage,
 					message: current?.message ?? "",
 					branch: event.branch,
 					connected: event.connected,
@@ -111,6 +118,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: "resolving",
+					lastActiveStage: current?.lastActiveStage ?? "pulling",
 					message: current?.message ?? "",
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
@@ -124,6 +132,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: "blocked",
+					lastActiveStage: current?.lastActiveStage,
 					message: event.message,
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
@@ -137,6 +146,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: "resolving",
+					lastActiveStage: current?.lastActiveStage ?? "pulling",
 					message: `Wrote ${event.strategy} resolution for ${event.filePath}.`,
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
@@ -151,6 +161,7 @@ export class SyncRuntimeStore {
 					this.setProjectState({
 						projectId: event.projectId,
 						stage: "succeeded",
+						lastActiveStage: current?.lastActiveStage ?? "pushing",
 						message: "",
 						branch: current?.branch ?? "",
 						connected: current?.connected ?? null,
@@ -163,6 +174,7 @@ export class SyncRuntimeStore {
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: classified.kind,
+					lastActiveStage: current?.lastActiveStage ?? "checking",
 					message: classified.message,
 					branch: current?.branch ?? "",
 					connected: classified.kind === "offline" ? false : current?.connected ?? null,
@@ -178,4 +190,8 @@ export class SyncRuntimeStore {
 			listener();
 		}
 	}
+}
+
+function isSyncActiveStage(stage: SyncRuntimeStage): stage is SyncActiveStage {
+	return stage === "checking" || stage === "pulling" || stage === "committing" || stage === "pushing";
 }

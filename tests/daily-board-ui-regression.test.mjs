@@ -581,6 +581,7 @@ test("sync page uses a compact sync decision surface with folded details", async
 	const cardBlock = cardMatch[1] ?? "";
 	assert.match(cardBlock, /friday-sync-decision-panel/);
 	assert.match(cardBlock, /friday-sync-preview-v1/);
+	assert.match(cardBlock, /renderSyncProgressPanel/);
 	assert.match(cardBlock, /project-detail-lane-v2/);
 	assert.match(cardBlock, /createSyncFunctionSection/);
 	assert.match(source, /createEl\("details", \{ cls: "friday-sync-detail-section"/);
@@ -598,6 +599,7 @@ test("sync page uses a compact sync decision surface with folded details", async
 	assert.match(styles, /\.project-sync-workbench-v1\b/);
 	assert.match(styles, /\.friday-sync-decision-panel\b/);
 	assert.match(styles, /\.friday-sync-preview-v1\b/);
+	assert.match(styles, /\.project-sync-progress-v2\b/);
 	assert.match(styles, /\.friday-sync-detail-section\b/);
 	assert.doesNotMatch(styles, /\.project-status-matrix-v1\s*\{/);
 });
@@ -688,13 +690,20 @@ test("sync page responds to pane width and keeps primary sync data readable", as
 	assert.match(styles, /\.project-branch-choice-v2\s*\{[^}]*min-height:\s*54px/s);
 	assert.match(styles, /\.project-branch-choice-v2\s*\{[^}]*white-space:\s*normal/s);
 	assert.match(styles, /\.project-branch-menu-list-v2\s*\{[^}]*gap:\s*4px/s);
+	assert.match(styles, /\.project-sync-progress-rail-v2\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
+	assert.match(styles, /\.project-sync-progress-copy-v2 span\s*\{[^}]*font-size:\s*var\(--font-ui-smaller\)/s);
+	assert.match(styles, /\.project-sync-progress-step-v2\.is-done,\s*\n\.project-sync-progress-step-v2\.is-current\s*\{[^}]*var\(--color-green\)/s);
+	assert.match(styles, /\.project-sync-progress-step-v2\.is-error\s*\{[^}]*var\(--color-red\)/s);
+	assert.doesNotMatch(styles, /\.project-sync-progress-step-v2::before/);
 	assert.match(styles, /\.project-branch-menu-v2:not\(\[open\]\) > \.project-branch-menu-list-v2\s*\{[^}]*display:\s*none/s);
 	assert.match(styles, /@supports \(width: 1cqw\) \{[\s\S]*?\.project-branch-menu-list-v2\s*\{[^}]*100cqw/s);
 	assert.match(styles, /@container \(max-width: 720px\) \{[\s\S]*?\.friday-sync-ledger-v1\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 720px\) \{[\s\S]*?\.project-sync-progress-rail-v2\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
 	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-detail-lane-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-function-card-v2\s*\{[^}]*order:\s*2/);
 	assert.match(styles, /@container \(max-width: 860px\) \{[\s\S]*?\.project-command-actions-v2 \.project-branch-menu-list-v2\s*\{[^}]*position:\s*static/s);
 	assert.match(styles, /@container \(max-width: 640px\) \{[\s\S]*?\.project-command-surface-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-sync-progress-head-v2,[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\)/);
 	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-file-row-v2\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
 });
 

@@ -17,6 +17,8 @@ import type { EditPlanRecord } from "../features/workbench/WorkbenchStateStore";
 import { FRIDAY_SETTINGS_CHANGED_EVENT, PROJECT_STATE_CHANGED_EVENT } from "../constants/events";
 import { FRIDAY_ICON_ID } from "../constants/icon";
 import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
+import type { SyncRuntimeEvent, SyncRuntimeStage } from "../features/sync/SyncEventBus";
+import type { SyncRuntimeState } from "../features/sync/SyncRuntimeStore";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
@@ -102,6 +104,7 @@ import { getMentionFileTypeIcon, isMentionableFile } from "./mentionSuggestions"
 export const VIEW_TYPE_DAILY_BOARD = "friday-daily-board";
 
 type TranslateParams = Record<string, string | number | boolean | null | undefined>;
+type SyncProgressStage = Extract<SyncRuntimeStage, "checking" | "pulling" | "committing" | "pushing">;
 
 interface SyncDecisionElements {
 	titleEl: HTMLElement;
@@ -115,6 +118,7 @@ interface SyncDecisionElements {
 	conflictValueEl: HTMLElement;
 	currentBranchEl: HTMLElement;
 	branchListEl: HTMLElement;
+	progressEl: HTMLElement;
 }
 
 interface SyncDetailSection {
@@ -180,8 +184,19 @@ export class DailyBoardView extends ItemView {
 	private expandedConflictKey = "";
 	private pendingIgnoreConfirmationKey = "";
 	private expandedLocalChangesProjectId = "";
+	private unsubscribeSyncRuntime: (() => void) | null = null;
 	private readonly handleProjectStateChanged = () => {
 		void this.safeRenderBoard();
+	};
+	private readonly handleSyncRuntimeEvent = (event: SyncRuntimeEvent): void => {
+		if (event.type === "sync_status_observed" || this.activePage !== "sync") {
+			return;
+		}
+		const activeProject = this.getActiveProjectEntry();
+		if (!activeProject || event.projectId !== this.getProjectKey(activeProject)) {
+			return;
+		}
+		this.scheduleRefresh();
 	};
 
 	private aiConversation: ChatMessage[] = [];
@@ -281,6 +296,7 @@ export class DailyBoardView extends ItemView {
 		);
 		window.addEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
 		window.addEventListener(FRIDAY_SETTINGS_CHANGED_EVENT, this.handleSettingsChanged);
+		this.unsubscribeSyncRuntime = this.plugin.syncEventBus.subscribe(this.handleSyncRuntimeEvent);
 		await this.ensureActiveProjectInitialized();
 		await this.ensureAiSessionLoaded();
 		await this.safeRenderBoard();
@@ -305,6 +321,8 @@ export class DailyBoardView extends ItemView {
 		this.aiRuntimeProgressTaskIds.clear();
 		window.removeEventListener(PROJECT_STATE_CHANGED_EVENT, this.handleProjectStateChanged);
 		window.removeEventListener(FRIDAY_SETTINGS_CHANGED_EVENT, this.handleSettingsChanged);
+		this.unsubscribeSyncRuntime?.();
+		this.unsubscribeSyncRuntime = null;
 		this.contentEl.empty();
 	}
 
@@ -1067,6 +1085,9 @@ export class DailyBoardView extends ItemView {
 			ignoreDetail.detailsEl.toggleAttribute("open", true);
 			ignoreDetail.detailsEl.scrollIntoView({ block: "nearest" });
 		};
+		const nextStepEl = decisionPanel.createDiv({ cls: "friday-sync-next-step" });
+		const runtimeState = this.plugin.syncRuntimeStore.getProjectState(this.getProjectKey(project));
+		this.renderSyncProgressPanel(nextStepEl, runtimeState);
 
 		const decision: SyncDecisionElements = {
 			titleEl,
@@ -1080,9 +1101,8 @@ export class DailyBoardView extends ItemView {
 			conflictValueEl,
 			currentBranchEl: branchMenu.currentBranchEl,
 			branchListEl: branchMenu.listEl,
+			progressEl: nextStepEl,
 		};
-
-		const nextStepEl = decisionPanel.createDiv({ cls: "friday-sync-next-step" });
 
 		if (project.gitState === "none") {
 			this.updateSyncDecisionPanel(decision, project, null, {
@@ -1116,6 +1136,7 @@ export class DailyBoardView extends ItemView {
 			void this.populateProjectSyncStatus(project, decision, statusDetail.bodyEl, treeDetail.bodyEl, localLane, collabDetail.bodyEl, openIgnoreRules);
 			void this.populateIgnoreCandidates(ignoreDetail.bodyEl, project, ignoreDetail.stateEl);
 		}
+		this.applySyncRuntimeDecisionState(decision, runtimeState);
 	}
 
 	private renderProjectBranchMenu(
@@ -1394,6 +1415,28 @@ export class DailyBoardView extends ItemView {
 		this.renderProjectBranchChoices(elements.branchListEl, project, status);
 	}
 
+	private applySyncRuntimeDecisionState(
+		elements: SyncDecisionElements,
+		runtimeState: SyncRuntimeState | null,
+	): void {
+		if (!runtimeState || !this.shouldRenderSyncProgress(runtimeState)) {
+			return;
+		}
+		if (this.isSyncRuntimeInFlight(runtimeState.stage)) {
+			elements.chipEl.setText(this.t("projects.sync.running", "运行中"));
+			elements.chipEl.addClass("is-active");
+			elements.chipEl.removeClass("is-warning");
+			elements.syncButton.disabled = true;
+			elements.syncButton.setText(this.t("projects.sync.progress.button.running", "同步中"));
+			return;
+		}
+		if (runtimeState.stage === "failed" || runtimeState.stage === "offline" || runtimeState.stage === "blocked" || runtimeState.stage === "resolving") {
+			elements.chipEl.setText(this.t("projects.sync.blockedShort", "受阻"));
+			elements.chipEl.addClass("is-warning");
+			elements.chipEl.removeClass("is-active");
+		}
+	}
+
 	private renderDecisionMetaRow(containerEl: HTMLElement, label: string, value: string): void {
 		const row = containerEl.createSpan({ cls: "project-decision-row-v2" });
 		row.createEl("strong", { text: `${label}:` });
@@ -1475,6 +1518,168 @@ export class DailyBoardView extends ItemView {
 			main.createSpan({ text: detail });
 		}
 		this.createSoftChip(row, chipText, variant);
+	}
+
+	private renderSyncProgressPanel(containerEl: HTMLElement, runtimeState: SyncRuntimeState | null): void {
+		containerEl.empty();
+		if (!runtimeState || !this.shouldRenderSyncProgress(runtimeState)) {
+			return;
+		}
+		const variant = this.getSyncRuntimeVariant(runtimeState.stage);
+		const panel = containerEl.createDiv({
+			cls: `project-sync-progress-v2 is-${variant}`,
+			attr: {
+				"aria-live": "polite",
+				"aria-busy": this.isSyncRuntimeInFlight(runtimeState.stage) ? "true" : "false",
+			},
+		});
+		const head = panel.createDiv({ cls: "project-sync-progress-head-v2" });
+		const copy = head.createDiv({ cls: "project-sync-progress-copy-v2" });
+		copy.createEl("strong", { text: this.getSyncRuntimeStageLabel(runtimeState.stage) });
+		copy.createSpan({ text: this.getSyncRuntimeStageDetail(runtimeState) });
+		this.createSoftChip(head, this.getSyncRuntimeChipLabel(runtimeState.stage), variant);
+
+		const rail = panel.createDiv({ cls: "project-sync-progress-rail-v2" });
+		for (const step of this.getSyncProgressSteps()) {
+			const stepEl = rail.createSpan({
+				cls: `project-sync-progress-step-v2 ${this.getSyncProgressStepClass(step.stage, runtimeState)}`.trim(),
+				text: step.label,
+			});
+			stepEl.setAttr("data-stage", step.stage);
+		}
+	}
+
+	private shouldRenderSyncProgress(runtimeState: SyncRuntimeState): boolean {
+		if (runtimeState.stage === "idle") {
+			return false;
+		}
+		if (this.isSyncRuntimeInFlight(runtimeState.stage) || runtimeState.stage === "succeeded" || runtimeState.stage === "failed" || runtimeState.stage === "resolving") {
+			return true;
+		}
+		return Boolean(runtimeState.message.trim());
+	}
+
+	private isSyncRuntimeInFlight(stage: SyncRuntimeStage): boolean {
+		return stage === "checking" || stage === "pulling" || stage === "committing" || stage === "pushing";
+	}
+
+	private getSyncRuntimeVariant(stage: SyncRuntimeStage): "active" | "warning" | "muted" {
+		if (stage === "failed" || stage === "offline" || stage === "blocked" || stage === "resolving") {
+			return "warning";
+		}
+		return this.isSyncRuntimeInFlight(stage) || stage === "succeeded" ? "active" : "muted";
+	}
+
+	private getSyncRuntimeChipLabel(stage: SyncRuntimeStage): string {
+		if (this.isSyncRuntimeInFlight(stage)) {
+			return this.t("projects.sync.running", "运行中");
+		}
+		if (stage === "succeeded") {
+			return this.t("projects.sync.done", "完成");
+		}
+		if (stage === "failed" || stage === "offline" || stage === "blocked" || stage === "resolving") {
+			return this.t("projects.sync.blockedShort", "受阻");
+		}
+		return this.t("projects.sync.pendingCheck", "待检查");
+	}
+
+	private getSyncRuntimeStageLabel(stage: SyncRuntimeStage): string {
+		switch (stage) {
+			case "checking":
+				return this.t("projects.sync.progress.checking", "正在检查仓库");
+			case "pulling":
+				return this.t("projects.sync.progress.pulling", "正在拉取远端");
+			case "committing":
+				return this.t("projects.sync.progress.committing", "正在提交本地改动");
+			case "pushing":
+				return this.t("projects.sync.progress.pushing", "正在推送远端");
+			case "resolving":
+				return this.t("projects.sync.progress.resolving", "等待处理冲突");
+			case "succeeded":
+				return this.t("projects.sync.progress.succeeded", "同步完成");
+			case "failed":
+				return this.t("projects.sync.progress.failed", "同步失败");
+			case "offline":
+				return this.t("projects.sync.progress.offline", "网络受阻");
+			case "blocked":
+				return this.t("projects.sync.progress.blocked", "同步受阻");
+			default:
+				return this.t("projects.sync.progress.idle", "等待同步");
+		}
+	}
+
+	private getSyncRuntimeStageDetail(runtimeState: SyncRuntimeState): string {
+		if (runtimeState.message.trim()) {
+			return runtimeState.message;
+		}
+		switch (runtimeState.stage) {
+			case "checking":
+				return this.t("projects.sync.progress.detail.checking", "检查本地仓库、远端地址和访问状态。");
+			case "pulling":
+				return this.t("projects.sync.progress.detail.pulling", "拉取远端更新，准备合并到当前分支。");
+			case "committing":
+				return this.t("projects.sync.progress.detail.committing", "把本地待确认文件写入本次同步提交。");
+			case "pushing":
+				return this.t("projects.sync.progress.detail.pushing", "把本地提交推送到远端仓库。");
+			case "resolving":
+				return this.t("projects.sync.progress.detail.resolving", "先处理冲突文件，再继续同步。");
+			case "succeeded":
+				return this.t("projects.sync.progress.detail.succeeded", "本次同步流程已完成，状态会继续保留在这里。");
+			case "failed":
+				return this.t("projects.sync.progress.detail.failed", "同步没有完成，请根据状态重新检查或处理阻塞项。");
+			case "offline":
+				return this.t("projects.sync.progress.detail.offline", "远端暂时不可访问，请检查网络或仓库权限。");
+			case "blocked":
+				return this.t("projects.sync.progress.detail.blocked", "同步被阻塞，请查看冲突或远端状态。");
+			default:
+				return this.t("projects.sync.progress.detail.idle", "等待下一次同步。");
+		}
+	}
+
+	private getSyncProgressSteps(): Array<{ stage: SyncProgressStage; label: string }> {
+		return [
+			{ stage: "checking", label: this.t("projects.sync.progress.step.checking", "检查") },
+			{ stage: "pulling", label: this.t("projects.sync.progress.step.pulling", "拉取") },
+			{ stage: "committing", label: this.t("projects.sync.progress.step.committing", "提交") },
+			{ stage: "pushing", label: this.t("projects.sync.progress.step.pushing", "推送") },
+		];
+	}
+
+	private getSyncProgressStepClass(
+		stepStage: SyncProgressStage,
+		runtimeState: SyncRuntimeState,
+	): string {
+		const order: SyncProgressStage[] = ["checking", "pulling", "committing", "pushing"];
+		const errorStage = this.getSyncProgressErrorStage(runtimeState);
+		const stepIndex = order.indexOf(stepStage);
+		if (errorStage) {
+			const errorIndex = order.indexOf(errorStage);
+			if (stepIndex < errorIndex) {
+				return "is-done";
+			}
+			return stepStage === errorStage ? "is-error" : "";
+		}
+		if (runtimeState.stage === "succeeded") {
+			return "is-done";
+		}
+		const currentIndex = order.indexOf(runtimeState.stage as SyncProgressStage);
+		if (currentIndex === -1) {
+			return "";
+		}
+		if (stepIndex < currentIndex) {
+			return "is-done";
+		}
+		return stepIndex === currentIndex ? "is-current" : "";
+	}
+
+	private getSyncProgressErrorStage(runtimeState: SyncRuntimeState): SyncProgressStage | null {
+		if (runtimeState.stage !== "failed" && runtimeState.stage !== "offline" && runtimeState.stage !== "blocked" && runtimeState.stage !== "resolving") {
+			return null;
+		}
+		if (runtimeState.lastActiveStage) {
+			return runtimeState.lastActiveStage;
+		}
+		return runtimeState.stage === "resolving" ? "pulling" : "checking";
 	}
 
 	private renderSyncReadinessChecks(
@@ -1727,6 +1932,10 @@ export class DailyBoardView extends ItemView {
 			);
 			localChangesPanel.empty();
 			const runtimeState = this.plugin.syncRuntimeStore.getProjectState(this.getProjectKey(project));
+			if (project.gitState === "git_remote_bound") {
+				this.renderSyncProgressPanel(decision.progressEl, runtimeState);
+				this.applySyncRuntimeDecisionState(decision, runtimeState);
+			}
 			if (runtimeState) {
 				let runtimeKey = "projects.sync.runtime";
 				let chipText: string = runtimeState.stage;
@@ -1736,7 +1945,7 @@ export class DailyBoardView extends ItemView {
 				} else if (runtimeState.stage === "blocked" || runtimeState.stage === "failed") {
 					runtimeKey = "projects.sync.blocked";
 				}
-				if (runtimeState.stage === "checking" || runtimeState.stage === "pulling" || runtimeState.stage === "pushing") {
+				if (this.isSyncRuntimeInFlight(runtimeState.stage)) {
 					variant = "active";
 					chipText = this.t("projects.sync.running", "运行中");
 				} else if (runtimeState.stage === "offline" || runtimeState.stage === "blocked" || runtimeState.stage === "failed") {
