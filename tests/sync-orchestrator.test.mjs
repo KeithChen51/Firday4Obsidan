@@ -13,6 +13,7 @@ const orchestratorModulePath = path.join(projectRoot, "src/features/sync/SyncOrc
 const queueModulePath = path.join(projectRoot, "src/platform/git/PromiseQueue.ts");
 const eventBusModulePath = path.join(projectRoot, "src/features/sync/SyncEventBus.ts");
 const gitOperatorModulePath = path.join(projectRoot, "src/platform/git/SimpleGitOperator.ts");
+const gitErrorModulePath = path.join(projectRoot, "src/platform/git/classifyGitError.ts");
 
 async function loadModules() {
 	const [orchestratorModule, queueModule, eventBusModule] = await Promise.all([
@@ -82,6 +83,106 @@ test("sync orchestrator runs pull, conflict detection, commit, then push in orde
 	assert.deepEqual(result.conflicts, []);
 });
 
+test("sync orchestrator pulls and retries once when push is rejected because remote changed", async () => {
+	const { orchestratorModule, queueModule, eventBusModule } = await loadModules();
+	const calls = [];
+	const stageEvents = [];
+	const bus = new eventBusModule.SyncEventBus();
+	bus.subscribe((event) => {
+		if (event.type === "sync_stage_changed") {
+			stageEvents.push(event.stage);
+		}
+	});
+	let pullCount = 0;
+	let pushCount = 0;
+	const operator = {
+		async prepareRepository() {
+			calls.push("prepare");
+		},
+		async commitWorkingTree() {
+			calls.push("commit");
+			return ["local.md"];
+		},
+		async pull() {
+			calls.push("pull");
+			pullCount += 1;
+			return { success: true, pulledFiles: pullCount === 2 ? ["remote.md"] : [] };
+		},
+		async detectConflicts() {
+			calls.push("detect");
+			return { conflicts: [], conflictSnapshots: {} };
+		},
+		async push() {
+			calls.push("push");
+			pushCount += 1;
+			return pushCount === 1
+				? {
+					success: false,
+					pushedFiles: [],
+					error: "! [rejected] master -> master (fetch first)\nUpdates were rejected because the remote contains work that you do not have locally.",
+				}
+				: { success: true, pushedFiles: ["local.md"] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue(), bus);
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push", "pull", "detect", "push"]);
+	assert.deepEqual(stageEvents, ["checking", "pulling", "committing", "pushing", "pulling", "pushing"]);
+	assert.equal(result.success, true);
+	assert.deepEqual(result.pulledFiles, ["remote.md"]);
+	assert.deepEqual(result.pushedFiles, ["local.md"]);
+});
+
+test("sync orchestrator stops at conflict resolution when retry pull finds conflicts after push rejection", async () => {
+	const { orchestratorModule, queueModule } = await loadModules();
+	const calls = [];
+	let detectCount = 0;
+	const operator = {
+		async prepareRepository() {
+			calls.push("prepare");
+		},
+		async commitWorkingTree() {
+			calls.push("commit");
+			return ["local.md"];
+		},
+		async pull() {
+			calls.push("pull");
+			return { success: true, pulledFiles: [] };
+		},
+		async detectConflicts() {
+			calls.push("detect");
+			detectCount += 1;
+			return detectCount === 1
+				? { conflicts: [], conflictSnapshots: {} }
+				: { conflicts: ["conflict.md"], conflictSnapshots: { "conflict.md": "snapshot.md" } };
+		},
+		async push() {
+			calls.push("push");
+			return {
+				success: false,
+				pushedFiles: [],
+				error: "error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not have locally.",
+			};
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push", "pull", "detect"]);
+	assert.equal(result.success, false);
+	assert.deepEqual(result.conflicts, ["conflict.md"]);
+	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+});
+
 test("sync orchestrator stops before local commit and push when conflicts are detected after pull", async () => {
 	const { orchestratorModule, queueModule } = await loadModules();
 	const calls = [];
@@ -114,6 +215,18 @@ test("sync orchestrator stops before local commit and push when conflicts are de
 	assert.equal(result.success, false);
 	assert.deepEqual(result.conflicts, ["conflict.md"]);
 	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+});
+
+test("git error classifier marks fetch-first push rejection as blocked", async () => {
+	const gitErrorModule = await jiti.import(gitErrorModulePath);
+	const error =
+		"! [rejected] master -> master (fetch first)\nUpdates were rejected because the remote contains work that you do not have locally.";
+
+	assert.equal(gitErrorModule.isNonFastForwardGitError(error), true);
+	assert.deepEqual(gitErrorModule.classifyGitError(error), {
+		kind: "blocked",
+		message: gitErrorModule.REMOTE_UPDATED_BEFORE_PUSH_MESSAGE,
+	});
 });
 
 test("sync orchestrator stops before commit and push when pull fails", async () => {

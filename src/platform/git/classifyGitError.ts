@@ -5,6 +5,9 @@ export interface ClassifiedGitError {
 	message: string;
 }
 
+export const REMOTE_UPDATED_BEFORE_PUSH_MESSAGE =
+	"Remote has new commits that are not local. Pull remote updates, resolve any conflicts, then sync again.";
+
 export function classifyGitError(error: unknown): ClassifiedGitError {
 	const message = String(error ?? "");
 	const normalized = message.toLowerCase();
@@ -28,6 +31,10 @@ export function classifyGitError(error: unknown): ClassifiedGitError {
 		return { kind: "blocked", message };
 	}
 
+	if (isNonFastForwardGitError(message)) {
+		return { kind: "blocked", message: REMOTE_UPDATED_BEFORE_PUSH_MESSAGE };
+	}
+
 	if (
 		normalized.includes("stash pop recovery failed") ||
 		normalized.includes("restore failed") ||
@@ -37,4 +44,15 @@ export function classifyGitError(error: unknown): ClassifiedGitError {
 	}
 
 	return { kind: "failed", message };
+}
+
+export function isNonFastForwardGitError(error: unknown): boolean {
+	const normalized = String(error ?? "").toLowerCase();
+	return (
+		normalized.includes("fetch first") ||
+		normalized.includes("non-fast-forward") ||
+		normalized.includes("remote contains work that you do not") ||
+		(normalized.includes("updates were rejected") && normalized.includes("have locally")) ||
+		(normalized.includes("failed to push some refs") && normalized.includes("fetch"))
+	);
 }
