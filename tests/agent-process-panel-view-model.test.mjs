@@ -222,6 +222,76 @@ test("buildAgentProcessPanelViewModel keeps completed task_with_process folded a
 	assert.equal(view.timeline?.canExpand, true);
 });
 
+test("buildAgentProcessPanelViewModel folds PI-hosted tool trace from runtime progress", async () => {
+	const { buildAgentProcessPanelViewModel } = await loadViewModel();
+	const { projectRuntimeProgress } = await loadProjector();
+
+	const snapshot = projectRuntimeProgress([
+		{
+			phase: "start",
+			depth: 0,
+			message: "PI runtime started.",
+			turnId: "turn-pi-trace",
+			taskId: "task-pi-trace",
+			traceId: "trace-pi-trace",
+			conversationId: "conversation-pi",
+			at: "2026-06-05T00:00:00.000Z",
+		},
+		{
+			phase: "tool_call",
+			depth: 0,
+			step: 1,
+			tool: "read_file",
+			targetPath: "Daily.md",
+			summary: "Reading Daily.md",
+			message: "Reading Daily.md",
+			at: "2026-06-05T00:00:01.000Z",
+		},
+		{
+			phase: "tool_result",
+			depth: 0,
+			step: 1,
+			tool: "read_file",
+			targetPath: "Daily.md",
+			status: "ok",
+			summary: "Read Daily.md",
+			message: "Read Daily.md",
+			at: "2026-06-05T00:00:02.000Z",
+		},
+		{
+			phase: "done",
+			depth: 0,
+			status: "ok",
+			message: "PI host bridge completed.",
+			at: "2026-06-05T00:00:03.000Z",
+		},
+	]);
+
+	const view = buildAgentProcessPanelViewModel(snapshot);
+	const renderedTrace = JSON.stringify(view.timeline);
+	const toolCalls = view.timeline?.items.flatMap((item) => [
+		...(item.toolCall ? [item.toolCall] : []),
+		...(item.toolCalls ?? []),
+	]) ?? [];
+
+	assert.equal(snapshot.status, "completed");
+	assert.equal(snapshot.identity.turnId, "turn-pi-trace");
+	assert.equal(view.mode, "completed_replay");
+	assert.equal(view.surface, "collapsed_completed_replay");
+	assert.equal(view.shouldRenderProcessPanel, true);
+	assert.equal(view.canExpand, true);
+	assert.equal(view.timeline?.status, "completed");
+	assert.equal(view.timeline?.canExpand, true);
+	assert.equal(view.timeline?.defaultExpanded, false);
+	assert.ok(
+		toolCalls.some((call) => call.name === "read_file" && call.detail.includes("Daily.md")),
+		"PI-hosted command trace should expose the tool name and target in timeline details",
+	);
+	assert.match(renderedTrace, /read_file/);
+	assert.match(renderedTrace, /Daily\.md/);
+	assert.doesNotMatch(renderedTrace, /PI runtime started/);
+});
+
 test("projected intake routes drive process panel surfaces", async () => {
 	const { buildAgentProcessPanelViewModel } = await loadViewModel();
 	const { projectRuntimeProgress } = await loadProjector();

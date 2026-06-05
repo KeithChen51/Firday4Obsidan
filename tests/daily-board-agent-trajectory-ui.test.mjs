@@ -15,10 +15,15 @@ const jiti = createJiti(import.meta.url);
 const rendererPath = path.join(projectRoot, "src/views/agentTrajectoryRenderer.ts");
 const dailyBoardPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const executionOrchestratorPath = path.join(projectRoot, "src/core/execution/ExecutionOrchestrator.ts");
+const liveTrajectoryStorePath = path.join(projectRoot, "src/core/trajectory/LiveTrajectoryStore.ts");
 let dailyBoardViewModulePromise;
 
 async function loadRenderer() {
 	return jiti.import(rendererPath);
+}
+
+async function loadLiveTrajectoryStore() {
+	return jiti.import(liveTrajectoryStorePath);
 }
 
 async function loadDailyBoardView() {
@@ -350,6 +355,132 @@ test("DailyBoard renders live stage reports as process notes without extra assis
 	assert.equal(processNotes.length, 1, "running stage report should stay attached to the live process step");
 	assert.ok(processNotes[0]?.textContent.includes(stageText));
 	assert.ok(messageListEl.countByClass("assistant-process-step-v6") >= 1);
+});
+
+test("DailyBoard embeds PI-hosted tool traces as a foldable completed process in the answer row", async () => {
+	const { LiveTrajectoryStore } = await loadLiveTrajectoryStore();
+	const messageListEl = new FakeElement("div");
+	const plugin = makePluginStub();
+	plugin.agentRuntimeService = {
+		...plugin.agentRuntimeService,
+		getAgentTask: async () => null,
+	};
+	const view = await createDailyBoardHarness({
+		activePage: "chat",
+		aiSessionId: "conversation-pi",
+		aiMessageListEl: messageListEl,
+		aiRuntimeTrajectoryStore: new LiveTrajectoryStore({
+			now: () => new Date("2026-06-05T00:00:00.000Z"),
+		}),
+		aiConversation: [
+			{
+				role: "user",
+				content: "Read Daily.md",
+				uiMeta: { turnId: "turn-pi-trace", taskId: "task-pi-trace", traceId: "trace-pi-trace", conversationId: "conversation-pi" },
+			},
+			{
+				role: "assistant",
+				content: "PI answer",
+				uiMeta: { turnId: "turn-pi-trace", taskId: "task-pi-trace", traceId: "trace-pi-trace", conversationId: "conversation-pi" },
+			},
+		],
+		plugin,
+		syncLiveRuntimeProgressProcess: () => false,
+		syncAiRuntimeShell: () => {
+			messageListEl.empty();
+			view.renderAiMessageList(messageListEl);
+		},
+		syncBackgroundAgentStatus: () => {},
+	});
+	view.renderAiMessageContent = (containerEl, message) => {
+		containerEl.createDiv({ cls: "test-message-body", text: message.content });
+	};
+	view.renderAssistantAvatar = (containerEl) => {
+		containerEl.createDiv({ cls: "test-assistant-avatar", text: "A" });
+	};
+	view.resolveUserDisplayName = () => "User";
+
+	const progressEvents = [
+		{
+			phase: "start",
+			depth: 0,
+			message: "PI runtime started.",
+			turnId: "turn-pi-trace",
+			taskId: "task-pi-trace",
+			traceId: "trace-pi-trace",
+			conversationId: "conversation-pi",
+			at: "2026-06-05T00:00:00.000Z",
+		},
+		{
+			phase: "tool_call",
+			depth: 0,
+			step: 1,
+			tool: "read_file",
+			targetPath: "Daily.md",
+			summary: "Reading Daily.md",
+			message: "Reading Daily.md",
+			turnId: "turn-pi-trace",
+			taskId: "task-pi-trace",
+			traceId: "trace-pi-trace",
+			conversationId: "conversation-pi",
+			at: "2026-06-05T00:00:01.000Z",
+		},
+		{
+			phase: "tool_result",
+			depth: 0,
+			step: 1,
+			tool: "read_file",
+			targetPath: "Daily.md",
+			status: "ok",
+			summary: "Read Daily.md",
+			message: "Read Daily.md",
+			turnId: "turn-pi-trace",
+			taskId: "task-pi-trace",
+			traceId: "trace-pi-trace",
+			conversationId: "conversation-pi",
+			at: "2026-06-05T00:00:02.000Z",
+		},
+		{
+			phase: "done",
+			depth: 0,
+			status: "ok",
+			message: "PI host bridge completed.",
+			turnId: "turn-pi-trace",
+			taskId: "task-pi-trace",
+			traceId: "trace-pi-trace",
+			conversationId: "conversation-pi",
+			at: "2026-06-05T00:00:03.000Z",
+		},
+	];
+
+	withMockedWindow({ setTimeout: () => 1, clearTimeout: () => {} }, () => {
+		for (const event of progressEvents) {
+			view.handleRuntimeProgress(event);
+		}
+	});
+
+	const assistantRows = messageListEl
+		.findAllByClass("friday-ai-message-row")
+		.filter((row) => row.classes.has("is-assistant"));
+	const answerRow = assistantRows.find((row) => row.textContent.includes("PI answer"));
+
+	assert.equal(assistantRows.length, 1, "PI process replay should stay embedded in the existing assistant answer row");
+	assert.ok(answerRow, "PI answer row should render");
+	assert.equal(answerRow.countByClass("test-message-body"), 1);
+	assert.equal(answerRow.countByClass("assistant-process-toggle-v6"), 1);
+	assert.equal(answerRow.countByClass("assistant-process-detail-v6"), 1);
+	assert.equal(answerRow.findByClass("assistant-process-detail-v6")?.attributes["aria-hidden"], "true");
+	assert.ok(answerRow.countByClass("assistant-tool-call-v5") >= 1);
+	const answerFlow = answerRow.findByClass("friday-ai-answer-flow");
+	assert.ok(answerFlow, "PI answer row should use answer flow");
+	const processIndex = directChildIndex(answerFlow, "assistant-process-detail-v6");
+	const answerIndex = directChildIndex(answerFlow, "assistant-output-stack-v3");
+	assert.ok(processIndex >= 0, "process detail should render inside the answer flow");
+	assert.ok(answerIndex >= 0, "answer content should render inside the answer flow");
+	assert.ok(processIndex < answerIndex, "process detail should render above the answer content");
+	assert.match(answerRow.textContent, /read_file/);
+	assert.match(answerRow.textContent, /Daily\.md/);
+	assert.doesNotMatch(answerRow.textContent, /PI runtime started/);
 });
 
 test("DailyBoard renders the task bar host before the composer input and resets stale host refs", async () => {
