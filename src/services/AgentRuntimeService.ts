@@ -108,6 +108,7 @@ import { ObsidianToolContext } from "./tools/ObsidianToolContext";
 import { ObsidianToolHandlers } from "./tools/ObsidianToolHandlers";
 import { ObsidianFridayPiRuntimeHostAdapter } from "./ObsidianFridayPiRuntimeHostAdapter";
 import { RealPiSdkSessionHostAdapter } from "../core/agent-kernel/pi/RealPiSdkSessionAdapter";
+import { buildFridayPiAgentOptions } from "../core/agent-kernel/pi/FridayPiAgentOptions";
 import {
 	DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
 	deriveFileMutationModeFromToolPermissionMode,
@@ -441,7 +442,14 @@ export class AgentRuntimeService {
 			this.getSettings().agentRuntime.piRuntimeSource ?? DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
 		);
 		const host = source === "real-pi-sdk"
-			? new RealPiSdkSessionHostAdapter()
+			? new RealPiSdkSessionHostAdapter({
+				agentOptions: async (input, context) => buildFridayPiAgentOptions({
+					llm: this.getSettings().llm,
+					modelOverride: input.modelOverride,
+					sessionId: context.conversationId || input.conversationId,
+					systemPrompt: await this.buildSystemPrompt(input as RuntimeTurnInput, input.depth ?? 0),
+				}),
+			})
 			: new ObsidianFridayPiRuntimeHostAdapter(
 				() => this.createAgentLoopController(),
 				{

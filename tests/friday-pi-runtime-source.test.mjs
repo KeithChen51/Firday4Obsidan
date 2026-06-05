@@ -40,11 +40,13 @@ test("AgentRuntimeService factory can select the real PI SDK host without changi
 	const source = read(runtimeServicePath);
 
 	assert.match(source, /RealPiSdkSessionHostAdapter/);
+	assert.match(source, /buildFridayPiAgentOptions/);
 	assert.match(
 		source,
 		/normalizeFridayPiRuntimeSource\(\s*this\.getSettings\(\)\.agentRuntime\.piRuntimeSource\s*\?\? DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,\s*\)/,
 	);
-	assert.match(source, /source === "real-pi-sdk"[\s\S]*new RealPiSdkSessionHostAdapter\(\)/);
+	assert.match(source, /source === "real-pi-sdk"[\s\S]*new RealPiSdkSessionHostAdapter\(\{[\s\S]*agentOptions:/);
+	assert.match(source, /buildSystemPrompt\(input(?: as RuntimeTurnInput)?,\s*input\.depth \?\? 0\)/);
 	assert.match(source, /new ObsidianFridayPiRuntimeHostAdapter\(/);
 	assert.match(source, /DEFAULT_FRIDAY_PI_RUNTIME_SOURCE|obsidian-host/);
 });
@@ -72,7 +74,7 @@ test("real PI SDK host is backed by a bundled dependency instead of an external 
 	assert.match(adapter, /import \{ Agent as BundledPiAgent \} from "@earendil-works\/pi-agent-core";/);
 	assert.match(
 		adapter,
-		/const Agent = BundledPiAgent as unknown as RealPiSdkAgentConstructor;[\s\S]*new Agent\(options\.agentOptions\)/,
+		/resolveRealPiSdkAgentOptions\(options\.agentOptions,\s*input,\s*context\)/,
 	);
 });
 

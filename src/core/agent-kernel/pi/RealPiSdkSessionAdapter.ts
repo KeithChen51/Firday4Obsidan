@@ -1,4 +1,5 @@
 import { Agent as BundledPiAgent } from "@earendil-works/pi-agent-core";
+import type { AgentOptions } from "@earendil-works/pi-agent-core";
 import type { AgentExecutionContext } from "../AgentExecutionContext";
 import type { AgentTurnInput, AgentTurnResult, RuntimeToolTrace } from "../contracts";
 import type {
@@ -11,6 +12,13 @@ import type {
 } from "./FridayPiRuntimePorts";
 
 type UnknownRecord = Record<string, unknown>;
+type RealPiSdkResolvedAgentOptions = AgentOptions | UnknownRecord;
+export type RealPiSdkAgentOptionsProvider =
+	| RealPiSdkResolvedAgentOptions
+	| ((
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+	) => RealPiSdkResolvedAgentOptions | Promise<RealPiSdkResolvedAgentOptions>);
 
 export type RealPiSdkEventListener = (event: UnknownRecord, signal?: AbortSignal) => void | Promise<void>;
 
@@ -28,7 +36,7 @@ export type RealPiSdkCreateAgent = (
 ) => RealPiSdkAgentLike | Promise<RealPiSdkAgentLike>;
 
 export interface RealPiSdkAgentConstructor {
-	new (options?: UnknownRecord): RealPiSdkAgentLike;
+	new (options?: RealPiSdkResolvedAgentOptions): RealPiSdkAgentLike;
 }
 
 export interface RealPiSdkAgentModule {
@@ -38,14 +46,14 @@ export interface RealPiSdkAgentModule {
 
 export interface RealPiSdkAgentFactoryOptions {
 	moduleSpecifier?: string;
-	agentOptions?: UnknownRecord;
+	agentOptions?: RealPiSdkAgentOptionsProvider;
 	importModule?: (specifier: string) => Promise<RealPiSdkAgentModule>;
 }
 
 export interface RealPiSdkSessionHostAdapterOptions {
 	createAgent?: RealPiSdkCreateAgent;
 	moduleSpecifier?: string;
-	agentOptions?: UnknownRecord;
+	agentOptions?: RealPiSdkAgentOptionsProvider;
 	importModule?: (specifier: string) => Promise<RealPiSdkAgentModule>;
 }
 
@@ -550,17 +558,32 @@ export class RealPiSdkSessionAdapter implements FridayPiSessionPort {
 export function createRealPiSdkAgentFactory(options: RealPiSdkAgentFactoryOptions = {}): RealPiSdkCreateAgent {
 	if (!options.importModule && !options.moduleSpecifier) {
 		const Agent = BundledPiAgent as unknown as RealPiSdkAgentConstructor;
-		return async () => new Agent(options.agentOptions);
+		return async (input, context) => {
+			const agentOptions = await resolveRealPiSdkAgentOptions(options.agentOptions, input, context);
+			return new Agent(agentOptions);
+		};
 	}
 	const moduleSpecifier = options.moduleSpecifier ?? "@earendil-works/pi-agent-core";
-	return async () => {
+	return async (input, context) => {
 		const module = await (options.importModule ?? importPiSdkModule)(moduleSpecifier);
 		const Agent = resolveAgentConstructor(module);
 		if (!Agent) {
 			throw new Error(`PI SDK module "${moduleSpecifier}" does not export Agent.`);
 		}
-		return new Agent(options.agentOptions);
+		const agentOptions = await resolveRealPiSdkAgentOptions(options.agentOptions, input, context);
+		return new Agent(agentOptions);
 	};
+}
+
+export async function resolveRealPiSdkAgentOptions(
+	agentOptions: RealPiSdkAgentOptionsProvider | undefined,
+	input: AgentTurnInput,
+	context: AgentExecutionContext,
+): Promise<RealPiSdkResolvedAgentOptions | undefined> {
+	if (typeof agentOptions === "function") {
+		return agentOptions(input, context);
+	}
+	return agentOptions;
 }
 
 async function importPiSdkModule(moduleSpecifier: string): Promise<RealPiSdkAgentModule> {
