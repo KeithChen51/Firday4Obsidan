@@ -42,6 +42,10 @@ interface TerminalSettlement {
 	dispose(): void;
 }
 
+type PromptSettlement =
+	| { type: "prompt"; error?: unknown }
+	| { type: "terminal"; error?: unknown };
+
 export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 	constructor(
 		private readonly host: FridayPiSessionHostPort,
@@ -72,11 +76,15 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 		try {
 			session = await this.host.createSession(input, context);
 			unsubscribe = session.subscribe((event) => this.handleSessionEvent(event, input, context, state, terminal));
-			await session.prompt(input.userPrompt, {
-				signal: context.signal,
-				metadata: this.buildPromptMetadata(input, context),
-			});
-			if (!state.error && !context.isCancelled()) {
+			const promptSettlement = this.startPrompt(session, input, context);
+			const firstSettlement = await Promise.race([
+				promptSettlement,
+				terminal.promise.then((error): PromptSettlement => ({ type: "terminal", error })),
+			]);
+			if (firstSettlement.error) {
+				throw firstSettlement.error;
+			}
+			if (firstSettlement.type === "prompt" && !state.error && !context.isCancelled()) {
 				const terminalError = terminal.settled ? terminal.error : await terminal.promise;
 				if (terminalError) {
 					throw terminalError;
@@ -132,6 +140,20 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			rawFinalReply: this.resolveAssistantText(state),
 			budget: context.budget,
 		};
+	}
+
+	private startPrompt(
+		session: FridayPiSessionPort,
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+	): Promise<PromptSettlement> {
+		return session.prompt(input.userPrompt, {
+			signal: context.signal,
+			metadata: this.buildPromptMetadata(input, context),
+		}).then(
+			() => ({ type: "prompt" as const }),
+			(error) => ({ type: "prompt" as const, error }),
+		);
 	}
 
 	private handleSessionEvent(

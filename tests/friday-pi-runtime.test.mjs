@@ -223,7 +223,50 @@ test("FridayPiRuntime fails when terminal timeout fires before slow prompt retur
 	assert.deepEqual(progress.map((event) => event.phase), ["start", "error"]);
 	assert.equal(result.events.at(-1).payload.status, "failed");
 	assert.match(result.events.at(-1).payload.message, /timed out waiting for a terminal event/i);
-	assert.deepEqual(calls, ["subscribe", "prompt", "prompt-resolved", "unsubscribe", "dispose"]);
+	assert.deepEqual(calls, ["subscribe", "prompt", "unsubscribe", "dispose"]);
+});
+
+test("FridayPiRuntime fails and cleans up when terminal timeout fires while prompt never resolves", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input, progress } = createInput({ userPrompt: "hung prompt without terminal event" });
+	const context = await createContext();
+	const calls = [];
+	const runtime = new FridayPiRuntime(
+		{
+			createSession() {
+				return {
+					subscribe() {
+						calls.push("subscribe");
+						return () => calls.push("unsubscribe");
+					},
+					prompt() {
+						calls.push("prompt");
+						return new Promise(() => {});
+					},
+					dispose() {
+						calls.push("dispose");
+					},
+				};
+			},
+		},
+		undefined,
+		{ terminalEventTimeoutMs: 5 },
+	);
+
+	const pending = Symbol("pending");
+	const result = await Promise.race([
+		runtime.execute(input, context),
+		new Promise((resolve) => setTimeout(() => resolve(pending), 50)),
+	]);
+
+	assert.notEqual(result, pending, "runtime.execute remained pending after terminal timeout");
+	assert.equal(result.status, "failed");
+	assert.match(result.assistantText, /timed out waiting for a terminal event/i);
+	assert.match(result.failure.technicalMessage, /timed out waiting for a terminal event/i);
+	assert.deepEqual(progress.map((event) => event.phase), ["start", "error"]);
+	assert.equal(result.events.at(-1).payload.status, "failed");
+	assert.match(result.events.at(-1).payload.message, /timed out waiting for a terminal event/i);
+	assert.deepEqual(calls, ["subscribe", "prompt", "unsubscribe", "dispose"]);
 });
 
 test("FridayPiRuntime records PI activity into durable context events", async () => {
