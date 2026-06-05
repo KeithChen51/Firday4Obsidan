@@ -405,3 +405,36 @@ test("RealPiSdkSessionHostAdapter aborts the PI Agent when the runtime disposes 
 	assert.equal(result.status, "failed");
 	assert.equal(createdAgent.abortCalls, 1);
 });
+
+test("RealPiSdkSessionHostAdapter runs with the bundled PI SDK dependency by default", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { RealPiSdkSessionHostAdapter } = await jiti.import(adapterPath);
+	const { registerFauxProvider, fauxAssistantMessage } = await import("@earendil-works/pi-ai");
+	const faux = registerFauxProvider({ tokensPerSecond: 0, tokenSize: { min: 1000, max: 1000 } });
+	faux.setResponses([fauxAssistantMessage("Bundled PI SDK dependency ran.")]);
+	const { input } = createInput({ turnId: "turn-real-pi-bundled-sdk" });
+	const context = await createContext({ turnId: "turn-real-pi-bundled-sdk" });
+
+	try {
+		const runtime = new FridayPiRuntime(
+			new RealPiSdkSessionHostAdapter({
+				agentOptions: {
+					initialState: {
+						model: faux.models[0],
+						systemPrompt: "Bundled dependency smoke.",
+					},
+				},
+			}),
+			undefined,
+			{ terminalEventTimeoutMs: 5000, cancelledPromptGraceMs: 0 },
+		);
+
+		const result = await runtime.execute(input, context);
+
+		assert.equal(result.status, "completed");
+		assert.equal(result.assistantText, "Bundled PI SDK dependency ran.");
+		assert.equal(faux.getPendingResponseCount(), 0);
+	} finally {
+		faux.unregister();
+	}
+});

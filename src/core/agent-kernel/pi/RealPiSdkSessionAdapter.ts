@@ -1,3 +1,4 @@
+import { Agent as BundledPiAgent } from "@earendil-works/pi-agent-core";
 import type { AgentExecutionContext } from "../AgentExecutionContext";
 import type { AgentTurnInput, AgentTurnResult, RuntimeToolTrace } from "../contracts";
 import type {
@@ -547,6 +548,10 @@ export class RealPiSdkSessionAdapter implements FridayPiSessionPort {
 }
 
 export function createRealPiSdkAgentFactory(options: RealPiSdkAgentFactoryOptions = {}): RealPiSdkCreateAgent {
+	if (!options.importModule && !options.moduleSpecifier) {
+		const Agent = BundledPiAgent as unknown as RealPiSdkAgentConstructor;
+		return async () => new Agent(options.agentOptions);
+	}
 	const moduleSpecifier = options.moduleSpecifier ?? "@earendil-works/pi-agent-core";
 	return async () => {
 		const module = await (options.importModule ?? importPiSdkModule)(moduleSpecifier);

@@ -13,9 +13,11 @@ const jiti = createJiti(import.meta.url);
 const agentTypesPath = path.join(projectRoot, "src/types/agent.ts");
 const settingsPath = path.join(projectRoot, "src/types/settings.ts");
 const runtimeServicePath = path.join(projectRoot, "src/services/AgentRuntimeService.ts");
+const realPiSdkAdapterPath = path.join(projectRoot, "src/core/agent-kernel/pi/RealPiSdkSessionAdapter.ts");
 const soulSettingsSectionPath = path.join(projectRoot, "src/settings/sections/SoulSettingsSection.ts");
 const enLocalePath = path.join(projectRoot, "src/i18n/locales/en-US.ts");
 const zhLocalePath = path.join(projectRoot, "src/i18n/locales/zh-CN.ts");
+const packageJsonPath = path.join(projectRoot, "package.json");
 
 test("Friday PI runtime source defaults to the existing Obsidian host bridge", async () => {
 	const { DEFAULT_FRIDAY_PI_RUNTIME_SOURCE, normalizeFridayPiRuntimeSource } = await jiti.import(agentTypesPath);
@@ -60,6 +62,18 @@ test("settings UI exposes a PI runtime source selector", () => {
 	assert.match(en, /"settings\.agent\.piRuntimeSource\.realPiSdk"/);
 	assert.match(zh, /"settings\.agent\.piRuntimeSource\.name"/);
 	assert.match(zh, /"settings\.agent\.piRuntimeSource\.realPiSdk"/);
+});
+
+test("real PI SDK host is backed by a bundled dependency instead of an external runtime module", () => {
+	const adapter = read(realPiSdkAdapterPath);
+	const packageJson = JSON.parse(read(packageJsonPath));
+
+	assert.equal(packageJson.dependencies["@earendil-works/pi-agent-core"], "^0.78.1");
+	assert.match(adapter, /import \{ Agent as BundledPiAgent \} from "@earendil-works\/pi-agent-core";/);
+	assert.match(
+		adapter,
+		/const Agent = BundledPiAgent as unknown as RealPiSdkAgentConstructor;[\s\S]*new Agent\(options\.agentOptions\)/,
+	);
 });
 
 function read(filePath) {
