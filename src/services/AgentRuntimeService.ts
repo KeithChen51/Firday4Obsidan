@@ -97,6 +97,7 @@ import { ToolRunAuditStore } from "../platform/tools/ToolRunAuditStore";
 import type { LlmTransportChannel, LlmTransportEvent, LlmTransportEventType } from "../core/llm/LlmTransportTelemetry";
 import { SoulStore } from "./SoulStore";
 import { RuntimeStateStore } from "./RuntimeStateStore";
+import { FridayPiRuntimeStateStore, type FridayPiWorkspacePolicyMetadata } from "./FridayPiRuntimeStateStore";
 import type { SoulDefinition } from "../types/soul";
 import { compileSoulProfileForPrompt } from "../features/soul/SoulProfile";
 import {
@@ -330,6 +331,7 @@ export class AgentRuntimeService {
 	private readonly agentTaskStore: AgentTaskStore;
 	private readonly agentCheckpointStore: AgentLoopCheckpointStore;
 	private readonly agentStateAdapter: ObsidianAgentStateAdapter;
+	private readonly fridayPiRuntimeStateStore: FridayPiRuntimeStateStore;
 	private activeTurnId = "";
 	private activeConversationId = "default";
 	private activeTraceId = "";
@@ -368,6 +370,7 @@ export class AgentRuntimeService {
 		const runtimeRoot = this.runtimeStateStore.getRuntimeRoot();
 		this.toolRunAuditStore = new ToolRunAuditStore(runtimeRoot);
 		this.stepTraceStore = new StepTraceStore(runtimeRoot);
+		this.fridayPiRuntimeStateStore = new FridayPiRuntimeStateStore(this.runtimeStateStore);
 		this.turnEventLog = new TurnEventLog({
 			resolveTurnPath: ({ conversationId, turnId }) =>
 				this.runtimeStateStore.getTurnEventLogPath(conversationId, turnId),
@@ -430,7 +433,13 @@ export class AgentRuntimeService {
 
 	createFridayPiRuntime(): FridayPiRuntime {
 		return new FridayPiRuntime(
-			new ObsidianFridayPiRuntimeHostAdapter(() => this.createAgentLoopController()),
+			new ObsidianFridayPiRuntimeHostAdapter(
+				() => this.createAgentLoopController(),
+				{
+					stateStore: this.fridayPiRuntimeStateStore,
+					workspacePolicyProvider: () => this.buildFridayPiWorkspacePolicyMetadata(),
+				},
+			),
 		);
 	}
 
@@ -3878,6 +3887,27 @@ export class AgentRuntimeService {
 			return "";
 		}
 		return service.getProjectAbsolutePath(activeProject);
+	}
+
+	private buildFridayPiWorkspacePolicyMetadata(): FridayPiWorkspacePolicyMetadata {
+		const activeProject = this.projectBoundaryService.getActiveProject();
+		const activeProjectRoot = this.projectBoundaryService.getActiveProjectRoot();
+		const activeProjectAbsoluteRoot = this.resolvePolicyWorkspaceRoot();
+		return {
+			trustBoundary: activeProject && activeProjectRoot ? "project" : "vault",
+			vault: { root: "/" },
+			...(activeProject ? {
+				activeProject: {
+					projectId: activeProject.projectId,
+					slug: activeProject.slug,
+					name: activeProject.projectName,
+					...(activeProjectRoot ? { vaultRoot: activeProjectRoot } : {}),
+					...(activeProjectAbsoluteRoot ? { absoluteRoot: activeProjectAbsoluteRoot } : {}),
+				},
+			} : {}),
+			externalAccess: "explicit",
+			externalWrite: false,
+		};
 	}
 
 	private classifyPolicyDeny(code: string | undefined): ToolFailureClass {

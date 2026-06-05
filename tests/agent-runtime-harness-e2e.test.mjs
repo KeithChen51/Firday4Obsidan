@@ -123,6 +123,43 @@ test("read -> final answer", async () => {
 	assert.ok(Array.isArray(compactContext?.payload.trimmedChannels));
 });
 
+test("PI-first runtime persists session, wrapper trace, package, and workspace policy metadata", async () => {
+	const result = await runAgentRuntimeScenario({
+		name: "pi metadata persistence",
+		projectRoot: "Project",
+		files: {
+			"Project/workspace/a.md": "alpha",
+		},
+		settings: {
+			agentRuntime: {
+				toolCallingMode: "native",
+			},
+		},
+		modelSteps: [
+			{ tool: { name: "read", args: { path: "Project/workspace/a.md" } } },
+			{ assistant: "The file says alpha." },
+		],
+	});
+
+	assert.equal(result.piSessionRecords.length, 1);
+	assert.equal(result.piSessionRecords[0].status, "completed");
+	assert.equal(result.piSessionRecords[0].packageRef.packageId, "friday-pi-local-bridge");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.trustBoundary, "project");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.activeProject.projectId, "project");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.activeProject.slug, "project");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.activeProject.name, "Project");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.activeProject.vaultRoot, "Project");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.activeProject.absoluteRoot.endsWith("Project"), true);
+	assert.equal(result.piSessionRecords[0].workspacePolicy.externalAccess, "explicit");
+	assert.equal(result.piSessionRecords[0].workspacePolicy.externalWrite, false);
+	assert.equal(result.piToolTraceRecords.length, 1);
+	assert.equal(result.piToolTraceRecords[0].kind, "pi_tool_trace");
+	assert.equal(result.piToolTraceRecords[0].tool, "read");
+	assert.equal(result.piToolTraceRecords[0].workspacePolicy.externalWrite, false);
+	assert.equal(result.piPackageManifest.packageId, "friday-pi-local-bridge");
+	assert.equal(result.piPackageManifest.marketplace, false);
+});
+
 test("read -> final answer persists visible process narration for replay without fake plan", async () => {
 	const result = await runAgentRuntimeScenario({
 		name: "read -> visible narration replay",

@@ -33,6 +33,8 @@ test("RuntimeStateStore exposes PI runtime path helpers under the runtime root",
 	assert.equal(store.getPiSessionsRoot(), path.join(root, "runtime", "pi", "sessions"));
 	assert.equal(store.getPiPackagesRoot(), path.join(root, "runtime", "pi", "packages"));
 	assert.equal(store.getPiToolTracesPath(), path.join(root, "runtime", "pi", "tool-traces.jsonl"));
+	assert.equal(store.getPiSessionStatePath("session/with:special\\chars"), path.join(root, "runtime", "pi", "sessions", "session_with_special_chars.jsonl"));
+	assert.equal(store.getPiPackageManifestPath("local/bridge"), path.join(root, "runtime", "pi", "packages", "local_bridge", "manifest.json"));
 });
 
 test("RuntimeStateStore ensureBaseLayout creates PI runtime session and package directories", async () => {
@@ -49,4 +51,15 @@ test("RuntimeStateStore ensureBaseLayout creates PI runtime session and package 
 	assert.equal(piRuntime.isDirectory(), true);
 	assert.equal(piSessions.isDirectory(), true);
 	assert.equal(piPackages.isDirectory(), true);
+});
+
+test("RuntimeStateStore PI path helpers keep unsafe ids inside the PI roots", async () => {
+	const { RuntimeStateStore } = await jiti.import(storePath);
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "friday-pi-safe-path-"));
+	const store = new RuntimeStateStore(createLocalStateRootService(root));
+
+	assert.equal(path.dirname(store.getPiSessionStatePath("../unsafe-session")), store.getPiSessionsRoot());
+	assert.equal(path.basename(store.getPiSessionStatePath("..")), "default.jsonl");
+	assert.equal(path.dirname(path.dirname(store.getPiPackageManifestPath("../unsafe-package"))), store.getPiPackagesRoot());
+	assert.equal(store.getPiPackageManifestPath(".."), path.join(store.getPiPackagesRoot(), "default", "manifest.json"));
 });

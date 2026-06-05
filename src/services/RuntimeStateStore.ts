@@ -45,6 +45,14 @@ export class RuntimeStateStore {
 		return path.join(this.getPiRuntimeRoot(), "tool-traces.jsonl");
 	}
 
+	getPiSessionStatePath(sessionId: string): string {
+		return path.join(this.getPiSessionsRoot(), `${this.safePathSegment(sessionId)}.jsonl`);
+	}
+
+	getPiPackageManifestPath(packageId = "friday-pi-local-bridge"): string {
+		return path.join(this.getPiPackagesRoot(), this.safePathSegment(packageId), "manifest.json");
+	}
+
 	getConversationRuntimeRoot(conversationId: string): string {
 		return path.join(this.getRuntimeRoot(), "conversations", this.safePathSegment(conversationId));
 	}
@@ -103,7 +111,10 @@ export class RuntimeStateStore {
 	}
 
 	private safePathSegment(value: string): string {
-		const segment = value.trim().replace(/[^a-zA-Z0-9._-]/g, "_");
-		return segment || "default";
+		const segment = String(value ?? "").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+		if (!segment || segment === "." || segment === "..") {
+			return "default";
+		}
+		return segment;
 	}
 }

@@ -328,6 +328,11 @@ export async function runAgentRuntimeScenario(scenario) {
 		conversationId: scenario.agentId ?? "agent",
 		turnId: runtimeResult.turnId,
 	});
+	const piSessionRecords = await readJsonlIfExists(
+		runtimeStateStore.getPiSessionStatePath(runtimeResult.conversationId ?? scenario.agentId ?? "agent"),
+	);
+	const piToolTraceRecords = await readJsonlIfExists(runtimeStateStore.getPiToolTracesPath());
+	const piPackageManifest = await readJsonIfExists(runtimeStateStore.getPiPackageManifestPath());
 
 	return {
 		status: failure ? "failed" : "completed",
@@ -356,6 +361,9 @@ export async function runAgentRuntimeScenario(scenario) {
 		stepTraces: runtimeResult.stepTraces ?? [],
 		approvalRequests: approvalService.requests,
 		agentMode: scenario.agentMode ?? "ask",
+		piSessionRecords,
+		piToolTraceRecords,
+		piPackageManifest,
 	};
 }
 
@@ -376,6 +384,33 @@ function createRuntimeFacade(modules, runtime) {
 	return new modules.AgentRuntimeFacade(
 		new modules.AgentKernel(runtime.createFridayPiRuntime()),
 	);
+}
+
+async function readJsonlIfExists(filePath) {
+	try {
+		const raw = await fs.readFile(filePath, "utf8");
+		return raw
+			.split(/\r?\n/)
+			.map((line) => line.trim())
+			.filter((line) => line.length > 0)
+			.map((line) => JSON.parse(line));
+	} catch (error) {
+		if (error && typeof error === "object" && error.code === "ENOENT") {
+			return [];
+		}
+		throw error;
+	}
+}
+
+async function readJsonIfExists(filePath) {
+	try {
+		return JSON.parse(await fs.readFile(filePath, "utf8"));
+	} catch (error) {
+		if (error && typeof error === "object" && error.code === "ENOENT") {
+			return null;
+		}
+		throw error;
+	}
 }
 
 function normalizeModelRequest(request) {
@@ -480,10 +515,18 @@ function findToolBoundaryViolations(messages) {
 function createRuntimeStateStore(root) {
 	const safePathSegment = (value) => {
 		const segment = String(value ?? "").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
-		return segment || "default";
+		return !segment || segment === "." || segment === ".." ? "default" : segment;
 	};
 	return {
 		getRuntimeRoot: () => path.join(root, "runtime"),
+		getPiRuntimeRoot: () => path.join(root, "runtime", "pi"),
+		getPiSessionsRoot: () => path.join(root, "runtime", "pi", "sessions"),
+		getPiPackagesRoot: () => path.join(root, "runtime", "pi", "packages"),
+		getPiToolTracesPath: () => path.join(root, "runtime", "pi", "tool-traces.jsonl"),
+		getPiSessionStatePath: (sessionId) =>
+			path.join(root, "runtime", "pi", "sessions", `${safePathSegment(sessionId)}.jsonl`),
+		getPiPackageManifestPath: (packageId = "friday-pi-local-bridge") =>
+			path.join(root, "runtime", "pi", "packages", safePathSegment(packageId), "manifest.json"),
 		getConversationRuntimeRoot: (conversationId) =>
 			path.join(root, "runtime", "conversations", safePathSegment(conversationId)),
 		getTurnEventLogPath: (conversationId, turnId) =>
@@ -502,6 +545,8 @@ function createRuntimeStateStore(root) {
 		getSoulSnapshotsRoot: (soulId) => path.join(root, "snapshots", soulId),
 		ensureBaseLayout: async () => {
 			await fs.mkdir(path.join(root, "runtime"), { recursive: true });
+			await fs.mkdir(path.join(root, "runtime", "pi", "sessions"), { recursive: true });
+			await fs.mkdir(path.join(root, "runtime", "pi", "packages"), { recursive: true });
 			await fs.mkdir(path.join(root, "approvals"), { recursive: true });
 			await fs.mkdir(path.join(root, "snapshots"), { recursive: true });
 		},
@@ -590,12 +635,14 @@ function createFakeSoulStore() {
 function createFakeProjectBoundaryService({ projectRoot, normalizePath }) {
 	const normalizedRoot = normalizePath(projectRoot ?? "");
 	const activeProject = normalizedRoot
-		? { id: "project", projectId: "project", slug: "project", name: "Project" }
+		? { id: "project", projectId: "project", slug: "project", name: "Project", projectName: "Project" }
 		: null;
 	return {
 		getActiveProject: () => activeProject,
 		getActiveProjectRoot: () => normalizedRoot,
 		getProjectRoot: () => normalizedRoot,
+		getProjectAbsolutePath: () =>
+			normalizedRoot ? path.join("C:/Vault", ...normalizedRoot.split("/")) : "",
 		isWithinProject: (_project, targetPath) => {
 			if (!normalizedRoot) {
 				return true;

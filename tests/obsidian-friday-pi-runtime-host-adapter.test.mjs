@@ -213,3 +213,164 @@ test("ObsidianFridayPiRuntimeHostAdapter preserves delegated host failures witho
 		"PI host bridge failure should stay non-terminal until AgentKernel wraps it",
 	);
 });
+
+test("ObsidianFridayPiRuntimeHostAdapter persists PI session state, wrapper traces, package metadata, and policy metadata without changing the result", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { ObsidianFridayPiRuntimeHostAdapter } = await jiti.import(adapterPath);
+	const { input } = createInput({
+		turnId: "turn-persist",
+		taskId: "task-input-persist",
+		traceId: "trace-persist",
+		conversationId: "conversation-persist",
+	});
+	const context = await createContext({
+		turnId: "turn-persist",
+		taskId: "task-input-persist",
+		traceId: "trace-persist",
+		conversationId: "conversation-persist",
+	});
+	const persisted = {
+		sessions: [],
+		traces: [],
+		packages: [],
+	};
+	const packageRef = {
+		packageId: "friday-pi-local-bridge",
+		manifestPath: "runtime/pi/packages/friday-pi-local-bridge/manifest.json",
+	};
+	const workspacePolicy = {
+		trustBoundary: "vault",
+		vault: { root: "/" },
+		activeProject: {
+			projectId: "project-1",
+			slug: "project",
+			name: "Project",
+			vaultRoot: "Project",
+			absoluteRoot: "C:/Vault/Project",
+		},
+		externalAccess: "explicit",
+		externalWrite: false,
+	};
+	const trace = {
+		runId: "wrapper-run-1",
+		step: 1,
+		tool: "read",
+		scope: "vault",
+		targetPath: "Project/workspace/Daily.md",
+		approved: true,
+		approvalReason: "No approval required",
+		persistedRule: false,
+		viaRule: false,
+		status: "ok",
+		ok: true,
+		summary: "Read Project/workspace/Daily.md",
+	};
+	const delegatedResult = {
+		turnId: context.turnId,
+		taskId: "task-result-persist",
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "completed",
+		assistantText: "Delegated persisted answer.",
+		events: context.snapshotEvents(),
+		traces: [trace],
+		rawFinalReply: "Raw delegated persisted answer.",
+	};
+	const adapter = new ObsidianFridayPiRuntimeHostAdapter(
+		() => ({
+			async execute() {
+				return delegatedResult;
+			},
+		}),
+		{
+			stateStore: {
+				async writePackageMetadata(metadata) {
+					persisted.packages.push(metadata);
+					return packageRef;
+				},
+				async appendSessionTurnRecord(record) {
+					persisted.sessions.push(record);
+				},
+				async appendToolTraceRecords(records) {
+					persisted.traces.push(...records);
+				},
+			},
+			workspacePolicyProvider: () => workspacePolicy,
+		},
+	);
+	const runtime = new FridayPiRuntime(adapter);
+
+	const result = await runtime.execute(input, context);
+
+	assert.deepEqual(result, {
+		...delegatedResult,
+		events: result.events,
+		budget: context.budget,
+	});
+	assert.equal(persisted.packages.length, 1);
+	assert.equal(persisted.packages[0].packageId, "friday-pi-local-bridge");
+	assert.equal(persisted.sessions.length, 1);
+	assert.equal(persisted.sessions[0].sessionId, "conversation-persist");
+	assert.equal(persisted.sessions[0].turnId, "turn-persist");
+	assert.equal(persisted.sessions[0].taskId, "task-result-persist");
+	assert.equal(persisted.sessions[0].traceId, "trace-persist");
+	assert.equal(persisted.sessions[0].status, "completed");
+	assert.equal(persisted.sessions[0].rawFinalReplyLength, delegatedResult.rawFinalReply.length);
+	assert.deepEqual(persisted.sessions[0].packageRef, packageRef);
+	assert.deepEqual(persisted.sessions[0].workspacePolicy, workspacePolicy);
+	assert.equal(persisted.traces.length, 1);
+	assert.equal(persisted.traces[0].kind, "pi_tool_trace");
+	assert.equal(persisted.traces[0].sessionId, "conversation-persist");
+	assert.equal(persisted.traces[0].turnId, "turn-persist");
+	assert.equal(persisted.traces[0].taskId, "task-result-persist");
+	assert.equal(persisted.traces[0].runId, "wrapper-run-1");
+	assert.equal(persisted.traces[0].workspacePolicy.externalAccess, "explicit");
+});
+
+test("ObsidianFridayPiRuntimeHostAdapter swallows PI persistence failures after attempting persistence", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { ObsidianFridayPiRuntimeHostAdapter } = await jiti.import(adapterPath);
+	const { input } = createInput({ conversationId: "conversation-persist-failure" });
+	const context = await createContext({ conversationId: "conversation-persist-failure" });
+	let packageWriteAttempts = 0;
+	const delegatedResult = {
+		turnId: context.turnId,
+		taskId: "task-persist-failure",
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "completed",
+		assistantText: "Result survives persistence failure.",
+		events: context.snapshotEvents(),
+		traces: [],
+		rawFinalReply: "Result survives persistence failure.",
+	};
+	const adapter = new ObsidianFridayPiRuntimeHostAdapter(
+		() => ({
+			async execute() {
+				return delegatedResult;
+			},
+		}),
+		{
+			stateStore: {
+				async writePackageMetadata() {
+					packageWriteAttempts += 1;
+					throw new Error("Synthetic PI persistence failure.");
+				},
+				async appendSessionTurnRecord() {
+					throw new Error("Should not be reached after package metadata failure.");
+				},
+				async appendToolTraceRecords() {
+					throw new Error("Should not be reached after package metadata failure.");
+				},
+			},
+		},
+	);
+	const runtime = new FridayPiRuntime(adapter);
+
+	const result = await runtime.execute(input, context);
+
+	assert.equal(packageWriteAttempts, 1);
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, delegatedResult.assistantText);
+	assert.equal(result.rawFinalReply, delegatedResult.rawFinalReply);
+});
