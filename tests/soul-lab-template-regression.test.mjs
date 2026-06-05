@@ -20,6 +20,28 @@ function read(filePath) {
 	return fs.readFileSync(filePath, "utf8").replace(/\r\n?/g, "\n");
 }
 
+function extractAtRuleBlock(source, startIndex) {
+	const openIndex = source.indexOf("{", startIndex);
+	assert.notEqual(openIndex, -1, "Expected at-rule to have an opening brace");
+	let depth = 0;
+	for (let index = openIndex; index < source.length; index += 1) {
+		const char = source[index];
+		if (char === "{") {
+			depth += 1;
+		} else if (char === "}") {
+			depth -= 1;
+			if (depth === 0) {
+				return source.slice(startIndex, index + 1);
+			}
+		}
+	}
+	assert.fail("Expected at-rule block to close");
+}
+
+function findAtRuleBlocks(source, pattern) {
+	return [...source.matchAll(pattern)].map((match) => extractAtRuleBlock(source, match.index));
+}
+
 test("soul experiment templates define a vivid MBTI alpha set with visible role titles", () => {
 	const source = read(templatePath);
 	const typeCodes = [...source.matchAll(/typeCode:\s*"([EI][NS][TF][JP])"/g)].map((match) => match[1]);
@@ -224,6 +246,9 @@ test("settings soul section opens Soul Lab and subscribes read-only experiment s
 	assert.match(settingsSource, /settings\.soulLab\.suggestion\.issueAction/);
 	assert.match(settingsSource, /settings\.soulLab\.suggestion\.modalHint/);
 	assert.match(settingsSource, /settings\.soulLab\.suggestion\.copyLink/);
+	assert.match(sectionSource, /friday-soul-suggestion-group/);
+	assert.match(sectionSource, /ctx\.renderSoulSuggestionPanel\(suggestionGroup\)/);
+	assert.doesNotMatch(sectionSource, /ctx\.renderSoulSuggestionPanel\(containerEl\)/);
 	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-actions"/);
 	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-action is-primary"/);
 	assert.match(settingsSource, /cls:\s*"friday-soul-suggestion-action is-secondary external-link"/);
@@ -272,6 +297,11 @@ test("settings soul section opens Soul Lab and subscribes read-only experiment s
 
 test("Soul Lab template cards have responsive native styles", () => {
 	const styles = read(stylesPath);
+	const soulContainerBlock = findAtRuleBlocks(styles, /@container\s*\(max-width:\s*720px\)/g).find((block) =>
+		block.includes(".friday-soul-lab-intro-header") &&
+		block.includes(".friday-soul-lab-series-header") &&
+		block.includes(".friday-soul-suggestion-url-row")
+	);
 
 	for (const expected of [
 		".friday-soul-lab-series",
@@ -292,6 +322,7 @@ test("Soul Lab template cards have responsive native styles", () => {
 		".friday-soul-lab-intro",
 		".friday-soul-lab-intro-header",
 		".friday-soul-lab-back-button",
+		".friday-soul-suggestion-group",
 		".friday-soul-suggestion-panel",
 		".friday-soul-suggestion-actions",
 		".friday-soul-suggestion-action",
@@ -303,6 +334,12 @@ test("Soul Lab template cards have responsive native styles", () => {
 		assert.ok(styles.includes(expected), `Expected Soul Lab card style: ${expected}`);
 	}
 	assert.match(styles, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(/);
+	assert.match(styles, /\.friday-soul-lab-intro\s*\{[^}]*container-type:\s*inline-size/);
+	assert.match(styles, /\.friday-soul-lab-series\s*\{[^}]*container-type:\s*inline-size/);
+	assert.match(styles, /\.friday-soul-suggestion-group\s*\{[^}]*container-type:\s*inline-size/);
+	assert.doesNotMatch(styles, /\.friday-soul-suggestion-panel\s*\{[^}]*container-type:\s*inline-size/);
+	assert.match(styles, /grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(100%,\s*260px\),\s*1fr\)\)/);
+	assert.doesNotMatch(styles, /\.friday-soul-template-grid\s*\{[^}]*minmax\(260px,\s*1fr\)/);
 	assert.match(styles, /\.friday-soul-lab-series-header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 	assert.match(styles, /\.friday-soul-lab-detail-toggle\s*\{[^}]*height:\s*30px/);
 	assert.match(styles, /\.friday-soul-template-card\s*\{[^}]*grid-template-rows:\s*auto\s+auto\s+auto/);
@@ -320,14 +357,27 @@ test("Soul Lab template cards have responsive native styles", () => {
 	assert.match(styles, /\.friday-soul-template-subscribe\s*\{[^}]*height:\s*32px/);
 	assert.match(styles, /\.friday-soul-lab-intro-header\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
 	assert.match(styles, /\.friday-soul-lab-back-button\s*\{[^}]*height:\s*30px/);
-	assert.match(styles, /\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+	assert.match(styles, /\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(min\(100%,\s*360px\),\s*1fr\)\)/);
 	assert.match(styles, /\.friday-soul-suggestion-actions\s*\{[^}]*display:\s*inline-flex/);
 	assert.match(styles, /\.friday-soul-suggestion-action\s*\{[^}]*display:\s*inline-flex/);
 	assert.match(styles, /\.friday-soul-suggestion-action\s*\{[^}]*text-decoration:\s*none/);
 	assert.match(styles, /\.friday-soul-suggestion-action\.is-secondary\s*\{[^}]*background:\s*var\(--background-primary\)/);
 	assert.match(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*display:\s*grid/);
+	assert.match(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*min-width:\s*0/);
+	assert.match(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*width:\s*min\(520px,\s*100%\)/);
+	assert.match(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*max-width:\s*100%/);
+	assert.doesNotMatch(styles, /\.friday-soul-suggestion-modal\s*\{[^}]*min-width:\s*min\(520px,\s*82vw\)/);
 	assert.match(styles, /\.friday-soul-suggestion-qr\s*\{[^}]*justify-content:\s*center/);
+	assert.match(styles, /\.friday-soul-suggestion-qr\s*\{[^}]*min-height:\s*min\(236px,\s*100cqw\)/);
+	assert.match(styles, /\.friday-soul-suggestion-qr-image\s*\{[^}]*width:\s*min\(220px,\s*100%\)/);
+	assert.match(styles, /\.friday-soul-suggestion-qr-image\s*\{[^}]*height:\s*auto/);
+	assert.match(styles, /\.friday-soul-suggestion-qr-image\s*\{[^}]*aspect-ratio:\s*1/);
 	assert.match(styles, /\.friday-soul-suggestion-url-row\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+	assert.ok(soulContainerBlock, "Expected a 720px container query block for Soul Lab narrow containers");
+	assert.match(soulContainerBlock, /\.friday-soul-lab-intro-header\s*\{[^}]*grid-template-columns:\s*1fr/);
+	assert.match(soulContainerBlock, /\.friday-soul-lab-series-header\s*\{[^}]*grid-template-columns:\s*1fr/);
+	assert.match(soulContainerBlock, /\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*1fr/);
+	assert.match(soulContainerBlock, /\.friday-soul-suggestion-actions[\s\S]*\.friday-soul-suggestion-url-row\s*\{[^}]*grid-template-columns:\s*1fr/);
 	assert.match(styles, /@media\s*\(max-width:\s*720px\)[\s\S]*\.friday-soul-suggestion-panel\s*\{[^}]*grid-template-columns:\s*1fr/);
 });
 

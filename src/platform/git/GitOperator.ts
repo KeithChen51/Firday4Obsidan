@@ -30,6 +30,7 @@ export interface GitOperator {
 	commitWorkingTree(project: ProjectEntry): Promise<string[]>;
 	pull(project: ProjectEntry): Promise<GitPullResult>;
 	detectConflicts(project: ProjectEntry): Promise<GitConflictResult>;
+	preserveConflicts(project: ProjectEntry, conflicts: string[]): Promise<string[]>;
 	readConflictContent(project: ProjectEntry, filePath: string, snapshotPath?: string): Promise<GitConflictContent>;
 	push(project: ProjectEntry): Promise<GitPushResult>;
 	getStatus(project: ProjectEntry): Promise<SyncStatus>;

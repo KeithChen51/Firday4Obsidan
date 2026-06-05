@@ -611,6 +611,15 @@ export class FridaySettingTab extends PluginSettingTab {
 	private renderSyncSection(containerEl: HTMLElement): void {
 		const group = this.createNativeSettingsGroup(containerEl);
 
+		new Setting(group)
+			.setName(this.t("settings.sync.mode.name", "同步模式"))
+			.setDesc(this.t("settings.sync.mode.advancedPending", "当前为安心模式。高阶模式正在开发中。"))
+			.addButton((button) =>
+				button
+					.setButtonText(this.t("settings.sync.mode.safe", "安心模式"))
+					.setDisabled(true),
+			);
+
 		new Setting(group).setName(this.t("settings.sync.autoPush", "自动推送")).addToggle((toggle) =>
 			toggle.setValue(this.host.settings.sync.mode === "continuous_auto").onChange(async (value) => {
 				await this.host.setSyncMode(value ? "continuous_auto" : "manual");

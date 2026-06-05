@@ -34,6 +34,14 @@ test("plugin root-index recovery clears stale throttles once the friday root is 
 	assert.match(block, /ROOT_INDEX_RECOVERY_WINDOW_MS/);
 });
 
+test("plugin root-index recovery runs silently without startup notices", async () => {
+	const source = readSource();
+	const start = source.indexOf("private async recoverMissingFridayRootIndex(): Promise<boolean> {");
+	assert.ok(start >= 0, "recoverMissingFridayRootIndex block should exist");
+	const block = source.slice(start, start + 2200);
+	assert.doesNotMatch(block, /new Notice\(/);
+});
+
 test("plugin startup wires the legacy agent migration flow before the board becomes interactive", async () => {
 	const source = readSource();
 	assert.match(source, /LegacyAgentMigrationService/);

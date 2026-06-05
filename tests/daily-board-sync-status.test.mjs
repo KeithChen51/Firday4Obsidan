@@ -12,6 +12,7 @@ const viewPath = path.join(projectRoot, "src/views/DailyBoardView.ts");
 const runtimeStorePath = path.join(projectRoot, "src/features/sync/SyncRuntimeStore.ts");
 const statusBarPath = path.join(projectRoot, "src/features/sync/SyncStatusBar.ts");
 const orchestratorPath = path.join(projectRoot, "src/features/sync/SyncOrchestrator.ts");
+const syncCommandsPath = path.join(projectRoot, "src/commands/syncCommands.ts");
 
 function read(filePath) {
 	return fs.readFileSync(filePath, "utf8");
@@ -22,6 +23,13 @@ test("main wires sync event bus, runtime store, and status bar together", async 
 	assert.match(source, /new SyncEventBus\(/);
 	assert.match(source, /new SyncRuntimeStore\(/);
 	assert.match(source, /new SyncStatusBar\(/);
+});
+
+test("main stores safe sync completion messages in workbench snapshots", async () => {
+	const source = read(mainPath);
+	assert.match(source, /classifyGitError/);
+	assert.match(source, /getSafeSyncEventMessage/);
+	assert.doesNotMatch(source, /message: event\.type === "sync_completed" \? event\.error/);
 });
 
 test("main broadcasts project state change events after project registration and active-project changes", async () => {
@@ -57,6 +65,27 @@ test("daily board view reads sync runtime store for the active project", async (
 	assert.match(source, /projects\.sync\.runtime/);
 	assert.match(source, /projects\.sync\.offline/);
 	assert.match(source, /projects\.sync\.blocked/);
+});
+
+test("daily board view presents safe sync errors instead of raw git output", async () => {
+	const source = read(viewPath);
+	assert.match(source, /classifyGitError/);
+	assert.match(source, /getSafeSyncErrorMessage/);
+	assert.doesNotMatch(source, /text: item\.result\.error/);
+	assert.doesNotMatch(source, /notice\.syncFailed", \{ error: result\.error/);
+});
+
+test("daily board status failure copy does not interpolate raw caught errors", async () => {
+	const source = read(viewPath);
+	assert.match(source, /const safeStatusError = this\.getSafeSyncErrorMessage\(error\)/);
+	assert.doesNotMatch(source, /projects\.sync\.statusFailed[\s\S]{0,160}error: String\(error\)/);
+});
+
+test("sync command notices present safe sync errors instead of raw git output", async () => {
+	const source = read(syncCommandsPath);
+	assert.match(source, /classifyGitError/);
+	assert.match(source, /getSafeSyncErrorMessage/);
+	assert.doesNotMatch(source, /notice\.syncFailed", \{ error: result\.error/);
 });
 
 test("daily board view refreshes the visible sync progress from runtime events", async () => {

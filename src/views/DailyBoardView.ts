@@ -20,6 +20,7 @@ import { FRIDAY_WORDMARK_FONT_FAMILY } from "../constants/wordmarkFont";
 import type { SyncRuntimeEvent, SyncRuntimeStage } from "../features/sync/SyncEventBus";
 import type { SyncRuntimeState } from "../features/sync/SyncRuntimeStore";
 import { GitIgnoreService } from "../features/sync/GitIgnoreService";
+import { classifyGitError, formatClassifiedGitError } from "../platform/git/classifyGitError";
 import type { ToolManifest } from "../platform/tools/ToolManifestCatalog";
 import { buildSlashSuggestions } from "../core/commands/SlashSuggestionService";
 import {
@@ -835,7 +836,7 @@ export class DailyBoardView extends ItemView {
 		if (item.result.error) {
 			row.createDiv({
 				cls: "friday-ai-error",
-				text: item.result.error,
+				text: this.getSafeSyncErrorMessage(item.result.error),
 			});
 		}
 		if (item.result.conflicts.length > 0) {
@@ -1150,7 +1151,12 @@ export class DailyBoardView extends ItemView {
 			attr: { "aria-label": this.t("projects.sync.branch.select", "选择分支") },
 		});
 		summary.createSpan({ cls: "project-dot-v2", attr: { "aria-hidden": "true" } });
-		const currentBranchEl = summary.createSpan({ cls: "project-current-branch-v2", text: status?.branch || this.t("projects.sync.branch.unknown", "待检查") });
+		const branchLabel = status?.branch || this.t("projects.sync.branch.unknown", "待检查");
+		const currentBranchEl = summary.createSpan({
+			cls: "project-current-branch-v2",
+			text: branchLabel,
+			attr: { title: branchLabel },
+		});
 		const listEl = branchMenu.createDiv({
 			cls: "project-branch-menu-list-v2",
 			attr: {
@@ -1411,7 +1417,9 @@ export class DailyBoardView extends ItemView {
 		elements.remoteValueEl.setText(this.getSyncBehindPreview(project, status));
 		elements.dirtyValueEl.setText(this.getSyncLocalPreview(status));
 		elements.conflictValueEl.setText(this.getSyncConflictPreview(status));
-		elements.currentBranchEl.setText(status?.branch || this.t("projects.sync.branch.unknown", "待检查"));
+		const branchLabel = status?.branch || this.t("projects.sync.branch.unknown", "待检查");
+		elements.currentBranchEl.setText(branchLabel);
+		elements.currentBranchEl.setAttribute("title", branchLabel);
 		this.renderProjectBranchChoices(elements.branchListEl, project, status);
 	}
 
@@ -1535,7 +1543,7 @@ export class DailyBoardView extends ItemView {
 		});
 		const head = panel.createDiv({ cls: "project-sync-progress-head-v2" });
 		const copy = head.createDiv({ cls: "project-sync-progress-copy-v2" });
-		copy.createEl("strong", { text: this.getSyncRuntimeStageLabel(runtimeState.stage) });
+		copy.createEl("strong", { text: this.getSyncRuntimeStageLabel(runtimeState.stage, runtimeState.condition) });
 		copy.createSpan({ text: this.getSyncRuntimeStageDetail(runtimeState) });
 		this.createSoftChip(head, this.getSyncRuntimeChipLabel(runtimeState.stage), variant);
 
@@ -1583,7 +1591,11 @@ export class DailyBoardView extends ItemView {
 		return this.t("projects.sync.pendingCheck", "待检查");
 	}
 
-	private getSyncRuntimeStageLabel(stage: SyncRuntimeStage): string {
+	private getSyncRuntimeStageLabel(stage: SyncRuntimeStage, condition?: string): string {
+		const conditionLabel = this.getSyncRuntimeConditionLabel(condition);
+		if (conditionLabel) {
+			return conditionLabel;
+		}
 		switch (stage) {
 			case "checking":
 				return this.t("projects.sync.progress.checking", "正在检查仓库");
@@ -1609,8 +1621,14 @@ export class DailyBoardView extends ItemView {
 	}
 
 	private getSyncRuntimeStageDetail(runtimeState: SyncRuntimeState): string {
-		if (runtimeState.message.trim()) {
-			return runtimeState.message;
+		const keyedDetail = this.formatSyncRuntimeKeyedDetail(runtimeState.messageKey, runtimeState.recoveryActionKey);
+		if (keyedDetail) {
+			return keyedDetail;
+		}
+		const message = runtimeState.message.trim();
+		const recoveryAction = runtimeState.recoveryAction?.trim() ?? "";
+		if (message) {
+			return recoveryAction && recoveryAction !== message ? `${message} ${recoveryAction}` : message;
 		}
 		switch (runtimeState.stage) {
 			case "checking":
@@ -1633,6 +1651,54 @@ export class DailyBoardView extends ItemView {
 				return this.t("projects.sync.progress.detail.blocked", "同步被阻塞，请查看冲突或远端状态。");
 			default:
 				return this.t("projects.sync.progress.detail.idle", "等待下一次同步。");
+		}
+	}
+
+	private formatSyncRuntimeKeyedDetail(messageKey?: string, recoveryActionKey?: string): string {
+		if (!messageKey) {
+			return "";
+		}
+		const message = this.plugin.t(messageKey).trim();
+		const recoveryAction = recoveryActionKey ? this.plugin.t(recoveryActionKey).trim() : "";
+		const separator = /[。！？]$/.test(message) ? "" : " ";
+		return recoveryAction && recoveryAction !== message ? `${message}${separator}${recoveryAction}` : message;
+	}
+
+	private getSyncRuntimeConditionLabel(condition?: string): string {
+		switch (condition) {
+			case "network_unavailable":
+				return this.t("projects.sync.condition.network", "网络连接有问题");
+			case "remote_unreachable":
+				return this.t("projects.sync.condition.remoteUnreachable", "远端不可访问");
+			case "auth_required":
+				return this.t("projects.sync.condition.authRequired", "需要重新授权");
+			case "permission_denied":
+				return this.t("projects.sync.condition.permissionDenied", "没有仓库权限");
+			case "remote_updated":
+				return this.t("projects.sync.condition.remoteUpdated", "正在合并远端更新");
+			case "branch_untracked":
+			case "branch_missing":
+				return this.t("projects.sync.condition.branchLinking", "正在连接远端分支");
+			case "remote_policy_blocked":
+				return this.t("projects.sync.condition.remotePolicy", "远端规则限制");
+			case "remote_file_rejected":
+				return this.t("projects.sync.condition.remoteFileRejected", "远端拒绝文件");
+			case "content_conflict":
+				return this.t("projects.sync.condition.contentConflict", "已保留双方版本");
+			case "stash_restore_conflict":
+				return this.t("projects.sync.condition.stashRestore", "正在生成安全副本");
+			case "git_runtime_unavailable":
+				return this.t("projects.sync.condition.gitRuntime", "本机 Git 不可用");
+			case "local_filesystem_blocked":
+				return this.t("projects.sync.condition.localFilesystem", "本地文件无法写入");
+			case "repository_state_blocked":
+				return this.t("projects.sync.condition.repositoryState", "仓库状态需要修复");
+			case "remote_service_unavailable":
+				return this.t("projects.sync.condition.remoteService", "远端服务不可用");
+			case "unknown_external":
+				return this.t("projects.sync.condition.unknown", "同步没有完成");
+			default:
+				return "";
 		}
 	}
 
@@ -1970,9 +2036,10 @@ export class DailyBoardView extends ItemView {
 				status.conflicts > 0 ? "warning" : status.workingTreeChanges.length > 0 ? "muted" : "active",
 			);
 		} catch (error) {
+			const safeStatusError = this.getSafeSyncErrorMessage(error);
 			this.updateSyncDecisionPanel(decision, project, null, {
 				description: this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
-					error: String(error),
+					error: safeStatusError,
 				}),
 				variant: "warning",
 				chipText: this.t("projects.sync.blockedShort", "受阻"),
@@ -1985,7 +2052,7 @@ export class DailyBoardView extends ItemView {
 			this.renderProjectSyncEvent(
 				statusPanel,
 				this.t("projects.sync.statusFailed", "同步状态读取失败：{error}", {
-					error: String(error),
+					error: safeStatusError,
 				}),
 				this.t("projects.sync.blockedShort", "受阻"),
 				"warning",
@@ -3642,16 +3709,27 @@ export class DailyBoardView extends ItemView {
 			const groupList = groupEl.createDiv({ cls: "friday-ai-session-group-list" });
 			for (const session of group.sessions) {
 				const sessionTitle = this.buildSessionTitle(session);
+				const isSessionSelected = this.aiSessionSelection.has(session.sessionId);
+				const sessionRowLabel = this.aiSessionManageMode
+					? this.t("ai.sessions.select", "选择对话：{title}", {
+						title: sessionTitle,
+					})
+					: this.t("ai.sessions.open", "打开对话：{title}", {
+						title: sessionTitle,
+					});
 				const itemEl = groupList.createDiv({ cls: "friday-ai-session-item" });
-				itemEl.setAttribute("role", "button");
-				itemEl.setAttribute("aria-label", this.t("ai.sessions.open", "打开对话：{title}", {
-					title: sessionTitle,
-				}));
+				if (this.aiSessionManageMode) {
+					itemEl.setAttribute("role", "checkbox");
+					itemEl.setAttribute("aria-checked", isSessionSelected ? "true" : "false");
+				} else {
+					itemEl.setAttribute("role", "button");
+				}
+				itemEl.setAttribute("aria-label", sessionRowLabel);
 				itemEl.tabIndex = 0;
 				if (session.sessionId === this.aiSessionId) {
 					itemEl.addClass("is-active");
 				}
-				if (this.aiSessionSelection.has(session.sessionId)) {
+				if (isSessionSelected) {
 					itemEl.addClass("is-selected");
 				}
 				itemEl.onclick = () => {
@@ -3665,6 +3743,9 @@ export class DailyBoardView extends ItemView {
 					void this.switchAiSession(session.sessionId);
 				};
 				itemEl.onkeydown = (event) => {
+					if (event.target !== itemEl) {
+						return;
+					}
 					if (this.aiSessionRenameId === session.sessionId) {
 						return;
 					}
@@ -3694,7 +3775,10 @@ export class DailyBoardView extends ItemView {
 				const rowEl = itemEl.createDiv({ cls: "friday-ai-session-item-row" });
 				if (this.aiSessionManageMode) {
 					const checkbox = rowEl.createEl("input", { attr: { type: "checkbox" }, cls: "friday-ai-session-checkbox" });
-					checkbox.checked = this.aiSessionSelection.has(session.sessionId);
+					checkbox.checked = isSessionSelected;
+					checkbox.setAttribute("aria-label", this.t("ai.sessions.selectCheckbox", "选择对话：{title}", {
+						title: sessionTitle,
+					}));
 					checkbox.onclick = (event) => {
 						event.stopPropagation();
 					};
@@ -6965,7 +7049,12 @@ export class DailyBoardView extends ItemView {
 			await this.plugin.saveSettings();
 			new Notice(this.plugin.t("notice.syncSuccess", { slug: this.getProjectLabel(project) }), 3000);
 		} else {
-			new Notice(this.plugin.t("notice.syncFailed", { error: result.error ?? this.getProjectLabel(project) }), 6000);
+			new Notice(
+				this.plugin.t("notice.syncFailed", {
+					error: this.getSafeSyncErrorMessage(result.error ?? this.getProjectLabel(project)),
+				}),
+				6000,
+			);
 		}
 
 		this.plugin.workbenchStateStore.recordSyncReport({
@@ -6982,6 +7071,11 @@ export class DailyBoardView extends ItemView {
 		}
 		this.activePage = "sync";
 		this.renderBoard();
+	}
+
+	private getSafeSyncErrorMessage(error: unknown): string {
+		const classified = classifyGitError(error);
+		return formatClassifiedGitError(classified, (key) => this.plugin.t(key));
 	}
 
 	private async syncAllProjects(): Promise<void> {

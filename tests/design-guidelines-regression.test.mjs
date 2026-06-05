@@ -98,6 +98,9 @@ test("core design selectors have one source of truth", () => {
 		".friday-page-content",
 		".friday-ai-chat-shell",
 		".assistant-process-detail-v6",
+		".friday-ai-session-drawer",
+		".friday-ai-session-item",
+		".friday-mention-dropdown",
 	]) {
 		const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 		const matches = styles.match(new RegExp(`^${escaped}\\s*\\{`, "gm")) ?? [];
@@ -123,9 +126,9 @@ test("compact icon controls keep accessible hit areas", () => {
 	assert.match(noteButton, /height:\s*28px;/);
 
 	const removeButton = cssBlock(styles, ".friday-ai-composer button.friday-inline-mention-token-remove");
-	assert.match(removeButton, /width:\s*12px;/);
-	assert.match(removeButton, /height:\s*12px;/);
-	assert.match(removeButton, /min-width:\s*12px;/);
+	assert.match(removeButton, /width:\s*24px;/);
+	assert.match(removeButton, /height:\s*24px;/);
+	assert.match(removeButton, /min-width:\s*24px;/);
 });
 
 test("mention dropdown exposes combobox list semantics", () => {

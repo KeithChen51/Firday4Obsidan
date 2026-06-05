@@ -1,4 +1,5 @@
 import type { SyncConflictRecord } from "./sync";
+import type { GitExternalCondition } from "../platform/git/classifyGitError";
 
 export type ProjectStatus = "active" | "completed" | "archived" | "on_hold";
 export type ProjectPriority = "low" | "medium" | "high" | "urgent";
@@ -138,6 +139,12 @@ export interface SyncStatus {
 	projectId?: string;
 	branch: string;
 	connected: boolean;
+	condition?: GitExternalCondition;
+	message?: string;
+	messageKey?: string;
+	recoveryAction?: string;
+	recoveryActionKey?: string;
+	technicalMessage?: string;
 	ahead: number;
 	behind: number;
 	dirty: number;

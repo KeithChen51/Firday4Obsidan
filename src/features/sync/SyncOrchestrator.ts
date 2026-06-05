@@ -4,7 +4,7 @@ import { PromiseQueue } from "../../platform/git/PromiseQueue";
 import { SyncEventBus } from "./SyncEventBus";
 import {
 	isNonFastForwardGitError,
-	REMOTE_UPDATED_BEFORE_PUSH_MESSAGE,
+	REMOTE_UPDATED_BEFORE_PUSH_ERROR,
 } from "../../platform/git/classifyGitError";
 
 export class SyncOrchestrator {
@@ -28,6 +28,10 @@ export class SyncOrchestrator {
 				this.emitStage(project, "pulling");
 				const pulled = await this.pull(project);
 				if (!pulled.success) {
+					const recovered = await this.preserveDetectedConflictsAfterFailure(project, pulled.pulledFiles, pulled.error);
+					if (recovered) {
+						return recovered;
+					}
 					this.emitRecoveryFailedIfNeeded(project, pulled.error);
 					this.emitCompleted(project, false, pulled.error);
 					return this.operator.makeErrorResult(project.projectId, pulled.error ?? "Pull failed");
@@ -36,44 +40,10 @@ export class SyncOrchestrator {
 
 				const conflictState = await this.detectConflicts(project);
 				if (conflictState.conflicts.length > 0) {
-					this.eventBus?.emit({
-						type: "sync_conflict_detected",
-						projectId: project.projectId,
-						conflicts: conflictState.conflicts,
-						recordedAt: new Date().toISOString(),
-					});
-					return {
-						success: false,
-						projectId: project.projectId,
-						pulledFiles: pulled.pulledFiles,
-						pushedFiles: [],
-						conflicts: conflictState.conflicts,
-						conflictSnapshots: conflictState.conflictSnapshots,
-					};
+					return this.preserveConflictsAndContinue(project, pulled.pulledFiles, conflictState);
 				}
 
-				this.emitStage(project, "committing");
-				await this.commitWorkingTree(project);
-				this.emitStage(project, "pushing");
-				const pushed = await this.push(project);
-				if (!pushed.success) {
-					const recovered = await this.retryPushAfterRemoteUpdate(project, pulled.pulledFiles, pushed.error);
-					if (recovered) {
-						return recovered;
-					}
-					this.emitCompleted(project, false, pushed.error);
-					return this.operator.makeErrorResult(project.projectId, pushed.error ?? "Push failed");
-				}
-
-				this.emitCompleted(project, true);
-				return {
-					success: true,
-					projectId: project.projectId,
-					pulledFiles: pulled.pulledFiles,
-					pushedFiles: pushed.pushedFiles,
-					conflicts: [],
-					conflictSnapshots: {},
-				};
+				return this.commitAndPush(project, pulled.pulledFiles);
 			} catch (error) {
 				this.emitCompleted(project, false, String(error));
 				return this.operator.makeErrorResult(project.projectId, error);
@@ -99,6 +69,10 @@ export class SyncOrchestrator {
 
 	async detectConflicts(project: ProjectEntry) {
 		return this.operator.detectConflicts(project);
+	}
+
+	async preserveConflicts(project: ProjectEntry, conflicts: string[]): Promise<string[]> {
+		return this.operator.preserveConflicts(project, conflicts);
 	}
 
 	async push(project: ProjectEntry) {
@@ -142,6 +116,71 @@ export class SyncOrchestrator {
 		});
 	}
 
+	private async commitAndPush(project: ProjectEntry, pulledFiles: string[]): Promise<SyncResult> {
+		this.emitStage(project, "committing");
+		await this.commitWorkingTree(project);
+		this.emitStage(project, "pushing");
+		const pushed = await this.push(project);
+		if (!pushed.success) {
+			const recovered = await this.retryPushAfterRemoteUpdate(project, pulledFiles, pushed.error);
+			if (recovered) {
+				return recovered;
+			}
+			this.emitCompleted(project, false, pushed.error);
+			return this.operator.makeErrorResult(project.projectId, pushed.error ?? "Push failed");
+		}
+
+		this.emitCompleted(project, true);
+		return {
+			success: true,
+			projectId: project.projectId,
+			pulledFiles,
+			pushedFiles: pushed.pushedFiles,
+			conflicts: [],
+			conflictSnapshots: {},
+		};
+	}
+
+	private async preserveDetectedConflictsAfterFailure(
+		project: ProjectEntry,
+		pulledFiles: string[],
+		error?: string,
+	): Promise<SyncResult | null> {
+		try {
+			const conflictState = await this.detectConflicts(project);
+			if (conflictState.conflicts.length === 0) {
+				return null;
+			}
+			return this.preserveConflictsAndContinue(project, pulledFiles, conflictState);
+		} catch {
+			this.emitRecoveryFailedIfNeeded(project, error);
+			return null;
+		}
+	}
+
+	private async preserveConflictsAndContinue(
+		project: ProjectEntry,
+		pulledFiles: string[],
+		conflictState: Awaited<ReturnType<SyncOrchestrator["detectConflicts"]>>,
+	): Promise<SyncResult> {
+		this.emitConflictDetected(project, conflictState.conflicts);
+		await this.preserveConflicts(project, conflictState.conflicts);
+		await this.operator.finalizeConflictResolution(project);
+		const remaining = await this.detectConflicts(project);
+		if (remaining.conflicts.length > 0) {
+			this.emitConflictDetected(project, remaining.conflicts);
+			return {
+				success: false,
+				projectId: project.projectId,
+				pulledFiles,
+				pushedFiles: [],
+				conflicts: remaining.conflicts,
+				conflictSnapshots: remaining.conflictSnapshots,
+			};
+		}
+		return this.commitAndPush(project, pulledFiles);
+	}
+
 	private async retryPushAfterRemoteUpdate(
 		project: ProjectEntry,
 		existingPulledFiles: string[],
@@ -154,7 +193,11 @@ export class SyncOrchestrator {
 		this.emitStage(project, "pulling");
 		const pulled = await this.pull(project);
 		if (!pulled.success) {
-			const error = pulled.error ?? REMOTE_UPDATED_BEFORE_PUSH_MESSAGE;
+			const error = pulled.error ?? REMOTE_UPDATED_BEFORE_PUSH_ERROR;
+			const recovered = await this.preserveDetectedConflictsAfterFailure(project, existingPulledFiles, error);
+			if (recovered) {
+				return recovered;
+			}
 			this.emitRecoveryFailedIfNeeded(project, error);
 			this.emitCompleted(project, false, error);
 			return this.operator.makeErrorResult(project.projectId, error);
@@ -164,22 +207,14 @@ export class SyncOrchestrator {
 		const pulledFiles = [...existingPulledFiles, ...pulled.pulledFiles];
 		const conflictState = await this.detectConflicts(project);
 		if (conflictState.conflicts.length > 0) {
-			this.emitConflictDetected(project, conflictState.conflicts);
-			return {
-				success: false,
-				projectId: project.projectId,
-				pulledFiles,
-				pushedFiles: [],
-				conflicts: conflictState.conflicts,
-				conflictSnapshots: conflictState.conflictSnapshots,
-			};
+			return this.preserveConflictsAndContinue(project, pulledFiles, conflictState);
 		}
 
 		this.emitStage(project, "pushing");
 		const pushed = await this.push(project);
 		if (!pushed.success) {
 			const error = isNonFastForwardGitError(pushed.error)
-				? REMOTE_UPDATED_BEFORE_PUSH_MESSAGE
+				? REMOTE_UPDATED_BEFORE_PUSH_ERROR
 				: pushed.error ?? "Push failed";
 			this.emitCompleted(project, false, error);
 			return this.operator.makeErrorResult(project.projectId, error);

@@ -55,6 +55,31 @@ function readStylesSource() {
 	return fs.readFileSync(stylesPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
+function readAtRuleBlock(source, atRuleStart) {
+	const start = source.indexOf(atRuleStart);
+	assert.ok(start >= 0, `${atRuleStart} should exist`);
+	const openIndex = source.indexOf("{", start);
+	assert.ok(openIndex > start, `${atRuleStart} should open a block`);
+	let depth = 0;
+	for (let index = openIndex; index < source.length; index += 1) {
+		if (source[index] === "{") {
+			depth += 1;
+		} else if (source[index] === "}") {
+			depth -= 1;
+			if (depth === 0) {
+				return source.slice(openIndex + 1, index);
+			}
+		}
+	}
+	assert.fail(`${atRuleStart} should close its block`);
+}
+
+function readCssBlock(source, selector) {
+	const match = source.match(new RegExp(`${selector}\\s*\\{([\\s\\S]*?)\\}`));
+	assert.ok(match, `${selector} block should exist`);
+	return match[1] ?? "";
+}
+
 function readLocaleSource(localePath) {
 	return fs.readFileSync(localePath, "utf8").replace(/\r\n?/g, "\n");
 }
@@ -127,6 +152,21 @@ test("session drawer styles favor native list rows over floating cards", async (
 	assert.match(styles, /\.friday-ai-session-item:hover \.friday-ai-session-item-actions\s*\{[\s\S]*opacity:\s*1/);
 });
 
+test("session drawer menu actions stay reachable on touch and narrow panes", async () => {
+	const styles = readStylesSource();
+	const adaptiveActionsMatch = styles.match(/@media \(hover: none\), \(max-width: 640px\) \{([\s\S]*?)\n\}/);
+	const containerActionsMatch = styles.match(/@container \(max-width: 640px\) \{\n\t\.friday-ai-session-item-actions\s*\{([\s\S]*?)\n\t\}\n\}/);
+	assert.ok(adaptiveActionsMatch, "session actions should have a touch and narrow pane fallback");
+	assert.ok(containerActionsMatch, "session actions should respond to narrow Obsidian pane containers");
+	const adaptiveActionsBlock = adaptiveActionsMatch[1] ?? "";
+	const containerActionsBlock = containerActionsMatch[1] ?? "";
+
+	assert.match(adaptiveActionsBlock, /\.friday-ai-session-item-actions\s*\{[\s\S]*opacity:\s*1/);
+	assert.match(adaptiveActionsBlock, /\.friday-ai-session-item-actions\s*\{[\s\S]*pointer-events:\s*auto/);
+	assert.match(containerActionsBlock, /opacity:\s*1/);
+	assert.match(containerActionsBlock, /pointer-events:\s*auto/);
+});
+
 test("session drawer uses the entire row as the interactive target", async () => {
 	const source = readViewSource();
 	const styles = readStylesSource();
@@ -138,6 +178,45 @@ test("session drawer uses the entire row as the interactive target", async () =>
 	assert.doesNotMatch(source, /createEl\("button", \{ cls: "friday-ai-session-item-body" \}\)/);
 	assert.match(styles, /\.friday-ai-session-item\s*\{[\s\S]*cursor:\s*pointer;/);
 	assert.match(styles, /\.friday-ai-session-item:focus-visible\b/);
+});
+
+test("session drawer management mode labels row and checkbox as selection targets", async () => {
+	const source = readViewSource();
+
+	assert.match(source, /const sessionRowLabel = this\.aiSessionManageMode\s*\?\s*this\.t\("ai\.sessions\.select"[\s\S]*?title: sessionTitle[\s\S]*?:\s*this\.t\("ai\.sessions\.open"[\s\S]*?title: sessionTitle[\s\S]*?\);/);
+	assert.match(source, /itemEl\.setAttribute\("aria-label", sessionRowLabel\)/);
+	assert.doesNotMatch(source, /itemEl\.setAttribute\("aria-label", this\.t\("ai\.sessions\.open"/);
+	assert.match(source, /checkbox\.setAttribute\("aria-label", this\.t\("ai\.sessions\.selectCheckbox"[\s\S]*?title: sessionTitle[\s\S]*?\)\)/);
+});
+
+test("session drawer row keydown ignores events bubbled from child controls", async () => {
+	const source = readViewSource();
+	const keydownMatch = source.match(/itemEl\.onkeydown = \(event\) => \{([\s\S]*?)\n\t\t\t\t\};/);
+	assert.ok(keydownMatch, "session row keydown handler should exist");
+	const keydownBlock = keydownMatch[1] ?? "";
+	const targetGuardIndex = keydownBlock.indexOf("if (event.target !== itemEl) {");
+	const activationIndex = keydownBlock.indexOf('if (event.key === "Enter" || event.key === " ")');
+
+	assert.ok(targetGuardIndex >= 0, "row keydown should guard against bubbled child-control events");
+	assert.ok(activationIndex > targetGuardIndex, "target guard should run before Enter/Space activation");
+	assert.match(keydownBlock, /if \(event\.target !== itemEl\) \{\s*return;\s*\}/);
+	assert.match(keydownBlock, /itemEl\.click\(\)/);
+});
+
+test("session item menu keeps a 28px live-shell hit area", async () => {
+	const styles = readStylesSource();
+	const shellMenuBlock = readCssBlock(styles, "\\.friday-shell \\.friday-ai-session-item-menu");
+	const width = shellMenuBlock.match(/width:\s*(\d+)px;/);
+	const height = shellMenuBlock.match(/height:\s*(\d+)px;/);
+	const minWidth = shellMenuBlock.match(/min-width:\s*(\d+)px;/);
+
+	assert.ok(width, "live shell session menu should declare width");
+	assert.ok(height, "live shell session menu should declare height");
+	assert.ok(minWidth, "live shell session menu should declare min-width");
+	assert.ok(Number(width[1]) >= 28, "live shell session menu width should be at least 28px");
+	assert.ok(Number(height[1]) >= 28, "live shell session menu height should be at least 28px");
+	assert.ok(Number(minWidth[1]) >= 28, "live shell session menu min-width should be at least 28px");
+	assert.doesNotMatch(shellMenuBlock, /(?:width|height|min-width):\s*24px;/);
 });
 
 test("explicit skill invocation stays on runtime path instead of builtin shortcut", async () => {
@@ -708,6 +787,22 @@ test("sync page responds to pane width and keeps primary sync data readable", as
 	assert.match(styles, /@container \(max-width: 520px\) \{[\s\S]*?\.project-file-row-v2\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\)/);
 });
 
+test("project branch summary preserves full branch name in clipped and refreshed labels", async () => {
+	const source = readViewSource();
+	const renderMatch = source.match(/private renderProjectBranchMenu\([\s\S]*?\): \{ currentBranchEl: HTMLElement; listEl: HTMLElement \} \{([\s\S]*?)\n\t\}\n\n\tprivate renderProjectBranchChoices/);
+	const updateMatch = source.match(/private updateSyncDecisionPanel\([\s\S]*?\): void \{([\s\S]*?)\n\t\}\n\n\tprivate applySyncRuntimeDecisionState/);
+	assert.ok(renderMatch, "renderProjectBranchMenu block should exist");
+	assert.ok(updateMatch, "updateSyncDecisionPanel block should exist");
+	const renderBlock = renderMatch[1] ?? "";
+	const updateBlock = updateMatch[1] ?? "";
+
+	assert.match(renderBlock, /const branchLabel = status\?\.branch \|\| this\.t\("projects\.sync\.branch\.unknown"/);
+	assert.match(renderBlock, /summary\.createSpan\(\{\s*cls: "project-current-branch-v2",\s*text: branchLabel,\s*attr: \{ title: branchLabel \},\s*\}\)/);
+	assert.match(updateBlock, /const branchLabel = status\?\.branch \|\| this\.t\("projects\.sync\.branch\.unknown"/);
+	assert.match(updateBlock, /elements\.currentBranchEl\.setText\(branchLabel\)/);
+	assert.match(updateBlock, /elements\.currentBranchEl\.setAttribute\("title", branchLabel\)/);
+});
+
 test("sync collaboration rows and function details keep subordinate visual weight", async () => {
 	const styles = readStylesSource();
 
@@ -959,7 +1054,7 @@ test("slash and mention dropdown floats above composer without resizing it", asy
 	assert.match(composerRootBlock, /position:\s*relative;/);
 	assert.match(composerRootBlock, /overflow:\s*visible;/);
 	assert.match(dropdownBlock, /position:\s*absolute;/);
-	assert.match(dropdownBlock, /bottom:\s*calc\(100%\s*\+\s*8px\);/);
+	assert.match(dropdownBlock, /bottom:\s*calc\(100%\s*\+\s*6px\);/);
 	assert.match(dropdownBlock, /z-index:\s*30;/);
 	assert.doesNotMatch(dropdownBlock, /position:\s*static;/);
 });
@@ -1029,7 +1124,7 @@ test("chat composer styles include visible keyboard focus and inline mention rem
 	assert.match(styles, /\.friday-inline-mention-token-remove\b/);
 	assert.match(styles, /\.friday-inline-mention-token\.is-skill\b/);
 	assert.match(styles, /\.friday-inline-mention-token\.is-context\b/);
-	assert.match(styles, /\.friday-ai-composer button\.friday-inline-mention-token-remove\s*\{[\s\S]*min-width:\s*12px;/);
+	assert.match(styles, /\.friday-ai-composer button\.friday-inline-mention-token-remove\s*\{[\s\S]*min-width:\s*24px;/);
 });
 
 test("slash skill suggestions are inserted as removable tokens instead of plain text", async () => {
@@ -1106,7 +1201,7 @@ test("workbench top bar keeps brand lockup project selector and compact native-k
 test("workbench shell header keeps a stable height when page content scrolls", async () => {
 	const styles = readStylesSource();
 	const headerMatches = Array.from(styles.matchAll(/\.friday-shell > \.friday-shell-header\s*\{([\s\S]*?)\}/g));
-	const headerMatch = headerMatches.at(-1);
+	const headerMatch = headerMatches.find((match) => /flex:\s*0\s+0\s+42px;/.test(match[1] ?? ""));
 	assert.ok(headerMatch, "live shell header correction block should exist");
 	const headerBlock = headerMatch[1] ?? "";
 
@@ -1114,6 +1209,36 @@ test("workbench shell header keeps a stable height when page content scrolls", a
 	assert.match(headerBlock, /box-sizing:\s*border-box;/);
 	assert.match(headerBlock, /height:\s*42px;/);
 	assert.match(headerBlock, /min-height:\s*42px;/);
+});
+
+test("daily board shell adapts dense chrome for 150 percent display scale and narrow panes", async () => {
+	const styles = readStylesSource();
+	assert.match(styles, /\.friday-shell\s*\{[\s\S]*container-type:\s*inline-size;/);
+	assert.match(styles, /\.friday-daily-board,\s*\n\.friday-daily-board \*\s*\{[\s\S]*box-sizing:\s*border-box;/);
+	const rightBarMatches = Array.from(styles.matchAll(/\.friday-shell-bar-right\s*\{([\s\S]*?)\}/g));
+	const rightBarBlock = rightBarMatches.find((match) => /flex-wrap:\s*nowrap;/.test(match[1] ?? ""))?.[1] ?? "";
+	const projectInlineBlock = readCssBlock(styles, "\\.friday-shell-project-inline");
+	const projectSelectWrapBlock = readCssBlock(styles, "\\.friday-shell-project-select-wrap");
+
+	assert.match(rightBarBlock, /flex:\s*1\s+1\s+280px;/);
+	assert.match(rightBarBlock, /flex-wrap:\s*nowrap;/);
+	assert.match(projectInlineBlock, /flex:\s*1\s+1\s+auto;/);
+	assert.match(projectSelectWrapBlock, /flex:\s*1\s+1\s+auto;/);
+
+	const narrowShellBlock = readAtRuleBlock(styles, "@container (max-width: 560px)");
+	assert.match(narrowShellBlock, /\.friday-shell > \.friday-shell-header\s*\{[\s\S]*height:\s*auto;/);
+	assert.match(narrowShellBlock, /\.friday-shell > \.friday-shell-header\s*\{[\s\S]*flex:\s*0\s+0\s+auto;/);
+	assert.match(narrowShellBlock, /\.friday-shell-bar-right\s*\{[\s\S]*flex-wrap:\s*nowrap;/);
+	assert.match(narrowShellBlock, /\.friday-shell-project-inline\s*\{[\s\S]*width:\s*auto;/);
+	assert.match(narrowShellBlock, /\.friday-shell \.friday-ai-toolbar-select-host\.is-model\s*\{[\s\S]*flex-basis:\s*100%;/);
+	assert.match(narrowShellBlock, /\.friday-shell \.friday-ai-toolbar-select-host\.is-permission\s*\{[\s\S]*min-width:\s*0;/);
+	assert.doesNotMatch(narrowShellBlock, /(^|\n)\s*\.friday-ai-toolbar-select-host\.is-model\s*\{/);
+	assert.match(narrowShellBlock, /\.friday-shell \.friday-ai-send-button\s*\{[\s\S]*margin-left:\s*0;/);
+
+	const narrowSyncBlock = readAtRuleBlock(styles, "@container (max-width: 420px)");
+	assert.match(narrowSyncBlock, /\.project-command-actions-v2\s*\{[\s\S]*flex-direction:\s*column;/);
+	assert.match(narrowSyncBlock, /\.project-command-actions-v2\s*>\s*\*\s*\{[\s\S]*width:\s*100%;/);
+	assert.match(narrowSyncBlock, /\.project-function-summary-v2\s*\{[\s\S]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto;/);
 });
 
 test("chat message meta uses the configured display name for user messages and FRIDAY avatar for assistant messages", async () => {

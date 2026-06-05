@@ -18,6 +18,7 @@ import { SecureStorage } from "../obsidian/SecureStorage";
 import type { GitConflictContent, GitConflictResult, GitOperator, GitPullResult, GitPushResult } from "./GitOperator";
 import { ProjectBoundaryService } from "../../services/ProjectBoundaryService";
 import { probeGitRuntime, type GitRuntimeStatus } from "./GitRuntimeProbe";
+import { classifyGitError, type ClassifiedGitError } from "./classifyGitError";
 
 type PostPullHandler = (
 	project: ProjectEntry,
@@ -174,6 +175,39 @@ export class SimpleGitOperator implements GitOperator {
 		};
 	}
 
+	async preserveConflicts(project: ProjectEntry, conflicts: string[]): Promise<string[]> {
+		const git = await this.requireRepoGit(project);
+		const projectPath = this.resolveProjectPath(project);
+		const timestamp = Date.now();
+		const preservedFiles: string[] = [];
+
+		for (const conflictPath of conflicts) {
+			const { normalizedPath, absolutePath } = this.resolveProjectRelativeFile(projectPath, conflictPath);
+			const versionAContent = await this.readRequiredConflictBlob(git, `:2:${normalizedPath}`);
+			const versionBContent = await this.readRequiredConflictBlob(git, `:3:${normalizedPath}`);
+			const versionACopy = await this.writePreservedConflictCopy(
+				projectPath,
+				normalizedPath,
+				"version-a",
+				timestamp,
+				versionAContent,
+			);
+			const versionBCopy = await this.writePreservedConflictCopy(
+				projectPath,
+				normalizedPath,
+				"version-b",
+				timestamp,
+				versionBContent,
+			);
+
+			await fs.writeFile(absolutePath, versionAContent, "utf8");
+			await git.add([normalizedPath, versionACopy, versionBCopy]);
+			preservedFiles.push(versionACopy, versionBCopy);
+		}
+
+		return preservedFiles;
+	}
+
 	async push(project: ProjectEntry): Promise<GitPushResult> {
 		try {
 			await this.ensureGitAvailable();
@@ -208,12 +242,18 @@ export class SimpleGitOperator implements GitOperator {
 
 			const status = await git.status();
 			const workingTreeChanges = this.buildWorkingTreeChanges(status);
-			const connected = project.gitRemote ? await this.canReachRemote(project, git) : false;
+			const remoteProbe = project.gitRemote
+				? await this.probeRemoteConnection(project, git)
+				: { connected: false, classified: undefined };
 
 			return {
 				projectId: project.projectId,
 				branch: status.current?.trim() || "",
-				connected,
+				connected: remoteProbe.connected,
+				condition: remoteProbe.classified?.condition,
+				messageKey: remoteProbe.classified?.messageKey,
+				recoveryActionKey: remoteProbe.classified?.recoveryActionKey,
+				technicalMessage: remoteProbe.classified?.technicalMessage,
 				ahead: status.ahead,
 				behind: status.behind,
 				dirty: workingTreeChanges.length,
@@ -223,7 +263,14 @@ export class SimpleGitOperator implements GitOperator {
 			};
 		} catch (error) {
 			console.error("[Friday] Failed to get sync status:", error);
-			return this.makeDefaultStatus(project, false);
+			const classified = classifyGitError(error);
+			return {
+				...this.makeDefaultStatus(project, false),
+				condition: classified.condition,
+				messageKey: classified.messageKey,
+				recoveryActionKey: classified.recoveryActionKey,
+				technicalMessage: classified.technicalMessage,
+			};
 		}
 	}
 
@@ -239,6 +286,8 @@ export class SimpleGitOperator implements GitOperator {
 		if (remaining.conflicts.length > 0) {
 			throw new Error("仍有冲突未解决。");
 		}
+		const git = await this.requireRepoGit(project);
+		await this.continueInProgressOperation(project, git);
 	}
 
 	makeErrorResult(projectId: string, error: unknown): SyncResult {
@@ -361,8 +410,18 @@ export class SimpleGitOperator implements GitOperator {
 			return false;
 		}
 
+		await this.fetchRemoteTrackingBranch(project, git, branchName);
 		await git.raw(["branch", "--set-upstream-to", `origin/${branchName}`, branchName]);
 		return true;
+	}
+
+	private async fetchRemoteTrackingBranch(project: ProjectEntry, git: SimpleGit, branchName: string): Promise<void> {
+		await git.raw([
+			...(await this.authArgs(project)),
+			"fetch",
+			"origin",
+			`${branchName}:refs/remotes/origin/${branchName}`,
+		]);
 	}
 
 	private async remoteBranchExists(project: ProjectEntry, git: SimpleGit, branchName: string): Promise<boolean> {
@@ -533,15 +592,24 @@ export class SimpleGitOperator implements GitOperator {
 	}
 
 	private async canReachRemote(project: ProjectEntry, git: SimpleGit): Promise<boolean> {
-		if (!project.gitRemote) {
-			return false;
-		}
+		return (await this.probeRemoteConnection(project, git)).connected;
+	}
 
+	private async probeRemoteConnection(
+		project: ProjectEntry,
+		git: SimpleGit,
+	): Promise<{ connected: boolean; classified?: ClassifiedGitError }> {
+		if (!project.gitRemote) {
+			return { connected: false };
+		}
 		try {
 			await git.raw([...(await this.authArgs(project)), "ls-remote", project.gitRemote]);
-			return true;
-		} catch {
-			return false;
+			return { connected: true };
+		} catch (error) {
+			return {
+				connected: false,
+				classified: classifyGitError(error),
+			};
 		}
 	}
 
@@ -550,6 +618,76 @@ export class SimpleGitOperator implements GitOperator {
 			return await git.raw(["show", spec]);
 		} catch {
 			return "";
+		}
+	}
+
+	private async readRequiredConflictBlob(git: SimpleGit, spec: string): Promise<string> {
+		try {
+			return await git.raw(["show", spec]);
+		} catch (error) {
+			throw new Error(`Unable to read conflict version ${spec}: ${String(error)}`);
+		}
+	}
+
+	private resolveProjectRelativeFile(
+		projectPath: string,
+		filePath: string,
+	): { normalizedPath: string; absolutePath: string } {
+		const normalizedPath = normalizePath(filePath.trim());
+		if (!normalizedPath || path.posix.isAbsolute(normalizedPath) || normalizedPath.split("/").includes("..")) {
+			throw new Error(`Unsafe conflict path: ${filePath}`);
+		}
+		const absolutePath = path.resolve(projectPath, ...normalizedPath.split("/"));
+		const relativeFromProject = path.relative(projectPath, absolutePath);
+		if (relativeFromProject.startsWith("..") || path.isAbsolute(relativeFromProject)) {
+			throw new Error(`Conflict path is outside project: ${filePath}`);
+		}
+		return { normalizedPath, absolutePath };
+	}
+
+	private async writePreservedConflictCopy(
+		projectPath: string,
+		conflictPath: string,
+		side: "version-a" | "version-b",
+		timestamp: number,
+		content: string,
+	): Promise<string> {
+		const parsed = path.posix.parse(conflictPath);
+		for (let index = 0; index < 1000; index += 1) {
+			const collisionSuffix = index === 0 ? "" : `-${index}`;
+			const fileName = `${parsed.name}.friday-${side}-${timestamp}${collisionSuffix}${parsed.ext}`;
+			const relativePath = normalizePath(path.posix.join(parsed.dir, fileName));
+			const absolutePath = path.resolve(projectPath, ...relativePath.split("/"));
+			const existing = await fs.stat(absolutePath).catch(() => null);
+			if (existing) {
+				continue;
+			}
+			await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+			await fs.writeFile(absolutePath, content, "utf8");
+			return relativePath;
+		}
+		throw new Error(`Unable to create preserved conflict copy for ${conflictPath}`);
+	}
+
+	private async continueInProgressOperation(project: ProjectEntry, git: SimpleGit): Promise<void> {
+		if (await this.gitPathExists(project, git, "rebase-merge")) {
+			await git.raw(["-c", "core.editor=true", "rebase", "--continue"]);
+			return;
+		}
+		if (await this.gitPathExists(project, git, "rebase-apply")) {
+			await git.raw(["-c", "core.editor=true", "rebase", "--continue"]);
+		}
+	}
+
+	private async gitPathExists(project: ProjectEntry, git: SimpleGit, gitPath: string): Promise<boolean> {
+		try {
+			const output = (await git.revparse(["--git-path", gitPath])).trim();
+			const projectPath = this.resolveProjectPath(project);
+			const absolutePath = path.isAbsolute(output) ? output : path.resolve(projectPath, output);
+			const stat = await fs.stat(absolutePath).catch(() => null);
+			return Boolean(stat);
+		} catch {
+			return false;
 		}
 	}
 

@@ -63,7 +63,8 @@ export class MentionComposer {
 			},
 			handleKeyDown: (_view, event) => this.handleKeyDown(event),
 			handleDOMEvents: {
-				mousedown: (_view, event) => this.handleMouseDown(event),
+				mousedown: (_view, event) => this.handleRemoveTokenEvent(event),
+				click: (_view, event) => this.handleRemoveTokenEvent(event),
 			},
 		});
 		this.dropdown.onSelect((item) => {
@@ -211,6 +212,10 @@ export class MentionComposer {
 	}
 
 	private handleKeyDown(event: KeyboardEvent): boolean {
+		const target = event.target instanceof HTMLElement ? event.target : null;
+		if (target?.closest("[data-mention-remove='true']")) {
+			return false;
+		}
 		if (this.dropdown.handleKeydown(event)) {
 			return true;
 		}
@@ -228,7 +233,7 @@ export class MentionComposer {
 		return false;
 	}
 
-	private handleMouseDown(event: Event): boolean {
+	private handleRemoveTokenEvent(event: Event): boolean {
 		const target = event.target instanceof HTMLElement ? event.target : null;
 		const removeButton = target?.closest<HTMLElement>("[data-mention-remove='true']");
 		if (!removeButton) {

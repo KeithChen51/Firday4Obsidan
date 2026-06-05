@@ -548,5 +548,6 @@ function renderSoulLabSettingsSection(ctx: SettingsSectionContext, containerEl: 
 		}
 	}
 
-	ctx.renderSoulSuggestionPanel(containerEl);
+	const suggestionGroup = containerEl.createDiv({ cls: "friday-soul-suggestion-group" });
+	ctx.renderSoulSuggestionPanel(suggestionGroup);
 }

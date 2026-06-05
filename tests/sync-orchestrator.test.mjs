@@ -138,10 +138,11 @@ test("sync orchestrator pulls and retries once when push is rejected because rem
 	assert.deepEqual(result.pushedFiles, ["local.md"]);
 });
 
-test("sync orchestrator stops at conflict resolution when retry pull finds conflicts after push rejection", async () => {
+test("sync orchestrator preserves both versions and continues when retry pull finds conflicts after push rejection", async () => {
 	const { orchestratorModule, queueModule } = await loadModules();
 	const calls = [];
 	let detectCount = 0;
+	let pushCount = 0;
 	const operator = {
 		async prepareRepository() {
 			calls.push("prepare");
@@ -157,17 +158,27 @@ test("sync orchestrator stops at conflict resolution when retry pull finds confl
 		async detectConflicts() {
 			calls.push("detect");
 			detectCount += 1;
-			return detectCount === 1
+			return detectCount === 1 || detectCount === 3
 				? { conflicts: [], conflictSnapshots: {} }
 				: { conflicts: ["conflict.md"], conflictSnapshots: { "conflict.md": "snapshot.md" } };
 		},
+		async preserveConflicts() {
+			calls.push("preserve");
+			return ["conflict.friday-ours.md", "conflict.friday-theirs.md"];
+		},
+		async finalizeConflictResolution() {
+			calls.push("finalize");
+		},
 		async push() {
 			calls.push("push");
-			return {
-				success: false,
-				pushedFiles: [],
-				error: "error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not have locally.",
-			};
+			pushCount += 1;
+			return pushCount === 1
+				? {
+					success: false,
+					pushedFiles: [],
+					error: "error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not have locally.",
+				}
+				: { success: true, pushedFiles: ["local.md"] };
 		},
 		makeErrorResult(projectSlug, error) {
 			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
@@ -177,15 +188,76 @@ test("sync orchestrator stops at conflict resolution when retry pull finds confl
 
 	const result = await orchestrator.sync(createProject());
 
-	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push", "pull", "detect"]);
-	assert.equal(result.success, false);
-	assert.deepEqual(result.conflicts, ["conflict.md"]);
-	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push", "pull", "detect", "preserve", "finalize", "detect", "commit", "push"]);
+	assert.equal(result.success, true);
+	assert.deepEqual(result.conflicts, []);
+	assert.deepEqual(result.pushedFiles, ["local.md"]);
 });
 
-test("sync orchestrator stops before local commit and push when conflicts are detected after pull", async () => {
+test("sync orchestrator preserves retry pull conflicts when pull itself fails after push rejection", async () => {
 	const { orchestratorModule, queueModule } = await loadModules();
 	const calls = [];
+	let pullCount = 0;
+	let detectCount = 0;
+	let pushCount = 0;
+	const operator = {
+		async prepareRepository() {
+			calls.push("prepare");
+		},
+		async commitWorkingTree() {
+			calls.push("commit");
+			return ["local.md"];
+		},
+		async pull() {
+			calls.push("pull");
+			pullCount += 1;
+			return pullCount === 1
+				? { success: true, pulledFiles: [] }
+				: { success: false, pulledFiles: [], error: "CONFLICT (content): Merge conflict in conflict.md" };
+		},
+		async detectConflicts() {
+			calls.push("detect");
+			detectCount += 1;
+			return detectCount === 2
+				? { conflicts: ["conflict.md"], conflictSnapshots: { "conflict.md": "snapshot.md" } }
+				: { conflicts: [], conflictSnapshots: {} };
+		},
+		async preserveConflicts() {
+			calls.push("preserve");
+			return ["conflict.friday-ours.md", "conflict.friday-theirs.md"];
+		},
+		async finalizeConflictResolution() {
+			calls.push("finalize");
+		},
+		async push() {
+			calls.push("push");
+			pushCount += 1;
+			return pushCount === 1
+				? {
+					success: false,
+					pushedFiles: [],
+					error: "error: failed to push some refs\nhint: Updates were rejected because the remote contains work that you do not have locally.",
+				}
+				: { success: true, pushedFiles: ["local.md"] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "commit", "push", "pull", "detect", "preserve", "finalize", "detect", "commit", "push"]);
+	assert.equal(result.success, true);
+	assert.deepEqual(result.conflicts, []);
+	assert.deepEqual(result.pushedFiles, ["local.md"]);
+});
+
+test("sync orchestrator preserves both versions and continues when conflicts are detected after pull", async () => {
+	const { orchestratorModule, queueModule } = await loadModules();
+	const calls = [];
+	let detectCount = 0;
 	const operator = {
 		async prepareRepository() {
 			calls.push("prepare");
@@ -200,21 +272,82 @@ test("sync orchestrator stops before local commit and push when conflicts are de
 		},
 		async detectConflicts() {
 			calls.push("detect");
-			return { conflicts: ["conflict.md"], conflictSnapshots: { "conflict.md": "snapshot.md" } };
+			detectCount += 1;
+			return detectCount === 1
+				? { conflicts: ["conflict.md"], conflictSnapshots: { "conflict.md": "snapshot.md" } }
+				: { conflicts: [], conflictSnapshots: {} };
+		},
+		async preserveConflicts() {
+			calls.push("preserve");
+			return ["conflict.friday-ours.md", "conflict.friday-theirs.md"];
+		},
+		async finalizeConflictResolution() {
+			calls.push("finalize");
 		},
 		async push() {
 			calls.push("push");
-			return { success: true, pushedFiles: [] };
+			return { success: true, pushedFiles: ["conflict.friday-theirs.md"] };
 		},
 	};
 	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
 
 	const result = await orchestrator.sync(createProject());
 
-	assert.deepEqual(calls, ["prepare", "pull", "detect"]);
-	assert.equal(result.success, false);
-	assert.deepEqual(result.conflicts, ["conflict.md"]);
-	assert.equal(result.conflictSnapshots["conflict.md"], "snapshot.md");
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "preserve", "finalize", "detect", "commit", "push"]);
+	assert.equal(result.success, true);
+	assert.deepEqual(result.conflicts, []);
+	assert.deepEqual(result.pushedFiles, ["conflict.friday-theirs.md"]);
+});
+
+test("sync orchestrator preserves conflicts discovered after pull failure before surfacing an error", async () => {
+	const { orchestratorModule, queueModule } = await loadModules();
+	const calls = [];
+	let detectCount = 0;
+	const operator = {
+		async prepareRepository() {
+			calls.push("prepare");
+		},
+		async commitWorkingTree() {
+			calls.push("commit");
+			return ["local.md"];
+		},
+		async pull() {
+			calls.push("pull");
+			return {
+				success: false,
+				pulledFiles: [],
+				error: "CONFLICT (content): Merge conflict in workspace/a.md\nAutomatic merge failed; fix conflicts and then commit the result.",
+			};
+		},
+		async detectConflicts() {
+			calls.push("detect");
+			detectCount += 1;
+			return detectCount === 1
+				? { conflicts: ["workspace/a.md"], conflictSnapshots: { "workspace/a.md": "snapshot.md" } }
+				: { conflicts: [], conflictSnapshots: {} };
+		},
+		async preserveConflicts() {
+			calls.push("preserve");
+			return ["workspace/a.friday-ours.md", "workspace/a.friday-theirs.md"];
+		},
+		async finalizeConflictResolution() {
+			calls.push("finalize");
+		},
+		async push() {
+			calls.push("push");
+			return { success: true, pushedFiles: ["local.md"] };
+		},
+		makeErrorResult(projectSlug, error) {
+			return { success: false, projectSlug, pulledFiles: [], pushedFiles: [], conflicts: [], error: String(error) };
+		},
+	};
+	const orchestrator = new orchestratorModule.SyncOrchestrator(operator, new queueModule.PromiseQueue());
+
+	const result = await orchestrator.sync(createProject());
+
+	assert.deepEqual(calls, ["prepare", "pull", "detect", "preserve", "finalize", "detect", "commit", "push"]);
+	assert.equal(result.success, true);
+	assert.deepEqual(result.conflicts, []);
 });
 
 test("git error classifier marks fetch-first push rejection as blocked", async () => {
@@ -223,10 +356,11 @@ test("git error classifier marks fetch-first push rejection as blocked", async (
 		"! [rejected] master -> master (fetch first)\nUpdates were rejected because the remote contains work that you do not have locally.";
 
 	assert.equal(gitErrorModule.isNonFastForwardGitError(error), true);
-	assert.deepEqual(gitErrorModule.classifyGitError(error), {
-		kind: "blocked",
-		message: gitErrorModule.REMOTE_UPDATED_BEFORE_PUSH_MESSAGE,
-	});
+	const classified = gitErrorModule.classifyGitError(error);
+	assert.equal(classified.kind, "blocked");
+	assert.equal(classified.condition, "remote_updated");
+	assert.equal(classified.messageKey, gitErrorModule.REMOTE_UPDATED_BEFORE_PUSH_MESSAGE_KEY);
+	assert.equal(classified.shouldAutoRetry, true);
 });
 
 test("sync orchestrator stops before commit and push when pull fails", async () => {
@@ -260,7 +394,7 @@ test("sync orchestrator stops before commit and push when pull fails", async () 
 
 	const result = await orchestrator.sync(createProject());
 
-	assert.deepEqual(calls, ["prepare", "pull"]);
+	assert.deepEqual(calls, ["prepare", "pull", "detect"]);
 	assert.equal(result.success, false);
 	assert.match(result.error ?? "", /pull failed/i);
 });
@@ -319,8 +453,24 @@ test("sync service queues conflict resolution actions instead of bypassing the g
 test("simple git operator attempts to attach upstream tracking before skipping pull", async () => {
 	const source = readGitOperatorSource();
 	assert.match(source, /const hasTracking = await this\.ensureTrackingBranchForPull\(project, git\);/);
-	assert.match(source, /await git\.raw\(\["branch", "--set-upstream-to", `origin\/\$\{branchName\}`, branchName\]\);/);
 	assert.match(source, /"ls-remote", "--heads", "origin", branchName/);
+	assert.match(
+		source,
+		/await this\.fetchRemoteTrackingBranch\(project, git, branchName\);[\s\S]*?await git\.raw\(\["branch", "--set-upstream-to", `origin\/\$\{branchName\}`, branchName\]\);/,
+	);
+	assert.match(source, /`\$\{branchName\}:refs\/remotes\/origin\/\$\{branchName\}`/);
+});
+
+test("simple git operator preserves both sides of content conflicts before resolving", async () => {
+	const source = readGitOperatorSource();
+	assert.match(source, /async preserveConflicts\(project: ProjectEntry, conflicts: string\[\]\): Promise<string\[]>/);
+	assert.match(source, /`:2:\$\{normalizedPath\}`/);
+	assert.match(source, /`:3:\$\{normalizedPath\}`/);
+	assert.match(source, /friday-\$\{side\}-\$\{timestamp\}/);
+	assert.match(source, /"version-a"/);
+	assert.match(source, /"version-b"/);
+	assert.match(source, /await git\.add\(\[normalizedPath, versionACopy, versionBCopy\]\)/);
+	assert.match(source, /continueInProgressOperation\(project, git\)/);
 });
 
 test("sync orchestrator emits recovery-failed event when stash pop restoration fails", async () => {

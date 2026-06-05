@@ -1,4 +1,5 @@
 ﻿import { Notice } from "obsidian";
+import { classifyGitError, formatClassifiedGitError } from "../platform/git/classifyGitError";
 import { FridayPluginApi } from "../types/plugin";
 
 export function registerSyncCommands(plugin: FridayPluginApi): void {
@@ -50,7 +51,7 @@ export function registerSyncCommands(plugin: FridayPluginApi): void {
 				await plugin.saveSettings();
 				new Notice(plugin.t("notice.syncSuccess", { slug: projectLabel }), 3000);
 			} else {
-				new Notice(plugin.t("notice.syncFailed", { error: result.error ?? projectLabel }), 6000);
+				new Notice(plugin.t("notice.syncFailed", { error: getSafeSyncErrorMessage(plugin, result.error ?? projectLabel) }), 6000);
 			}
 
 			plugin.workbenchStateStore.recordSyncReport({
@@ -94,4 +95,9 @@ function updateProjectSyncTimestamps(
 			project.lastSyncAt = new Date().toISOString();
 		}
 	}
+}
+
+function getSafeSyncErrorMessage(plugin: FridayPluginApi, error: unknown): string {
+	const classified = classifyGitError(error);
+	return formatClassifiedGitError(classified, (key) => plugin.t(key));
 }

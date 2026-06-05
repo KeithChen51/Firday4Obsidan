@@ -104,6 +104,12 @@ export class SyncService {
 			projectId: project.projectId,
 			branch: status.branch,
 			connected: status.connected,
+			condition: status.condition,
+			message: status.message,
+			messageKey: status.messageKey,
+			recoveryAction: status.recoveryAction,
+			recoveryActionKey: status.recoveryActionKey,
+			technicalMessage: status.technicalMessage,
 			conflicts: status.conflicts,
 			recordedAt: new Date().toISOString(),
 		});

@@ -25,6 +25,38 @@ function readStylesSource() {
 	return fs.readFileSync(stylesPath, "utf8").replace(/\r\n?/g, "\n");
 }
 
+function readAtRuleBlock(source, atRuleStart) {
+	const start = source.indexOf(atRuleStart);
+	assert.ok(start >= 0, `${atRuleStart} should exist`);
+	const openIndex = source.indexOf("{", start);
+	assert.ok(openIndex > start, `${atRuleStart} should open a block`);
+	return readBlockBody(source, openIndex, atRuleStart);
+}
+
+function readCssRuleBlock(source, selector) {
+	const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	const match = new RegExp(`(?:^|\\n)${escapedSelector}\\s*\\{`).exec(source);
+	assert.ok(match, `${selector} rule should exist`);
+	const openIndex = source.indexOf("{", match.index);
+	assert.ok(openIndex > match.index, `${selector} should open a block`);
+	return readBlockBody(source, openIndex, selector);
+}
+
+function readBlockBody(source, openIndex, label) {
+	let depth = 0;
+	for (let index = openIndex; index < source.length; index += 1) {
+		if (source[index] === "{") {
+			depth += 1;
+		} else if (source[index] === "}") {
+			depth -= 1;
+			if (depth === 0) {
+				return source.slice(openIndex + 1, index);
+			}
+		}
+	}
+	assert.fail(`${label} should close its block`);
+}
+
 function readLocaleSource(localePath) {
 	return fs.readFileSync(localePath, "utf8").replace(/\r\n?/g, "\n");
 }
@@ -298,6 +330,23 @@ test("settings project styles define the new project settings panels", async () 
 	assert.doesNotMatch(styles, /\.friday-project-editor-summary \{/);
 });
 
+test("settings native panels stack controls for 150 percent display scale and narrow panes", async () => {
+	const styles = readStylesSource();
+	const mediaBlock = readAtRuleBlock(styles, "@media (max-width: 640px)");
+	const containerBlock = readAtRuleBlock(styles, "@container (max-width: 640px)");
+	const settingsGroupBlock = readCssRuleBlock(styles, ".friday-native-settings-group");
+
+	assert.match(mediaBlock, /\.friday-native-settings-group\s*\{[\s\S]*padding:\s*14px;/);
+	assert.match(settingsGroupBlock, /container-type:\s*inline-size;/);
+	assert.match(containerBlock, /\.friday-native-settings-group \.setting-item\s*\{[\s\S]*flex-direction:\s*column;/);
+	assert.match(
+		containerBlock,
+		/\.friday-native-settings-group \.setting-item-info,\s*\.friday-native-settings-group \.setting-item-control\s*\{[\s\S]*width:\s*100%;[\s\S]*min-width:\s*0;/,
+	);
+	assert.match(containerBlock, /\.friday-native-settings-group \.setting-item-control > \*\s*\{[\s\S]*max-width:\s*100%;/);
+	assert.match(containerBlock, /\.friday-project-editor-input\s*\{[\s\S]*min-width:\s*0;/);
+});
+
 test("settings project panel headers are explicitly left aligned", async () => {
 	const source = readSettingsSource();
 	const styles = readStylesSource();
@@ -366,6 +415,26 @@ test("settings project editor disables auto sync until a git remote is available
 	assert.match(source, /setDisabled\(disabled\)/);
 	assert.match(source, /settings\.project\.editor\.autoSync\.needsRemote/);
 	assert.match(source, /this\.getDraftAutoSyncAvailability\(draft\)/);
+});
+
+test("settings sync section shows safe mode while advanced mode is in development", async () => {
+	const source = readSettingsSource();
+	const sectionStart = source.indexOf("private renderSyncSection");
+	const sectionEnd = source.indexOf("\n\tprivate renderSubscriptionsSection", sectionStart);
+	assert.ok(sectionStart >= 0 && sectionEnd > sectionStart, "renderSyncSection should exist");
+	const block = source.slice(sectionStart, sectionEnd);
+
+	assert.match(block, /settings\.sync\.mode\.name/);
+	assert.match(block, /settings\.sync\.mode\.safe/);
+	assert.match(block, /settings\.sync\.mode\.advancedPending/);
+});
+
+test("settings sync locale files cover sync mode status copy", async () => {
+	for (const localeSource of [readLocaleSource(zhLocalePath), readLocaleSource(enLocalePath)]) {
+		assert.match(localeSource, /"settings\.sync\.mode\.name":/);
+		assert.match(localeSource, /"settings\.sync\.mode\.safe":/);
+		assert.match(localeSource, /"settings\.sync\.mode\.advancedPending":/);
+	}
 });
 
 test("settings project section redirects legacy Friday root handling to subscriptions", async () => {

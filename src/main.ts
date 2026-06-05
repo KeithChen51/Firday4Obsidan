@@ -43,6 +43,7 @@ import { AutoSyncManager } from "./features/sync/AutoSyncManager";
 import { SyncEventBus } from "./features/sync/SyncEventBus";
 import { SyncRuntimeStore } from "./features/sync/SyncRuntimeStore";
 import { SyncStatusBar } from "./features/sync/SyncStatusBar";
+import { classifyGitError, formatClassifiedGitError } from "./platform/git/classifyGitError";
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
@@ -239,6 +240,21 @@ function matchesBuiltInSoulPreset(
 ): boolean {
 	return builtInSoulPresetFingerprint(soul) === builtInSoulPresetFingerprint(preset);
 }
+
+function getSafeSyncEventMessage(
+	event: { type: string; success?: boolean; error?: string; message?: string },
+	translateKey: (key: string) => string,
+): string {
+	if (event.type !== "sync_completed") {
+		return event.message ?? "";
+	}
+	if (event.success || !event.error) {
+		return "";
+	}
+	const classified = classifyGitError(event.error);
+	return formatClassifiedGitError(classified, translateKey);
+}
+
 type WikiCompileResult = {
 	projectId: string;
 	projectRoot: string;
@@ -467,7 +483,7 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 					this.workbenchStateStore.recordSyncStatusSnapshot({
 						projectId: event.projectId,
 						stage: event.type === "sync_completed" ? (event.success ? "succeeded" : "failed") : event.stage,
-						message: event.type === "sync_completed" ? event.error ?? "" : event.message ?? "",
+						message: getSafeSyncEventMessage(event, (key) => this.t(key)),
 						recordedAt: event.recordedAt,
 					});
 				}
@@ -980,10 +996,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		const lastAttemptAt = Number(window.localStorage.getItem(storageKey) ?? "0");
 		if (Number.isFinite(lastAttemptAt) && Date.now() - lastAttemptAt < ROOT_INDEX_RECOVERY_WINDOW_MS) {
 			console.warn("[Friday] Friday root exists on disk but is still missing from the vault index.", { fridayRoot });
-			new Notice(
-				"检测到 F.R.I.D.A.Y 目录已存在于磁盘，但当前 Vault 没有收录它。请重新打开这个 Vault；如果持续复现，请反馈 Obsidian 版本与 .obsidian/app.json。",
-				10000,
-			);
 			return false;
 		}
 
@@ -991,10 +1003,6 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 		console.warn("[Friday] Friday root exists on disk but is missing from the current vault index. Reloading once.", {
 			fridayRoot,
 		});
-		new Notice(
-			"检测到 F.R.I.D.A.Y 目录已存在于磁盘，但当前文件树没有收录；正在自动重载一次 Obsidian 以恢复索引。",
-			8000,
-		);
 		window.setTimeout(() => {
 			this.reloadObsidianApp();
 		}, 250);

@@ -1,3 +1,5 @@
+import type { GitExternalCondition } from "../../platform/git/classifyGitError";
+
 export type SyncRuntimeStage =
 	| "idle"
 	| "checking"
@@ -34,6 +36,12 @@ export type SyncRuntimeEvent =
 			projectId: string;
 			branch: string;
 			connected: boolean;
+			condition?: GitExternalCondition;
+			message?: string;
+			messageKey?: string;
+			recoveryAction?: string;
+			recoveryActionKey?: string;
+			technicalMessage?: string;
 			conflicts: number;
 			recordedAt: string;
 	  }

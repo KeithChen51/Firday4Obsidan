@@ -48,7 +48,6 @@ const mentionNodeSpec: NodeSpec = {
 					class: "friday-inline-mention-token-remove",
 					"data-mention-remove": "true",
 					"aria-label": `Remove token ${label}`,
-					tabindex: "-1",
 				},
 				"x",
 			],

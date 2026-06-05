@@ -1,4 +1,9 @@
-import { classifyGitError } from "../../platform/git/classifyGitError";
+import {
+	GIT_ERROR_MESSAGE_KEYS,
+	GIT_ERROR_RECOVERY_ACTION_KEYS,
+	classifyGitError,
+	type GitExternalCondition,
+} from "../../platform/git/classifyGitError";
 import { SyncEventBus, type SyncRuntimeEvent, type SyncRuntimeStage } from "./SyncEventBus";
 
 type SyncActiveStage = Extract<SyncRuntimeStage, "checking" | "pulling" | "committing" | "pushing">;
@@ -7,7 +12,12 @@ export interface SyncRuntimeState {
 	projectId: string;
 	stage: SyncRuntimeStage;
 	lastActiveStage?: SyncActiveStage;
+	condition?: GitExternalCondition;
 	message: string;
+	messageKey?: string;
+	recoveryAction?: string;
+	recoveryActionKey?: string;
+	technicalMessage?: string;
 	branch: string;
 	connected: boolean | null;
 	conflicts: number;
@@ -62,7 +72,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: "checking",
 					lastActiveStage: "checking",
+					condition: undefined,
 					message: "",
+					messageKey: undefined,
+					recoveryAction: "",
+					recoveryActionKey: undefined,
+					technicalMessage: "",
 					branch: "",
 					connected: null,
 					conflicts: 0,
@@ -75,7 +90,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: event.stage,
 					lastActiveStage: isSyncActiveStage(event.stage) ? event.stage : current?.lastActiveStage,
+					condition: isSyncActiveStage(event.stage) ? undefined : current?.condition,
 					message: event.message ?? current?.message ?? "",
+					messageKey: isSyncActiveStage(event.stage) ? undefined : current?.messageKey,
+					recoveryAction: isSyncActiveStage(event.stage) ? "" : current?.recoveryAction ?? "",
+					recoveryActionKey: isSyncActiveStage(event.stage) ? undefined : current?.recoveryActionKey,
+					technicalMessage: isSyncActiveStage(event.stage) ? "" : current?.technicalMessage ?? "",
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: current?.conflicts ?? 0,
@@ -89,7 +109,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: current?.stage ?? "pulling",
 					lastActiveStage: current?.lastActiveStage ?? "pulling",
+					condition: current?.condition,
 					message: event.pulledFiles.length > 0 ? `Pulled ${event.pulledFiles.length} file(s).` : "",
+					messageKey: undefined,
+					recoveryAction: current?.recoveryAction ?? "",
+					recoveryActionKey: current?.recoveryActionKey,
+					technicalMessage: current?.technicalMessage ?? "",
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: current?.conflicts ?? 0,
@@ -101,11 +126,21 @@ export class SyncRuntimeStore {
 				const current = this.getProjectState(event.projectId);
 				const nextStage =
 					!event.connected ? "offline" : event.conflicts > 0 ? "blocked" : current?.stage ?? "idle";
+				const condition = !event.connected
+					? event.condition ?? "remote_unreachable"
+					: event.conflicts > 0
+						? "content_conflict"
+						: undefined;
 				this.setProjectState({
 					projectId: event.projectId,
 					stage: nextStage,
 					lastActiveStage: current?.lastActiveStage,
-					message: current?.message ?? "",
+					condition,
+					message: event.message ?? current?.message ?? "",
+					messageKey: event.messageKey ?? current?.messageKey,
+					recoveryAction: event.recoveryAction ?? current?.recoveryAction ?? "",
+					recoveryActionKey: event.recoveryActionKey ?? current?.recoveryActionKey,
+					technicalMessage: event.technicalMessage ?? current?.technicalMessage ?? "",
 					branch: event.branch,
 					connected: event.connected,
 					conflicts: event.conflicts,
@@ -119,7 +154,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: "resolving",
 					lastActiveStage: current?.lastActiveStage ?? "pulling",
-					message: current?.message ?? "",
+					condition: "content_conflict",
+					message: "",
+					messageKey: GIT_ERROR_MESSAGE_KEYS.content_conflict,
+					recoveryAction: "",
+					recoveryActionKey: GIT_ERROR_RECOVERY_ACTION_KEYS.content_conflict,
+					technicalMessage: event.conflicts.join(", "),
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: event.conflicts.length,
@@ -133,7 +173,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: "blocked",
 					lastActiveStage: current?.lastActiveStage,
-					message: event.message,
+					condition: "stash_restore_conflict",
+					message: "",
+					messageKey: GIT_ERROR_MESSAGE_KEYS.stash_restore_conflict,
+					recoveryAction: "",
+					recoveryActionKey: GIT_ERROR_RECOVERY_ACTION_KEYS.stash_restore_conflict,
+					technicalMessage: event.message,
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: current?.conflicts ?? 0,
@@ -147,7 +192,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: "resolving",
 					lastActiveStage: current?.lastActiveStage ?? "pulling",
-					message: `Wrote ${event.strategy} resolution for ${event.filePath}.`,
+					condition: current?.condition ?? "content_conflict",
+					message: `已处理 ${event.filePath}。`,
+					messageKey: undefined,
+					recoveryAction: current?.recoveryAction ?? "",
+					recoveryActionKey: current?.recoveryActionKey,
+					technicalMessage: `Wrote ${event.strategy} resolution for ${event.filePath}.`,
 					branch: current?.branch ?? "",
 					connected: current?.connected ?? null,
 					conflicts: current?.conflicts ?? 0,
@@ -162,7 +212,12 @@ export class SyncRuntimeStore {
 						projectId: event.projectId,
 						stage: "succeeded",
 						lastActiveStage: current?.lastActiveStage ?? "pushing",
+						condition: undefined,
 						message: "",
+						messageKey: undefined,
+						recoveryAction: "",
+						recoveryActionKey: undefined,
+						technicalMessage: "",
 						branch: current?.branch ?? "",
 						connected: current?.connected ?? null,
 						conflicts: 0,
@@ -175,7 +230,12 @@ export class SyncRuntimeStore {
 					projectId: event.projectId,
 					stage: classified.kind,
 					lastActiveStage: current?.lastActiveStage ?? "checking",
-					message: classified.message,
+					condition: classified.condition,
+					message: "",
+					messageKey: classified.messageKey,
+					recoveryAction: "",
+					recoveryActionKey: classified.recoveryActionKey,
+					technicalMessage: classified.technicalMessage,
 					branch: current?.branch ?? "",
 					connected: classified.kind === "offline" ? false : current?.connected ?? null,
 					conflicts: current?.conflicts ?? 0,
