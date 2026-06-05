@@ -127,6 +127,7 @@ test("PI-first runtime persists session, wrapper trace, package, and workspace p
 	const result = await runAgentRuntimeScenario({
 		name: "pi metadata persistence",
 		projectRoot: "Project",
+		waitForPiPersistence: { sessionRecords: 1, toolTraceRecords: 1 },
 		files: {
 			"Project/workspace/a.md": "alpha",
 		},

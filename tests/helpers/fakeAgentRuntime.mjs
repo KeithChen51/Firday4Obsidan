@@ -328,6 +328,13 @@ export async function runAgentRuntimeScenario(scenario) {
 		conversationId: scenario.agentId ?? "agent",
 		turnId: runtimeResult.turnId,
 	});
+	if (scenario.waitForPiPersistence) {
+		await waitForPiPersistenceRecords({
+			runtimeStateStore,
+			conversationId: runtimeResult.conversationId ?? scenario.agentId ?? "agent",
+			expected: scenario.waitForPiPersistence,
+		});
+	}
 	const piSessionRecords = await readJsonlIfExists(
 		runtimeStateStore.getPiSessionStatePath(runtimeResult.conversationId ?? scenario.agentId ?? "agent"),
 	);
@@ -365,6 +372,31 @@ export async function runAgentRuntimeScenario(scenario) {
 		piToolTraceRecords,
 		piPackageManifest,
 	};
+}
+
+async function waitForPiPersistenceRecords({ runtimeStateStore, conversationId, expected }) {
+	const expectedSessionRecords = typeof expected === "object" ? expected.sessionRecords ?? 1 : 1;
+	const expectedToolTraceRecords = typeof expected === "object" ? expected.toolTraceRecords ?? 0 : 0;
+	const requirePackageManifest = typeof expected === "object" ? expected.packageManifest ?? true : true;
+	const sessionPath = runtimeStateStore.getPiSessionStatePath(conversationId);
+	const toolTracesPath = runtimeStateStore.getPiToolTracesPath();
+	const manifestPath = runtimeStateStore.getPiPackageManifestPath();
+	const deadline = Date.now() + 100;
+	while (Date.now() < deadline) {
+		const [sessions, traces, manifest] = await Promise.all([
+			readJsonlIfExists(sessionPath),
+			readJsonlIfExists(toolTracesPath),
+			readJsonIfExists(manifestPath),
+		]);
+		if (
+			sessions.length >= expectedSessionRecords &&
+			traces.length >= expectedToolTraceRecords &&
+			(!requirePackageManifest || manifest)
+		) {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
 }
 
 async function readStoredCheckpoints(storePath) {

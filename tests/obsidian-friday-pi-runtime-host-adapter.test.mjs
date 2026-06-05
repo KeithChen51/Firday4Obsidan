@@ -15,6 +15,17 @@ const contextPath = path.join(projectRoot, "src/core/agent-kernel/AgentExecution
 
 const terminalEventTypes = new Set(["turn_completed", "turn_failed", "turn_cancelled"]);
 
+async function waitFor(predicate, message, timeoutMs = 100) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (predicate()) {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+	assert.fail(message);
+}
+
 function createInput(overrides = {}) {
 	const progress = [];
 	return {
@@ -104,7 +115,14 @@ test("ObsidianFridayPiRuntimeHostAdapter exposes delegated host results through 
 		async execute(executeInput, executeContext) {
 			executeCount += 1;
 			assert.equal(executeInput, input);
-			assert.equal(executeContext, context);
+			assert.notEqual(executeContext, context);
+			assert.equal(executeContext.turnId, context.turnId);
+			assert.equal(executeContext.taskId, context.taskId);
+			assert.equal(executeContext.traceId, context.traceId);
+			assert.equal(executeContext.conversationId, context.conversationId);
+			assert.equal(executeContext.agentId, context.agentId);
+			assert.equal(executeContext.mode, context.mode);
+			assert.deepEqual(executeContext.budget, context.budget);
 			executeContext.emit({
 				type: "model_response",
 				payload: { source: "host", text: "Host side event." },
@@ -391,4 +409,182 @@ test("ObsidianFridayPiRuntimeHostAdapter reports PI persistence failures diagnos
 	});
 	assert.equal(warnings[0][2] instanceof Error, true);
 	assert.match(warnings[0][2].message, /Synthetic PI persistence failure/);
+});
+
+test("ObsidianFridayPiRuntimeHostAdapter settles host results before slow PI persistence can trip the terminal timeout", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { ObsidianFridayPiRuntimeHostAdapter } = await jiti.import(adapterPath);
+	const { input } = createInput({
+		turnId: "turn-slow-persist",
+		taskId: "task-slow-persist",
+		traceId: "trace-slow-persist",
+		conversationId: "conversation-slow-persist",
+	});
+	const context = await createContext({
+		turnId: "turn-slow-persist",
+		taskId: "task-slow-persist",
+		traceId: "trace-slow-persist",
+		conversationId: "conversation-slow-persist",
+	});
+	const packageRef = {
+		packageId: "friday-pi-local-bridge",
+		manifestPath: "runtime/pi/packages/friday-pi-local-bridge/manifest.json",
+	};
+	const delegatedResult = {
+		turnId: context.turnId,
+		taskId: "task-result-slow-persist",
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "completed",
+		assistantText: "Slow persistence must not delay the terminal result.",
+		events: context.snapshotEvents(),
+		traces: [],
+		rawFinalReply: "Slow persistence must not delay the terminal result.",
+	};
+	let markPackageWriteStarted;
+	const packageWriteStarted = new Promise((resolve) => {
+		markPackageWriteStarted = resolve;
+	});
+	let releasePackageWrite;
+	const packageWriteReleased = new Promise((resolve) => {
+		releasePackageWrite = resolve;
+	});
+	let packageWriteCompleted = false;
+	const persisted = {
+		sessions: [],
+		traces: [],
+	};
+	const adapter = new ObsidianFridayPiRuntimeHostAdapter(
+		() => ({
+			async execute() {
+				return delegatedResult;
+			},
+		}),
+		{
+			stateStore: {
+				async writePackageMetadata() {
+					markPackageWriteStarted();
+					await packageWriteReleased;
+					packageWriteCompleted = true;
+					return packageRef;
+				},
+				async appendSessionTurnRecord(record) {
+					persisted.sessions.push(record);
+				},
+				async appendToolTraceRecords(records) {
+					persisted.traces.push(...records);
+				},
+			},
+		},
+	);
+	const runtime = new FridayPiRuntime(
+		adapter,
+		undefined,
+		{ terminalEventTimeoutMs: 5, cancelledPromptGraceMs: 0 },
+	);
+
+	const resultPromise = runtime.execute(input, context);
+	try {
+		await packageWriteStarted;
+		const result = await resultPromise;
+
+		assert.equal(result.status, "completed");
+		assert.equal(result.assistantText, delegatedResult.assistantText);
+		assert.equal(packageWriteCompleted, false, "runtime result should not wait for slow PI persistence");
+	} finally {
+		releasePackageWrite();
+		await resultPromise.catch(() => undefined);
+	}
+
+	await waitFor(() => packageWriteCompleted, "slow PI persistence did not finish after being released");
+	await waitFor(() => persisted.sessions.length === 1, "slow PI session record was not persisted after release");
+	assert.equal(persisted.sessions[0].turnId, context.turnId);
+	assert.equal(persisted.traces.length, 0);
+});
+
+test("ObsidianFridayPiRuntimeHostAdapter aborts delegated host turns and suppresses late persistence after PI timeout", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { ObsidianFridayPiRuntimeHostAdapter } = await jiti.import(adapterPath);
+	const { input } = createInput({
+		turnId: "turn-timeout-abort",
+		taskId: "task-timeout-abort",
+		traceId: "trace-timeout-abort",
+		conversationId: "conversation-timeout-abort",
+	});
+	const context = await createContext({
+		turnId: "turn-timeout-abort",
+		taskId: "task-timeout-abort",
+		traceId: "trace-timeout-abort",
+		conversationId: "conversation-timeout-abort",
+	});
+	let executeContext;
+	let resolveDelegatedResult;
+	let delegatedStarted;
+	const delegatedStartedPromise = new Promise((resolve) => {
+		delegatedStarted = resolve;
+	});
+	let persistedAfterTimeout = false;
+	let markPersistenceAttempt;
+	const persistenceAttempted = new Promise((resolve) => {
+		markPersistenceAttempt = resolve;
+	});
+	const delegatedResultPromise = new Promise((resolve) => {
+		resolveDelegatedResult = () => resolve({
+			turnId: context.turnId,
+			taskId: "task-late-timeout-abort",
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			status: "completed",
+			assistantText: "Late delegated result.",
+			events: executeContext.snapshotEvents(),
+			traces: [],
+			rawFinalReply: "Late delegated result.",
+		});
+	});
+	const adapter = new ObsidianFridayPiRuntimeHostAdapter(
+		() => ({
+			async execute(_executeInput, delegatedContext) {
+				executeContext = delegatedContext;
+				delegatedStarted();
+				return delegatedResultPromise;
+			},
+		}),
+		{
+			stateStore: {
+				async writePackageMetadata(metadata) {
+					return {
+						packageId: metadata.packageId,
+						manifestPath: "runtime/pi/packages/friday-pi-local-bridge/manifest.json",
+					};
+				},
+				async appendSessionTurnRecord() {
+					persistedAfterTimeout = true;
+					markPersistenceAttempt();
+				},
+				async appendToolTraceRecords() {},
+			},
+		},
+	);
+	const runtime = new FridayPiRuntime(
+		adapter,
+		undefined,
+		{ terminalEventTimeoutMs: 5, cancelledPromptGraceMs: 0 },
+	);
+
+	const resultPromise = runtime.execute(input, context);
+	await delegatedStartedPromise;
+	const result = await resultPromise;
+
+	assert.equal(result.status, "failed");
+	assert.equal(context.isCancelled(), false, "PI timeout should not cancel the outer user turn context");
+	assert.equal(executeContext.isCancelled(), true, "PI timeout must abort the delegated host context");
+
+	resolveDelegatedResult();
+	const latePersistence = await Promise.race([
+		persistenceAttempted.then(() => "persisted"),
+		new Promise((resolve) => setTimeout(() => resolve("not-persisted"), 30)),
+	]);
+
+	assert.equal(latePersistence, "not-persisted");
+	assert.equal(persistedAfterTimeout, false);
 });

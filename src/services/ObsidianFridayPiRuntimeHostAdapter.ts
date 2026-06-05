@@ -1,4 +1,4 @@
-import type { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
+import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import type { RuntimeTurnExecutorPort } from "../core/agent-kernel/AgentKernelPorts";
 import type { AgentTurnInput, AgentTurnResult, RuntimeToolTrace } from "../core/agent-kernel/contracts";
 import type {
@@ -51,6 +51,7 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 	private readonly listeners = new Set<FridayPiSessionListener>();
 	private promptStarted = false;
 	private disposed = false;
+	private delegatedContext?: AgentExecutionContext;
 
 	constructor(
 		private readonly createExecutor: ObsidianFridayPiRuntimeExecutorFactory,
@@ -69,7 +70,7 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 		};
 	}
 
-	async prompt(text: string, _options?: FridayPiPromptOptions): Promise<void> {
+	async prompt(text: string, options?: FridayPiPromptOptions): Promise<void> {
 		if (this.disposed) {
 			throw new Error("PI host bridge session has been disposed.");
 		}
@@ -78,13 +79,17 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 		}
 		this.promptStarted = true;
 		const startedAt = new Date().toISOString();
+		const delegatedContext = this.createDelegatedContext(options);
+		this.delegatedContext = delegatedContext;
 		try {
 			const result = await this.createExecutor().execute(
 				text === this.input.userPrompt ? this.input : { ...this.input, userPrompt: text },
-				this.context,
+				delegatedContext,
 			);
+			if (this.disposed) {
+				return;
+			}
 			const endedAt = new Date().toISOString();
-			await this.persistHostResult(result, startedAt, endedAt);
 			this.emit({
 				type: "host_result",
 				result,
@@ -92,6 +97,8 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 					? "PI host bridge failed."
 					: "PI host bridge completed.",
 			});
+			// Persistence is diagnostic state; it must not delay PI terminal settlement.
+			void this.persistHostResult(result, startedAt, endedAt);
 		} catch (error) {
 			this.emit({
 				type: "error",
@@ -99,6 +106,32 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 				message: this.stringifyError(error) || "PI host bridge failed.",
 			});
 		}
+	}
+
+	private createDelegatedContext(options?: FridayPiPromptOptions): AgentExecutionContext {
+		const delegatedContext = new AgentExecutionContext({
+			turnId: this.context.turnId,
+			taskId: this.context.taskId,
+			traceId: this.context.traceId,
+			conversationId: this.context.conversationId,
+			agentId: this.context.agentId,
+			mode: this.context.mode,
+			startedAt: this.context.startedAt,
+			signal: options?.signal ?? this.context.signal,
+			budget: this.context.budget,
+			metadata: this.context.metadata,
+		});
+		for (const event of this.context.snapshotEvents()) {
+			delegatedContext.emit({
+				type: event.type,
+				at: event.at,
+				status: event.status,
+				taskId: event.taskId,
+				payload: event.payload,
+				failure: event.failure,
+			});
+		}
+		return delegatedContext;
 	}
 
 	private async persistHostResult(result: AgentTurnResult, startedAt: string, endedAt: string): Promise<void> {
@@ -219,6 +252,7 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 
 	dispose(): void {
 		this.disposed = true;
+		this.delegatedContext?.cancel("PI host bridge session disposed.");
 		this.listeners.clear();
 	}
 
