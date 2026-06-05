@@ -29,6 +29,22 @@ export class RuntimeStateStore {
 		return this.localStateRootService.resolveVault("runtime");
 	}
 
+	getPiRuntimeRoot(): string {
+		return path.join(this.getRuntimeRoot(), "pi");
+	}
+
+	getPiSessionsRoot(): string {
+		return path.join(this.getPiRuntimeRoot(), "sessions");
+	}
+
+	getPiPackagesRoot(): string {
+		return path.join(this.getPiRuntimeRoot(), "packages");
+	}
+
+	getPiToolTracesPath(): string {
+		return path.join(this.getPiRuntimeRoot(), "tool-traces.jsonl");
+	}
+
 	getConversationRuntimeRoot(conversationId: string): string {
 		return path.join(this.getRuntimeRoot(), "conversations", this.safePathSegment(conversationId));
 	}
@@ -77,6 +93,9 @@ export class RuntimeStateStore {
 			this.getApprovalsRoot(),
 			this.getSnapshotsRoot(),
 			this.getRuntimeRoot(),
+			this.getPiRuntimeRoot(),
+			this.getPiSessionsRoot(),
+			this.getPiPackagesRoot(),
 			this.getBackupsRoot(),
 		]) {
 			await mkdir(directory, { recursive: true });
