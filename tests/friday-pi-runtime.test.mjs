@@ -435,6 +435,7 @@ test("Friday PI runtime ports stay local and do not import the real PI SDK yet",
 	const runtime = fs.readFileSync(runtimePath, "utf8");
 
 	assert.doesNotMatch(`${ports}\n${runtime}`, /@earendil-works\/pi-/);
+	assert.doesNotMatch(`${ports}\n${runtime}`, /AgentRuntimeService|from ["'][^"']*views|from ["']obsidian["']/);
 	assert.match(ports, /FridayPiSessionPort/);
 	assert.match(ports, /subscribe\(\s*listener/);
 	assert.match(ports, /prompt\(\s*text/);

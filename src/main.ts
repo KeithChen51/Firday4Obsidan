@@ -47,7 +47,6 @@ import { classifyGitError, formatClassifiedGitError } from "./platform/git/class
 import { EventRouter } from "./core/execution/EventRouter";
 import { ExecutionPlanner } from "./core/execution/ExecutionPlanner";
 import { ExecutionOrchestrator } from "./core/execution/ExecutionOrchestrator";
-import { AgentLoopController } from "./core/agent-kernel/AgentLoopController";
 import { AgentKernel, AgentRuntimeFacade } from "./core/agent-kernel/AgentKernel";
 import { normalizeLlmSettings, switchLlmMode } from "./core/llm/LlmSettingsResolver";
 import { SecureStorage } from "./platform/obsidian/SecureStorage";
@@ -508,9 +507,9 @@ export default class FridayPlugin extends Plugin implements FridayPluginApi {
 				() => this.settings,
 			);
 			await this.agentRuntimeService.restorePendingMutationPlans();
-			const agentLoopController: AgentLoopController = this.agentRuntimeService.createAgentLoopController();
+			const fridayPiRuntime = this.agentRuntimeService.createFridayPiRuntime();
 			this.agentRuntimeFacade = new AgentRuntimeFacade(
-				new AgentKernel(agentLoopController),
+				new AgentKernel(fridayPiRuntime),
 			);
 			this.executionOrchestrator = new ExecutionOrchestrator(
 				this.skillCommandService,

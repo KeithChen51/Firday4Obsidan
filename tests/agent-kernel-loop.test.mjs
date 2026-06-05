@@ -4156,8 +4156,9 @@ test("AgentLoopController keeps retryable transport telemetry failures out of pr
 	assert.equal(retryProgress.transport.retryable, false);
 });
 
-test("main wires AgentKernel to AgentLoopController by default instead of LegacyAgentRuntimeAdapter", () => {
+test("main wires AgentKernel to FridayPiRuntime by default instead of LegacyAgentRuntimeAdapter", () => {
 	const source = fs.readFileSync(mainPath, "utf8");
-	assert.match(source, /AgentLoopController/);
+	assert.match(source, /createFridayPiRuntime\(\)/);
+	assert.match(source, /new AgentKernel\(fridayPiRuntime\)/);
 	assert.doesNotMatch(source, /new AgentKernel\(\s*new LegacyAgentRuntimeAdapter/);
 });

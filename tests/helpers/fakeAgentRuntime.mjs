@@ -374,7 +374,7 @@ async function readStoredCheckpoints(storePath) {
 
 function createRuntimeFacade(modules, runtime) {
 	return new modules.AgentRuntimeFacade(
-		new modules.AgentKernel(runtime.createAgentLoopController()),
+		new modules.AgentKernel(runtime.createFridayPiRuntime()),
 	);
 }
 

@@ -1,5 +1,5 @@
 import type { AgentExecutionContext } from "../AgentExecutionContext";
-import type { AgentTurnInput, RuntimeToolTrace } from "../contracts";
+import type { AgentTurnInput, AgentTurnResult, RuntimeToolTrace } from "../contracts";
 
 export type FridayPiSessionUnsubscribe = () => void;
 
@@ -32,6 +32,7 @@ export type FridayPiSessionEvent =
 	| FridayPiTextFinalEvent
 	| FridayPiToolCallEvent
 	| FridayPiToolResultEvent
+	| FridayPiHostResultEvent
 	| FridayPiErrorEvent
 	| FridayPiDoneEvent
 	| FridayPiSessionEndEvent;
@@ -72,6 +73,12 @@ export interface FridayPiToolResultEvent {
 	summary?: string;
 	error?: string;
 	failureClass?: RuntimeToolTrace["failureClass"];
+}
+
+export interface FridayPiHostResultEvent {
+	type: "host_result";
+	result: AgentTurnResult;
+	summary?: string;
 }
 
 export interface FridayPiErrorEvent {

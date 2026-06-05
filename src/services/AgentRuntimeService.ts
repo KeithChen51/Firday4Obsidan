@@ -12,6 +12,7 @@ import { deriveFileMutationModeFromToolPermissionMode } from "../types/agent";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
 import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
+import { FridayPiRuntime } from "../core/agent-kernel/pi/FridayPiRuntime";
 import {
 	containsRawMaxToolIterationText,
 	MAX_TOOL_ITERATION_SAFE_ASSISTANT_TEXT,
@@ -105,6 +106,7 @@ import {
 import { ObsidianToolAdapter } from "./tools/ObsidianToolAdapter";
 import { ObsidianToolContext } from "./tools/ObsidianToolContext";
 import { ObsidianToolHandlers } from "./tools/ObsidianToolHandlers";
+import { ObsidianFridayPiRuntimeHostAdapter } from "./ObsidianFridayPiRuntimeHostAdapter";
 
 interface RuntimeToolCall {
 	id?: string;
@@ -423,6 +425,12 @@ export class AgentRuntimeService {
 	createAgentLoopController(): AgentLoopController {
 		return createObsidianAgentLoopController(
 			this as unknown as Parameters<typeof createObsidianAgentLoopController>[0],
+		);
+	}
+
+	createFridayPiRuntime(): FridayPiRuntime {
+		return new FridayPiRuntime(
+			new ObsidianFridayPiRuntimeHostAdapter(() => this.createAgentLoopController()),
 		);
 	}
 

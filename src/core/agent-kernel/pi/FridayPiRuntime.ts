@@ -13,6 +13,7 @@ import type {
 import type {
 	FridayPiDoneEvent,
 	FridayPiErrorEvent,
+	FridayPiHostResultEvent,
 	FridayPiSessionEndEvent,
 	FridayPiSessionEvent,
 	FridayPiSessionHostPort,
@@ -28,6 +29,7 @@ interface PiTurnState {
 	textDeltas: string[];
 	finalText?: string;
 	traces: RuntimeToolTrace[];
+	hostResult?: AgentTurnResult;
 	error?: unknown;
 	doneReported: boolean;
 }
@@ -100,6 +102,10 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				state.error = state.error ?? error;
 				this.reportError(input, context, error);
 			}
+		}
+
+		if (state.hostResult) {
+			return this.hostResult(input, context, state.hostResult);
 		}
 
 		if (context.isCancelled() && !state.error) {
@@ -190,6 +196,12 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				});
 				break;
 			}
+			case "host_result":
+				state.hostResult = event.result;
+				state.doneReported = true;
+				this.reportHostResult(input, context, event);
+				terminal.settle();
+				break;
 			case "error":
 				state.error = state.error ?? this.toError(event);
 				this.reportError(input, context, state.error);
@@ -202,6 +214,47 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				terminal.settle();
 				break;
 		}
+	}
+
+	private hostResult(input: AgentTurnInput, context: AgentExecutionContext, result: AgentTurnResult): AgentTurnResult {
+		const assistantText = result.assistantText ?? "";
+		return {
+			...result,
+			turnId: result.turnId || context.turnId,
+			taskId: result.taskId ?? result.task?.id ?? context.taskId,
+			traceId: result.traceId ?? context.traceId,
+			conversationId: result.conversationId || input.conversationId,
+			status: result.status ?? "completed",
+			assistantText,
+			events: this.mergeEvents(result.events ?? [], context.snapshotEvents()),
+			traces: result.traces ?? [],
+			rawFinalReply: result.rawFinalReply ?? assistantText,
+			budget: result.budget ?? context.budget,
+		};
+	}
+
+	private reportHostResult(
+		input: AgentTurnInput,
+		context: AgentExecutionContext,
+		event: FridayPiHostResultEvent,
+	): void {
+		const status = event.result.status ?? "completed";
+		const failed = status === "failed" || status === "cancelled";
+		const summary = event.summary ?? (failed ? "PI host bridge failed." : "PI host bridge completed.");
+		this.emitContextEvent(context, "model_response", {
+			source: "pi_host_bridge",
+			terminal: true,
+			status,
+			summary,
+			taskId: event.result.taskId ?? event.result.task?.id,
+			traceId: event.result.traceId,
+		});
+		this.report(input, context, {
+			phase: failed ? "error" : "done",
+			depth: this.depth(input),
+			...(status === "completed" ? { status: "ok" as const } : failed ? { status: "failed" as const } : {}),
+			message: summary,
+		});
 	}
 
 	private reportToolCall(input: AgentTurnInput, context: AgentExecutionContext, event: FridayPiToolCallEvent): void {
@@ -469,6 +522,20 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			}
 		}
 		return sanitized;
+	}
+
+	private mergeEvents(first: AgentTurnEvent[], second: AgentTurnEvent[]): AgentTurnEvent[] {
+		const merged: AgentTurnEvent[] = [];
+		const seen = new Set<string>();
+		for (const event of [...first, ...second]) {
+			const key = `${event.type}:${event.turnId}:${event.at}:${JSON.stringify(event.payload ?? {})}:${event.status ?? ""}`;
+			if (seen.has(key)) {
+				continue;
+			}
+			seen.add(key);
+			merged.push(event);
+		}
+		return merged;
 	}
 
 	private sessionEndSummary(event: FridayPiDoneEvent | FridayPiSessionEndEvent): string {

@@ -10,20 +10,22 @@ import { runAgentRuntimeScenario } from "./helpers/fakeAgentRuntime.mjs";
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(testDir, "..");
 
-test("default plugin wiring routes UI commands through AgentRuntimeFacade and AgentKernel v2", () => {
+test("default plugin wiring routes UI commands through AgentRuntimeFacade, AgentKernel, and FridayPiRuntime", () => {
 	const mainSource = read("src/main.ts");
 	const orchestratorSource = read("src/core/execution/ExecutionOrchestrator.ts");
 	const helperSource = read("tests/helpers/fakeAgentRuntime.mjs");
 
-	assert.match(mainSource, /const agentLoopController: AgentLoopController = this\.agentRuntimeService\.createAgentLoopController\(\);/);
-	assert.match(mainSource, /this\.agentRuntimeFacade = new AgentRuntimeFacade\(\s*new AgentKernel\(agentLoopController\)/);
+	assert.match(mainSource, /const fridayPiRuntime = this\.agentRuntimeService\.createFridayPiRuntime\(\);/);
+	assert.match(mainSource, /this\.agentRuntimeFacade = new AgentRuntimeFacade\(\s*new AgentKernel\(fridayPiRuntime\)/);
+	assert.doesNotMatch(mainSource, /const agentLoopController: AgentLoopController = this\.agentRuntimeService\.createAgentLoopController\(\);/);
 	assert.match(mainSource, /new ExecutionOrchestrator\(\s*this\.skillCommandService,\s*this\.agentRuntimeFacade/);
 	assert.match(orchestratorSource, /this\.agentRuntimeFacade\.runTurn\(/);
 	assert.doesNotMatch(orchestratorSource, /agentRuntimeService|LegacyAgentRuntimeAdapter/);
-	assert.match(helperSource, /new modules\.AgentRuntimeFacade\(\s*new modules\.AgentKernel\(runtime\.createAgentLoopController\(\)\)/);
+	assert.match(helperSource, /new modules\.AgentRuntimeFacade\(\s*new modules\.AgentKernel\(runtime\.createFridayPiRuntime\(\)\)/);
+	assert.doesNotMatch(helperSource, /new modules\.AgentKernel\(runtime\.createAgentLoopController\(\)\)/);
 });
 
-test("kernel v2 default harness path preserves taskId traceId and budget across replay", async () => {
+test("PI-first default harness path preserves taskId traceId and budget across replay", async () => {
 	const budget = {
 		token: { softLimit: 2048, hardLimit: 4096 },
 		tool: { maxIterations: 2 },

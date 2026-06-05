@@ -41,8 +41,9 @@ test("kernel and production default path do not depend on legacy runtime entry p
 	const mainSource = read("src/main.ts");
 	assert.doesNotMatch(mainSource, /LegacyAgentRuntimeAdapter/, "main must not wire the legacy adapter");
 	assert.doesNotMatch(mainSource, /agentRuntimeService\.runTurn\(/, "main must not call the legacy service runTurn");
-	assert.match(mainSource, /createAgentLoopController\(\)/);
-	assert.match(mainSource, /new AgentRuntimeFacade\(\s*new AgentKernel\(agentLoopController\)/);
+	assert.match(mainSource, /createFridayPiRuntime\(\)/);
+	assert.match(mainSource, /new AgentRuntimeFacade\(\s*new AgentKernel\(fridayPiRuntime\)/);
+	assert.doesNotMatch(mainSource, /const agentLoopController: AgentLoopController = this\.agentRuntimeService\.createAgentLoopController\(\);/);
 
 	const orchestratorSource = read("src/core/execution/ExecutionOrchestrator.ts");
 	assert.match(orchestratorSource, /AgentRuntimeFacade/);
