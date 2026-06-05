@@ -45,6 +45,17 @@ async function createContext(overrides = {}) {
 	});
 }
 
+async function waitFor(predicate, message, timeoutMs = 100) {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (predicate()) {
+			return;
+		}
+		await new Promise((resolve) => setTimeout(resolve, 1));
+	}
+	assert.fail(message);
+}
+
 class ScriptedPiAgent {
 	constructor(script) {
 		this.script = script;
@@ -433,6 +444,176 @@ test("RealPiSdkSessionHostAdapter runs with the bundled PI SDK dependency by def
 
 		assert.equal(result.status, "completed");
 		assert.equal(result.assistantText, "Bundled PI SDK dependency ran.");
+		assert.equal(faux.getPendingResponseCount(), 0);
+	} finally {
+		faux.unregister();
+	}
+});
+
+test("RealPiSdkSessionHostAdapter runs bundled PI SDK tool calls through persisted Friday runtime state", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { RealPiSdkSessionHostAdapter } = await jiti.import(adapterPath);
+	const { PersistedFridayPiSessionHostAdapter, FRIDAY_PI_REAL_SDK_PACKAGE_METADATA } = await jiti.import(
+		path.join(projectRoot, "src/services/PersistedFridayPiSessionHostAdapter.ts"),
+	);
+	const { registerFauxProvider, fauxAssistantMessage, fauxToolCall } = await import("@earendil-works/pi-ai");
+	const faux = registerFauxProvider({ tokensPerSecond: 0, tokenSize: { min: 1000, max: 1000 } });
+	const providerRequests = [];
+	const captureProviderRequest = (context, options, model) => {
+		const messages = context.messages ?? [];
+		const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+		providerRequests.push({
+			systemPrompt: context.systemPrompt,
+			modelId: model.id,
+			roles: messages.map((message) => message.role),
+			lastUserText: (lastUserMessage?.content ?? [])
+				.filter((part) => part.type === "text")
+				.map((part) => part.text)
+				.join(""),
+			toolNames: (context.tools ?? []).map((tool) => tool.name),
+			sessionId: options?.sessionId,
+		});
+	};
+	faux.setResponses([
+		(context, options, _state, model) => {
+			captureProviderRequest(context, options, model);
+			return fauxAssistantMessage([
+				fauxToolCall("read_file", { path: "Project/workspace/a.md" }, { id: "pi-read-file-1" }),
+			], { stopReason: "toolUse" });
+		},
+		(context, options, _state, model) => {
+			captureProviderRequest(context, options, model);
+			return fauxAssistantMessage("Real PI read alpha.");
+		},
+	]);
+	const { input, progress } = createInput({ turnId: "turn-real-pi-persisted-tool" });
+	const context = await createContext({ turnId: "turn-real-pi-persisted-tool" });
+	const persisted = {
+		sessions: [],
+		traces: [],
+		packages: [],
+	};
+	const packageRef = {
+		packageId: "friday-pi-real-sdk",
+		manifestPath: "runtime/pi/packages/friday-pi-real-sdk/manifest.json",
+		runtime: "friday-pi",
+		kind: "runtime_sdk",
+		marketplace: false,
+	};
+	const workspacePolicy = {
+		trustBoundary: "project",
+		vault: { root: "/" },
+		activeProject: {
+			projectId: "project",
+			slug: "project",
+			name: "Project",
+			vaultRoot: "Project",
+			absoluteRoot: "C:/Vault/Project",
+		},
+		externalAccess: "explicit",
+		externalWrite: false,
+	};
+	const toolExecutions = [];
+	const readTool = {
+		name: "read_file",
+		label: "Read file",
+		description: "Read a file from the FRIDAY workspace.",
+		parameters: {
+			type: "object",
+			properties: {
+				path: { type: "string" },
+			},
+			required: ["path"],
+			additionalProperties: false,
+		},
+		async execute(toolCallId, params) {
+			toolExecutions.push({ toolCallId, params });
+			return {
+				content: [{ type: "text", text: "alpha" }],
+				details: {
+					targetPath: params.path,
+					summary: `Read ${params.path}`,
+				},
+			};
+		},
+	};
+
+	try {
+		const runtime = new FridayPiRuntime(
+			new PersistedFridayPiSessionHostAdapter(
+				new RealPiSdkSessionHostAdapter({
+					agentOptions: {
+						sessionId: context.conversationId,
+						initialState: {
+							model: faux.models[0],
+							systemPrompt: "Use the provided tool, then answer.",
+							tools: [readTool],
+						},
+					},
+				}),
+				{
+					stateStore: {
+						async writePackageMetadata(metadata) {
+							persisted.packages.push(metadata);
+							return packageRef;
+						},
+						async appendSessionTurnRecord(record) {
+							persisted.sessions.push(record);
+						},
+						async appendToolTraceRecords(records) {
+							persisted.traces.push(...records);
+						},
+					},
+					workspacePolicyProvider: () => workspacePolicy,
+					packageMetadata: FRIDAY_PI_REAL_SDK_PACKAGE_METADATA,
+				},
+			),
+			undefined,
+			{ terminalEventTimeoutMs: 5000, cancelledPromptGraceMs: 0 },
+		);
+
+		const result = await runtime.execute(input, context);
+		await waitFor(() => persisted.sessions.length === 1, "real PI SDK tool session state was not persisted");
+
+		assert.equal(result.status, "completed");
+		assert.equal(result.assistantText, "Real PI read alpha.");
+		assert.deepEqual(providerRequests, [
+			{
+				systemPrompt: "Use the provided tool, then answer.",
+				modelId: faux.models[0].id,
+				roles: ["user"],
+				lastUserText: input.userPrompt,
+				toolNames: ["read_file"],
+				sessionId: context.conversationId,
+			},
+			{
+				systemPrompt: "Use the provided tool, then answer.",
+				modelId: faux.models[0].id,
+				roles: ["user", "assistant", "toolResult"],
+				lastUserText: input.userPrompt,
+				toolNames: ["read_file"],
+				sessionId: context.conversationId,
+			},
+		]);
+		assert.deepEqual(toolExecutions, [
+			{ toolCallId: "pi-read-file-1", params: { path: "Project/workspace/a.md" } },
+		]);
+		assert.equal(result.traces.length, 1);
+		assert.equal(result.traces[0].runId, "pi-read-file-1");
+		assert.equal(result.traces[0].tool, "read_file");
+		assert.equal(result.traces[0].targetPath, "Project/workspace/a.md");
+		assert.equal(result.traces[0].status, "ok");
+		assert.equal(progress.some((event) => event.phase === "tool_call" && event.tool === "read_file"), true);
+		assert.equal(progress.some((event) => event.phase === "tool_result" && event.tool === "read_file"), true);
+		assert.equal(persisted.packages[0].bridge, "real-pi-sdk");
+		assert.equal(persisted.sessions[0].packageRef.packageId, "friday-pi-real-sdk");
+		assert.deepEqual(persisted.sessions[0].workspacePolicy, workspacePolicy);
+		assert.equal(persisted.traces.length, 1);
+		assert.equal(persisted.traces[0].kind, "pi_tool_trace");
+		assert.equal(persisted.traces[0].runId, "pi-read-file-1");
+		assert.equal(persisted.traces[0].tool, "read_file");
+		assert.equal(persisted.traces[0].packageRef.packageId, "friday-pi-real-sdk");
+		assert.deepEqual(persisted.traces[0].workspacePolicy, workspacePolicy);
 		assert.equal(faux.getPendingResponseCount(), 0);
 	} finally {
 		faux.unregister();
