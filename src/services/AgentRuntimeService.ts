@@ -110,6 +110,10 @@ import { ObsidianFridayPiRuntimeHostAdapter } from "./ObsidianFridayPiRuntimeHos
 import { RealPiSdkSessionHostAdapter } from "../core/agent-kernel/pi/RealPiSdkSessionAdapter";
 import { buildFridayPiAgentOptions } from "../core/agent-kernel/pi/FridayPiAgentOptions";
 import {
+	FRIDAY_PI_REAL_SDK_PACKAGE_METADATA,
+	PersistedFridayPiSessionHostAdapter,
+} from "./PersistedFridayPiSessionHostAdapter";
+import {
 	DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
 	deriveFileMutationModeFromToolPermissionMode,
 	normalizeFridayPiRuntimeSource,
@@ -442,14 +446,21 @@ export class AgentRuntimeService {
 			this.getSettings().agentRuntime.piRuntimeSource ?? DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
 		);
 		const host = source === "real-pi-sdk"
-			? new RealPiSdkSessionHostAdapter({
-				agentOptions: async (input, context) => buildFridayPiAgentOptions({
-					llm: this.getSettings().llm,
-					modelOverride: input.modelOverride,
-					sessionId: context.conversationId || input.conversationId,
-					systemPrompt: await this.buildSystemPrompt(input as RuntimeTurnInput, input.depth ?? 0),
+			? new PersistedFridayPiSessionHostAdapter(
+				new RealPiSdkSessionHostAdapter({
+					agentOptions: async (input, context) => buildFridayPiAgentOptions({
+						llm: this.getSettings().llm,
+						modelOverride: input.modelOverride,
+						sessionId: context.conversationId || input.conversationId,
+						systemPrompt: await this.buildSystemPrompt(input as RuntimeTurnInput, input.depth ?? 0),
+					}),
 				}),
-			})
+				{
+					stateStore: this.fridayPiRuntimeStateStore,
+					workspacePolicyProvider: () => this.buildFridayPiWorkspacePolicyMetadata(),
+					packageMetadata: FRIDAY_PI_REAL_SDK_PACKAGE_METADATA,
+				},
+			)
 			: new ObsidianFridayPiRuntimeHostAdapter(
 				() => this.createAgentLoopController(),
 				{

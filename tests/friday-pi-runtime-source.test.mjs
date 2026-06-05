@@ -40,12 +40,16 @@ test("AgentRuntimeService factory can select the real PI SDK host without changi
 	const source = read(runtimeServicePath);
 
 	assert.match(source, /RealPiSdkSessionHostAdapter/);
+	assert.match(source, /PersistedFridayPiSessionHostAdapter/);
 	assert.match(source, /buildFridayPiAgentOptions/);
 	assert.match(
 		source,
 		/normalizeFridayPiRuntimeSource\(\s*this\.getSettings\(\)\.agentRuntime\.piRuntimeSource\s*\?\? DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,\s*\)/,
 	);
-	assert.match(source, /source === "real-pi-sdk"[\s\S]*new RealPiSdkSessionHostAdapter\(\{[\s\S]*agentOptions:/);
+	assert.match(source, /source === "real-pi-sdk"[\s\S]*new PersistedFridayPiSessionHostAdapter\([\s\S]*new RealPiSdkSessionHostAdapter\(\{[\s\S]*agentOptions:/);
+	assert.match(source, /packageMetadata:\s*FRIDAY_PI_REAL_SDK_PACKAGE_METADATA/);
+	assert.match(source, /stateStore:\s*this\.fridayPiRuntimeStateStore/);
+	assert.match(source, /workspacePolicyProvider:\s*\(\)\s*=>\s*this\.buildFridayPiWorkspacePolicyMetadata\(\)/);
 	assert.match(source, /buildSystemPrompt\(input(?: as RuntimeTurnInput)?,\s*input\.depth \?\? 0\)/);
 	assert.match(source, /new ObsidianFridayPiRuntimeHostAdapter\(/);
 	assert.match(source, /DEFAULT_FRIDAY_PI_RUNTIME_SOURCE|obsidian-host/);
