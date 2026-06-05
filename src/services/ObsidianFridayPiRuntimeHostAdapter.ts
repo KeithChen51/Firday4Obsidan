@@ -106,10 +106,10 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 		if (!stateStore) {
 			return;
 		}
+		const ids = this.resolveResultIds(result);
 		try {
 			const workspacePolicy = this.resolveWorkspacePolicy();
 			const packageRef = await stateStore.writePackageMetadata(LOCAL_BRIDGE_PACKAGE_METADATA);
-			const ids = this.resolveResultIds(result);
 			await stateStore.appendSessionTurnRecord({
 				sessionId: ids.sessionId,
 				conversationId: ids.conversationId,
@@ -128,9 +128,27 @@ class ObsidianFridayPiRuntimeHostSession implements FridayPiSessionPort {
 			await stateStore.appendToolTraceRecords(
 				(result.traces ?? []).map((trace) => this.toPiToolTraceRecord(trace, ids, packageRef, workspacePolicy)),
 			);
-		} catch {
+		} catch (error) {
 			// PI runtime-layer persistence must not change the user-facing host bridge result.
+			this.reportPersistenceFailure(ids, error);
 		}
+	}
+
+	private reportPersistenceFailure(
+		ids: ReturnType<ObsidianFridayPiRuntimeHostSession["resolveResultIds"]>,
+		error: unknown,
+	): void {
+		const metadata: Record<string, string> = {
+			turnId: ids.turnId,
+			conversationId: ids.conversationId,
+		};
+		if (ids.taskId) {
+			metadata.taskId = ids.taskId;
+		}
+		if (ids.traceId) {
+			metadata.traceId = ids.traceId;
+		}
+		console.warn("[Friday] PI runtime persistence failed.", metadata, error);
 	}
 
 	private resolveResultIds(result: AgentTurnResult): {

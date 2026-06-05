@@ -327,12 +327,14 @@ test("ObsidianFridayPiRuntimeHostAdapter persists PI session state, wrapper trac
 	assert.equal(persisted.traces[0].workspacePolicy.externalAccess, "explicit");
 });
 
-test("ObsidianFridayPiRuntimeHostAdapter swallows PI persistence failures after attempting persistence", async () => {
+test("ObsidianFridayPiRuntimeHostAdapter reports PI persistence failures diagnostically without changing the result", async () => {
 	const { FridayPiRuntime } = await jiti.import(runtimePath);
 	const { ObsidianFridayPiRuntimeHostAdapter } = await jiti.import(adapterPath);
 	const { input } = createInput({ conversationId: "conversation-persist-failure" });
 	const context = await createContext({ conversationId: "conversation-persist-failure" });
 	let packageWriteAttempts = 0;
+	const originalWarn = console.warn;
+	const warnings = [];
 	const delegatedResult = {
 		turnId: context.turnId,
 		taskId: "task-persist-failure",
@@ -367,10 +369,26 @@ test("ObsidianFridayPiRuntimeHostAdapter swallows PI persistence failures after 
 	);
 	const runtime = new FridayPiRuntime(adapter);
 
-	const result = await runtime.execute(input, context);
+	let result;
+	console.warn = (...args) => warnings.push(args);
+	try {
+		result = await runtime.execute(input, context);
+	} finally {
+		console.warn = originalWarn;
+	}
 
 	assert.equal(packageWriteAttempts, 1);
 	assert.equal(result.status, "completed");
 	assert.equal(result.assistantText, delegatedResult.assistantText);
 	assert.equal(result.rawFinalReply, delegatedResult.rawFinalReply);
+	assert.equal(warnings.length, 1);
+	assert.equal(warnings[0][0], "[Friday] PI runtime persistence failed.");
+	assert.deepEqual(warnings[0][1], {
+		turnId: context.turnId,
+		conversationId: context.conversationId,
+		taskId: "task-persist-failure",
+		traceId: context.traceId,
+	});
+	assert.equal(warnings[0][2] instanceof Error, true);
+	assert.match(warnings[0][2].message, /Synthetic PI persistence failure/);
 });
