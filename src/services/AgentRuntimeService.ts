@@ -8,7 +8,6 @@ import {
 	Vault,
 } from "obsidian";
 import { ChatMessage, AIService } from "./AIService";
-import { deriveFileMutationModeFromToolPermissionMode } from "../types/agent";
 import { AgentLoopController } from "../core/agent-kernel/AgentLoopController";
 import { AgentExecutionContext } from "../core/agent-kernel/AgentExecutionContext";
 import { AgentKernel, AgentRuntimeFacade } from "../core/agent-kernel/AgentKernel";
@@ -45,8 +44,8 @@ import { HistoryCompactor } from "../core/context/HistoryCompactor";
 import { ToolBoundaryFilter } from "../core/context/ToolBoundaryFilter";
 import { PromptContextEngine, type PromptMentionContext } from "../core/context/PromptContextEngine";
 import {
-	normalizeActiveFileContext,
 	type ActiveFileContext,
+	normalizeActiveFileContext,
 } from "../core/context/ActiveFileContext";
 import { MemoryStoreV1 } from "../core/memory/MemoryStoreV1";
 import { WikiKnowledgeProvider } from "../core/retrieval/WikiKnowledgeProvider";
@@ -108,6 +107,12 @@ import { ObsidianToolAdapter } from "./tools/ObsidianToolAdapter";
 import { ObsidianToolContext } from "./tools/ObsidianToolContext";
 import { ObsidianToolHandlers } from "./tools/ObsidianToolHandlers";
 import { ObsidianFridayPiRuntimeHostAdapter } from "./ObsidianFridayPiRuntimeHostAdapter";
+import { RealPiSdkSessionHostAdapter } from "../core/agent-kernel/pi/RealPiSdkSessionAdapter";
+import {
+	DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
+	deriveFileMutationModeFromToolPermissionMode,
+	normalizeFridayPiRuntimeSource,
+} from "../types/agent";
 
 interface RuntimeToolCall {
 	id?: string;
@@ -432,15 +437,19 @@ export class AgentRuntimeService {
 	}
 
 	createFridayPiRuntime(): FridayPiRuntime {
-		return new FridayPiRuntime(
-			new ObsidianFridayPiRuntimeHostAdapter(
+		const source = normalizeFridayPiRuntimeSource(
+			this.getSettings().agentRuntime.piRuntimeSource ?? DEFAULT_FRIDAY_PI_RUNTIME_SOURCE,
+		);
+		const host = source === "real-pi-sdk"
+			? new RealPiSdkSessionHostAdapter()
+			: new ObsidianFridayPiRuntimeHostAdapter(
 				() => this.createAgentLoopController(),
 				{
 					stateStore: this.fridayPiRuntimeStateStore,
 					workspacePolicyProvider: () => this.buildFridayPiWorkspacePolicyMetadata(),
 				},
-			),
-		);
+			);
+		return new FridayPiRuntime(host);
 	}
 
 	getAgentStateAdapter(): ObsidianAgentStateAdapter {

@@ -282,6 +282,7 @@ export const DEFAULT_SETTINGS: FridaySettings = {
 			"del\\s+/s\\s+/q\\s+[a-zA-Z]:",
 		],
 		toolCallingMode: "auto",
+		piRuntimeSource: "obsidian-host",
 		projectToolPolicyRules: {},
 	},
 	slashCommands: [],

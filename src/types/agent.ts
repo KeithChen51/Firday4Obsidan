@@ -14,6 +14,13 @@ export interface AgentProfile {
 export type ToolPermissionMode = "auto" | "standard" | "strict";
 export type FileMutationMode = "review" | "autoApproved";
 export type RuntimePolicyEffect = "allow" | "ask" | "deny";
+export type FridayPiRuntimeSource = "obsidian-host" | "real-pi-sdk";
+
+export const DEFAULT_FRIDAY_PI_RUNTIME_SOURCE: FridayPiRuntimeSource = "obsidian-host";
+
+export function normalizeFridayPiRuntimeSource(value: unknown): FridayPiRuntimeSource {
+	return value === "real-pi-sdk" ? "real-pi-sdk" : DEFAULT_FRIDAY_PI_RUNTIME_SOURCE;
+}
 
 export function deriveFileMutationModeFromToolPermissionMode(mode: ToolPermissionMode): FileMutationMode {
 	return mode === "auto" ? "autoApproved" : "review";
@@ -50,5 +57,6 @@ export interface AgentRuntimeSettings {
 	maxToolIterations: number;
 	blockedCommands: string[];
 	toolCallingMode: ToolCallingMode;
+	piRuntimeSource: FridayPiRuntimeSource;
 	projectToolPolicyRules: Record<string, RuntimeToolPolicyRule[]>;
 }

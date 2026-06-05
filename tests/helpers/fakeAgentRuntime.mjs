@@ -71,6 +71,7 @@ function createBaseSettings(overrides = {}) {
 				maxToolIterations: 6,
 				blockedCommands: [],
 				toolCallingMode: "native",
+				piRuntimeSource: "obsidian-host",
 				projectToolPolicyRules: {},
 			},
 		},

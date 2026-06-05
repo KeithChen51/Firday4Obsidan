@@ -1,7 +1,11 @@
 import { Notice, Setting } from "obsidian";
 import { parseAgentModelChoice, resolveSelectedAgentModelValue } from "../../core/llm/AgentModelCatalog";
 import { SOUL_EXPERIMENT_TEMPLATE_SERIES } from "../../features/soul/SoulExperimentTemplates";
-import { deriveFileMutationModeFromToolPermissionMode, type ToolPermissionMode } from "../../types/agent";
+import {
+	deriveFileMutationModeFromToolPermissionMode,
+	normalizeFridayPiRuntimeSource,
+	type ToolPermissionMode,
+} from "../../types/agent";
 import type { SoulTonePreset } from "../../types/soul";
 import { markNativeDangerSetting, renderNativeSettingsEmptyState } from "../../ui/obsidian-native/SettingsKit";
 
@@ -204,6 +208,24 @@ export function renderSoulSettingsSection(ctx: SettingsSectionContext, container
 				await ctx.host.saveSettings();
 			}),
 		);
+
+	new Setting(runtimeGroup)
+		.setName(ctx.t("settings.agent.piRuntimeSource.name", "PI runtime source"))
+		.setDesc(
+			ctx.t(
+				"settings.agent.piRuntimeSource.desc",
+				"选择 FRIDAY PI 主机：Obsidian host 保持当前桥接；Real PI SDK 会尝试 import @earendil-works/pi-agent-core。",
+			),
+		)
+		.addDropdown((dropdown) => {
+			dropdown.addOption("obsidian-host", ctx.t("settings.agent.piRuntimeSource.obsidianHost", "Obsidian host bridge"));
+			dropdown.addOption("real-pi-sdk", ctx.t("settings.agent.piRuntimeSource.realPiSdk", "Real PI SDK"));
+			dropdown.setValue(normalizeFridayPiRuntimeSource(ctx.host.settings.agentRuntime.piRuntimeSource));
+			dropdown.onChange(async (value) => {
+				ctx.host.settings.agentRuntime.piRuntimeSource = normalizeFridayPiRuntimeSource(value);
+				await ctx.host.saveSettings();
+			});
+		});
 
 	new Setting(runtimeGroup)
 		.setName(ctx.t("settings.agent.toolCalling.name", "Tool Calling 模式"))
