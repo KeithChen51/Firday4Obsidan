@@ -36,6 +36,7 @@ interface TerminalSettlement {
 	promise: Promise<unknown | undefined>;
 	settle(error?: unknown): void;
 	readonly settled: boolean;
+	readonly error: unknown | undefined;
 	dispose(): void;
 }
 
@@ -73,8 +74,8 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				signal: context.signal,
 				metadata: this.buildPromptMetadata(input, context),
 			});
-			if (!state.error && !context.isCancelled() && !terminal.settled) {
-				const terminalError = await terminal.promise;
+			if (!state.error && !context.isCancelled()) {
+				const terminalError = terminal.settled ? terminal.error : await terminal.promise;
 				if (terminalError) {
 					throw terminalError;
 				}
@@ -371,6 +372,7 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 
 	private createTerminalSettlement(context: AgentExecutionContext): TerminalSettlement {
 		let settled = false;
+		let settledError: unknown | undefined;
 		let resolvePromise: (error?: unknown) => void = () => {};
 		let timeout: ReturnType<typeof setTimeout> | undefined;
 		const promise = new Promise<unknown | undefined>((resolve) => {
@@ -381,6 +383,7 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				return;
 			}
 			settled = true;
+			settledError = error;
 			if (timeout) {
 				clearTimeout(timeout);
 			}
@@ -406,6 +409,9 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			settle,
 			get settled() {
 				return settled;
+			},
+			get error() {
+				return settledError;
 			},
 			dispose() {
 				if (timeout) {

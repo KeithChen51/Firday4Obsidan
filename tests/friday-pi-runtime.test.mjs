@@ -187,6 +187,45 @@ test("FridayPiRuntime waits for delayed terminal PI events after prompt resolves
 	assert.deepEqual(calls, ["subscribe", "prompt", "emit-final", "emit-done", "unsubscribe", "dispose"]);
 });
 
+test("FridayPiRuntime fails when terminal timeout fires before slow prompt returns", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input, progress } = createInput({ userPrompt: "slow prompt without terminal event" });
+	const context = await createContext();
+	const calls = [];
+	const runtime = new FridayPiRuntime(
+		{
+			createSession() {
+				return {
+					subscribe() {
+						calls.push("subscribe");
+						return () => calls.push("unsubscribe");
+					},
+					async prompt() {
+						calls.push("prompt");
+						await new Promise((resolve) => setTimeout(resolve, 30));
+						calls.push("prompt-resolved");
+					},
+					dispose() {
+						calls.push("dispose");
+					},
+				};
+			},
+		},
+		undefined,
+		{ terminalEventTimeoutMs: 5 },
+	);
+
+	const result = await runtime.execute(input, context);
+
+	assert.equal(result.status, "failed");
+	assert.equal(result.assistantText.includes("timed out waiting for a terminal event"), true);
+	assert.match(result.failure.technicalMessage, /timed out waiting for a terminal event/i);
+	assert.deepEqual(progress.map((event) => event.phase), ["start", "error"]);
+	assert.equal(result.events.at(-1).payload.status, "failed");
+	assert.match(result.events.at(-1).payload.message, /timed out waiting for a terminal event/i);
+	assert.deepEqual(calls, ["subscribe", "prompt", "prompt-resolved", "unsubscribe", "dispose"]);
+});
+
 test("FridayPiRuntime records PI activity into durable context events", async () => {
 	const { FridayPiRuntime } = await jiti.import(runtimePath);
 	const { input } = createInput();
