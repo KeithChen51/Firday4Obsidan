@@ -136,6 +136,132 @@ test("FridayPiRuntime subscribes before prompt and maps PI events into a kernel 
 	}
 });
 
+test("FridayPiRuntime waits for delayed terminal PI events after prompt resolves", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input, progress } = createInput({ userPrompt: "stream after prompt resolves" });
+	const context = await createContext();
+	const calls = [];
+	let listener;
+	let subscribed = false;
+
+	const runtime = new FridayPiRuntime({
+		createSession() {
+			return {
+				subscribe(next) {
+					calls.push("subscribe");
+					listener = next;
+					subscribed = true;
+					return () => {
+						calls.push("unsubscribe");
+						subscribed = false;
+					};
+				},
+				async prompt() {
+					calls.push("prompt");
+					setTimeout(() => {
+						if (!subscribed) {
+							calls.push("late-event-dropped");
+							return;
+						}
+						calls.push("emit-final");
+						listener({ type: "text_final", text: "Delayed from PI." });
+						calls.push("emit-done");
+						listener({ type: "done", summary: "Delayed PI done" });
+					}, 5);
+				},
+				dispose() {
+					calls.push("dispose");
+				},
+			};
+		},
+	});
+
+	const result = await runtime.execute(input, context);
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Delayed from PI.");
+	assert.deepEqual(progress.map((event) => event.phase), ["start", "model_response", "done"]);
+	assert.deepEqual(calls, ["subscribe", "prompt", "emit-final", "emit-done", "unsubscribe", "dispose"]);
+});
+
+test("FridayPiRuntime records PI activity into durable context events", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input } = createInput();
+	const context = await createContext();
+
+	const session = {
+		listener: undefined,
+		subscribe(listener) {
+			session.listener = listener;
+			return () => {};
+		},
+		async prompt() {
+			session.listener({ type: "text_delta", text: "Durable " });
+			session.listener({ type: "tool_call", step: 1, tool: "read_file", targetPath: "Daily.md", summary: "Reading Daily.md" });
+			session.listener({
+				type: "tool_result",
+				runId: "durable-run",
+				step: 1,
+				tool: "read_file",
+				scope: "vault",
+				targetPath: "Daily.md",
+				status: "ok",
+				ok: true,
+				summary: "Read Daily.md",
+			});
+			session.listener({ type: "text_final", text: "Durable PI response." });
+			session.listener({ type: "done", summary: "Durable done" });
+		},
+	};
+	const durableRuntime = new FridayPiRuntime({ createSession: () => session });
+
+	const result = await durableRuntime.execute(input, context);
+	const eventTypes = result.events.map((event) => event.type);
+
+	assert.equal(result.assistantText, "Durable PI response.");
+	assert.deepEqual(eventTypes, ["model_response", "tool_call", "tool_result", "model_response", "turn_completed"]);
+	assert.equal(result.events[0].payload.text, "Durable ");
+	assert.equal(result.events[1].payload.tool, "read_file");
+	assert.equal(result.events[2].payload.tool, "read_file");
+	assert.equal(result.events[2].payload.status, "ok");
+	assert.equal(result.events[4].payload.summary, "Durable done");
+});
+
+test("FridayPiRuntime returns failed and cleans up on direct PI error events", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input, progress } = createInput({ userPrompt: "emit PI error" });
+	const context = await createContext();
+	const calls = [];
+
+	const runtime = new FridayPiRuntime({
+		createSession() {
+			return {
+				subscribe(listener) {
+					calls.push("subscribe");
+					this.listener = listener;
+					return () => calls.push("unsubscribe");
+				},
+				async prompt() {
+					calls.push("prompt");
+					this.listener({ type: "error", message: "PI emitted an error" });
+				},
+				dispose() {
+					calls.push("dispose");
+				},
+			};
+		},
+	});
+
+	const result = await runtime.execute(input, context);
+
+	assert.deepEqual(calls, ["subscribe", "prompt", "unsubscribe", "dispose"]);
+	assert.equal(result.status, "failed");
+	assert.match(result.failure.technicalMessage, /PI emitted an error/);
+	assert.equal(progress.at(-1).phase, "error");
+	assert.deepEqual(result.events.map((event) => event.type), ["turn_failed"]);
+	assert.equal(result.events[0].payload.message, "PI emitted an error");
+});
+
 test("FridayPiRuntime returns failed on prompt errors and still cleans up the session", async () => {
 	const { FridayPiRuntime } = await jiti.import(runtimePath);
 	const { input, progress } = createInput({ userPrompt: "fail the PI turn" });

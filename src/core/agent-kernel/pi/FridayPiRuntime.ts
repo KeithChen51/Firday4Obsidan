@@ -3,6 +3,7 @@ import type { AgentExecutionContext } from "../AgentExecutionContext";
 import type { AgentFailureClassifierPort, RuntimeTurnExecutorPort } from "../AgentKernelPorts";
 import type {
 	AgentFailure,
+	AgentTurnEvent,
 	AgentTurnInput,
 	AgentTurnResult,
 	AgentTurnStatus,
@@ -16,9 +17,12 @@ import type {
 	FridayPiSessionEvent,
 	FridayPiSessionHostPort,
 	FridayPiSessionPort,
+	FridayPiRuntimeOptions,
 	FridayPiToolCallEvent,
 	FridayPiToolResultEvent,
 } from "./FridayPiRuntimePorts";
+
+const DEFAULT_TERMINAL_EVENT_TIMEOUT_MS = 30_000;
 
 interface PiTurnState {
 	textDeltas: string[];
@@ -28,10 +32,18 @@ interface PiTurnState {
 	doneReported: boolean;
 }
 
+interface TerminalSettlement {
+	promise: Promise<unknown | undefined>;
+	settle(error?: unknown): void;
+	readonly settled: boolean;
+	dispose(): void;
+}
+
 export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 	constructor(
 		private readonly host: FridayPiSessionHostPort,
 		private readonly failureClassifier: AgentFailureClassifierPort = new AgentFailureClassifier(),
+		private readonly options: FridayPiRuntimeOptions = {},
 	) {}
 
 	async execute(input: AgentTurnInput, context: AgentExecutionContext): Promise<AgentTurnResult> {
@@ -46,6 +58,7 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 		};
 		let session: FridayPiSessionPort | undefined;
 		let unsubscribe: (() => void) | undefined;
+		const terminal = this.createTerminalSettlement(context);
 
 		this.report(input, context, {
 			phase: "start",
@@ -55,15 +68,24 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 
 		try {
 			session = await this.host.createSession(input, context);
-			unsubscribe = session.subscribe((event) => this.handleSessionEvent(event, input, context, state));
+			unsubscribe = session.subscribe((event) => this.handleSessionEvent(event, input, context, state, terminal));
 			await session.prompt(input.userPrompt, {
 				signal: context.signal,
 				metadata: this.buildPromptMetadata(input, context),
 			});
+			if (!state.error && !context.isCancelled() && !terminal.settled) {
+				const terminalError = await terminal.promise;
+				if (terminalError) {
+					throw terminalError;
+				}
+			}
 		} catch (error) {
-			state.error = state.error ?? error;
-			this.reportError(input, context, error);
+			if (!state.error) {
+				state.error = error;
+				this.reportError(input, context, error);
+			}
 		} finally {
+			terminal.dispose();
 			try {
 				unsubscribe?.();
 			} catch (error) {
@@ -110,10 +132,15 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 		input: AgentTurnInput,
 		context: AgentExecutionContext,
 		state: PiTurnState,
+		terminal: TerminalSettlement,
 	): void {
 		switch (event.type) {
 			case "text_delta":
 				state.textDeltas.push(event.text);
+				this.emitContextEvent(context, "model_response", {
+					text: event.text,
+					final: false,
+				});
 				this.report(input, context, {
 					phase: "model_response",
 					depth: this.depth(input),
@@ -122,6 +149,10 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				break;
 			case "text_final":
 				state.finalText = event.text;
+				this.emitContextEvent(context, "model_response", {
+					text: event.text,
+					final: true,
+				});
 				this.report(input, context, {
 					phase: "model_response",
 					depth: this.depth(input),
@@ -134,6 +165,18 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			case "tool_result": {
 				const trace = this.toToolTrace(event, context, state.traces.length + 1);
 				state.traces.push(trace);
+				this.emitContextEvent(context, "tool_result", {
+					runId: trace.runId,
+					step: trace.step,
+					tool: trace.tool,
+					scope: trace.scope,
+					targetPath: trace.targetPath,
+					status: trace.status,
+					ok: trace.ok,
+					summary: trace.summary,
+					error: trace.error,
+					failureClass: trace.failureClass,
+				});
 				this.report(input, context, {
 					phase: "tool_result",
 					depth: this.depth(input),
@@ -149,16 +192,26 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			case "error":
 				state.error = state.error ?? this.toError(event);
 				this.reportError(input, context, state.error);
+				terminal.settle(state.error);
 				break;
 			case "done":
 			case "session_end":
 				state.doneReported = true;
 				this.reportDone(input, context, this.sessionEndSummary(event));
+				terminal.settle();
 				break;
 		}
 	}
 
 	private reportToolCall(input: AgentTurnInput, context: AgentExecutionContext, event: FridayPiToolCallEvent): void {
+		this.emitContextEvent(context, "tool_call", {
+			runId: event.runId,
+			step: event.step,
+			tool: event.tool,
+			scope: event.scope,
+			targetPath: event.targetPath,
+			summary: event.summary,
+		});
 		this.report(input, context, {
 			phase: "tool_call",
 			depth: this.depth(input),
@@ -245,6 +298,16 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 	}
 
 	private reportError(input: AgentTurnInput, context: AgentExecutionContext, error: unknown): void {
+		const failure = this.failureClassifier.classify(error, {
+			status: context.isCancelled() ? "cancelled" : "failed",
+		});
+		this.emitContextEvent(
+			context,
+			context.isCancelled() ? "turn_cancelled" : "turn_failed",
+			{ message: this.stringifyError(error) || "PI runtime failed." },
+			context.isCancelled() ? "cancelled" : "failed",
+			failure,
+		);
 		this.report(input, context, {
 			phase: "error",
 			depth: this.depth(input),
@@ -254,11 +317,27 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 	}
 
 	private reportDone(input: AgentTurnInput, context: AgentExecutionContext, message: string): void {
+		this.emitContextEvent(context, "turn_completed", { summary: message }, "completed");
 		this.report(input, context, {
 			phase: "done",
 			depth: this.depth(input),
 			status: "ok",
 			message,
+		});
+	}
+
+	private emitContextEvent(
+		context: AgentExecutionContext,
+		type: AgentTurnEvent["type"],
+		payload: Record<string, unknown>,
+		status?: AgentTurnStatus,
+		failure?: AgentFailure,
+	): void {
+		context.emit({
+			type,
+			...(status ? { status } : {}),
+			payload: this.sanitizePayload(payload),
+			...(failure ? { failure } : {}),
 		});
 	}
 
@@ -284,6 +363,57 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			agentId: context.agentId,
 			mode: context.mode,
 		};
+	}
+
+	private createTerminalSettlement(context: AgentExecutionContext): TerminalSettlement {
+		let settled = false;
+		let resolvePromise: (error?: unknown) => void = () => {};
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		const promise = new Promise<unknown | undefined>((resolve) => {
+			resolvePromise = resolve;
+		});
+		const settle = (error?: unknown): void => {
+			if (settled) {
+				return;
+			}
+			settled = true;
+			if (timeout) {
+				clearTimeout(timeout);
+			}
+			context.signal.removeEventListener("abort", onAbort);
+			resolvePromise(error);
+		};
+		const onAbort = (): void => {
+			settle(context.getCancelReason() ?? context.signal.reason ?? "PI runtime turn cancelled.");
+		};
+		const timeoutMs = this.resolveTerminalEventTimeoutMs();
+		if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+			timeout = setTimeout(() => {
+				settle(new Error(`PI runtime timed out waiting for a terminal event after ${timeoutMs}ms.`));
+			}, timeoutMs);
+		}
+		if (context.signal.aborted) {
+			onAbort();
+		} else {
+			context.signal.addEventListener("abort", onAbort, { once: true });
+		}
+		return {
+			promise,
+			settle,
+			get settled() {
+				return settled;
+			},
+			dispose() {
+				if (timeout) {
+					clearTimeout(timeout);
+				}
+				context.signal.removeEventListener("abort", onAbort);
+			},
+		};
+	}
+
+	private resolveTerminalEventTimeoutMs(): number {
+		return this.options.terminalEventTimeoutMs ?? DEFAULT_TERMINAL_EVENT_TIMEOUT_MS;
 	}
 
 	private resolveAssistantText(state: PiTurnState): string {
@@ -312,6 +442,23 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			return typeof message === "string" ? message : String(message ?? "");
 		}
 		return error === undefined || error === null ? "" : String(error);
+	}
+
+	private sanitizePayload(payload: Record<string, unknown>): Record<string, unknown> {
+		const sanitized: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(payload)) {
+			if (value === undefined) {
+				continue;
+			}
+			if (typeof value === "string") {
+				sanitized[key] = value.slice(0, 2_000);
+				continue;
+			}
+			if (typeof value === "number" || typeof value === "boolean" || value === null) {
+				sanitized[key] = value;
+			}
+		}
+		return sanitized;
 	}
 
 	private sessionEndSummary(event: FridayPiDoneEvent | FridayPiSessionEndEvent): string {

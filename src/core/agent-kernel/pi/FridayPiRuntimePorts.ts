@@ -12,6 +12,7 @@ export interface FridayPiPromptOptions {
 
 export interface FridayPiSessionPort {
 	subscribe(listener: FridayPiSessionListener): FridayPiSessionUnsubscribe;
+	/** Resolves when the prompt is accepted; streaming may continue until a terminal session event. */
 	prompt(text: string, options?: FridayPiPromptOptions): Promise<void>;
 	steer?(text: string, options?: FridayPiPromptOptions): Promise<void>;
 	followUp?(text: string, options?: FridayPiPromptOptions): Promise<void>;
@@ -20,6 +21,10 @@ export interface FridayPiSessionPort {
 
 export interface FridayPiSessionHostPort {
 	createSession(input: AgentTurnInput, context: AgentExecutionContext): FridayPiSessionPort | Promise<FridayPiSessionPort>;
+}
+
+export interface FridayPiRuntimeOptions {
+	terminalEventTimeoutMs?: number;
 }
 
 export type FridayPiSessionEvent =
