@@ -301,13 +301,13 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 		const failure = this.failureClassifier.classify(error, {
 			status: context.isCancelled() ? "cancelled" : "failed",
 		});
-		this.emitContextEvent(
-			context,
-			context.isCancelled() ? "turn_cancelled" : "turn_failed",
-			{ message: this.stringifyError(error) || "PI runtime failed." },
-			context.isCancelled() ? "cancelled" : "failed",
-			failure,
-		);
+		this.emitContextEvent(context, "model_response", {
+			source: "pi",
+			terminal: true,
+			status: context.isCancelled() ? "cancelled" : "failed",
+			message: this.stringifyError(error) || "PI runtime failed.",
+			failureCategory: failure.category,
+		});
 		this.report(input, context, {
 			phase: "error",
 			depth: this.depth(input),
@@ -317,7 +317,11 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 	}
 
 	private reportDone(input: AgentTurnInput, context: AgentExecutionContext, message: string): void {
-		this.emitContextEvent(context, "turn_completed", { summary: message }, "completed");
+		this.emitContextEvent(context, "model_response", {
+			source: "pi",
+			terminal: true,
+			summary: message,
+		});
 		this.report(input, context, {
 			phase: "done",
 			depth: this.depth(input),

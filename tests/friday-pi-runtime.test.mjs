@@ -13,6 +13,9 @@ const jiti = createJiti(import.meta.url);
 const runtimePath = path.join(projectRoot, "src/core/agent-kernel/pi/FridayPiRuntime.ts");
 const portsPath = path.join(projectRoot, "src/core/agent-kernel/pi/FridayPiRuntimePorts.ts");
 const contextPath = path.join(projectRoot, "src/core/agent-kernel/AgentExecutionContext.ts");
+const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
+
+const terminalEventTypes = new Set(["turn_completed", "turn_failed", "turn_cancelled"]);
 
 function createInput(overrides = {}) {
 	const progress = [];
@@ -219,11 +222,13 @@ test("FridayPiRuntime records PI activity into durable context events", async ()
 	const eventTypes = result.events.map((event) => event.type);
 
 	assert.equal(result.assistantText, "Durable PI response.");
-	assert.deepEqual(eventTypes, ["model_response", "tool_call", "tool_result", "model_response", "turn_completed"]);
+	assert.deepEqual(eventTypes, ["model_response", "tool_call", "tool_result", "model_response", "model_response"]);
 	assert.equal(result.events[0].payload.text, "Durable ");
 	assert.equal(result.events[1].payload.tool, "read_file");
 	assert.equal(result.events[2].payload.tool, "read_file");
 	assert.equal(result.events[2].payload.status, "ok");
+	assert.equal(result.events[4].payload.source, "pi");
+	assert.equal(result.events[4].payload.terminal, true);
 	assert.equal(result.events[4].payload.summary, "Durable done");
 });
 
@@ -258,8 +263,95 @@ test("FridayPiRuntime returns failed and cleans up on direct PI error events", a
 	assert.equal(result.status, "failed");
 	assert.match(result.failure.technicalMessage, /PI emitted an error/);
 	assert.equal(progress.at(-1).phase, "error");
-	assert.deepEqual(result.events.map((event) => event.type), ["turn_failed"]);
+	assert.deepEqual(result.events.map((event) => event.type), ["model_response"]);
+	assert.equal(result.events[0].payload.source, "pi");
+	assert.equal(result.events[0].payload.terminal, true);
+	assert.equal(result.events[0].payload.status, "failed");
 	assert.equal(result.events[0].payload.message, "PI emitted an error");
+});
+
+test("AgentKernel owns terminal events for successful PI runtime turns", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { AgentKernel, AgentRuntimeFacade } = await jiti.import(kernelPath);
+	let listener;
+	const runtime = new FridayPiRuntime({
+		createSession() {
+			return {
+				subscribe(next) {
+					listener = next;
+					return () => {};
+				},
+				async prompt() {
+					listener({ type: "text_final", text: "Kernel wrapped PI response." });
+					listener({ type: "done", summary: "Kernel wrapped PI done" });
+				},
+			};
+		},
+	});
+	const facade = new AgentRuntimeFacade(new AgentKernel(runtime));
+
+	const result = await facade.runTurn({
+		agentId: "agent-pi",
+		conversationId: "conversation-pi",
+		conversation: [],
+		userPrompt: "run through kernel",
+		mode: "write",
+	});
+	const terminalEvents = result.events.filter((event) => terminalEventTypes.has(event.type));
+	const piTerminalActivity = result.events.find((event) =>
+		event.type === "model_response" &&
+		event.payload?.source === "pi" &&
+		event.payload?.terminal === true &&
+		event.payload?.summary === "Kernel wrapped PI done"
+	);
+
+	assert.equal(result.status, "completed");
+	assert.equal(result.assistantText, "Kernel wrapped PI response.");
+	assert.equal(terminalEvents.length, 1);
+	assert.equal(terminalEvents[0].type, "turn_completed");
+	assert.ok(result.events.some((event) => event.type === "model_response" && event.payload?.text === "Kernel wrapped PI response."));
+	assert.ok(piTerminalActivity, "PI done should be durable activity without being a terminal turn event");
+});
+
+test("AgentKernel owns terminal events for failed PI runtime turns", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { AgentKernel, AgentRuntimeFacade } = await jiti.import(kernelPath);
+	let listener;
+	const runtime = new FridayPiRuntime({
+		createSession() {
+			return {
+				subscribe(next) {
+					listener = next;
+					return () => {};
+				},
+				async prompt() {
+					listener({ type: "error", message: "Kernel wrapped PI error" });
+				},
+			};
+		},
+	});
+	const facade = new AgentRuntimeFacade(new AgentKernel(runtime));
+
+	const result = await facade.runTurn({
+		agentId: "agent-pi",
+		conversationId: "conversation-pi",
+		conversation: [],
+		userPrompt: "fail through kernel",
+		mode: "write",
+	});
+	const terminalEvents = result.events.filter((event) => terminalEventTypes.has(event.type));
+	const piErrorActivity = result.events.find((event) =>
+		event.type === "model_response" &&
+		event.payload?.source === "pi" &&
+		event.payload?.terminal === true &&
+		event.payload?.status === "failed" &&
+		event.payload?.message === "Kernel wrapped PI error"
+	);
+
+	assert.equal(result.status, "failed");
+	assert.equal(terminalEvents.length, 1);
+	assert.equal(terminalEvents[0].type, "turn_failed");
+	assert.ok(piErrorActivity, "PI error should be durable activity without being a terminal turn event");
 });
 
 test("FridayPiRuntime returns failed on prompt errors and still cleans up the session", async () => {
