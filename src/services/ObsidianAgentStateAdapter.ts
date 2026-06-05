@@ -191,7 +191,7 @@ export class ObsidianAgentStateAdapter {
 		return output;
 	}
 
-	async failTurn(error: unknown, context: AgentExecutionContext, options: ObsidianFailTurnOptions = {}): Promise<void> {
+	async failTurn(error: unknown, context: AgentExecutionContext, options: ObsidianFailTurnOptions = {}): Promise<AgentTurnResult | void> {
 		const task = await this.taskManager.failTurn(error, context);
 		if (task?.status === "completed") {
 			return;
@@ -199,22 +199,23 @@ export class ObsidianAgentStateAdapter {
 		const message = error instanceof Error ? error.message : String(error ?? "Task failed.");
 		const status: AgentTurnStatus = task?.status === "cancelled" ? "cancelled" : "failed";
 		const diagnostics = this.buildFailureDiagnostics(message, status);
+		const output: AgentTurnResult = {
+			turnId: context.turnId,
+			taskId: context.taskId,
+			traceId: context.traceId,
+			conversationId: context.conversationId,
+			status,
+			assistantText: message,
+			events: context.snapshotEvents(),
+			traces: [],
+			rawFinalReply: "",
+			...(task ? { task } : {}),
+			stepTraces: options.stepTraces,
+		};
 		try {
 			await this.replayRecorder.recordTurn({
 				context,
-				result: {
-					turnId: context.turnId,
-					taskId: context.taskId,
-					traceId: context.traceId,
-					conversationId: context.conversationId,
-					status,
-					assistantText: message,
-					events: context.snapshotEvents(),
-					traces: [],
-					rawFinalReply: "",
-					...(task ? { task } : {}),
-					stepTraces: options.stepTraces,
-				},
+				result: output,
 				extraEvents: [
 					...(options.sideEvents ?? []),
 					{
@@ -230,6 +231,7 @@ export class ObsidianAgentStateAdapter {
 		} catch {
 			// Preserve the original runtime failure instead of replacing it with replay persistence errors.
 		}
+		return output;
 	}
 
 	private collectPendingMutations(result: AgentTurnResult, context: AgentExecutionContext): RuntimeMutationPlan[] {

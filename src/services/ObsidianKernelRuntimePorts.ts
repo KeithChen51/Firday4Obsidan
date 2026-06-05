@@ -237,10 +237,11 @@ export function createObsidianAgentLoopController(runtime: ObsidianKernelRuntime
 					depth: runtimeInput.depth ?? 0,
 					message: `Runtime failed: ${runtime.truncateText(message, 220)}`,
 				});
-				await stateAdapter.failTurn(error, context, {
+				const failed = await stateAdapter.failTurn(error, context, {
 					stepTraces: runtime.activeTurnStateMachine?.snapshot() ?? [],
 					sideEvents: filterKernelCompatibleSideEvents(runtime.activeTurnSideEvents),
 				});
+				return failed ? withKernelStatus(failed, context) : undefined;
 			},
 			cleanup: async (_input, context) => {
 				if (contextAbortListener) {

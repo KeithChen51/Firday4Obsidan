@@ -131,7 +131,10 @@ export class AgentLoopController implements RuntimeTurnExecutorPort {
 			this.emitTerminalProgress(input, completed);
 			return completed;
 		} catch (error) {
-			await this.options.lifecycle?.fail?.(input, context, error);
+			const failed = await this.options.lifecycle?.fail?.(input, context, error);
+			if (failed) {
+				return failed;
+			}
 			throw error;
 		} finally {
 			await this.options.lifecycle?.cleanup?.(input, context);

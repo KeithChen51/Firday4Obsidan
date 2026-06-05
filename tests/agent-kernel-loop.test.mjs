@@ -13,6 +13,7 @@ const jiti = createJiti(import.meta.url);
 
 const kernelPath = path.join(projectRoot, "src/core/agent-kernel/AgentKernel.ts");
 const loopPath = path.join(projectRoot, "src/core/agent-kernel/AgentLoopController.ts");
+const contextPath = path.join(projectRoot, "src/core/agent-kernel/AgentExecutionContext.ts");
 const runtimeProtocolPath = path.join(projectRoot, "src/core/agent-kernel/RuntimeProtocol.ts");
 const projectorPath = path.join(projectRoot, "src/core/trajectory/AgentTrajectoryProjector.ts");
 const viewModelPath = path.join(projectRoot, "src/views/agentProcessPanelViewModel.ts");
@@ -172,6 +173,76 @@ test("RuntimeProtocol normalizes canonical interaction routes and legacy intake 
 			assert.equal(parsed.intake[key], value, `${testCase.name} ${key}`);
 		}
 	}
+});
+
+test("AgentLoopController returns lifecycle failure results before cleanup", async () => {
+	const [{ AgentLoopController }, { AgentExecutionContext }] = await Promise.all([
+		jiti.import(loopPath),
+		jiti.import(contextPath),
+	]);
+	const input = {
+		turnId: "turn-finalized-failure",
+		traceId: "trace-finalized-failure",
+		conversationId: "conversation-finalized-failure",
+		agentId: "agent-finalized-failure",
+		conversation: [],
+		userPrompt: "Cancel this turn.",
+		mode: "ask",
+	};
+	const context = new AgentExecutionContext(input);
+	const cleanupCalls = [];
+	const failureResult = {
+		turnId: context.turnId,
+		taskId: "task-finalized-failure",
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		status: "cancelled",
+		assistantText: "User cancelled task.",
+		events: context.snapshotEvents(),
+		traces: [],
+		rawFinalReply: "",
+		budget: context.budget,
+	};
+	const controller = new AgentLoopController({
+		contextEngine: {
+			buildContext: async () => {
+				throw new Error("This operation was aborted");
+			},
+		},
+		modelDriver: {
+			requestText: async () => {
+				throw new Error("requestText should not run");
+			},
+			requestWithTools: async () => {
+				throw new Error("requestWithTools should not run");
+			},
+		},
+		toolExecution: {
+			listNativeTools: async () => {
+				throw new Error("listNativeTools should not run");
+			},
+			executeTool: async () => {
+				throw new Error("executeTool should not run");
+			},
+			recordMutationPlans: () => [],
+		},
+		lifecycle: {
+			fail: async (actualInput, actualContext, error) => {
+				assert.equal(actualInput, input);
+				assert.equal(actualContext, context);
+				assert.match(error instanceof Error ? error.message : String(error), /aborted/);
+				return failureResult;
+			},
+			cleanup: async () => {
+				cleanupCalls.push("cleanup");
+			},
+		},
+	});
+
+	const result = await controller.execute(input, context);
+
+	assert.equal(result, failureResult);
+	assert.deepEqual(cleanupCalls, ["cleanup"]);
 });
 
 test("AgentKernel executes a native model/tool loop through AgentLoopController", async () => {

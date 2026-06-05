@@ -187,6 +187,71 @@ test("FridayPiRuntime waits for delayed terminal PI events after prompt resolves
 	assert.deepEqual(calls, ["subscribe", "prompt", "emit-final", "emit-done", "unsubscribe", "dispose"]);
 });
 
+test("FridayPiRuntime lets a cancelling host bridge return its finalized result", async () => {
+	const { FridayPiRuntime } = await jiti.import(runtimePath);
+	const { input, progress } = createInput({ userPrompt: "cancel through host bridge" });
+	const context = await createContext();
+	const calls = [];
+	let listener;
+	const hostCancelledEvent = {
+		type: "turn_cancelled",
+		turnId: context.turnId,
+		taskId: context.taskId,
+		traceId: context.traceId,
+		conversationId: context.conversationId,
+		at: "2026-06-05T00:00:00.000Z",
+		status: "cancelled",
+		payload: { summary: "User cancelled task." },
+	};
+	const runtime = new FridayPiRuntime(
+		{
+			createSession() {
+				return {
+					subscribe(next) {
+						listener = next;
+						calls.push("subscribe");
+						return () => calls.push("unsubscribe");
+					},
+					async prompt() {
+						calls.push("prompt");
+						context.cancel("User cancelled task.");
+						await new Promise((resolve) => setTimeout(resolve, 5));
+						listener({
+							type: "host_result",
+							summary: "PI host bridge cancelled.",
+							result: {
+								turnId: context.turnId,
+								taskId: context.taskId,
+								traceId: context.traceId,
+								conversationId: context.conversationId,
+								status: "cancelled",
+								assistantText: "User cancelled task.",
+								events: [hostCancelledEvent],
+								traces: [],
+								rawFinalReply: "",
+							},
+						});
+					},
+					dispose() {
+						calls.push("dispose");
+					},
+				};
+			},
+		},
+		undefined,
+		{ cancelledPromptGraceMs: 50 },
+	);
+
+	const result = await runtime.execute(input, context);
+
+	assert.deepEqual(calls, ["subscribe", "prompt", "unsubscribe", "dispose"]);
+	assert.equal(result.status, "cancelled");
+	assert.equal(result.assistantText, "User cancelled task.");
+	assert.ok(result.events.some((event) => event.type === "turn_cancelled"));
+	assert.equal(progress.at(-1).phase, "error");
+	assert.equal(progress.at(-1).message, "PI host bridge cancelled.");
+});
+
 test("FridayPiRuntime fails when terminal timeout fires before slow prompt returns", async () => {
 	const { FridayPiRuntime } = await jiti.import(runtimePath);
 	const { input, progress } = createInput({ userPrompt: "slow prompt without terminal event" });

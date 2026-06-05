@@ -13,7 +13,7 @@ export interface AgentLoopLifecyclePort {
 		context: AgentExecutionContext,
 		result: AgentTurnResult,
 	): Promise<AgentTurnResult>;
-	fail?(input: AgentTurnInput, context: AgentExecutionContext, error: unknown): Promise<void>;
+	fail?(input: AgentTurnInput, context: AgentExecutionContext, error: unknown): Promise<AgentTurnResult | void>;
 	cleanup?(input: AgentTurnInput, context: AgentExecutionContext): Promise<void>;
 }
 

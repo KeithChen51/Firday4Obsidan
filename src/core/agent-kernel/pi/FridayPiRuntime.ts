@@ -24,6 +24,7 @@ import type {
 } from "./FridayPiRuntimePorts";
 
 const DEFAULT_TERMINAL_EVENT_TIMEOUT_MS = 30_000;
+const DEFAULT_CANCELLED_PROMPT_GRACE_MS = 250;
 
 interface PiTurnState {
 	textDeltas: string[];
@@ -81,7 +82,13 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 				promptSettlement,
 				terminal.promise.then((error): PromptSettlement => ({ type: "terminal", error })),
 			]);
-			if (firstSettlement.error) {
+			if (firstSettlement.type === "terminal" && firstSettlement.error && context.isCancelled()) {
+				await this.waitForPromptAfterCancellation(promptSettlement);
+			}
+			if (state.hostResult && !state.error) {
+				terminal.settle();
+			}
+			if (firstSettlement.error && !state.hostResult) {
 				throw firstSettlement.error;
 			}
 			if (firstSettlement.type === "prompt" && !state.error && !context.isCancelled()) {
@@ -154,6 +161,28 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 			() => ({ type: "prompt" as const }),
 			(error) => ({ type: "prompt" as const, error }),
 		);
+	}
+
+	private async waitForPromptAfterCancellation(
+		promptSettlement: Promise<PromptSettlement>,
+	): Promise<PromptSettlement | undefined> {
+		const graceMs = this.resolveCancelledPromptGraceMs();
+		if (!Number.isFinite(graceMs) || graceMs <= 0) {
+			return undefined;
+		}
+		let timeout: ReturnType<typeof setTimeout> | undefined;
+		try {
+			return await Promise.race([
+				promptSettlement,
+				new Promise<undefined>((resolve) => {
+					timeout = setTimeout(() => resolve(undefined), graceMs);
+				}),
+			]);
+		} finally {
+			if (timeout) {
+				clearTimeout(timeout);
+			}
+		}
 	}
 
 	private handleSessionEvent(
@@ -499,6 +528,10 @@ export class FridayPiRuntime implements RuntimeTurnExecutorPort {
 
 	private resolveTerminalEventTimeoutMs(): number {
 		return this.options.terminalEventTimeoutMs ?? DEFAULT_TERMINAL_EVENT_TIMEOUT_MS;
+	}
+
+	private resolveCancelledPromptGraceMs(): number {
+		return this.options.cancelledPromptGraceMs ?? DEFAULT_CANCELLED_PROMPT_GRACE_MS;
 	}
 
 	private resolveAssistantText(state: PiTurnState): string {

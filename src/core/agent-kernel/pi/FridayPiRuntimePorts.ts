@@ -25,6 +25,7 @@ export interface FridayPiSessionHostPort {
 
 export interface FridayPiRuntimeOptions {
 	terminalEventTimeoutMs?: number;
+	cancelledPromptGraceMs?: number;
 }
 
 export type FridayPiSessionEvent =
