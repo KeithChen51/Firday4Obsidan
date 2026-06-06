@@ -1,6 +1,8 @@
 import esbuild from "esbuild";
+import path from "node:path";
 import process from "process";
 import { builtinModules } from 'node:module';
+import { fileURLToPath } from "node:url";
 
 const banner =
 `/*
@@ -10,6 +12,21 @@ if you want to view the source, please visit the github repository of this plugi
 `;
 
 const prod = (process.argv[2] === "production");
+const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+const piAiBrowserRuntimePath = path.join(projectRoot, "src/core/agent-kernel/pi/PiAiBrowserRuntime.ts");
+const piAgentCoreBrowserRuntimePath = path.join(projectRoot, "node_modules/@earendil-works/pi-agent-core/dist/agent.js");
+
+const fridayPiAiBrowserRuntimePlugin = {
+	name: "friday-pi-browser-runtime",
+	setup(build) {
+		build.onResolve({ filter: /^@earendil-works\/pi-ai$/ }, () => ({
+			path: piAiBrowserRuntimePath,
+		}));
+		build.onResolve({ filter: /^@earendil-works\/pi-agent-core$/ }, () => ({
+			path: piAgentCoreBrowserRuntimePath,
+		}));
+	},
+};
 
 const context = await esbuild.context({
 	banner: {
@@ -17,6 +34,7 @@ const context = await esbuild.context({
 	},
 	entryPoints: ["src/main.ts"],
 	bundle: true,
+	plugins: [fridayPiAiBrowserRuntimePlugin],
 	external: [
 		"obsidian",
 		"electron",
