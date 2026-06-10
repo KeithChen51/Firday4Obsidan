@@ -1,0 +1,2510 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY Desktop 产品规划工作台</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --graphite: #1E1F21;
+      --warm-bone: #F4F1EB;
+      --muted-teal: #4A7F7B;
+      --stone: #D9D5CA;
+      --accent: #E07A5F;
+      --brand-ink: #315F5B;
+      --paper: #FBFAF7;
+      --panel: #FBFAF7;
+      --ink: var(--graphite);
+      --ink-strong: rgba(30, 31, 33, 0.88);
+      --ink-body: rgba(30, 31, 33, 0.72);
+      --ink-muted: rgba(30, 31, 33, 0.58);
+      --muted: rgba(30, 31, 33, 0.62);
+      --line: rgba(30, 31, 33, 0.13);
+      --soft-line: rgba(30, 31, 33, 0.07);
+      --green: var(--muted-teal);
+      --green-soft: rgba(74, 127, 123, 0.12);
+      --blue: var(--ink-body);
+      --blue-soft: rgba(217, 213, 202, 0.46);
+      --rust: var(--accent);
+      --rust-soft: rgba(224, 122, 95, 0.16);
+      --active: var(--muted-teal);
+      --active-soft: rgba(74, 127, 123, 0.12);
+      --shadow: none;
+      --radius: 8px;
+      --font-latin-brand: "Avenir Next", "Inter", "Segoe UI", Arial, sans-serif;
+      --font-cjk-display: "LXGW WenKai Screen", "LXGW WenKai", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STFangsong", "FangSong", serif;
+      --font-cjk-body: "LXGW WenKai Screen", "LXGW WenKai", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-cjk-ui: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      font-family: var(--font-cjk-body);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--warm-bone);
+      color: var(--ink-body);
+      line-height: 1.65;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .rail {
+      border-right: 1px solid var(--line);
+      background: rgba(244, 241, 235, 0.92);
+      padding: 28px 22px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+      font-family: var(--font-latin-brand);
+    }
+
+    .brand img {
+      width: 42px;
+      height: auto;
+      display: block;
+    }
+
+    .brand-title {
+      margin: 0;
+      color: var(--graphite);
+      font-size: 16px;
+      font-weight: 650;
+      line-height: 1.1;
+      letter-spacing: 0.28em;
+    }
+
+    .brand-subtitle {
+      margin: 4px 0 0;
+      color: var(--ink-muted);
+      font-size: 12px;
+      line-height: 1.1;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+
+    .rail-note {
+      color: var(--ink-muted);
+      font-size: 13px;
+      margin: 20px 0 28px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav a {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      padding: 9px 10px;
+      border-radius: 6px;
+      color: #3E4242;
+      font-size: 14px;
+    }
+
+    .nav a:hover,
+    .nav a:focus {
+      background: rgba(74, 127, 123, 0.12);
+      outline: none;
+    }
+
+    .nav .mark {
+      width: 18px;
+      text-align: center;
+      color: var(--active);
+      font-size: 13px;
+    }
+
+    .rail-foot {
+      position: absolute;
+      left: 22px;
+      right: 22px;
+      bottom: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 16px;
+    }
+
+    main {
+      padding: 56px clamp(28px, 6vw, 88px) 80px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: clamp(24px, 4vw, 52px);
+      align-items: end;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 56px;
+      margin-bottom: 44px;
+    }
+
+    .eyebrow {
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      font-size: 12px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      margin-bottom: 12px;
+    }
+
+    h1 {
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: 1.02;
+      margin: 0;
+      max-width: 900px;
+      letter-spacing: 0;
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-weight: 500;
+    }
+
+    .hero p {
+      color: var(--ink-muted);
+      font-size: 16px;
+      margin: 18px 0 0;
+      max-width: 720px;
+    }
+
+    .status-board {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      padding: 18px;
+      border-radius: var(--radius);
+    }
+
+    .status-board h2,
+    section h2 {
+      font-size: 18px;
+      margin: 0 0 14px;
+      letter-spacing: 0;
+    }
+
+    .status-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      border-top: 1px solid var(--soft-line);
+      padding-top: 10px;
+      font-size: 13px;
+    }
+
+    .status-row:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .status-row b {
+      font-weight: 700;
+    }
+
+    .status-row span {
+      color: var(--muted);
+      text-align: right;
+    }
+
+    .grid {
+      display: grid;
+      gap: 24px;
+    }
+
+    .two-col {
+      grid-template-columns: minmax(0, 0.95fr) minmax(360px, 1.05fr);
+      align-items: start;
+    }
+
+    section {
+      margin-bottom: 34px;
+    }
+
+    .band {
+      border-top: 1px solid var(--line);
+      padding-top: 24px;
+    }
+
+    .decision-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .decision {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 18px;
+      padding: 15px 0;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .decision:last-child {
+      border-bottom: 0;
+    }
+
+    .decision .label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .decision strong {
+      display: block;
+      font-size: 16px;
+      margin-bottom: 3px;
+    }
+
+    .decision p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .source-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+
+    .source-links a,
+    .tag {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 5px 10px;
+      background: var(--panel);
+      color: #3E4242;
+      font-size: 12px;
+    }
+
+    .preview-frame {
+      border: 1px solid var(--line);
+      background: #1E1F21;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      margin-top: 22px;
+    }
+
+    .window-bar {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      height: 34px;
+      padding: 0 13px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      background: #2A2C2E;
+      position: relative;
+    }
+
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #E07A5F;
+    }
+
+    .dot:nth-child(2) {
+      background: #D9D5CA;
+    }
+
+    .dot:nth-child(3) {
+      background: #4A7F7B;
+    }
+
+    .workspace-launch {
+      position: relative;
+      margin-left: 10px;
+    }
+
+    .workspace-icon {
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.05);
+      display: grid;
+      gap: 3px;
+      align-content: center;
+      justify-content: center;
+      padding: 5px;
+    }
+
+    .workspace-icon span {
+      width: 12px;
+      height: 2px;
+      border-radius: 999px;
+      background: #DDEBE8;
+      display: block;
+    }
+
+    .workspace-popover {
+      position: absolute;
+      left: 0;
+      top: 30px;
+      width: 230px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #FCFAF6;
+      color: var(--ink);
+      box-shadow: var(--shadow);
+      padding: 12px;
+      z-index: 3;
+      opacity: 0;
+      transform: translateY(-4px);
+      pointer-events: none;
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+
+    .workspace-launch:hover .workspace-popover,
+    .workspace-launch:focus-within .workspace-popover {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+
+    .workspace-popover b {
+      display: block;
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 6px;
+    }
+
+    .workspace-popover ul {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 5px;
+      font-size: 12px;
+    }
+
+    .workspace-popover li {
+      border: 1px solid var(--soft-line);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #F4F1EB;
+    }
+
+    .workspace-popover .active {
+      border-color: var(--green);
+      background: var(--green-soft);
+      color: #315F5B;
+      font-weight: 700;
+    }
+
+    .app-preview {
+      display: grid;
+      grid-template-columns: 178px minmax(430px, 1fr) 280px;
+      min-height: 520px;
+      color: var(--ink);
+      background: #F4F1EB;
+    }
+
+    .workline-sidebar {
+      background: #242629;
+      color: #F4F1EB;
+      border-right: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 14px 12px;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .workline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 750;
+      font-size: 12px;
+    }
+
+    .collapse-control {
+      width: 24px;
+      height: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      color: rgba(244, 241, 235, 0.72);
+      font-size: 12px;
+    }
+
+    .workline-group {
+      display: grid;
+      gap: 6px;
+    }
+
+    .workline-group b {
+      color: rgba(244, 241, 235, 0.48);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .workline-item {
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 6px;
+      padding: 7px 8px;
+      color: rgba(244, 241, 235, 0.72);
+      font-size: 12px;
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .workline-item.active {
+      border-color: rgba(74, 127, 123, 0.68);
+      background: rgba(74, 127, 123, 0.28);
+      color: #F4F1EB;
+      font-weight: 750;
+    }
+
+    .workline-foot {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 10px;
+      color: rgba(244, 241, 235, 0.5);
+      font-size: 11px;
+    }
+
+    .artifact-stage {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background: #F4F1EB;
+    }
+
+    .artifact-tabs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 14px 0;
+      border-bottom: 1px solid var(--line);
+      background: #EDE8DF;
+      overflow: hidden;
+    }
+
+    .artifact-tab {
+      border: 1px solid var(--line);
+      border-bottom: 0;
+      border-radius: 6px 6px 0 0;
+      background: #E4DED3;
+      padding: 8px 11px;
+      font-size: 12px;
+      color: #4C5353;
+      white-space: nowrap;
+    }
+
+    .artifact-tab.active {
+      background: #F4F1EB;
+      color: var(--ink);
+      font-weight: 750;
+    }
+
+    .artifact-split-hint {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .artifact-canvas {
+      padding: 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(190px, 0.48fr);
+      gap: 14px;
+      min-height: 0;
+    }
+
+    .artifact-document,
+    .artifact-secondary {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+    }
+
+    .artifact-document {
+      min-height: 430px;
+    }
+
+    .artifact-secondary {
+      background: #EEE9E0;
+      color: #4D5555;
+      font-size: 12px;
+    }
+
+    .doc-kicker {
+      color: var(--green);
+      font-weight: 750;
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .artifact-document h3 {
+      margin: 0 0 12px;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .doc-section {
+      border-top: 1px solid var(--soft-line);
+      padding-top: 12px;
+      margin-top: 12px;
+      font-size: 13px;
+    }
+
+    .doc-section b {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .selected-text {
+      margin-top: 10px;
+      border-left: 3px solid var(--rust);
+      background: var(--rust-soft);
+      padding: 9px 10px;
+      font-size: 12px;
+      position: relative;
+    }
+
+    .selection-anchor {
+      display: flex;
+      margin-top: 10px;
+      justify-content: flex-start;
+    }
+
+    .selection-anchor span {
+      border: 1px solid var(--green);
+      border-radius: 999px;
+      padding: 4px 9px;
+      color: #F4F1EB;
+      background: var(--green);
+      font-size: 11px;
+      font-weight: 750;
+      letter-spacing: 0;
+    }
+
+    .split-label {
+      color: var(--green);
+      font-weight: 750;
+      margin-bottom: 10px;
+    }
+
+    .mini-page {
+      display: grid;
+      gap: 7px;
+    }
+
+    .mini-line {
+      height: 8px;
+      border-radius: 999px;
+      background: #D9D5CA;
+    }
+
+    .mini-line.short {
+      width: 62%;
+    }
+
+    .friday-panel {
+      border-left: 1px solid #141516;
+      background: #1E1F21;
+      color: #F4F1EB;
+      padding: 14px 12px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .friday-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 750;
+      font-size: 13px;
+    }
+
+    .friday-title span {
+      color: rgba(244, 241, 235, 0.62);
+      font-weight: 500;
+      font-size: 11px;
+    }
+
+    .process-list {
+      display: grid;
+      gap: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 10px;
+    }
+
+    .process-item {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      gap: 7px;
+      color: rgba(244, 241, 235, 0.76);
+      font-size: 11px;
+    }
+
+    .process-item::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      margin-top: 4px;
+    }
+
+    .side-chat {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      min-height: 0;
+    }
+
+    .side-bubble {
+      border: 1px solid rgba(255, 255, 255, 0.11);
+      border-radius: 7px;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 9px;
+      font-size: 12px;
+      color: rgba(244, 241, 235, 0.88);
+    }
+
+    .side-bubble.user {
+      border-color: rgba(224, 122, 95, 0.45);
+      background: rgba(224, 122, 95, 0.12);
+    }
+
+    .reference-disclosure {
+      margin-top: 10px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 9px;
+      font-size: 12px;
+    }
+
+    .reference-disclosure summary {
+      cursor: pointer;
+      color: #8EC5BE;
+      font-weight: 700;
+      list-style: none;
+    }
+
+    .reference-disclosure summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .reference-disclosure summary::after {
+      content: " 展开";
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .reference-disclosure[open] summary::after {
+      content: " 收起";
+    }
+
+    .reference-list {
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+      color: rgba(244, 241, 235, 0.62);
+      display: grid;
+      gap: 4px;
+    }
+
+    .side-composer {
+      border: 1px solid rgba(255, 255, 255, 0.13);
+      border-radius: 7px;
+      min-height: 78px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      padding: 10px;
+      color: rgba(244, 241, 235, 0.54);
+      background: rgba(255, 255, 255, 0.04);
+      font-size: 12px;
+    }
+
+    .send {
+      background: var(--green);
+      color: #F4F1EB;
+      border-radius: 50%;
+      width: 30px;
+      height: 30px;
+      display: inline-grid;
+      place-items: center;
+      font-weight: 650;
+    }
+
+    .final-preview {
+      display: grid;
+      grid-template-columns: 210px minmax(0, 1fr);
+      min-width: 980px;
+      min-height: 500px;
+      color: var(--ink);
+      background: #F8F5EF;
+    }
+
+    .final-sidebar {
+      background: #EDE8DF;
+      border-right: 1px solid var(--line);
+      padding: 14px 12px;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+      color: var(--blue);
+    }
+
+    .final-actions {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .final-action,
+    .final-conversation-row {
+      min-height: 30px;
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+    }
+
+    .final-project-switch {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .final-label {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 750;
+    }
+
+    .final-project-current {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      color: var(--blue);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .final-conversation-list {
+      display: grid;
+      gap: 5px;
+    }
+
+    .final-conversation-row {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .final-conversation-row.active {
+      background: #EAE2DA;
+    }
+
+    .final-page {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background: #FCFAF4;
+      min-width: 0;
+    }
+
+    .final-page-head {
+      min-height: 56px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 14px;
+      align-items: center;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--soft-line);
+      background: var(--panel);
+    }
+
+    .final-page-title {
+      color: var(--blue);
+      font-weight: 650;
+      font-size: 14px;
+    }
+
+    .final-page-subtitle {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .final-resource-dock {
+      border: 1px solid color-mix(in srgb, var(--green) 48%, var(--line));
+      border-radius: 999px;
+      background: var(--green-soft);
+      color: #315F5B;
+      padding: 7px 10px;
+      font-size: 11px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .final-split {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      min-height: 444px;
+    }
+
+    .final-canvas {
+      padding: 18px;
+      border-right: 1px solid var(--soft-line);
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .final-tabs {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+    }
+
+    .final-tab {
+      background: #EDE8DF;
+      border-radius: 7px;
+      padding: 7px 10px;
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .final-doc {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 18px;
+      min-height: 300px;
+    }
+
+    .final-doc h3 {
+      margin: 0 0 12px;
+      font-size: 26px;
+      line-height: 1.14;
+    }
+
+    .final-line {
+      display: block;
+      height: 9px;
+      border-radius: 999px;
+      background: #D8D2C6;
+      margin-bottom: 9px;
+    }
+
+    .final-line.short {
+      width: 62%;
+    }
+
+    .final-selection {
+      border: 2px solid var(--rust);
+      border-radius: 8px;
+      background: var(--rust-soft);
+      padding: 10px;
+      color: #7A3F2F;
+      font-size: 12px;
+      font-weight: 750;
+      margin: 14px 0;
+    }
+
+    .final-agent {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding: 14px;
+      gap: 12px;
+      background: rgba(255, 252, 247, 0.9);
+    }
+
+    .final-bubble {
+      border: 1px solid var(--soft-line);
+      border-radius: 9px;
+      background: var(--panel);
+      padding: 11px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .final-bubble.user {
+      border-color: color-mix(in srgb, var(--rust) 46%, var(--soft-line));
+      background: #FFF8F4;
+    }
+
+    .final-event {
+      display: grid;
+      grid-template-columns: 12px minmax(0, 1fr) auto;
+      gap: 7px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      margin: 7px 0;
+    }
+
+    .final-event::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+    }
+
+    .final-composer {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      min-height: 74px;
+      padding: 11px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .preview-actions {
+      margin-top: 14px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .preview-actions a {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: var(--panel);
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+    }
+
+    .flow-step {
+      border-top: 4px solid var(--blue);
+      background: var(--panel);
+      padding: 12px;
+      border-radius: 0 0 var(--radius) var(--radius);
+      min-height: 118px;
+    }
+
+    .flow-step:nth-child(2) {
+      border-top-color: var(--green);
+    }
+
+    .flow-step:nth-child(3) {
+      border-top-color: var(--rust);
+    }
+
+    .flow-step:nth-child(4) {
+      border-top-color: var(--active);
+    }
+
+    .flow-step b {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .flow-step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .observation-card {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .observation-card h3 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .observation-row {
+      display: grid;
+      grid-template-columns: 88px 1fr;
+      gap: 12px;
+      align-items: start;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .observation-row b {
+      color: var(--ink);
+      font-weight: 700;
+    }
+
+    .observation-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-top: 4px;
+    }
+
+    .observation-actions span {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 14px;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .observation-actions span:first-child {
+      background: var(--green);
+      border-color: var(--green);
+      color: var(--paper);
+    }
+
+    .note {
+      border-left: 4px solid var(--green);
+      padding: 10px 14px;
+      background: var(--green-soft);
+      color: #315F5B;
+      margin-top: 18px;
+      font-size: 14px;
+    }
+
+    .band {
+      padding-top: 44px;
+      margin-bottom: 44px;
+    }
+
+    .band > h2 {
+      max-width: 760px;
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-size: clamp(26px, 3vw, 40px);
+      line-height: 1.18;
+      font-weight: 500;
+    }
+
+    .decision {
+      grid-template-columns: 112px minmax(0, 1fr);
+      padding: 17px 0;
+      border-bottom-color: var(--line);
+    }
+
+    .decision .label {
+      color: var(--ink-muted);
+      font-family: var(--font-cjk-ui);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .decision strong {
+      color: var(--ink-strong);
+      font-weight: 600;
+    }
+
+    .decision p,
+    .flow-step p,
+    .conclusion p {
+      color: var(--ink-body);
+      font-weight: 400;
+    }
+
+    .status-board,
+    .final-project-switch,
+    .final-doc,
+    .final-bubble,
+    .final-composer,
+    .flow-step,
+    .workspace-popover,
+    .source-links a,
+    .tag {
+      box-shadow: none;
+      background: var(--paper);
+      border-color: var(--line);
+    }
+
+    .source-links a,
+    .tag,
+    .preview-actions a {
+      border-radius: 6px;
+      color: var(--ink-body);
+      font-family: var(--font-cjk-ui);
+      font-weight: 500;
+    }
+
+    .preview-frame {
+      background: var(--paper);
+      box-shadow: none;
+    }
+
+    .window-bar {
+      background: var(--warm-bone);
+      border-bottom-color: var(--line);
+    }
+
+    .dot {
+      background: rgba(30, 31, 33, 0.36);
+    }
+
+    .dot:nth-child(2) {
+      background: rgba(30, 31, 33, 0.22);
+    }
+
+    .dot:nth-child(3) {
+      background: var(--muted-teal);
+    }
+
+    .workspace-icon {
+      border-color: var(--line);
+      background: rgba(251, 250, 247, 0.64);
+    }
+
+    .workspace-icon span {
+      background: var(--ink-muted);
+    }
+
+    .app-preview,
+    .final-preview {
+      font-family: var(--font-cjk-ui);
+      background: var(--warm-bone);
+    }
+
+    .workline-sidebar,
+    .friday-panel {
+      background: rgba(217, 213, 202, 0.3);
+      color: var(--ink-body);
+      border-color: var(--line);
+    }
+
+    .workline-head,
+    .friday-title {
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .workline-group b,
+    .workline-foot,
+    .friday-title span,
+    .process-item,
+    .side-composer,
+    .reference-list {
+      color: var(--ink-muted);
+    }
+
+    .workline-item,
+    .side-bubble,
+    .side-composer {
+      border-color: var(--line);
+      background: rgba(251, 250, 247, 0.58);
+      color: var(--ink-body);
+    }
+
+    .workline-item.active {
+      border-color: rgba(74, 127, 123, 0.42);
+      background: rgba(74, 127, 123, 0.12);
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .side-bubble.user,
+    .final-bubble.user {
+      border-color: rgba(224, 122, 95, 0.34);
+      background: rgba(224, 122, 95, 0.12);
+      color: var(--ink-body);
+    }
+
+    .reference-disclosure,
+    .process-list,
+    .workline-foot {
+      border-color: var(--line);
+    }
+
+    .reference-disclosure summary {
+      color: var(--muted-teal);
+    }
+
+    .reference-disclosure summary::after {
+      color: var(--ink-muted);
+    }
+
+    .artifact-tabs,
+    .final-sidebar,
+    .resource-side,
+    .state-resource-window {
+      background: rgba(217, 213, 202, 0.32);
+    }
+
+    .artifact-document,
+    .artifact-secondary,
+    .final-doc,
+    .final-agent,
+    .final-page,
+    .final-page-head {
+      background: var(--paper);
+    }
+
+    .artifact-document h3,
+    .final-doc h3 {
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-weight: 500;
+    }
+
+    .final-page-title,
+    .final-project-current,
+    .final-conversation-row,
+    .final-tab {
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .final-resource-dock,
+    .selection-anchor span,
+    .preview-actions a {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: #315F5B;
+    }
+
+    .flow-step {
+      border-top: 1px solid var(--line);
+      border-radius: var(--radius);
+      min-height: 118px;
+    }
+
+    .flow-step:nth-child(2),
+    .flow-step:nth-child(3),
+    .flow-step:nth-child(4) {
+      border-top-color: var(--line);
+    }
+
+    .final-preview {
+      grid-template-columns: 72px 220px minmax(0, 1fr);
+      min-width: 1080px;
+      min-height: 620px;
+      background: var(--warm-bone);
+      font-family: var(--font-cjk-ui);
+    }
+
+    .app-mini-rail {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+      padding: 14px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .mini-brand {
+      width: 52px;
+      min-height: 44px;
+      display: grid;
+      place-items: center;
+    }
+
+    .mini-nav-item {
+      width: 52px;
+      min-height: 54px;
+      display: grid;
+      grid-template-rows: 22px auto;
+      align-items: center;
+      justify-items: center;
+      gap: 4px;
+      border-radius: 8px;
+      color: var(--ink-muted);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      line-height: 1;
+    }
+
+    .mini-brand img {
+      width: 28px;
+      height: auto;
+    }
+
+    .mini-nav {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .mini-nav-item {
+      border: 1px solid transparent;
+    }
+
+    .mini-icon {
+      display: grid;
+      place-items: center;
+      min-height: 22px;
+      color: currentColor;
+      line-height: 0;
+    }
+
+    .mini-icon svg {
+      display: block;
+      width: 19px;
+      height: 19px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .mini-nav-item.active .mini-icon svg {
+      stroke-width: 2;
+    }
+
+    .mini-label {
+      color: currentColor;
+      font-family: var(--font-cjk-ui);
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.1;
+      letter-spacing: 0;
+      white-space: nowrap;
+    }
+
+    .mini-nav-item.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--muted-teal);
+    }
+
+    .mini-settings {
+      align-self: end;
+    }
+
+    .project-menu {
+      display: grid;
+      grid-template-rows: auto repeat(4, auto) 1fr;
+      gap: 8px;
+      padding: 16px 12px;
+      border-right: 1px solid var(--line);
+      background: rgba(217, 213, 202, 0.26);
+      color: var(--ink-body);
+    }
+
+    .menu-heading {
+      margin-bottom: 6px;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .project-menu-row {
+      display: grid;
+      gap: 2px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 9px 10px;
+    }
+
+    .project-menu-row.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+    }
+
+    .project-menu-row b {
+      color: var(--ink-strong);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .project-menu-row span,
+    .project-menu-foot {
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .project-menu-foot {
+      align-self: end;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+
+    .project-home {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 16px;
+      padding: 24px;
+      min-width: 0;
+      background: var(--warm-bone);
+    }
+
+    .project-home-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 18px;
+      align-items: start;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .home-kicker {
+      margin-bottom: 8px;
+      color: var(--muted-teal);
+      font-family: var(--font-latin-brand);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .project-home h3 {
+      margin: 0;
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-size: 30px;
+      line-height: 1.16;
+      font-weight: 500;
+    }
+
+    .project-home p {
+      max-width: 620px;
+      margin: 10px 0 0;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .remote-chip {
+      border: 1px solid rgba(74, 127, 123, 0.34);
+      border-radius: 6px;
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--muted-teal);
+      padding: 7px 9px;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .project-input {
+      min-height: 76px;
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 14px;
+      color: var(--ink-muted);
+      font-size: 13px;
+    }
+
+    .project-input b {
+      width: 30px;
+      height: 30px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--muted-teal);
+      color: var(--paper);
+      font-weight: 650;
+    }
+
+    .project-home-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 14px;
+      align-content: start;
+    }
+
+    .project-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 14px;
+      min-width: 0;
+    }
+
+    .conversations-card {
+      grid-row: span 2;
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .card-head b {
+      color: var(--ink-strong);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .card-head span {
+      color: var(--muted-teal);
+      font-size: 12px;
+    }
+
+    .home-list {
+      display: grid;
+      gap: 0;
+    }
+
+    .home-row,
+    .people-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--soft-line);
+      color: var(--ink-body);
+      font-size: 12px;
+    }
+
+    .home-row:last-child,
+    .people-row:last-child {
+      border-bottom: 0;
+    }
+
+    .home-row.active {
+      color: var(--ink-strong);
+    }
+
+    .home-row b,
+    .people-row b {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .home-row span,
+    .people-row span {
+      color: var(--ink-muted);
+      white-space: nowrap;
+    }
+
+    .side-info-card {
+      background: rgba(217, 213, 202, 0.26);
+    }
+
+    .wiki-card {
+      display: grid;
+      gap: 12px;
+      color: inherit;
+      text-decoration: none;
+      overflow: hidden;
+    }
+
+    .wiki-mini-graph {
+      position: relative;
+      min-height: 132px;
+      border: 1px solid var(--soft-line);
+      border-radius: 6px;
+      background:
+        linear-gradient(rgba(30, 31, 33, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 31, 33, 0.035) 1px, transparent 1px),
+        rgba(217, 213, 202, 0.16);
+      background-size: 28px 28px;
+    }
+
+    .wiki-mini-graph svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: rgba(74, 127, 123, 0.42);
+      stroke-width: 1.4;
+    }
+
+    .wiki-node {
+      position: absolute;
+      min-width: 58px;
+      border: 1px solid rgba(74, 127, 123, 0.34);
+      border-radius: 999px;
+      background: var(--paper);
+      color: var(--brand-ink);
+      padding: 5px 8px;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1.15;
+    }
+
+    .wiki-node.primary {
+      border-color: rgba(224, 122, 95, 0.44);
+      background: rgba(224, 122, 95, 0.12);
+      color: var(--graphite);
+    }
+
+    .wiki-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .wiki-summary b {
+      display: block;
+      color: var(--ink-strong);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .calendar-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .calendar-mini {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+    }
+
+    .calendar-day {
+      min-height: 18px;
+      border: 1px solid var(--soft-line);
+      border-radius: 4px;
+      background: rgba(244, 241, 235, 0.72);
+    }
+
+    .calendar-day.is-muted {
+      opacity: 0.38;
+    }
+
+    .calendar-day.is-marked {
+      border-color: rgba(74, 127, 123, 0.32);
+      background: rgba(74, 127, 123, 0.12);
+    }
+
+    .calendar-note {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 11px;
+      line-height: 1.55;
+    }
+
+    .conversation-peek {
+      display: grid;
+      grid-template-columns: 120px minmax(0, 1fr);
+      gap: 16px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .conversation-peek b {
+      color: var(--muted-teal);
+      font-weight: 650;
+    }
+
+    @media (max-width: 1080px) {
+      .shell {
+        grid-template-columns: 1fr;
+      }
+
+      .rail {
+        position: static;
+        height: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .rail-foot {
+        position: static;
+        margin-top: 24px;
+      }
+
+      .hero,
+      .two-col,
+      .flow,
+      .final-split {
+        grid-template-columns: 1fr;
+      }
+
+      .app-preview {
+        grid-template-columns: 150px minmax(260px, 1fr);
+      }
+
+      .friday-panel {
+        grid-column: 1 / -1;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+    }
+
+    @media (max-width: 720px) {
+      main {
+        padding: 24px 16px 40px;
+      }
+
+      .decision {
+        grid-template-columns: 1fr;
+        gap: 5px;
+      }
+
+      .app-preview {
+        grid-template-columns: 1fr;
+      }
+
+      .final-preview {
+        grid-template-columns: 1fr;
+        min-width: 0;
+      }
+
+      .workline-sidebar {
+        min-height: auto;
+      }
+
+      .artifact-tabs {
+        flex-wrap: wrap;
+      }
+
+      .artifact-split-hint {
+        width: 100%;
+        margin-left: 0;
+      }
+
+      .artifact-canvas {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">
+        <img src="../../../brand/logo/friday-icon.svg" alt="">
+        <div>
+          <p class="brand-title">FRIDAY</p>
+          <p class="brand-subtitle">Desktop Plan</p>
+        </div>
+      </div>
+      <p class="rail-note">产品规划工作台 · HTML 版</p>
+      <nav class="nav" aria-label="规划导航">
+        <a href="#summary"><span class="mark">01</span>总纲</a>
+        <a href="#decisions"><span class="mark">02</span>已确认决策</a>
+        <a href="#scope"><span class="mark">03</span>v0 边界</a>
+        <a href="#persistence"><span class="mark">04</span>落盘分层</a>
+        <a href="#core-flow"><span class="mark">05</span>核心流程</a>
+        <a href="#preview"><span class="mark">06</span>工作台预览</a>
+        <a href="#flow"><span class="mark">07</span>启动流程</a>
+        <a href="#sources"><span class="mark">08</span>文档来源</a>
+      </nav>
+      <div class="rail-foot">
+        后续视觉、信息架构、模块页面和技能库决策，都可以继续在这个 HTML 里生成可评审预览。
+      </div>
+    </aside>
+
+    <main>
+      <header class="hero" id="summary">
+        <div>
+          <div class="eyebrow">Planning Artifact / 2026-06-08</div>
+          <h1>把桌面端规划变成可以看的产品工作台。</h1>
+          <p>这个页面不是替代 Markdown 决策日志，而是作为更适合评审的 HTML 入口。文字决策、信息架构和界面预览放在同一个地方，确认后再沉淀回实施计划。</p>
+        </div>
+        <aside class="status-board" aria-label="当前状态">
+          <h2>当前状态</h2>
+          <div class="status-list">
+            <div class="status-row"><b>主入口</b><span>新增</span></div>
+            <div class="status-row"><b>产品对象</b><span>已收敛</span></div>
+            <div class="status-row"><b>工作区结构</b><span>已确认</span></div>
+            <div class="status-row"><b>预览形态</b><span>已确认</span></div>
+          </div>
+        </aside>
+      </header>
+
+      <section class="band" id="decisions">
+        <h2>已确认决策</h2>
+        <div class="decision-list">
+          <article class="decision">
+            <div class="label">产品定位</div>
+            <div>
+              <strong>FRIDAY Desktop 是本地优先的工作台</strong>
+              <p>面向组织和团队里的泛文档工作者，不把产品表达成 Coding Agent。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">形态原则</div>
+            <div>
+              <strong>桌面端是新形态，但不偏离 FRIDAY 既有能力</strong>
+              <p>交互可以脱离 Obsidian 重新组织；能力侧优先复用 runtime、过程面板、资料、Skill、Soul、同步和本地状态。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">视觉基准</div>
+            <div>
+              <strong>Codex 只参考信息结构，视觉回到 FRIDAY VI</strong>
+              <p>不是机械套色，而是遵守柔和墨色、Warm Bone 文档底色、少量 Muted Teal 功能色、少阴影和低侵入排版。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">产物画布</div>
+            <div>
+              <strong>默认一个当前产物，顶部标签切换</strong>
+              <p>需要并行查看时，用户拖拽标签把产物拆成左右或上下并列显示。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">进入规则</div>
+            <div>
+              <strong>生成可视产物自动切换，已有主产物自动恢复</strong>
+              <p>用户也可以手动打开工作区里的已有可显示文件，一边看内容一边和 FRIDAY 对话。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">对话历史</div>
+            <div>
+              <strong>每个对话打开时加载完整历史</strong>
+              <p>项目可以有多个对话；切换对话时，产物画布和右侧 FRIDAY 侧栏都随当前对话切换。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">工作线侧栏</div>
+            <div>
+              <strong>最左侧是常驻小侧边栏，项目打开第二层菜单</strong>
+              <p>点击项目后显示全部项目；进入项目主页后，再开始新对话或点击已有对话进入对话页。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">启动入口</div>
+            <div>
+              <strong>首次选择或新建工作区，之后恢复上次工作区</strong>
+              <p>工作区列表只作为切换器，默认第一屏直接进入工作台。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">产品语气</div>
+            <div>
+              <strong>FRIDAY 是加入项目的工作伙伴</strong>
+              <p>初始化、识别和建议文案可以轻微拟人化，例如“让 FRIDAY 加入一个项目”“FRIDAY 已查看文件夹结构”，但行为说明必须保持清楚。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">本地结构</div>
+            <div>
+              <strong>工作区内使用可见的 FRIDAY/ 目录</strong>
+              <p>项目根目录和现有文件树是直接信息来源；FRIDAY 自己产生和管理的内容放在 FRIDAY/。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">混合工作区</div>
+            <div>
+              <strong>不再创建 Knowledge/ 和 Code/ 作为默认分类目录</strong>
+              <p>FRIDAY 只有一个混合工作区模型；已有文件通过 metadata 标记为资料、代码或两者兼具，不因为分类被移动或复制。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">初始化</div>
+            <div>
+              <strong>让 FRIDAY 加入项目后，才创建 FRIDAY/</strong>
+              <p>加入项目不移动已有文件；如果这个文件夹本身就是资料库，用户可以让 FRIDAY 把现有文件登记为项目资料。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">资料命名</div>
+            <div>
+              <strong>产品侧叫项目资料库，技术侧仍可叫 context</strong>
+              <p>资料默认可参与对话，但使用时按清单、说明、摘要、原文逐层披露。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">加入资料库</div>
+            <div>
+              <strong>从项目文件树加入，只登记资料身份</strong>
+              <p>项目资料库是管理视图；文件成为资料时只登记相对路径、说明、摘要和启用状态，不为现有文件创建隐藏副本。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">资料说明</div>
+            <div>
+              <strong>导入后不弹必填表单，说明可以后补</strong>
+              <p>FRIDAY 后台生成摘要和建议用途，但资料详情仍以原文件信息优先。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">资料状态</div>
+            <div>
+              <strong>新增资料默认启用，允许暂停</strong>
+              <p>暂停资料仍保留在项目资料库，但 FRIDAY 默认不参考；用户可在对话中点名使用。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Agent 自由度</div>
+            <div>
+              <strong>资料、Skill、产物都是显式文件，不做默认白名单限制</strong>
+              <p>FRIDAY 可以自由判断和组合相关文件；用户点名或排除某项时，只作为当前任务指令。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">参考披露</div>
+            <div>
+              <strong>回答底部显示“参考文件 x 个”</strong>
+              <p>点击后展开实际参考文件列表；默认折叠，不放在 FRIDAY 侧栏作为主要展示。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">技能库</div>
+            <div>
+              <strong>项目技能和全局技能无优先级</strong>
+              <p>只区分范围和存储位置。Skill 由用户主动创建，创建后默认启用。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Git 同步</div>
+            <div>
+              <strong>项目资料和项目技能是可共享资产，不是强制默认提交</strong>
+              <p>FRIDAY/context/ 和项目 FRIDAY/skills/ 可以作为协作内容；是否进入 Git 由项目来源和 Git Profile 决定。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="band" id="scope">
+        <h2>桌面端 v0 产品边界</h2>
+        <div class="decision-list">
+          <article class="decision">
+            <div class="label">必须跑通</div>
+            <div>
+              <strong>独立 Desktop Host + 本地工作区 + 项目主页</strong>
+              <p>用户可以启动桌面端，进入上次项目主页，切换项目，开始新对话或打开已有对话。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">核心工作流</div>
+            <div>
+              <strong>对话、过程 trace、产物画布必须形成闭环</strong>
+              <p>右侧 FRIDAY 加载完整历史；过程、工具调用和参考文件可折叠披露；生成或打开可显示文件时进入产物画布。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">资料与知识</div>
+            <div>
+              <strong>项目资料库 v1 可用，项目 Wiki 先做摘要和详情入口</strong>
+              <p>资料以项目文件树相对路径和 metadata 为事实来源；Wiki 先承载知识图谱预览和详情页，不要求完整自动生成能力。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">协作边界</div>
+            <div>
+              <strong>Git 同步采用 allowlist，而不是提交整个 FRIDAY/</strong>
+              <p>第一轮只把 context、项目 skills 和最小 project manifest 视作可共享资产；会产生频繁冲突的 conversations、traces、state、runtime cache 和个人 UI 状态默认本地。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">先占位</div>
+            <div>
+              <strong>团队、总日历、项目日历、模块、Soul 高级配置先保留入口</strong>
+              <p>这些能力进入总模块栏或项目主页，但 v0 不定义完整数据结构和复杂交互，避免第一轮产品边界失控。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">暂不做</div>
+            <div>
+              <strong>云账号、实时协作、完整 marketplace、移动端和自动升级</strong>
+              <p>第一轮只证明 FRIDAY 可以作为本地优先桌面 Host 跑通核心工作台，不做完整组织协作平台。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">验收口径</div>
+            <div>
+              <strong>一个本地项目能完成完整泛文档任务</strong>
+              <p>添加资料、开始对话、查看过程、生成或打开产物、引用文件、保存状态、下次恢复，这是 v0 的产品闭环。</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="band" id="persistence">
+        <h2>落盘对象与同步分层</h2>
+        <p>已确认原则：FRIDAY 的落盘对象先分成项目事实、运行过程和个人状态三层。v0 不把所有 FRIDAY/ 内容都当成协作数据；项目资料库和项目技能只是可共享资产层，是否进入 Git 由 Git Profile 决定。</p>
+        <div class="decision-list">
+          <article class="decision">
+            <div class="label">Git Profile</div>
+            <div>
+              <strong>项目来源决定共享层是否进入仓库</strong>
+              <p>新建本地项目默认 local-only；已有 Git 文件夹不自动污染仓库；从远端拉取的项目如果已有 FRIDAY 共享层，则按 remote-managed 加载。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Project</div>
+            <div>
+              <strong>项目 manifest 和个人状态分开保存</strong>
+              <p>project.json 只保存 schema version、项目识别和共享层版本；当前打开对话、窗口布局和设备状态留在本地状态里。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Context</div>
+            <div>
+              <strong>项目资料库是可共享资产</strong>
+              <p>保存资料登记、说明、metadata、启用状态和产物入库记录；启用共享层后，它是团队通过 Git 协作时最稳定的事实层。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">File Role</div>
+            <div>
+              <strong>已有文件不自动挪动，只登记角色</strong>
+              <p>知识资料、代码文件、兼具两者和排除项都通过 registry / metadata 表达；物理整理文件必须是单独确认后的操作。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Skill</div>
+            <div>
+              <strong>项目技能可共享，全局技能属于本机</strong>
+              <p>FRIDAY/skills/ 保存当前项目技能；全局 Skills 放在本机全局目录，不随单个项目默认同步。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Conversation / Turn</div>
+            <div>
+              <strong>对话和单轮消息默认本地</strong>
+              <p>保存标题、完整历史、用户输入、FRIDAY 回复和确认事项；v0 不作为多人 Git 协作事实来源。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Artifact</div>
+            <div>
+              <strong>产物放在 FRIDAY/artifacts/，加入资料库时再决定去向</strong>
+              <p>生成的 md、html、report 等文件可以在画布中打开；用户可把产物放入 FRIDAY 托管资料文件夹，或写入项目文件树指定位置。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Trace / Reference</div>
+            <div>
+              <strong>过程和引用记录跟随对话本地保存</strong>
+              <p>Trace 记录工具调用、读写文件和 runtime event；Reference 记录某次回答实际参考文件，默认只服务恢复和追溯。</p>
+            </div>
+          </article>
+          <article class="decision">
+            <div class="label">Workspace State</div>
+            <div>
+              <strong>窗口、画布和折叠状态是个人状态</strong>
+              <p>保存当前打开对话、布局、标签、折叠状态和设备状态；不进入 Git 协作层。</p>
+            </div>
+          </article>
+        </div>
+        <div class="note">目录草案：项目根目录和现有文件树是直接信息来源；FRIDAY/project.json、FRIDAY/context/、FRIDAY/skills/ 属于可共享资产层；FRIDAY/context/ 是资料登记层，项目文件记录相对路径和文件角色，不复制现有文件；FRIDAY/artifacts/ 是产物区，产物可被加入资料库或写入项目文件树；FRIDAY/conversations/、FRIDAY/traces/、FRIDAY/references/、FRIDAY/state/、FRIDAY/runtime/、FRIDAY/local/ 默认本地。</div>
+      </section>
+
+      <section class="band" id="core-flow">
+        <h2>v0 核心工作流状态流</h2>
+        <div class="flow">
+          <div class="flow-step">
+            <b>1. 项目主页接收意图</b>
+            <p>用户进入上次项目主页，在输入框里说明要做什么，或点击已有对话继续工作。</p>
+          </div>
+          <div class="flow-step">
+            <b>2. 创建或恢复对话</b>
+            <p>FRIDAY 根据输入创建新对话；打开旧对话时加载完整历史，并恢复该对话绑定的主产物状态。</p>
+          </div>
+          <div class="flow-step">
+            <b>3. FRIDAY 运行并披露过程</b>
+            <p>右侧 FRIDAY 区域显示完整对话、过程 trace、工具调用、确认事项和继续输入，过程卡片可以折叠。</p>
+          </div>
+          <div class="flow-step">
+            <b>4. 生成或打开产物</b>
+            <p>当 FRIDAY 生成 Markdown、HTML、报告等可显示文件，或用户手动打开已有可显示文件时，进入产物状态。</p>
+          </div>
+          <div class="flow-step">
+            <b>5. 产物画布接管主区域</b>
+            <p>主区域从对话工作台切换为产物画布；右侧仍是同一对话的完整 FRIDAY 历史和过程。</p>
+          </div>
+          <div class="flow-step">
+            <b>6. 引用披露和状态恢复</b>
+            <p>回答底部显示“参考文件 x 个”；对话、产物、trace 和引用记录落盘，下次打开项目时可恢复。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="preview">
+        <div>
+          <h2>桌面端信息层级定稿预览</h2>
+          <p>已确认的信息结构：最左侧是常驻总模块栏，先放搜索、项目、团队、日历、模块、SOUL 和设置；其中团队、日历先作为占位，后续再定义具体内容。点击项目后出现第二层项目菜单；点击任意项目进入项目主页。项目主页负责开始新对话、进入已有对话，并展示资料库、Wiki、项目日历、技能、协作人员和远端配置的摘要。进入对话页后，第二层不再显示全部项目，而是切换为当前项目导航。</p>
+          <div class="note">进入某个对话后，主要页面内容继续沿用前面确认的对话页结构：有产物时显示画布 + 右侧 FRIDAY 过程区；没有产物时显示对话主页面 + 靠右资源窗口。</div>
+        </div>
+
+        <div class="preview-frame" aria-label="FRIDAY Desktop 定稿工作台结构预览">
+          <div class="window-bar">
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+          <div class="final-preview">
+            <aside class="app-mini-rail" aria-label="全局导航">
+              <div class="mini-brand"><img src="../../../brand/logo/friday-icon.svg" alt=""></div>
+              <div class="mini-nav">
+                <div class="mini-nav-item" title="搜索">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="10.5" cy="10.5" r="5.6"></circle>
+                      <path d="M14.8 14.8 19.5 19.5"></path>
+                    </svg>
+                  </span>
+                  <span class="mini-label">搜索</span>
+                </div>
+                <div class="mini-nav-item active" title="项目">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M4.5 8.5h5.2l1.5 2h8.3v7.1a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V10.5a2 2 0 0 1 2-2Z"></path>
+                      <path d="M4.5 10.5h15"></path>
+                    </svg>
+                  </span>
+                  <span class="mini-label">项目</span>
+                </div>
+                <div class="mini-nav-item" title="团队">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <circle cx="9" cy="8.2" r="3"></circle>
+                      <path d="M4.8 18.2c.7-3.2 2.1-5 4.2-5s3.5 1.8 4.2 5"></path>
+                      <path d="M14.1 10.4a2.6 2.6 0 1 0 1.1-5"></path>
+                      <path d="M14.9 13.1c2.4.3 3.9 2 4.5 5.1"></path>
+                    </svg>
+                  </span>
+                  <span class="mini-label">团队</span>
+                </div>
+                <div class="mini-nav-item" title="日历">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect x="4.5" y="6.5" width="15" height="13" rx="2"></rect>
+                      <path d="M8 4.5v4M16 4.5v4M4.5 10.5h15"></path>
+                      <path d="M8.1 14.1h.1M12 14.1h.1M15.9 14.1h.1M8.1 17h.1M12 17h.1"></path>
+                    </svg>
+                  </span>
+                  <span class="mini-label">日历</span>
+                </div>
+                <div class="mini-nav-item" title="模块">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <rect x="4.7" y="4.7" width="5.7" height="5.7" rx="1.4"></rect>
+                      <rect x="13.6" y="4.7" width="5.7" height="5.7" rx="1.4"></rect>
+                      <rect x="4.7" y="13.6" width="5.7" height="5.7" rx="1.4"></rect>
+                      <rect x="13.6" y="13.6" width="5.7" height="5.7" rx="1.4"></rect>
+                    </svg>
+                  </span>
+                  <span class="mini-label">模块</span>
+                </div>
+                <div class="mini-nav-item" title="SOUL">
+                  <span class="mini-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M12 4.8a7.2 7.2 0 1 1-6.4 10.5"></path>
+                      <path d="M12 8.2a3.8 3.8 0 1 1-3.8 3.8"></path>
+                      <circle cx="12" cy="12" r="0.9"></circle>
+                    </svg>
+                  </span>
+                  <span class="mini-label">SOUL</span>
+                </div>
+              </div>
+              <div class="mini-nav-item mini-settings" title="设置">
+                <span class="mini-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 4.5v2.2M12 17.3v2.2M5.6 7.1l1.6 1.6M16.8 15.3l1.6 1.6M4.5 12h2.2M17.3 12h2.2M5.6 16.9l1.6-1.6M16.8 8.7l1.6-1.6"></path>
+                    <circle cx="12" cy="12" r="3.8"></circle>
+                  </svg>
+                </span>
+                <span class="mini-label">设置</span>
+              </div>
+            </aside>
+
+            <aside class="project-menu" aria-label="项目列表">
+              <div class="menu-heading">项目</div>
+              <div class="project-menu-row active">
+                <b>FRIDAY Desktop</b>
+                <span>12 个对话</span>
+              </div>
+              <div class="project-menu-row">
+                <b>直播间分析复盘</b>
+                <span>8 个对话</span>
+              </div>
+              <div class="project-menu-row">
+                <b>世界模型</b>
+                <span>5 个对话</span>
+              </div>
+              <div class="project-menu-row">
+                <b>汇率监测</b>
+                <span>3 个对话</span>
+              </div>
+              <div class="project-menu-foot">＋ 新建工作区</div>
+            </aside>
+
+            <section class="project-home" aria-label="项目主页">
+              <header class="project-home-head">
+                <div>
+                  <div class="home-kicker">FRIDAY Desktop</div>
+                  <h3>产品规划工作区</h3>
+                  <p>项目主页是进入工作的中间层：先看到项目状态，再选择开始新对话或进入已有对话。</p>
+                </div>
+                <div class="remote-chip">远端已配置 · main</div>
+              </header>
+
+              <div class="project-input">
+                <span>向 FRIDAY 说明你要在这个项目里做什么...</span>
+                <b>↑</b>
+              </div>
+
+              <div class="project-home-grid">
+                <section class="project-card conversations-card">
+                  <div class="card-head">
+                    <b>全部对话</b>
+                    <span>更多</span>
+                  </div>
+                  <div class="home-list">
+                    <div class="home-row active"><b>基于 PI 的桌面端</b><span>14 分</span></div>
+                    <div class="home-row"><b>桌面端产品规划</b><span>今天</span></div>
+                    <div class="home-row"><b>项目资料库规则</b><span>昨天</span></div>
+                    <div class="home-row"><b>技能与 Soul</b><span>2 天</span></div>
+                  </div>
+                </section>
+
+                <section class="project-card">
+                  <div class="card-head">
+                    <b>项目资料库</b>
+                    <span>更多</span>
+                  </div>
+                  <div class="home-list">
+                    <div class="home-row"><b>已配置 12 份资料</b><span>查看</span></div>
+                  </div>
+                </section>
+
+                <section class="project-card">
+                  <div class="card-head">
+                    <b>项目技能</b>
+                    <span>更多 · 配置</span>
+                  </div>
+                  <div class="home-list">
+                    <div class="home-row"><b>产品规划复盘</b><span>启用</span></div>
+                    <div class="home-row"><b>HTML 规划页生成</b><span>启用</span></div>
+                    <div class="home-row"><b>FRIDAY VI 检查</b><span>暂停</span></div>
+                  </div>
+                </section>
+
+                <a class="project-card wiki-card" href="./previews/project-wiki-graph.html">
+                  <div class="card-head">
+                    <b>项目 Wiki</b>
+                    <span>查看知识图谱</span>
+                  </div>
+                  <div class="wiki-mini-graph" aria-label="当前项目知识图谱预览">
+                    <svg viewBox="0 0 300 132" aria-hidden="true">
+                      <path d="M92 35 C122 28, 143 42, 156 62"></path>
+                      <path d="M156 62 C188 52, 214 62, 235 84"></path>
+                      <path d="M156 62 C134 86, 116 101, 82 105"></path>
+                      <path d="M156 62 C168 87, 184 101, 213 110"></path>
+                    </svg>
+                    <span class="wiki-node primary" style="left: 105px; top: 50px;">桌面端</span>
+                    <span class="wiki-node" style="left: 28px; top: 22px;">PI Runtime</span>
+                    <span class="wiki-node" style="right: 22px; top: 72px;">项目资料库</span>
+                    <span class="wiki-node" style="left: 20px; bottom: 16px;">技能库</span>
+                    <span class="wiki-node" style="right: 46px; bottom: 12px;">产物画布</span>
+                  </div>
+                  <div class="wiki-summary">
+                    <span><b>38</b>知识节点</span>
+                    <span><b>72</b>关系</span>
+                    <span><b>12</b>来源文件</span>
+                  </div>
+                </a>
+
+                <section class="project-card calendar-card">
+                  <div class="card-head">
+                    <b>项目日历</b>
+                    <span>占位 · 后续定义</span>
+                  </div>
+                  <div class="calendar-mini" aria-label="项目日历占位预览">
+                    <span class="calendar-day is-muted"></span>
+                    <span class="calendar-day is-muted"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day is-marked"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day is-marked"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day"></span>
+                    <span class="calendar-day is-marked"></span>
+                    <span class="calendar-day"></span>
+                  </div>
+                  <p class="calendar-note">先作为项目管理视图占位，暂不定义任务、会议、排期或提醒规则。</p>
+                </section>
+
+                <section class="project-card side-info-card">
+                  <div class="card-head">
+                    <b>项目状态</b>
+                    <span>配置</span>
+                  </div>
+                  <div class="people-row">
+                    <span>协作人员</span>
+                    <b>Keith · FRIDAY</b>
+                  </div>
+                  <div class="people-row">
+                    <span>远端</span>
+                    <b>origin/main 已连接</b>
+                  </div>
+                  <div class="people-row">
+                    <span>资料</span>
+                    <b>12 个启用 · 2 个暂停</b>
+                  </div>
+                </section>
+              </div>
+
+              <div class="conversation-peek">
+                <b>进入对话页后</b>
+                <span>左侧小侧栏仍作为全局导航；第二层切换为当前项目导航，优先显示本项目对话，底部只放资料库、Wiki、技能入口；产物跟随对话标题行或画布。</span>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div class="preview-actions">
+          <a href="./previews/codex-reference-workbench.html">查看有画布完整预览</a>
+          <a href="./previews/no-canvas-workbench.html">查看无画布完整预览</a>
+          <a href="./previews/project-wiki-graph.html">查看 Wiki 知识图谱预览</a>
+        </div>
+      </section>
+
+      <section class="band" id="capability-map">
+        <h2>下一步讨论：既有能力映射</h2>
+        <div class="flow">
+          <div class="flow-step">
+            <b>对话与过程</b>
+            <p>把现有 runtime progress、tool trace 和过程折叠抽成桌面端中间对话区能力。</p>
+          </div>
+          <div class="flow-step">
+            <b>工作区边界</b>
+            <p>把项目路径、权限、Git 同步和文件修改审查放进 Desktop HostAdapter。</p>
+          </div>
+          <div class="flow-step">
+            <b>项目资料库</b>
+            <p>承接 context、mention、memory、摘要和回答底部的实际参考文件披露。</p>
+          </div>
+          <div class="flow-step">
+            <b>产物</b>
+            <p>承接 FRIDAY 生成文件、用户已有可显示文件和修改结果；默认单主产物，顶部标签切换，拖拽标签后可并列。</p>
+          </div>
+          <div class="flow-step">
+            <b>技能与 Soul</b>
+            <p>把项目 Skill、全局 Skill、Soul 行为画像和未来模块组合放到独立管理入口。</p>
+          </div>
+          <div class="flow-step">
+            <b>PI 与模块</b>
+            <p>把 PI SDK 和社区能力映射成 FRIDAY 可审查、可启用、可本地修改的模块协议。</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="flow">
+        <h2>工作区启动流程</h2>
+        <div class="flow">
+          <div class="flow-step">
+            <b>项目页入口</b>
+            <p>用户在项目页点击“让 FRIDAY 加入一个项目”。</p>
+          </div>
+          <div class="flow-step">
+            <b>选择项目位置</b>
+            <p>用户可以新建文件夹，也可以选择一个已有文件夹。</p>
+          </div>
+          <div class="flow-step">
+            <b>FRIDAY 先观察</b>
+            <p>如果是已有文件夹，FRIDAY 先只读查看文件夹结构，再给出初步结论。</p>
+          </div>
+          <div class="flow-step">
+            <b>确认加入</b>
+            <p>用户可以加入项目或取消；项目资料库视图进入项目后再定义。</p>
+          </div>
+          <div class="flow-step">
+            <b>再次打开</b>
+            <p>恢复上次项目主页，最左侧保留项目切换入口。</p>
+          </div>
+        </div>
+        <div class="observation-card">
+          <h3>FRIDAY 已查看文件夹结构</h3>
+          <div class="observation-row">
+            <b>初步判断</b>
+            <span>偏代码项目。</span>
+          </div>
+          <div class="observation-row">
+            <b>判断依据</b>
+            <span>Git 仓库 · 文档 12 个 · 代码文件 184 个 · README · docs/ · package.json</span>
+          </div>
+          <div class="observation-row">
+            <b>建议</b>
+            <span>对于需要作为项目背景资料的文件，请在项目资料库中选择现有文件进行配置。</span>
+          </div>
+          <div class="observation-row">
+            <b>说明</b>
+            <span>观察阶段不会创建 FRIDAY/，也不会移动或修改原有文件。</span>
+          </div>
+          <div class="observation-actions">
+            <span>加入项目</span>
+            <span>取消</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="band" id="sources">
+        <h2>文档来源</h2>
+        <p>HTML 页面用于阅读和视觉评审；Markdown 文件继续作为可 diff、可追溯的事实来源。</p>
+        <div class="source-links">
+          <a href="./2026-06-08-friday-desktop-product-master-plan.zh.md">产品规划总纲</a>
+          <a href="./2026-06-08-friday-desktop-product-decisions.zh.md">产品决策记录</a>
+          <a href="./2026-06-06-friday-desktop-module-platform-vision.zh.md">模块平台长期愿景</a>
+          <a href="./2026-06-06-friday-desktop-product-implementation.zh.md">工程实施计划</a>
+          <a href="./previews/workbench-v1.html">项目工作台 v1 预览</a>
+          <a href="./previews/project-library-v1.html">项目资料库 v1 预览</a>
+          <a href="./previews/project-wiki-graph.html">项目 Wiki 知识图谱预览</a>
+          <a href="./previews/codex-reference-workbench.html">有画布工作台定稿预览</a>
+          <a href="./previews/no-canvas-workbench.html">无画布对话页预览</a>
+          <a href="./previews/resource-entry-options.html">项目资源入口方案预览</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>项目工作台 v1 预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #F4F1EB;
+      --ink: #1E1F21;
+      --muted: #666F70;
+      --line: #D9D5CA;
+      --soft-line: #E8E3DA;
+      --surface: #FCFAF6;
+      --side: #1E1F21;
+      --side-2: #2A2C2E;
+      --green: #4A7F7B;
+      --green-soft: #DDEBE8;
+      --blue: #4F8F8B;
+      --blue-soft: #E3EFED;
+      --rust: #E07A5F;
+      --rust-soft: #F5DDD5;
+      --active: #4A7F7B;
+      --active-soft: #DDEBE8;
+      --shadow: 0 22px 70px rgba(30, 31, 33, 0.14);
+      font-family: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.5;
+    }
+
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 278px minmax(420px, 1fr) 300px;
+      background: var(--bg);
+    }
+
+    .conversations {
+      background: var(--side);
+      color: #F4F1EB;
+      padding: 18px 14px;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      gap: 14px;
+      min-height: 100vh;
+    }
+
+    .project-switcher {
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .project-switcher img {
+      width: 28px;
+      height: auto;
+      display: block;
+    }
+
+    .project-switcher strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .project-switcher span {
+      color: rgba(244, 241, 235, 0.68);
+      font-size: 12px;
+    }
+
+    .new-chat {
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      background: var(--active);
+      color: #F4F1EB;
+      border-radius: 6px;
+      padding: 9px 11px;
+      font-weight: 760;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .conversation-group {
+      overflow: hidden;
+    }
+
+    .group-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: rgba(244, 241, 235, 0.58);
+      font-size: 12px;
+      margin: 4px 4px 8px;
+    }
+
+    .chat-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .chat-item {
+      border-radius: 7px;
+      padding: 9px 10px;
+      background: transparent;
+      color: rgba(244, 241, 235, 0.72);
+      font-size: 12px;
+    }
+
+    .chat-item.active {
+      background: rgba(255, 255, 255, 0.1);
+      color: #FCFAF6;
+      box-shadow: inset 3px 0 0 var(--active);
+    }
+
+    .chat-item strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+
+    .chat-item span {
+      color: rgba(244, 241, 235, 0.55);
+    }
+
+    .collapse-note {
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      padding-top: 12px;
+      color: rgba(244, 241, 235, 0.55);
+      font-size: 12px;
+    }
+
+    .chat {
+      position: relative;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 100vh;
+      background: #F4F1EB;
+    }
+
+    .chat-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: flex-start;
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--line);
+      background: #FCFAF6;
+    }
+
+    .chat-header h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: 0;
+    }
+
+    .chat-header p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status-pills {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      background: var(--green-soft);
+      color: #315F5B;
+      white-space: nowrap;
+    }
+
+    .thread {
+      padding: 22px clamp(18px, 4vw, 46px);
+      overflow: auto;
+      display: grid;
+      align-content: start;
+      gap: 14px;
+    }
+
+    .message {
+      max-width: 760px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 13px 15px;
+      background: var(--surface);
+      box-shadow: 0 8px 24px rgba(55, 47, 33, 0.06);
+      font-size: 14px;
+    }
+
+    .message.user {
+      justify-self: end;
+      background: #FFF5F1;
+      border-color: #E8BFB2;
+    }
+
+    .process {
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--soft-line);
+      padding-top: 9px;
+      margin-top: 10px;
+    }
+
+    .refs {
+      border-top: 1px solid var(--soft-line);
+      margin-top: 10px;
+      padding-top: 9px;
+      font-size: 12px;
+    }
+
+    .refs summary {
+      color: var(--green);
+      font-weight: 760;
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .refs summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .refs summary::after {
+      content: " 展开";
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .refs[open] summary::after {
+      content: " 收起";
+    }
+
+    .refs ul {
+      padding-left: 18px;
+      color: var(--muted);
+      margin: 8px 0 0;
+    }
+
+    .composer {
+      padding: 16px 24px 20px;
+      border-top: 1px solid var(--line);
+      background: #FCFAF6;
+    }
+
+    .composer-box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      min-height: 76px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .send {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      background: var(--green);
+      color: #F4F1EB;
+      font-weight: 800;
+    }
+
+    .resource-panel {
+      background: #E8E3DA;
+      border-left: 1px solid var(--line);
+      padding: 18px 14px;
+      display: grid;
+      align-content: start;
+      gap: 12px;
+    }
+
+    .resource-panel h2 {
+      margin: 0 0 2px;
+      font-size: 16px;
+    }
+
+    .resource-panel .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 8px;
+    }
+
+    .resource-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #FCFAF6;
+      padding: 12px;
+    }
+
+    .resource-card h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .resource-card h3 span {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .mini-list {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    .open-detail {
+      border-top: 1px solid var(--soft-line);
+      padding-top: 8px;
+      color: var(--green);
+      font-weight: 750;
+      font-size: 12px;
+    }
+
+    .floating {
+      position: absolute;
+      inset: 76px clamp(28px, 6vw, 74px) 104px;
+      background: rgba(30, 31, 33, 0.18);
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+    }
+
+    .floating-window {
+      width: min(680px, 94%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      pointer-events: auto;
+    }
+
+    .float-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #E8E3DA;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .float-close {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .float-body {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .detail-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 14px;
+      border-bottom: 1px solid var(--soft-line);
+      padding-bottom: 10px;
+      font-size: 13px;
+    }
+
+    .detail-row:last-child {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    .detail-row b {
+      color: var(--ink);
+    }
+
+    .detail-row span {
+      color: var(--muted);
+    }
+
+    @media (max-width: 1180px) {
+      .app {
+        grid-template-columns: 230px minmax(360px, 1fr);
+      }
+
+      .resource-panel {
+        grid-column: 1 / -1;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .resource-panel > h2,
+      .resource-panel > .hint {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .app {
+        grid-template-columns: 1fr;
+      }
+
+      .conversations {
+        min-height: auto;
+      }
+
+      .chat {
+        min-height: 720px;
+      }
+
+      .resource-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .floating {
+        inset: 72px 12px 96px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="conversations">
+      <div class="project-switcher">
+        <img src="../../../../brand/logo/friday-icon-reversed.svg" alt="">
+        <div>
+          <strong>产品规划工作区</strong>
+          <span>左侧是这个项目里的对话，可收起</span>
+        </div>
+      </div>
+      <div class="new-chat">新建对话</div>
+      <section class="conversation-group">
+        <div class="group-title"><span>项目对话</span><span>收起</span></div>
+        <div class="chat-list">
+          <div class="chat-item active">
+            <strong>桌面端产品规划</strong>
+            <span>正在讨论项目工作台布局</span>
+          </div>
+          <div class="chat-item">
+            <strong>资料库规则</strong>
+            <span>快照、说明、启用状态</span>
+          </div>
+          <div class="chat-item">
+            <strong>技能库边界</strong>
+            <span>项目技能 / 全局技能</span>
+          </div>
+          <div class="chat-item">
+            <strong>PI Runtime 接入</strong>
+            <span>工具 trace 和 host adapter</span>
+          </div>
+        </div>
+      </section>
+      <div class="collapse-note">折叠后只保留窄栏和当前对话入口，避免压缩中间对话区。</div>
+    </aside>
+
+    <main class="chat">
+      <header class="chat-header">
+        <div>
+          <h1>桌面端产品规划</h1>
+          <p>中间区域保持对话为主，接近当前 FRIDAY 在 Obsidian 里的工作状态。</p>
+        </div>
+        <div class="status-pills">
+          <span class="pill">资料 12</span>
+          <span class="pill">产物 4</span>
+          <span class="pill">项目技能 3</span>
+        </div>
+      </header>
+
+      <section class="thread" aria-label="对话">
+        <div class="message user">项目工作台应该左边是项目里的不同对话，中间是对话界面，右边放资料库、产物、技能入口。</div>
+        <div class="message">
+          这个结构更清楚：左侧服务“在这个项目里切换不同工作线”，中间保持 FRIDAY 对话，右侧不是完整管理页，而是三类关键资源的入口和摘要。
+          <details class="refs">
+            <summary>参考文件 2 个</summary>
+            <ul>
+              <li>FRIDAY 桌面端产品决策记录.md</li>
+              <li>项目资料库 v1 预览.html</li>
+            </ul>
+          </details>
+          <div class="process">过程已折叠 · 可打开右侧资源详情浮窗</div>
+        </div>
+      </section>
+
+      <div class="floating" aria-label="中间悬浮详情窗口示例">
+        <div class="floating-window">
+          <div class="float-head">
+            <span>技能库详情 · 当前项目</span>
+            <span class="float-close">关闭</span>
+          </div>
+          <div class="float-body">
+            <div class="detail-row">
+              <b>项目技能</b>
+              <span>复盘结构化整理、内部汇报语气、资料摘要规范</span>
+            </div>
+            <div class="detail-row">
+              <b>全局技能</b>
+              <span>中文写作润色、会议纪要整理、轻代码脚本生成</span>
+            </div>
+            <div class="detail-row">
+              <b>启用规则</b>
+              <span>项目技能和全局技能无优先级，相关技能进入同一候选池。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <footer class="composer">
+        <div class="composer-box">
+          <span>和 FRIDAY 继续讨论这个项目...</span>
+          <span class="send">↑</span>
+        </div>
+      </footer>
+    </main>
+
+    <aside class="resource-panel">
+      <h2>项目资源</h2>
+        <p class="hint">右侧只展示摘要和入口。它提示相关资源，不限制 FRIDAY 的判断；点击后在中间打开悬浮详情。</p>
+
+      <section class="resource-card">
+        <h3>资料库 <span>12</span></h3>
+        <div class="mini-list">
+          <span>评审会议记录.md</span>
+          <span>客户反馈第二轮.pdf</span>
+          <span>下周评审提纲.md</span>
+        </div>
+        <div class="open-detail">查看资料库详情</div>
+      </section>
+
+      <section class="resource-card">
+        <h3>产物 <span>4</span></h3>
+        <div class="mini-list">
+          <span>评审提纲.md</span>
+          <span>行动项清单.xlsx</span>
+          <span>复盘草稿.md</span>
+        </div>
+        <div class="open-detail">查看产物详情</div>
+      </section>
+
+      <section class="resource-card">
+        <h3>技能 <span>3 / 8</span></h3>
+        <div class="mini-list">
+          <span>项目技能 3 个</span>
+          <span>全局技能 8 个</span>
+          <span>无优先级，按相关性使用</span>
+        </div>
+        <div class="open-detail">查看技能详情</div>
+      </section>
+    </aside>
+  </div>
+</body>
+</html>

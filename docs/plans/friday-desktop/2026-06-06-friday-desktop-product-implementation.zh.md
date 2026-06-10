@@ -20,7 +20,7 @@
 - `src/services/FridayPiRuntimeStateStore.ts`：PI session、tool trace、package metadata 和 workspace policy 的持久化基础。
 - `src/services/SoulStore.ts` 与 `src/features/soul/*`：Soul 的本地定义、模板和 profile 基础。
 - `src/views/DailyBoardView.ts`：现有主界面，但命名和职责已经是历史遗留问题。
-- `docs/plans/2026-06-06-friday-desktop-module-platform-vision.zh.md`：长期产品愿景记录。
+- `docs/plans/friday-desktop/2026-06-06-friday-desktop-module-platform-vision.zh.md`：长期产品愿景记录。
 
 基线验证命令：
 

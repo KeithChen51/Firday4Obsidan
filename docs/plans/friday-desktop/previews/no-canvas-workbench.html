@@ -1,0 +1,906 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY Desktop 无画布对话页预览</title>
+  <style>
+    :root {
+      --graphite: #1E1F21;
+      --warm-bone: #F4F1EB;
+      --stone: #D9D5CA;
+      --paper: #FBFAF7;
+      --shell: #F4F1EB;
+      --panel: #FBFAF7;
+      --ink: var(--graphite);
+      --muted: #4C4D4B;
+      --subtle: #6E716E;
+      --line: rgba(30, 31, 33, 0.13);
+      --soft-line: rgba(30, 31, 33, 0.07);
+      --muted-teal: #4A7F7B;
+      --muted-teal-soft: #DDEBE8;
+      --accent: #E07A5F;
+      --accent-soft: #F5DDD5;
+      --brand-ink: #315F5B;
+      --shell-muted: #EDE8DF;
+      --ink-strong: rgba(30, 31, 33, 0.88);
+      --ink-body: rgba(30, 31, 33, 0.72);
+      --ink-muted: rgba(30, 31, 33, 0.58);
+      --font-latin-brand: "Avenir Next", "Inter", "Segoe UI", Arial, sans-serif;
+      --font-cjk-display: "LXGW WenKai Screen", "LXGW WenKai", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STFangsong", "FangSong", serif;
+      --font-cjk-body: "LXGW WenKai Screen", "LXGW WenKai", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-cjk-ui: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --shadow: none;
+      font-family: var(--font-cjk-body);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--warm-bone);
+      color: var(--ink-body);
+      line-height: 1.65;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    main {
+      max-width: 1540px;
+      margin: 0 auto;
+      padding: 34px clamp(18px, 4vw, 56px) 64px;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 20px;
+      margin-bottom: 26px;
+    }
+
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-size: 18px;
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .brand img { width: 26px; }
+
+    .nav-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .nav-links a {
+      color: var(--muted-teal);
+      font-size: 13px;
+      font-weight: 760;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: color-mix(in srgb, var(--panel) 82%, var(--muted-teal-soft));
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 32px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 920px;
+      font-size: clamp(34px, 5vw, 60px);
+      line-height: 1.05;
+      letter-spacing: 0;
+      color: var(--ink);
+      font-family: var(--font-cjk-display);
+      font-weight: 500;
+    }
+
+    .intro p {
+      margin: 16px 0 0;
+      max-width: 920px;
+      color: var(--ink-muted);
+      font-size: 18px;
+      font-weight: 650;
+    }
+
+    .note {
+      border-left: 4px solid var(--muted-teal);
+      background: var(--muted-teal-soft);
+      padding: 16px 18px;
+      color: #315F5B;
+      font-weight: 760;
+    }
+
+    .desktop-frame {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--shell);
+      box-shadow: var(--shadow);
+      min-height: 720px;
+    }
+
+    .os-bar {
+      height: 40px;
+      display: grid;
+      grid-template-columns: 420px minmax(0, 1fr) 110px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--shell) 92%, var(--panel));
+      color: var(--subtle);
+      font-size: 14px;
+      font-weight: 680;
+    }
+
+    .menu {
+      display: flex;
+      gap: 22px;
+      white-space: nowrap;
+    }
+
+    .window-title {
+      justify-self: center;
+      color: var(--brand-ink);
+      font-weight: 760;
+    }
+
+    .window-controls {
+      display: flex;
+      justify-content: flex-end;
+      gap: 16px;
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .layout {
+      min-width: 1220px;
+      min-height: 680px;
+      display: grid;
+      grid-template-columns: 72px 220px minmax(0, 1fr);
+    }
+
+    .app-mini-rail {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+      padding: 14px 8px;
+      background: var(--paper);
+      border-right: 1px solid var(--line);
+    }
+
+    .mini-brand {
+      width: 52px;
+      min-height: 44px;
+      display: grid;
+      place-items: center;
+    }
+
+    .mini-brand img {
+      width: 28px;
+      height: auto;
+    }
+
+    .mini-nav {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .mini-nav-item {
+      width: 52px;
+      min-height: 54px;
+      display: grid;
+      grid-template-rows: 22px auto;
+      align-items: center;
+      justify-items: center;
+      gap: 4px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--ink-muted);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      line-height: 1;
+    }
+
+    .mini-nav-item.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--muted-teal);
+    }
+
+    .mini-settings {
+      align-self: end;
+    }
+
+    .mini-icon {
+      display: grid;
+      place-items: center;
+      min-height: 22px;
+      color: currentColor;
+      line-height: 0;
+    }
+
+    .mini-icon svg {
+      display: block;
+      width: 19px;
+      height: 19px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.85;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .mini-nav-item.active .mini-icon svg {
+      stroke-width: 2;
+    }
+
+    .mini-label {
+      color: currentColor;
+      font-family: var(--font-cjk-ui);
+      font-size: 10px;
+      font-weight: 500;
+      line-height: 1.1;
+      white-space: nowrap;
+    }
+
+    .project-menu {
+      display: grid;
+      grid-template-rows: auto repeat(4, auto) 1fr;
+      gap: 8px;
+      padding: 16px 12px;
+      border-right: 1px solid var(--line);
+      background: rgba(217, 213, 202, 0.26);
+      color: var(--ink-body);
+    }
+
+    .menu-heading {
+      margin-bottom: 6px;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .project-menu-row {
+      display: grid;
+      gap: 2px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 9px 10px;
+    }
+
+    .project-menu-row.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+    }
+
+    .project-menu-row b {
+      color: var(--ink-strong);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .project-menu-row span,
+    .project-menu-foot {
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .project-menu-foot {
+      align-self: end;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+
+    .conversation-menu {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto auto;
+      gap: 14px;
+      padding: 16px 12px;
+      border-right: 1px solid var(--line);
+      background: rgba(217, 213, 202, 0.26);
+      color: var(--ink-body);
+    }
+
+    .conversation-project {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+    }
+
+    .conversation-project b {
+      display: block;
+      color: var(--ink-strong);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .conversation-project a,
+    .conversation-menu-foot {
+      color: var(--muted-teal);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .conversation-menu-block {
+      display: grid;
+      gap: 6px;
+      align-content: start;
+    }
+
+    .conversation-list-block {
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .project-entry-block {
+      align-self: end;
+    }
+
+    .conversation-menu-title {
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .conversation-menu-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 8px 9px;
+      color: var(--ink-body);
+      font-size: 12px;
+    }
+
+    .conversation-menu-row.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--ink-strong);
+    }
+
+    .conversation-menu-row b {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+
+    .conversation-menu-row span {
+      color: var(--ink-muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .conversation-resource-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .conversation-resource {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      padding: 8px;
+      color: var(--ink-body);
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .page {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      background: var(--panel);
+    }
+
+    .page-head {
+      min-height: 56px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--soft-line);
+      background: var(--panel);
+    }
+
+    .conversation-name {
+      color: var(--brand-ink);
+      font-weight: 650;
+    }
+
+    .conversation-context {
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .page-body {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      min-height: 624px;
+      background: var(--panel);
+    }
+
+    .chat-area {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      padding: 22px;
+      gap: 18px;
+    }
+
+    .chat-stack {
+      max-width: 780px;
+      width: 100%;
+      justify-self: center;
+      align-self: start;
+      display: grid;
+      gap: 14px;
+    }
+
+    .bubble {
+      border: 1px solid var(--soft-line);
+      border-radius: 14px;
+      background: var(--panel);
+      padding: 16px;
+      font-weight: 700;
+    }
+
+    .bubble.user {
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--soft-line));
+      background: color-mix(in srgb, var(--accent-soft) 34%, var(--panel));
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 9px 0;
+    }
+
+    .event::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--muted-teal);
+      justify-self: center;
+    }
+
+    .composer {
+      max-width: 780px;
+      width: 100%;
+      justify-self: center;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      min-height: 96px;
+      background: var(--panel);
+      padding: 14px;
+      color: var(--subtle);
+      font-weight: 760;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .composer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--brand-ink);
+      font-size: 13px;
+    }
+
+    .send {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--muted-teal);
+      color: var(--panel);
+      display: grid;
+      place-items: center;
+      font-weight: 900;
+    }
+
+    .resource-window {
+      border-left: 1px solid var(--soft-line);
+      background: var(--shell-muted);
+      padding: 18px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 16px;
+      color: var(--brand-ink);
+    }
+
+    .resource-window h2 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.16;
+    }
+
+    .resource-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .resource-tab {
+      border: 1px solid color-mix(in srgb, var(--muted-teal) 42%, var(--line));
+      border-radius: 999px;
+      padding: 7px 10px;
+      background: var(--muted-teal-soft);
+      color: #315F5B;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .resource-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 14px;
+      background: var(--panel);
+      margin-bottom: 12px;
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .resource-card b {
+      display: block;
+      color: var(--ink);
+      margin-bottom: 6px;
+    }
+
+    .skill-switch {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .skill-switch span {
+      border: 1px solid var(--soft-line);
+      border-radius: 999px;
+      padding: 5px 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .skill-switch .active {
+      border-color: var(--muted-teal);
+      background: var(--muted-teal-soft);
+      color: #315F5B;
+      font-weight: 650;
+    }
+
+    .desktop-frame,
+    .layout,
+    .app-mini-rail,
+    .project-menu,
+    .conversation-menu,
+    .page,
+    .chat-area,
+    .resource-window,
+    .composer {
+      font-family: var(--font-cjk-ui);
+    }
+
+    .desktop-frame {
+      border-radius: 8px;
+      background: var(--paper);
+      box-shadow: none;
+    }
+
+    .os-bar,
+    .page-head {
+      background: var(--warm-bone);
+    }
+
+    .project-menu,
+    .conversation-menu,
+    .resource-window {
+      background: rgba(217, 213, 202, 0.32);
+      color: var(--ink-body);
+    }
+
+    .app-mini-rail {
+      background: var(--paper);
+      color: var(--ink-body);
+    }
+
+    .window-title,
+    .conversation-name,
+    .composer-bottom,
+    .resource-window h2 {
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .conversation-context,
+    .composer,
+    .skill-switch span {
+      color: var(--ink-muted);
+    }
+
+    .bubble,
+    .composer,
+    .resource-card {
+      border-radius: 8px;
+      box-shadow: none;
+      background: var(--paper);
+      border-color: var(--line);
+      font-weight: 500;
+    }
+
+    .bubble.user {
+      background: rgba(224, 122, 95, 0.1);
+      border-color: rgba(224, 122, 95, 0.34);
+    }
+
+    .event::before,
+    .send {
+      background: var(--muted-teal);
+    }
+
+    .send {
+      color: var(--paper);
+    }
+
+    .resource-tab,
+    .skill-switch .active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--brand-ink);
+      font-weight: 650;
+    }
+
+    @media (max-width: 1180px) {
+      .intro {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      main { padding-inline: 14px; }
+
+      .menu,
+      .window-controls {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topline">
+      <div class="brand"><img src="../../../../brand/logo/friday-icon.svg" alt=""> FRIDAY Desktop</div>
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="../index.html#preview">返回规划首页</a>
+        <a href="./codex-reference-workbench.html">有画布预览</a>
+      </nav>
+    </div>
+
+    <section class="intro">
+      <div>
+        <div class="eyebrow">No Canvas Conversation / 2026-06-09</div>
+        <h1>没有画布时，对话仍是主页面。</h1>
+        <p>同一套桌面端层级保持不变：最左侧是常驻全局导航；进入对话页后，第二层切换为当前项目导航，优先显示本项目对话，底部放资料库、Wiki、技能入口。当前对话还没有可显示产物或用户没有打开文件时，中间不拆出画布，FRIDAY 对话占据主区域，资料库、Wiki、技能以靠右资源窗口承载。</p>
+      </div>
+      <div class="note">这个状态不是另一个产品页，而是同一个对话页面在“没有画布”时的布局。用户仍然从项目主页进入对话；出现画布后，资源窗口收起到对话标题行右侧。</div>
+    </section>
+
+    <section class="desktop-frame" aria-label="FRIDAY Desktop 无画布对话页">
+      <div class="os-bar">
+        <div class="menu"><span>文件</span><span>编辑</span><span>查看</span><span>窗口</span><span>帮助</span></div>
+        <div class="window-title">FRIDAY Desktop · 产品规划工作区</div>
+        <div class="window-controls"><span>−</span><span>□</span><span>×</span></div>
+      </div>
+
+      <div class="layout">
+        <aside class="app-mini-rail" aria-label="全局导航">
+          <div class="mini-brand"><img src="../../../../brand/logo/friday-icon.svg" alt=""></div>
+          <div class="mini-nav">
+            <div class="mini-nav-item" title="搜索">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="10.5" cy="10.5" r="5.6"></circle>
+                  <path d="M14.8 14.8 19.5 19.5"></path>
+                </svg>
+              </span>
+              <span class="mini-label">搜索</span>
+            </div>
+            <div class="mini-nav-item active" title="项目">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M4.5 8.5h5.2l1.5 2h8.3v7.1a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V10.5a2 2 0 0 1 2-2Z"></path>
+                  <path d="M4.5 10.5h15"></path>
+                </svg>
+              </span>
+              <span class="mini-label">项目</span>
+            </div>
+            <div class="mini-nav-item" title="团队">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle cx="9" cy="8.2" r="3"></circle>
+                  <path d="M4.8 18.2c.7-3.2 2.1-5 4.2-5s3.5 1.8 4.2 5"></path>
+                  <path d="M14.1 10.4a2.6 2.6 0 1 0 1.1-5"></path>
+                  <path d="M14.9 13.1c2.4.3 3.9 2 4.5 5.1"></path>
+                </svg>
+              </span>
+              <span class="mini-label">团队</span>
+            </div>
+            <div class="mini-nav-item" title="日历">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <rect x="4.5" y="6.5" width="15" height="13" rx="2"></rect>
+                  <path d="M8 4.5v4M16 4.5v4M4.5 10.5h15"></path>
+                  <path d="M8.1 14.1h.1M12 14.1h.1M15.9 14.1h.1M8.1 17h.1M12 17h.1"></path>
+                </svg>
+              </span>
+              <span class="mini-label">日历</span>
+            </div>
+            <div class="mini-nav-item" title="模块">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <rect x="4.7" y="4.7" width="5.7" height="5.7" rx="1.4"></rect>
+                  <rect x="13.6" y="4.7" width="5.7" height="5.7" rx="1.4"></rect>
+                  <rect x="4.7" y="13.6" width="5.7" height="5.7" rx="1.4"></rect>
+                  <rect x="13.6" y="13.6" width="5.7" height="5.7" rx="1.4"></rect>
+                </svg>
+              </span>
+              <span class="mini-label">模块</span>
+            </div>
+            <div class="mini-nav-item" title="SOUL">
+              <span class="mini-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M12 4.8a7.2 7.2 0 1 1-6.4 10.5"></path>
+                  <path d="M12 8.2a3.8 3.8 0 1 1-3.8 3.8"></path>
+                  <circle cx="12" cy="12" r="0.9"></circle>
+                </svg>
+              </span>
+              <span class="mini-label">SOUL</span>
+            </div>
+          </div>
+          <div class="mini-nav-item mini-settings" title="设置">
+            <span class="mini-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M12 4.5v2.2M12 17.3v2.2M5.6 7.1l1.6 1.6M16.8 15.3l1.6 1.6M4.5 12h2.2M17.3 12h2.2M5.6 16.9l1.6-1.6M16.8 8.7l1.6-1.6"></path>
+                <circle cx="12" cy="12" r="3.8"></circle>
+              </svg>
+            </span>
+            <span class="mini-label">设置</span>
+          </div>
+        </aside>
+
+        <aside class="conversation-menu" aria-label="当前项目导航">
+          <div class="conversation-project">
+            <div class="menu-heading">当前项目</div>
+            <b>FRIDAY Desktop</b>
+            <a href="../index.html#preview">返回项目主页</a>
+          </div>
+
+          <div class="conversation-menu-block conversation-list-block">
+            <div class="conversation-menu-title">本项目对话</div>
+            <div class="conversation-menu-row active"><b>基于 PI 的桌面端</b><span>14 分</span></div>
+            <div class="conversation-menu-row"><b>桌面端产品规划</b><span>今天</span></div>
+            <div class="conversation-menu-row"><b>项目资料库规则</b><span>昨天</span></div>
+            <div class="conversation-menu-row"><b>技能与 Soul</b><span>2 天</span></div>
+            <div class="conversation-menu-row"><b>Wiki 知识图谱</b><span>2 天</span></div>
+            <div class="conversation-menu-row"><b>产物画布交互</b><span>3 天</span></div>
+            <div class="conversation-menu-row"><b>模块平台愿景</b><span>5 天</span></div>
+          </div>
+
+          <div class="conversation-menu-block project-entry-block">
+            <div class="conversation-menu-title">项目入口</div>
+            <div class="conversation-resource-grid">
+              <div class="conversation-resource">资料库</div>
+              <div class="conversation-resource">Wiki</div>
+              <div class="conversation-resource">技能</div>
+            </div>
+          </div>
+
+          <div class="conversation-menu-foot">切换项目时，点击最左侧“项目”重新打开项目列表。</div>
+        </aside>
+
+        <section class="page">
+          <div class="page-head">
+            <div>
+              <div class="conversation-name">基于 PI 的桌面端</div>
+              <div class="conversation-context">当前没有打开产物画布，主区域显示完整对话</div>
+            </div>
+            <div class="conversation-context">资源窗口常驻靠右</div>
+          </div>
+
+          <div class="page-body">
+            <section class="chat-area">
+              <div class="chat-stack">
+                <article class="bubble user">
+                  先不生成文件，我们先把 FRIDAY Desktop 的产品结构讨论清楚。
+                </article>
+                <article class="bubble">
+                  可以。当前对话没有画布，所以我会把完整历史、过程和继续输入放在主区域；右侧保留资料库、Wiki、技能窗口，方便随时查看项目资源。
+                  <div class="event"><span>读取桌面端规划决策</span><span>完成</span></div>
+                  <div class="event"><span>整理项目资料库规则</span><span>进行中</span></div>
+                  <div class="event"><span>等待用户确认资源入口</span><span>待确认</span></div>
+                </article>
+              </div>
+
+              <div class="composer">
+                <div>继续输入，或拖入新的项目资料...</div>
+                <div class="composer-bottom">
+                  <span>＋ 本地资料 · 5.5 · 麦克风</span>
+                  <span class="send">↑</span>
+                </div>
+              </div>
+            </section>
+
+            <aside class="resource-window">
+              <div>
+                <div class="eyebrow">Project Resources</div>
+                <h2>资料库、Wiki、技能</h2>
+              </div>
+              <div class="resource-tabs">
+                <span class="resource-tab">资料库 12</span>
+                <span class="resource-tab">Wiki 38</span>
+                <span class="resource-tab">技能 3</span>
+              </div>
+              <div>
+                <div class="resource-card">
+                  <b>项目资料库</b>
+                  会议记录、复盘、方案草稿和用户反馈都可以作为当前对话上下文。
+                </div>
+                <div class="resource-card">
+                  <b>Wiki</b>
+                  当前项目已经沉淀出的概念、决策、资料和技能关系，可以进入知识图谱详情页。
+                </div>
+                <div class="resource-card">
+                  <b>技能</b>
+                  默认显示项目技能；用户可以切换到全局技能。
+                  <div class="skill-switch">
+                    <span class="active">项目技能</span>
+                    <span>全局技能</span>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

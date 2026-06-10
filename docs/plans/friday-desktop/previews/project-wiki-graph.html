@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY Desktop 项目 Wiki 知识图谱预览</title>
+  <style>
+    :root {
+      --graphite: #1E1F21;
+      --warm-bone: #F4F1EB;
+      --stone: #D9D5CA;
+      --paper: #FBFAF7;
+      --line: rgba(30, 31, 33, 0.13);
+      --soft-line: rgba(30, 31, 33, 0.07);
+      --muted-teal: #4A7F7B;
+      --muted-teal-soft: #DDEBE8;
+      --accent: #E07A5F;
+      --accent-soft: #F5DDD5;
+      --brand-ink: #315F5B;
+      --ink-strong: rgba(30, 31, 33, 0.88);
+      --ink-body: rgba(30, 31, 33, 0.72);
+      --ink-muted: rgba(30, 31, 33, 0.58);
+      --font-latin-brand: "Avenir Next", "Inter", "Segoe UI", Arial, sans-serif;
+      --font-cjk-display: "LXGW WenKai Screen", "LXGW WenKai", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC", "STFangsong", "FangSong", serif;
+      --font-cjk-body: "LXGW WenKai Screen", "LXGW WenKai", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-cjk-ui: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      color-scheme: light;
+      font-family: var(--font-cjk-body);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--warm-bone);
+      color: var(--ink-body);
+      line-height: 1.65;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    main {
+      max-width: 1540px;
+      margin: 0 auto;
+      padding: 34px clamp(18px, 4vw, 56px) 64px;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 20px;
+      margin-bottom: 26px;
+    }
+
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--graphite);
+      font-family: var(--font-latin-brand);
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .brand img { width: 26px; }
+
+    .nav-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .nav-links a {
+      color: var(--muted-teal);
+      font-size: 13px;
+      font-weight: 650;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: color-mix(in srgb, var(--paper) 82%, var(--muted-teal-soft));
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 32px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      max-width: 920px;
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: 1.05;
+      font-weight: 500;
+    }
+
+    .intro p {
+      max-width: 860px;
+      margin: 16px 0 0;
+      font-size: 17px;
+    }
+
+    .note {
+      border-left: 4px solid var(--muted-teal);
+      background: var(--muted-teal-soft);
+      padding: 14px 16px;
+      color: var(--brand-ink);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .desktop-frame {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      font-family: var(--font-cjk-ui);
+    }
+
+    .os-bar {
+      height: 40px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--warm-bone);
+      padding: 0 14px;
+      color: var(--ink-muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .menu {
+      display: flex;
+      gap: 18px;
+    }
+
+    .window-title {
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .window-controls {
+      display: flex;
+      justify-content: flex-end;
+      gap: 16px;
+      color: var(--graphite);
+      font-weight: 650;
+    }
+
+    .wiki-layout {
+      display: grid;
+      grid-template-columns: 238px minmax(620px, 1fr) 336px;
+      min-height: 720px;
+      min-width: 1190px;
+    }
+
+    .wiki-nav,
+    .node-panel {
+      background: rgba(217, 213, 202, 0.26);
+      border-right: 1px solid var(--line);
+      padding: 18px 14px;
+    }
+
+    .node-panel {
+      border-right: 0;
+      border-left: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .wiki-title {
+      color: var(--graphite);
+      font-family: var(--font-cjk-display);
+      font-size: 24px;
+      font-weight: 500;
+      line-height: 1.2;
+      margin-bottom: 12px;
+    }
+
+    .wiki-nav p,
+    .node-panel p {
+      margin: 0 0 16px;
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .filter-group {
+      display: grid;
+      gap: 8px;
+      margin: 18px 0;
+    }
+
+    .filter-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      padding: 8px 10px;
+      color: var(--ink-body);
+      font-size: 12px;
+    }
+
+    .filter-row.active {
+      border-color: rgba(74, 127, 123, 0.34);
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--brand-ink);
+      font-weight: 650;
+    }
+
+    .filter-row span {
+      color: var(--ink-muted);
+    }
+
+    .graph-area {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      background: var(--warm-bone);
+    }
+
+    .graph-toolbar {
+      min-height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      border-bottom: 1px solid var(--line);
+      padding: 10px 18px;
+      background: var(--paper);
+    }
+
+    .graph-toolbar b {
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .graph-toolbar span {
+      color: var(--ink-muted);
+      font-size: 12px;
+    }
+
+    .toolbar-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .toolbar-actions button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--paper);
+      color: var(--ink-body);
+      padding: 7px 10px;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    .graph-canvas {
+      position: relative;
+      overflow: hidden;
+      min-height: 662px;
+      background:
+        linear-gradient(rgba(30, 31, 33, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(30, 31, 33, 0.035) 1px, transparent 1px),
+        var(--warm-bone);
+      background-size: 36px 36px;
+    }
+
+    .graph-lines {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: rgba(74, 127, 123, 0.36);
+      stroke-width: 1.6;
+    }
+
+    .graph-lines .accent-line {
+      stroke: rgba(224, 122, 95, 0.48);
+    }
+
+    .graph-node {
+      position: absolute;
+      width: 132px;
+      min-height: 54px;
+      display: grid;
+      align-content: center;
+      gap: 2px;
+      border: 1px solid rgba(74, 127, 123, 0.34);
+      border-radius: 8px;
+      background: var(--paper);
+      color: var(--brand-ink);
+      padding: 9px 10px;
+      font-size: 12px;
+      line-height: 1.25;
+    }
+
+    .graph-node b {
+      color: var(--ink-strong);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .graph-node span {
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .graph-node.primary {
+      width: 152px;
+      min-height: 68px;
+      border-color: rgba(224, 122, 95, 0.48);
+      background: color-mix(in srgb, var(--accent-soft) 34%, var(--paper));
+    }
+
+    .source-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .source-row {
+      border-bottom: 1px solid var(--soft-line);
+      padding-bottom: 9px;
+      color: var(--ink-body);
+      font-size: 12px;
+    }
+
+    .source-row b {
+      display: block;
+      color: var(--ink-strong);
+      font-weight: 650;
+    }
+
+    .metric-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 16px 0;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(217, 213, 202, 0.18);
+      padding: 9px;
+      color: var(--ink-muted);
+      font-size: 11px;
+    }
+
+    .metric b {
+      display: block;
+      color: var(--ink-strong);
+      font-size: 16px;
+      font-weight: 650;
+    }
+
+    @media (max-width: 900px) {
+      main { padding-inline: 14px; }
+
+      .intro,
+      .wiki-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .wiki-layout {
+        min-width: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topline">
+      <div class="brand"><img src="../../../../brand/logo/friday-icon.svg" alt=""> FRIDAY Desktop</div>
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="../index.html#preview">返回规划首页</a>
+        <a href="./project-library-v1.html">项目资料库预览</a>
+        <a href="./codex-reference-workbench.html">有画布预览</a>
+      </nav>
+    </div>
+
+    <section class="intro">
+      <div>
+        <div class="eyebrow">Project Wiki / Knowledge Graph</div>
+        <h1>项目 Wiki 用知识图谱承接已经沉淀的关系。</h1>
+        <p>项目主页的 Wiki 板块展示当前项目已经建立的知识图谱。点击进入后，用户可以查看概念、资料、决策、产物和技能之间的关系，而不是只看文件列表。</p>
+      </div>
+      <div class="note">Wiki 不是项目资料库列表的替代品。项目资料库仍然管理原始资料和说明；Wiki 用来组织已经沉淀出的知识节点和关系。</div>
+    </section>
+
+    <section class="desktop-frame" aria-label="项目 Wiki 知识图谱详细界面">
+      <div class="os-bar">
+        <div class="menu"><span>文件</span><span>编辑</span><span>查看</span><span>窗口</span><span>帮助</span></div>
+        <div class="window-title">FRIDAY Desktop · 项目 Wiki</div>
+        <div class="window-controls"><span>−</span><span>□</span><span>×</span></div>
+      </div>
+
+      <div class="wiki-layout">
+        <aside class="wiki-nav">
+          <div class="wiki-title">FRIDAY Desktop Wiki</div>
+          <p>这里显示当前项目已经沉淀出的知识结构，来自资料、对话、产物和技能。</p>
+
+          <div class="filter-group">
+            <div class="filter-row active"><b>全部节点</b><span>38</span></div>
+            <div class="filter-row"><b>项目决策</b><span>11</span></div>
+            <div class="filter-row"><b>资料来源</b><span>12</span></div>
+            <div class="filter-row"><b>产物</b><span>7</span></div>
+            <div class="filter-row"><b>技能</b><span>8</span></div>
+          </div>
+
+          <div class="metric-strip">
+            <div class="metric"><b>38</b>节点</div>
+            <div class="metric"><b>72</b>关系</div>
+            <div class="metric"><b>12</b>来源</div>
+          </div>
+        </aside>
+
+        <section class="graph-area">
+          <div class="graph-toolbar">
+            <div>
+              <b>知识图谱</b>
+              <span>当前视图：桌面端产品结构</span>
+            </div>
+            <div class="toolbar-actions">
+              <button>按来源高亮</button>
+              <button>只看决策</button>
+              <button>重新整理</button>
+            </div>
+          </div>
+
+          <div class="graph-canvas">
+            <svg class="graph-lines" viewBox="0 0 820 660" aria-hidden="true">
+              <path class="accent-line" d="M390 294 C304 232, 258 184, 188 142"></path>
+              <path d="M390 294 C500 224, 552 180, 636 142"></path>
+              <path d="M390 294 C258 296, 180 332, 116 416"></path>
+              <path d="M390 294 C494 326, 568 386, 632 488"></path>
+              <path d="M390 294 C382 406, 370 476, 346 548"></path>
+              <path d="M188 142 C296 112, 466 104, 636 142"></path>
+              <path d="M116 416 C218 474, 280 514, 346 548"></path>
+              <path d="M632 488 C532 522, 438 548, 346 548"></path>
+            </svg>
+
+            <div class="graph-node primary" style="left: 42%; top: 40%;">
+              <b>桌面端工作台</b>
+              <span>产品结构核心</span>
+            </div>
+            <div class="graph-node" style="left: 12%; top: 13%;">
+              <b>PI-first Runtime</b>
+              <span>运行时底座</span>
+            </div>
+            <div class="graph-node" style="right: 10%; top: 13%;">
+              <b>项目资料库</b>
+              <span>资料快照与说明</span>
+            </div>
+            <div class="graph-node" style="left: 6%; bottom: 25%;">
+              <b>技能库</b>
+              <span>项目技能 / 全局技能</span>
+            </div>
+            <div class="graph-node" style="right: 9%; bottom: 14%;">
+              <b>产物画布</b>
+              <span>Markdown / HTML / 报告</span>
+            </div>
+            <div class="graph-node" style="left: 34%; bottom: 7%;">
+              <b>Soul</b>
+              <span>行为画像与 Agent loop</span>
+            </div>
+          </div>
+        </section>
+
+        <aside class="node-panel">
+          <div class="eyebrow">Selected Node</div>
+          <div class="wiki-title">桌面端工作台</div>
+          <p>该节点汇总了当前项目里关于桌面端信息架构、工作区、对话页面、产物画布和资源入口的已确认关系。</p>
+
+          <div class="source-list">
+            <div class="source-row">
+              <b>关联决策</b>
+              常驻小侧栏、第二层项目菜单、项目主页、对话页画布拆分。
+            </div>
+            <div class="source-row">
+              <b>关联资料</b>
+              桌面端产品决策、FRIDAY VI 标准、PI runtime spike 记录。
+            </div>
+            <div class="source-row">
+              <b>关联产物</b>
+              有画布工作台预览、无画布对话页预览、项目资料库预览。
+            </div>
+            <div class="source-row">
+              <b>下一步</b>
+              定义 Wiki 节点的来源、手动编辑、FRIDAY 自动整理和冲突处理规则。
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

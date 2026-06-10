@@ -1,0 +1,698 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>项目资料库 v1 预览</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #F4F1EB;
+      --surface: #FCFAF6;
+      --ink: #1E1F21;
+      --muted: #666F70;
+      --line: #D9D5CA;
+      --line-soft: #E8E3DA;
+      --green: #4A7F7B;
+      --green-soft: #DDEBE8;
+      --blue: #4F8F8B;
+      --blue-soft: #E3EFED;
+      --rust: #E07A5F;
+      --rust-soft: #F5DDD5;
+      --active: #4A7F7B;
+      --active-soft: #DDEBE8;
+      --disabled: #767A78;
+      --shadow: 0 20px 60px rgba(30, 31, 33, 0.1);
+      font-family: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.5;
+    }
+
+    a {
+      color: inherit;
+    }
+
+    .page {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+    }
+
+    .sidebar {
+      background: #1E1F21;
+      color: #F4F1EB;
+      padding: 22px 18px;
+    }
+
+    .workspace {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 20px;
+      background: rgba(255, 255, 255, 0.05);
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .workspace img {
+      width: 28px;
+      height: auto;
+      display: block;
+    }
+
+    .workspace strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .workspace span {
+      color: rgba(244, 241, 235, 0.66);
+      font-size: 12px;
+    }
+
+    .nav {
+      display: grid;
+      gap: 5px;
+      font-size: 13px;
+    }
+
+    .nav div {
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: rgba(244, 241, 235, 0.72);
+    }
+
+    .nav .active {
+      background: var(--active);
+      color: #F4F1EB;
+      font-weight: 750;
+    }
+
+    .main {
+      padding: 26px clamp(20px, 4vw, 48px) 42px;
+    }
+
+    .topbar {
+      display: flex;
+      gap: 18px;
+      justify-content: space-between;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 22px;
+      margin-bottom: 22px;
+    }
+
+    .eyebrow {
+      color: var(--rust);
+      font-weight: 760;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(30px, 4vw, 48px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .summary {
+      margin: 12px 0 0;
+      max-width: 720px;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      min-width: 280px;
+    }
+
+    button {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 8px 11px;
+      font: inherit;
+      font-size: 13px;
+      cursor: default;
+    }
+
+    button.primary {
+      background: var(--green);
+      color: #F4F1EB;
+      border-color: var(--green);
+      font-weight: 720;
+    }
+
+    .count-pill {
+      border: 1px solid rgba(74, 127, 123, 0.32);
+      background: var(--green-soft);
+      color: #315F5B;
+      border-radius: 999px;
+      padding: 9px 13px;
+      font-size: 13px;
+      font-weight: 760;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 24px;
+      align-items: start;
+    }
+
+    .library-shell {
+      display: grid;
+      grid-template-columns: minmax(280px, 1.05fr) minmax(320px, 0.95fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .library-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 560px;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+
+    .panel-head b {
+      font-size: 15px;
+    }
+
+    .panel-head span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .file-tree,
+    .configured-list {
+      padding: 10px 12px 14px;
+      display: grid;
+      align-content: start;
+      gap: 4px;
+      overflow: auto;
+    }
+
+    .tree-item,
+    .configured-item {
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: grid;
+      gap: 3px;
+      font-size: 13px;
+    }
+
+    .tree-item {
+      grid-template-columns: 18px auto 1fr auto;
+      align-items: center;
+      color: #3E4242;
+    }
+
+    .tree-item.folder {
+      font-weight: 720;
+      color: var(--ink);
+    }
+
+    .tree-item.file {
+      margin-left: 18px;
+    }
+
+    .tree-check {
+      width: 14px;
+      height: 14px;
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      background: var(--surface);
+      position: relative;
+    }
+
+    .tree-check.checked {
+      background: var(--green);
+      border-color: var(--green);
+    }
+
+    .tree-check.checked::after,
+    .tree-check.added::after {
+      content: "";
+      position: absolute;
+      width: 7px;
+      height: 4px;
+      left: 3px;
+      top: 3px;
+      border-left: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(-45deg);
+    }
+
+    .tree-check.checked {
+      color: var(--paper);
+    }
+
+    .tree-check.added {
+      border-color: rgba(74, 127, 123, 0.2);
+      background: rgba(221, 235, 232, 0.42);
+      color: rgba(74, 127, 123, 0.46);
+    }
+
+    .tree-item.is-selected {
+      background: var(--green-soft);
+      color: #315F5B;
+      font-weight: 720;
+    }
+
+    .tree-kind,
+    .tree-meta {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .tree-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-top: 1px solid var(--line-soft);
+      background: rgba(244, 241, 235, 0.46);
+    }
+
+    .tree-actions span {
+      color: var(--muted);
+      font-size: 12px;
+      margin-right: auto;
+    }
+
+    .configured-item {
+      border: 1px solid var(--line-soft);
+      background: rgba(244, 241, 235, 0.48);
+    }
+
+    .configured-item.is-active {
+      border-color: rgba(74, 127, 123, 0.38);
+      background: rgba(221, 235, 232, 0.5);
+    }
+
+    .configured-item b {
+      font-size: 13px;
+    }
+
+    .configured-item p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .library-note {
+      grid-column: 1 / -1;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 14px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .library-note b {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .library-note p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .toolbar {
+      display: grid;
+      grid-template-columns: minmax(240px, 1fr) auto;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .search {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 10px 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .sorts {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .sort {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 11px;
+      background: var(--surface);
+      color: #3E4242;
+      font-size: 12px;
+    }
+
+    .sort.active {
+      background: var(--blue-soft);
+      border-color: #B7D0CD;
+      color: #315F5B;
+      font-weight: 700;
+    }
+
+    .table {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: minmax(240px, 1.25fr) 96px 120px 112px;
+      gap: 14px;
+      align-items: center;
+      padding: 13px 16px;
+      border-top: 1px solid var(--line-soft);
+      min-height: 72px;
+    }
+
+    .row:first-child {
+      border-top: 0;
+    }
+
+    .header {
+      min-height: auto;
+      background: #E8E3DA;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      padding-top: 10px;
+      padding-bottom: 10px;
+    }
+
+    .file-name {
+      font-weight: 760;
+      margin-bottom: 3px;
+    }
+
+    .file-desc {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .type {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: fit-content;
+      border-radius: 999px;
+      padding: 4px 9px;
+      font-size: 12px;
+      background: var(--active-soft);
+      color: #315F5B;
+    }
+
+    .type.pdf {
+      background: var(--rust-soft);
+      color: #A94B35;
+    }
+
+    .type.md {
+      background: var(--green-soft);
+      color: #315F5B;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: #315F5B;
+      font-weight: 700;
+    }
+
+    .status::before {
+      content: "";
+      width: 28px;
+      height: 16px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: inset 13px 0 0 rgba(255, 255, 255, 0.95);
+    }
+
+    .status.paused {
+      color: var(--disabled);
+    }
+
+    .status.paused::before {
+      background: #BDB9AF;
+      box-shadow: inset -13px 0 0 rgba(255, 255, 255, 0.95);
+    }
+
+    .date {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .detail {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .detail h2 {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+
+    .detail .path {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 18px;
+    }
+
+    .detail-section {
+      border-top: 1px solid var(--line-soft);
+      padding-top: 14px;
+      margin-top: 14px;
+    }
+
+    .detail-section:first-of-type {
+      border-top: 0;
+      padding-top: 0;
+      margin-top: 0;
+    }
+
+    .detail-section h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+    }
+
+    .detail-section p,
+    .detail-section li {
+      color: var(--muted);
+      font-size: 13px;
+      margin: 0 0 6px;
+    }
+
+    .detail-section ul {
+      padding-left: 18px;
+      margin: 0;
+    }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: var(--blue-soft);
+      padding: 10px 12px;
+      color: #315F5B;
+      font-size: 13px;
+      margin-top: 16px;
+    }
+
+    @media (max-width: 1120px) {
+      .page {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .layout,
+      .library-shell,
+      .topbar {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        display: grid;
+      }
+
+      .actions,
+      .sorts {
+        justify-content: flex-start;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .main {
+        padding: 22px 14px 36px;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+
+      .row {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+
+      .header {
+        display: none;
+      }
+
+      .file-desc {
+        white-space: normal;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <aside class="sidebar">
+      <div class="workspace">
+        <img src="../../../../brand/logo/friday-icon-reversed.svg" alt="">
+        <div>
+          <strong>产品规划工作区</strong>
+          <span>FRIDAY/ 已初始化</span>
+        </div>
+      </div>
+      <nav class="nav" aria-label="工作区导航">
+        <div>工作台</div>
+        <div class="active">项目资料库</div>
+        <div>产物</div>
+        <div>技能库</div>
+        <div>模块</div>
+        <div>Soul</div>
+        <div>设置</div>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">Project Library Preview / v1</div>
+          <h1>项目资料库</h1>
+          <p class="summary">项目资料库首页只显示已配置资料数量。完整视图左侧展示项目根目录下的真实文件树，右侧管理已经登记为资料的文件和说明。</p>
+        </div>
+        <div class="actions" aria-label="资料操作">
+          <span class="count-pill">已配置 12 份资料</span>
+        </div>
+      </header>
+
+      <div class="library-shell">
+        <section class="library-panel" aria-label="项目文件夹结构">
+          <div class="panel-head">
+            <b>项目文件</b>
+            <span>勾选多选，或拖到右侧加入资料库</span>
+          </div>
+          <div class="file-tree">
+            <div class="tree-item folder"><span></span><span class="tree-kind">▾</span><span>docs</span><span class="tree-meta">文件夹</span></div>
+            <div class="tree-item file is-selected"><span class="tree-check added"></span><span class="tree-kind">MD</span><span>docs/产品规划.md</span><span class="tree-meta">已加入</span></div>
+            <div class="tree-item file"><span class="tree-check checked"></span><span class="tree-kind">MD</span><span>docs/技术方案.md</span><span class="tree-meta">已选</span></div>
+            <div class="tree-item folder"><span></span><span class="tree-kind">▾</span><span>meetings</span><span class="tree-meta">文件夹</span></div>
+            <div class="tree-item file"><span class="tree-check added"></span><span class="tree-kind">MD</span><span>meetings/0608-评审纪要.md</span><span class="tree-meta">已加入</span></div>
+            <div class="tree-item folder"><span></span><span class="tree-kind">▾</span><span>src</span><span class="tree-meta">文件夹</span></div>
+            <div class="tree-item file"><span class="tree-check"></span><span class="tree-kind">TS</span><span>src/runtime/session.ts</span><span class="tree-meta">代码文件</span></div>
+            <div class="tree-item file"><span class="tree-check"></span><span class="tree-kind">TS</span><span>src/ui/workbench.ts</span><span class="tree-meta">代码文件</span></div>
+            <div class="tree-item file"><span class="tree-check added"></span><span class="tree-kind">MD</span><span>README.md</span><span class="tree-meta">已加入</span></div>
+            <div class="tree-item file"><span class="tree-check checked"></span><span class="tree-kind">JSON</span><span>package.json</span><span class="tree-meta">已选</span></div>
+          </div>
+          <div class="tree-actions">
+            <span>已选 2 个文件</span>
+            <button class="primary">加入资料库</button>
+          </div>
+        </section>
+
+        <section class="library-panel" aria-label="已加入资料库">
+          <div class="panel-head">
+            <b>已加入资料库</b>
+            <span>12 份资料</span>
+          </div>
+          <div class="configured-list">
+            <div class="configured-item is-active">
+              <b>docs/产品规划.md</b>
+              <p>说明：桌面端产品规划的主文档，用于判断当前版本边界。</p>
+              <p>状态：启用 · 项目内文件</p>
+            </div>
+            <div class="configured-item">
+              <b>README.md</b>
+              <p>说明：项目背景和启动方式，FRIDAY 可用于理解目录结构。</p>
+              <p>状态：启用 · 项目内文件</p>
+            </div>
+            <div class="configured-item">
+              <b>meetings/0608-评审纪要.md</b>
+              <p>说明：最近一次评审记录，适合回答“为什么这么设计”。</p>
+              <p>状态：启用 · 项目内文件</p>
+            </div>
+            <div class="configured-item">
+              <b>research/客户反馈第二轮.pdf</b>
+              <p>说明：导入到项目文件树后的客户反馈资料，用于复盘需求变化。</p>
+              <p>状态：启用 · 项目文件</p>
+            </div>
+          </div>
+        </section>
+
+        <div class="library-note">
+          <div>
+            <b>导入到项目文件树</b>
+            <p>外部文件先放入用户确认的项目位置，再登记为资料；项目现有文件只登记相对路径，不移动、不复制。</p>
+          </div>
+          <button class="primary">选择位置并导入</button>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
