@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>FRIDAY Desktop Workbench Smoke</title>
+	<link rel="stylesheet" href="./workbench.css">
+</head>
+<body>
+	<div class="workbench-shell">
+		<nav class="primary-rail" aria-label="FRIDAY global navigation">
+			<button class="rail-item is-active" type="button" aria-label="搜索">
+				<span class="rail-icon">⌕</span>
+				<span class="rail-label">搜索</span>
+			</button>
+			<button class="rail-item" type="button" aria-label="项目">
+				<span class="rail-icon">▦</span>
+				<span class="rail-label">项目</span>
+			</button>
+			<button class="rail-item" type="button" aria-label="团队">
+				<span class="rail-icon">◌</span>
+				<span class="rail-label">团队</span>
+			</button>
+			<button class="rail-item" type="button" aria-label="日历">
+				<span class="rail-icon">□</span>
+				<span class="rail-label">日历</span>
+			</button>
+			<button class="rail-item" type="button" aria-label="模块">
+				<span class="rail-icon">◇</span>
+				<span class="rail-label">模块</span>
+			</button>
+			<button class="rail-item" type="button" aria-label="SOUL">
+				<span class="rail-icon">✦</span>
+				<span class="rail-label">SOUL</span>
+			</button>
+			<button class="rail-item rail-settings" type="button" aria-label="设置">
+				<span class="rail-icon">⚙</span>
+				<span class="rail-label">设置</span>
+			</button>
+		</nav>
+
+		<aside class="project-menu" aria-label="Current project menu">
+			<header class="project-menu-header">
+				<p class="eyebrow">当前项目</p>
+				<h1>Friday Desktop Runtime</h1>
+				<span class="project-status">本地项目</span>
+			</header>
+			<button class="project-home-link" type="button" data-view-target="project-home">返回项目主页</button>
+			<section class="conversation-list" aria-label="本项目对话列表">
+				<h2>本项目对话</h2>
+				<button type="button" data-view-target="conversation-no-canvas">Runtime 架构对话</button>
+				<button type="button" data-view-target="conversation-canvas">UI Integration Smoke</button>
+				<button type="button">权限与 trace</button>
+			</section>
+			<footer class="project-menu-footer">
+				<button type="button">资料库</button>
+				<button type="button">Wiki</button>
+				<button type="button">技能</button>
+			</footer>
+		</aside>
+
+		<main class="workbench-main">
+			<section class="workbench-view is-active" data-view="project-home" aria-label="项目主页">
+				<div class="project-home-grid">
+					<section class="home-composer">
+						<h2>项目主页</h2>
+						<div class="composer-box" role="group" aria-label="项目输入框">
+							<p>让 FRIDAY 为这个项目创建下一轮桌面 runtime 验收清单。</p>
+							<div class="composer-toolbar">+ · FRIDAY Local 0.1 · 标准</div>
+						</div>
+					</section>
+					<section class="home-section">
+						<h3>项目对话列表</h3>
+						<ul>
+							<li>Runtime 架构对话</li>
+							<li>UI Integration Smoke</li>
+							<li>权限与 trace</li>
+						</ul>
+					</section>
+					<section class="home-section">
+						<h3>项目资料库摘要</h3>
+						<p>已加入 3 份资料，当前对话可按文件类型和文件名引用。</p>
+					</section>
+					<section class="home-section">
+						<h3>项目技能摘要</h3>
+						<p>Project Brief 与 Implementation Review 已启用。</p>
+					</section>
+					<section class="home-section placeholder">
+						<h3>Wiki 占位</h3>
+						<p>项目 Wiki 后续接入知识图谱入口。</p>
+					</section>
+					<section class="home-section placeholder">
+						<h3>日历占位</h3>
+						<p>排期与会议视图保留在 v0 后续。</p>
+					</section>
+					<section class="home-section">
+						<h3>项目协作人员</h3>
+						<p>Keith · FRIDAY</p>
+					</section>
+					<section class="home-section">
+						<h3>远端配置状态</h3>
+						<p>未连接远端，使用本地 FRIDAY runtime 配置。</p>
+					</section>
+				</div>
+			</section>
+
+			<section class="workbench-view" data-view="conversation-no-canvas" aria-label="对话无画布状态">
+				<header class="conversation-title-row">
+					<div>
+						<p class="eyebrow">当前对话</p>
+						<h2>Runtime 架构对话</h2>
+					</div>
+					<div class="resource-actions" aria-label="共享资源入口">
+						<button type="button" title="资料库" aria-label="打开资料库资源" aria-pressed="true" data-resource-tab="library">▤</button>
+						<button type="button" title="项目文件树" aria-label="打开项目文件树资源" aria-pressed="false" data-resource-tab="fileTree">⌘</button>
+						<button type="button" title="技能" aria-label="打开技能资源" aria-pressed="false" data-resource-tab="skills">✦</button>
+						<button type="button" title="产物" aria-label="打开产物资源" aria-pressed="false" data-resource-tab="artifacts">▧</button>
+					</div>
+				</header>
+				<div class="conversation-layout no-canvas-layout">
+					<section class="conversation-thread" aria-label="完整对话">
+						<article class="message user-message">我们先把 Electron shell 与 renderer 的边界跑通。</article>
+						<article class="message assistant-message">已确认：renderer 只接收受控 bridge，不直接接触 Electron、Node 或 PI SDK。</article>
+						<article class="message assistant-message">下一步补 BrowserWindow、preload 与 workbench 本地入口。</article>
+						<div class="composer-box conversation-composer">
+							<p>继续检查资源窗口结构。</p>
+							<div class="composer-toolbar">+ · FRIDAY Local 0.1 · 标准</div>
+						</div>
+					</section>
+					<aside class="resource-window" aria-label="共享资源窗口">
+						<div class="resource-window-heading">
+							<h3>资源</h3>
+							<span>同一窗口切换</span>
+						</div>
+						<div class="resource-panel is-active" data-resource-panel="library">
+							<ul class="resource-list compact-list">
+								<li><span>Markdown</span><strong>desktop-runtime-decisions.md</strong></li>
+								<li><span>PDF</span><strong>research-brief.pdf</strong></li>
+								<li><span>Image</span><strong>workbench-flow.png</strong></li>
+							</ul>
+							<button class="text-action" type="button">进入项目资料库</button>
+						</div>
+						<div class="resource-panel" data-resource-panel="fileTree">
+							<ul class="resource-list">
+								<li>
+									<strong>docs/plans/friday-desktop/index.html</strong>
+									<div class="inline-actions">
+										<button type="button">在画布中打开</button>
+										<button type="button">添加到对话</button>
+									</div>
+								</li>
+								<li>
+									<strong>src/desktop/runtime/DesktopRuntimeSmoke.ts</strong>
+									<div class="inline-actions">
+										<button type="button">在画布中打开</button>
+										<button type="button">添加到对话</button>
+									</div>
+								</li>
+							</ul>
+						</div>
+						<div class="resource-panel" data-resource-panel="skills">
+							<div class="segmented-control" aria-label="技能范围">
+								<button class="is-active" type="button">项目技能</button>
+								<button type="button">全局技能</button>
+							</div>
+							<ul class="resource-list compact-list">
+								<li><span>Project</span><strong>Project Brief</strong></li>
+								<li><span>Project</span><strong>Implementation Review</strong></li>
+							</ul>
+						</div>
+						<div class="resource-panel" data-resource-panel="artifacts">
+							<ul class="resource-list compact-list">
+								<li><span>Canvas</span><strong>Runtime 架构图</strong></li>
+								<li><span>Table</span><strong>权限 trace 表</strong></li>
+							</ul>
+						</div>
+					</aside>
+				</div>
+			</section>
+
+			<section class="workbench-view" data-view="conversation-canvas" aria-label="对话有画布状态">
+				<header class="conversation-title-row">
+					<div>
+						<p class="eyebrow">产物画布</p>
+						<h2>UI Integration Smoke</h2>
+					</div>
+					<div class="resource-actions" aria-label="共享资源入口">
+						<button type="button" title="资料库" aria-label="打开资料库资源" aria-pressed="true" data-resource-tab="library">▤</button>
+						<button type="button" title="项目文件树" aria-label="打开项目文件树资源" aria-pressed="false" data-resource-tab="fileTree">⌘</button>
+						<button type="button" title="技能" aria-label="打开技能资源" aria-pressed="false" data-resource-tab="skills">✦</button>
+						<button type="button" title="产物" aria-label="打开产物资源" aria-pressed="false" data-resource-tab="artifacts">▧</button>
+					</div>
+				</header>
+				<aside class="resource-window resource-popover is-open" data-canvas-resource-window aria-label="共享资源窗口浮层">
+					<div class="resource-window-heading">
+						<h3>资源</h3>
+						<span>画布标题行打开</span>
+					</div>
+					<div class="resource-panel is-active" data-resource-panel="library">
+						<ul class="resource-list compact-list">
+							<li><span>Markdown</span><strong>desktop-runtime-decisions.md</strong></li>
+							<li><span>PDF</span><strong>research-brief.pdf</strong></li>
+							<li><span>Image</span><strong>workbench-flow.png</strong></li>
+						</ul>
+						<button class="text-action" type="button">进入项目资料库</button>
+					</div>
+					<div class="resource-panel" data-resource-panel="fileTree">
+						<ul class="resource-list">
+							<li>
+								<strong>docs/plans/friday-desktop/index.html</strong>
+								<div class="inline-actions">
+									<button type="button">在画布中打开</button>
+									<button type="button">添加到对话</button>
+								</div>
+							</li>
+							<li>
+								<strong>src/desktop/runtime/DesktopRuntimeSmoke.ts</strong>
+								<div class="inline-actions">
+									<button type="button">在画布中打开</button>
+									<button type="button">添加到对话</button>
+								</div>
+							</li>
+						</ul>
+					</div>
+					<div class="resource-panel" data-resource-panel="skills">
+						<div class="segmented-control" aria-label="技能范围">
+							<button class="is-active" type="button">项目技能</button>
+							<button type="button">全局技能</button>
+						</div>
+						<ul class="resource-list compact-list">
+							<li><span>Project</span><strong>Project Brief</strong></li>
+							<li><span>Project</span><strong>Implementation Review</strong></li>
+						</ul>
+					</div>
+					<div class="resource-panel" data-resource-panel="artifacts">
+						<ul class="resource-list compact-list">
+							<li><span>Canvas</span><strong>Runtime 架构图</strong></li>
+							<li><span>Table</span><strong>权限 trace 表</strong></li>
+						</ul>
+					</div>
+				</aside>
+				<div class="conversation-layout canvas-layout">
+					<section class="artifact-canvas" aria-label="Artifact canvas">
+						<header>
+							<span>Artifact</span>
+							<strong>Runtime 架构图</strong>
+						</header>
+						<div class="canvas-surface">
+							<div>Project</div>
+							<div>Preload bridge</div>
+							<div>Renderer workbench</div>
+						</div>
+					</section>
+					<aside class="friday-process" aria-label="FRIDAY 过程和对话区">
+						<h3>FRIDAY 过程</h3>
+						<ol>
+							<li>读取工作台 smoke state</li>
+							<li>确认资源入口在标题行</li>
+							<li>保持完整对话与 trace</li>
+						</ol>
+						<div class="message assistant-message">资源窗口从标题行图标展开为同一个共享浮层。</div>
+					</aside>
+				</div>
+			</section>
+		</main>
+	</div>
+	<div class="bridge-status" data-bridge-status>fridayDesktop bridge pending</div>
+	<script src="./workbench.js"></script>
+</body>
+</html>

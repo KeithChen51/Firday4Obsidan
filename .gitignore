@@ -11,6 +11,7 @@ node_modules/
 
 # Don't include the compiled root main.js file in the repo.
 /main.js
+/dist/
 
 # Source branch keeps generated publish trees local-only.
 /plugin/
