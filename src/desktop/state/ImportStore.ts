@@ -4,6 +4,7 @@ import path from "path";
 import type { DesktopTurnContext } from "../contracts/DesktopHostAdapter";
 import type { ExternalImportSnapshot } from "../contracts/FileSystemHostPort";
 import { atomicWriteJson, FRIDAY_DIRECTORY_NAME } from "./ProjectManifestStore";
+import { encodeStatePathSegment } from "./StatePathSegments";
 
 export const IMPORT_METADATA_SCHEMA_VERSION = 1;
 
@@ -46,7 +47,7 @@ export class ImportStore {
 
 		const sourceBuffer = await fs.readFile(resolvedSourcePath);
 		const importId = this.createImportId();
-		const conversationSegment = safePathSegment(context.conversationId);
+		const conversationSegment = encodeStatePathSegment(context.conversationId);
 		const importDirectory = path.join(this.importsRoot, conversationSegment, importId);
 		const originalFileName = path.basename(resolvedSourcePath);
 		const targetPath = path.join(importDirectory, originalFileName);
@@ -70,7 +71,7 @@ export class ImportStore {
 	}
 
 	async archiveConversationImports(conversationId: string): Promise<string> {
-		const conversationSegment = safePathSegment(conversationId);
+		const conversationSegment = encodeStatePathSegment(conversationId);
 		const sourceDirectory = path.join(this.importsRoot, conversationSegment);
 		const archiveDirectory = path.join(this.archiveConversationsRoot, conversationSegment, "imports");
 
@@ -113,14 +114,6 @@ function inferMimeType(fileName: string): string | undefined {
 		".yml": "application/yaml",
 	};
 	return mimeTypes[extension];
-}
-
-function safePathSegment(value: string): string {
-	const segment = String(value ?? "").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
-	if (!segment || segment === "." || segment === "..") {
-		return "default";
-	}
-	return segment;
 }
 
 async function pathExists(targetPath: string): Promise<boolean> {

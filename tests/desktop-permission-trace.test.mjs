@@ -300,6 +300,47 @@ test("trace store appends per-turn JSONL and supports query and replay", async (
 	});
 });
 
+test("trace store project-wide query and replay include encoded conversation directories", async () => {
+	const { traceStore } = await loadModules();
+
+	await withTempProject("friday-desktop-trace-encoded-conversation-", async (projectRootPath) => {
+		const store = new traceStore.TraceStore(projectRootPath, {
+			clock: () => new Date("2026-06-12T00:00:00.000Z"),
+			idFactory: () => "trace-encoded",
+		});
+		const context = createContext(projectRootPath, {
+			conversationId: "a/b",
+			turnId: "turn/1",
+		});
+
+		await store.appendTraceEvent(context, {
+			type: "file_read",
+			at: "",
+			payload: { path: "docs/brief.md" },
+		});
+
+		const byConversation = await store.queryTraceEvents({
+			projectId: "desktop-project",
+			conversationId: "a/b",
+		});
+		const projectWide = await store.queryTraceEvents({
+			projectId: "desktop-project",
+		});
+		const replayed = [];
+		for await (const event of store.replayTraceEvents({
+			projectId: "desktop-project",
+		})) {
+			replayed.push(event);
+		}
+
+		assert.deepEqual(byConversation.map((event) => event.id), ["trace-encoded"]);
+		assert.deepEqual(projectWide.map((event) => event.id), ["trace-encoded"]);
+		assert.deepEqual(replayed.map((event) => event.id), ["trace-encoded"]);
+		assert.equal(projectWide[0].conversationId, "a/b");
+		assert.equal(projectWide[0].turnId, "turn/1");
+	});
+});
+
 test("trace store skips malformed JSONL lines while preserving valid events", async () => {
 	const { traceStore } = await loadModules();
 

@@ -3,6 +3,7 @@ import path from "path";
 import type { DesktopTurnContext } from "../contracts/DesktopHostAdapter";
 import type { DesktopTraceEvent, TraceHostPort, TraceQuery } from "../contracts/TraceHostPort";
 import { FRIDAY_DIRECTORY_NAME } from "./ProjectManifestStore";
+import { encodeStatePathSegment } from "./StatePathSegments";
 
 export interface TraceStoreOptions {
 	clock?: () => Date;
@@ -91,14 +92,18 @@ export class TraceStore implements TraceHostPort {
 			throw error;
 		}
 		const events: StoredTraceEvent[] = [];
-		for (const conversationId of conversations.sort()) {
-			events.push(...await this.readConversationEvents(conversationId));
+		for (const conversationDirectoryName of conversations.sort()) {
+			events.push(...await this.readConversationEventsFromRoot(path.join(this.traceRoot, conversationDirectoryName)));
 		}
 		return events;
 	}
 
 	private async readConversationEvents(conversationId: string): Promise<StoredTraceEvent[]> {
-		const conversationRoot = path.join(this.traceRoot, safePathSegment(conversationId));
+		const conversationRoot = path.join(this.traceRoot, encodeStatePathSegment(conversationId));
+		return this.readConversationEventsFromRoot(conversationRoot);
+	}
+
+	private async readConversationEventsFromRoot(conversationRoot: string): Promise<StoredTraceEvent[]> {
 		let files: string[] = [];
 		try {
 			files = await fs.readdir(conversationRoot);
@@ -136,20 +141,12 @@ export class TraceStore implements TraceHostPort {
 	}
 
 	private resolveTracePath(conversationId: string, turnId: string): string {
-		return path.join(this.traceRoot, safePathSegment(conversationId), `${safePathSegment(turnId)}.jsonl`);
+		return path.join(this.traceRoot, encodeStatePathSegment(conversationId), `${encodeStatePathSegment(turnId)}.jsonl`);
 	}
 }
 
 function createTraceEventId(): string {
 	return `trace-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-}
-
-function safePathSegment(value: string): string {
-	const segment = String(value ?? "").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
-	if (!segment || segment === "." || segment === "..") {
-		return "default";
-	}
-	return segment;
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
