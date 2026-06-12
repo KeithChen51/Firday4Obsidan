@@ -81,7 +81,16 @@ v1 不需要 SQL。文件系统是事实来源，JSON/Markdown 存 metadata 和�
 
 ## 4. 产物与资料的关系
 
-- 产物区先不继续展开设计。
+- 产物区只在进入某个对话后出现，是当前对话界面的一部分。
+- 产物区本质上是 **当前对话已有产物的列表**。
+- 列表项代表 FRIDAY 在该对话中生成、打开或修改过的文件结果。
+- 用户点击列表项后，主区域才打开对应产物画布；没有打开产物时，对话主区域仍显示完整对话。
+- 产物列表不直接塞进对话标题行；对话标题行右侧只放资料库、文件树、技能、产物四个资源 icon。
+- 当前对话资源用这排 icon 切换；用户点击产物后，下方共用资源窗口显示当前对话已有产物列表。
+- 打开产物画布后，资源 icon 仍与对话标题平行；资源内容在右侧 FRIDAY 过程区上方以悬浮窗口展开，避免占用画布标题、产物标签区域和过程内容流。
+- 当前对话资源窗口默认 tab：已有产物时默认打开 **产物**；没有产物时默认打开 **资料库**；用户手动切换后，按当前对话记住上次选择。
+- 产物 tab 只显示当前对话产生、打开或修改过的产物；每项只显示文件类型和文件名。单击产物在画布中打开。右键产物显示：**在画布中打开**、**添加到对话**、**加入项目资料库**、**放入项目文件树**。
+- 产物区不承担项目级文件管理，不出现在项目主页作为一级模块。
 - 已确认原则：产物默认不自动进入项目资料库。
 - 用户可以手动选择把产物添加到项目资料库。
 - 添加时有两个出口：放入 FRIDAY 托管的资料文件夹，或写入项目现有文件树中的指定位置。
@@ -107,6 +116,117 @@ v1 不需要 SQL。文件系统是事实来源，JSON/Markdown 存 metadata 和�
 - 项目文件树仍然是用户真实工作空间。
 - 不用为了资料库把用户已有文件二次复制一份。
 - `metadata.json` 可以记录 `sourceType: artifact`、`sourceArtifactId`、`promotedAt` 和 `targetPath`。
+
+已确认：Artifact 落盘采用 **方案 B：产物文件 + manifest 记录版本关系**。产物不是只覆盖的普通文件，也不在 v0 做完整版本图谱。
+
+推荐目录：
+
+```text
+FRIDAY/artifacts/
+  <artifactId>/
+    artifact.json
+    files/
+      <versionId>/
+        content.<ext>
+```
+
+`artifact.json` 最小职责：
+
+```text
+Artifact
+  id
+  conversationId
+  title
+  displayName
+  artifactType      // markdown | html | report | code | image | other
+  renderable        // 是否可在画布渲染
+  currentVersionId
+  versions[]
+  createdTurnId
+  updatedTurnId?
+  source            // generated | opened | imported | modified
+  promotedToContext // 是否已加入项目资料库
+  contextId?
+  writtenToProjectTree // 是否已写入项目文件树
+  projectTreePath?
+  createdAt
+  updatedAt
+```
+
+版本规则：
+
+- `versions[]` 只记录能解释用户可见状态的关键版本：初次生成、用户确认后的修改、手动打开并纳入对话、写入项目文件树或加入资料库前的快照。
+- v0 不记录每次自动保存、内部重试和临时中间结果。
+- 当前对话产物列表读取本对话关联的 `artifactId` 列表。
+- 画布打开的是 `currentVersionId` 指向的文件。
+- `@产物` 引用 artifact id 和当时的 version id，避免后续修改改变历史消息语义。
+- 代码文件如果由 FRIDAY 生成，默认也先是产物；用户选择“放入项目文件树”后，才成为项目中的真实代码文件。
+- 产物加入项目资料库时，写入 `context` metadata，并在 `artifact.json` 中回写 `promotedToContext` 和 `contextId`。
+- 产物写入项目文件树时，写入用户选择的相对路径，并在 `artifact.json` 中回写 `writtenToProjectTree` 和 `projectTreePath`。
+
+已确认：用户手动打开项目里的已有文件到画布时，采用 **方案 B：按来源区分，创建轻量 Artifact wrapper**。
+
+规则：
+
+- FRIDAY 生成的文件由 `FRIDAY/artifacts/` 托管，文件内容保存在 `files/<versionId>/content.<ext>`。
+- 用户从项目文件树打开已有文件时，不复制原文件，只创建一个 `artifact.json` wrapper 指向项目相对路径。
+- wrapper 的 `source` 使用 `opened_project_file`，并记录 `storageMode: project_file_reference`、`projectTreePath`、打开时的 `observedHash?`、`observedMtime?` 和 `openedTurnId?`。
+- 这个 wrapper 让已有项目文件可以进入当前对话产物列表、画布、`@产物` 和状态恢复，但不表示 FRIDAY 托管了该文件副本。
+- 用户要求 FRIDAY 修改已有项目文件时，先生成修改草稿或 patch；用户确认后再写回 `projectTreePath` 指向的真实文件。
+- 写回后在 `artifact.json` 中追加一次可见版本记录，记录应用的 turn、写入路径、新 hash / mtime 和可回溯 trace id。
+- 如果用户希望保留一个独立产物副本，可以另存为 FRIDAY 托管产物；这不是默认行为。
+
+## 4.3 权限模式
+
+已确认：桌面端权限模式命名为 **安全 / 标准 / 自主**。这是面向用户的产品语言，不直接暴露现有插件里的 `toolPermissionMode`、`fileMutationMode` 或内部 runtime policy 名称。
+
+安全和标准模式共享同一个基本边界：项目根目录、`FRIDAY/` 管理目录和用户明确添加的授权路径是 FRIDAY 可以工作的范围；超出范围的外部路径、命令执行、网络访问、Git push、删除和移动需要更高等级确认。自主模式单独处理，语义上对齐 Codex 的 full access / danger-full-access：用户明确选择后，FRIDAY 不再用默认沙箱边界和逐项审批阻断本地文件、命令和网络动作。
+
+| 模式 | 产品语义 | 默认行为 |
+| --- | --- | --- |
+| 安全 | FRIDAY 可以观察和准备，但关键动作都先问用户 | 读项目资料和打开文件允许；写入项目真实文件树、移动、删除、命令执行、外部路径和网络访问都需要确认 |
+| 标准 | 默认推荐模式，适合泛文档工作 | FRIDAY 产物自动保存到 `FRIDAY/artifacts/`；已有项目文件修改先生成草稿 / patch，用户确认后写回；低风险读取和资料解析不打断 |
+| 自主 | 用户希望 FRIDAY 像 full access Coding Agent 一样自主推进 | 类似 Codex Full access：本地文件读写、命令执行、网络访问和项目外路径不再默认逐项确认；FRIDAY 继续记录 trace，并允许用户随时停止或切回标准 / 安全 |
+
+具体范围：
+
+| 能力范围 | 安全 | 标准 | 自主 |
+| --- | --- | --- | --- |
+| 读取项目文件 | 可以读项目内文件，并在过程里披露 | 可以读项目内文件，不频繁打断 | 可以读本机账号可访问的文件，不限项目边界 |
+| 写入 `FRIDAY/` 自身状态 | 可以写对话、trace、草稿、产物 metadata | 可以写对话、trace、产物和恢复状态 | 可以写所有 FRIDAY 状态和运行缓存 |
+| 写入 `FRIDAY/artifacts/` 产物 | 可以生成草稿，但关键交付前提示 | 自动保存和版本化 | 自动保存、修改、覆盖版本 |
+| 修改项目真实文件 | 每次确认 | 默认生成 diff / patch，用户确认后写回 | 直接写入，不默认逐项确认 |
+| 新建项目文件 | 每次确认目标位置 | 低风险新建可少打断，重要文件确认 | 直接创建 |
+| 删除 / 移动文件 | 每次确认 | 强确认 | 直接执行 |
+| 访问项目外路径 | 每次确认 | 默认确认，或加入授权路径后按项目规则处理 | 直接访问本机可访问路径 |
+| 运行本地命令 | 默认关闭，需要确认开启和执行 | 可运行常规命令；越界或高风险时确认 | 直接运行 shell、npm、git、脚本等命令 |
+| 网络访问 | 默认确认 | 按任务确认或项目策略开启 | 默认可访问网络 |
+| Git `status` / `diff` | 可读，过程披露 | 可执行 | 可执行 |
+| Git `commit` / `push` / `reset` | 每次确认 | commit 可确认后执行；push / reset 强确认 | 直接执行 |
+| 安装依赖 / 包 / 模块 | 每次确认 | 需要确认 | 直接执行 |
+| 启用 / 修改 Skill、模块 | 每次确认 | 需要确认，尤其是影响 Agent 行为的模块 | 直接启用或修改 |
+| 读取 secrets / `.env` | 默认不主动读取，除非用户点名确认 | 默认敏感提示 | 可以读取，除非用户另设排除规则 |
+| UI 提示 | 频繁确认卡 | 只在越界、高风险或写真实文件时确认 | 输入框底部显示当前模式 + trace + 停止按钮 |
+| 适用场景 | 新项目、资料敏感、非技术用户 | 默认推荐，泛文档工作 | 用户明确要 FRIDAY 像 Coding Agent 一样全权推进 |
+
+补充原则：
+
+- 项目路径可信不等于所有写入都自动放行。安全和标准模式下，可信边界解决的是 FRIDAY 能不能看、能不能准备修改；真正落盘仍按动作风险和权限模式决定。自主模式是用户明确选择的例外，等同进入完整访问姿态。
+- `FRIDAY/artifacts/` 属于 FRIDAY 托管产物区，默认可以自动保存和版本化。
+- 写入项目现有文件树、把产物放入项目文件树、修改用户手动打开的已有文件，都应保留可见 diff / patch 和可回溯 trace。
+- 所有读取、写入、审批、拒绝、失败和重试都进入 Trace；普通用户看到的是过程说明和确认事项，开发者需要时可以展开审计细节。
+- v0 不设计临时提权流程。FRIDAY 不提供“仅允许这一步”“本轮临时提升权限”之类入口；权限模式由用户在输入框底部明确查看和切换。安全 / 标准模式下遇到越界或高风险动作时，FRIDAY 只按当前模式要求动作确认、拒绝或提示用户手动切换模式。
+- 输入框底部工具栏采用极简结构：`+ · 模型名称 · 当前权限模式`，例如 `+ · 5.5 · 标准`。`+` 是统一添加入口，包含添加文件、添加图片、添加 Skill、`@` 引用等；权限文字点击后只切换三档模式。
+- 通过 `+` 添加外部文件 / 图片时，默认复制一份快照到 `FRIDAY/imports/`，再作为当前输入的显式引用。项目内文件仍按项目相对路径引用，不复制。`FRIDAY/imports/` 不自动进入项目资料库；用户后续要沉淀为资料时，再走“加入资料库 / 写入项目文件树”的显式动作。
+- `FRIDAY/imports/` 按对话分目录：`FRIDAY/imports/<conversationId>/<importId>/`。每个 import 目录保存原文件快照和 `import.json`，记录原文件名、原路径、hash、文件类型、大小、创建 turn 和添加时间。这样便于按对话清理、归档和历史恢复。
+- 对话生命周期 v0 不设计删除动作，只提供归档。归档某个对话时，`FRIDAY/conversations/<conversationId>/` 和 `FRIDAY/imports/<conversationId>/` 一起转入 `FRIDAY/archive/conversations/<conversationId>/`；恢复时按同一个归档包回到原位置。
+- 归档后的对话默认从项目主页的活跃对话列表和最近对话中隐藏；项目主页的对话区域提供“查看归档对话 x”入口，不在最左侧全局导航新增归档模块。
+- 打开已归档对话时先进入只读状态，顶部显示“这个对话已归档。恢复后可以继续对话。”并提供恢复按钮。恢复后 `conversationId` 不变，输入框为空，按恢复时间回到活跃对话列表靠前位置。
+- `FRIDAY/artifacts/` 下的产物文件不随对话归档移动，只保留对话里的 artifact 关联。归档后当前对话产物列表随对话隐藏；恢复对话后再显示。
+- 权限模式切换是当前对话级状态，不直接修改项目默认权限。项目默认权限只决定新对话初始值；当前对话每个 Turn 发送时冻结当时的权限模式，方便历史恢复、trace 审计和解释行为差异。
+- 自主模式不作为默认模式。它需要清楚说明“FRIDAY 将获得完整本地访问并自动执行”；进入对话后，当前模式只需要在输入框底部持续显示，避免把自主标识散落到过程区、标题区和设置区。
+- 当用户从自主切回标准 / 安全时，如果 FRIDAY 空闲则立即切换；如果正在执行命令、写文件或调用工具，则先停止后续排队动作，并让用户选择停止当前任务或等当前步骤完成后再切换。
+- 后续设置页不应先做复杂规则编辑器。v0 只需要三档模式 + 项目级覆盖；allow / ask / deny 细规则可以作为高级能力延后。
 
 ## 5. 技能库
 
@@ -335,6 +455,8 @@ A/
     project.json   # 最小 FRIDAY 项目共享 manifest
     context/       # 项目资料库登记、说明、metadata；不复制项目现有文件
     artifacts/     # 产品侧叫“产物”，保存 FRIDAY 生成物和版本关系
+    imports/       # 从 + 添加的项目外文件快照，服务当前对话引用，默认本地
+    archive/       # 归档的对话包；对话和按 conversationId 分组的 imports 一起归档
     skills/        # 项目技能
     conversations/ # 对话和单轮消息，默认本地
     traces/        # 工具调用和过程 trace，默认本地
@@ -369,6 +491,8 @@ FRIDAY/skills/      # 当前项目技能
 ```text
 FRIDAY/conversations/ # 对话历史和单轮消息
 FRIDAY/artifacts/     # 产物文件，默认本地；产物可被加入资料库或写入项目文件树
+FRIDAY/imports/       # 项目外文件通过 + 加入当前对话时的本地快照
+FRIDAY/archive/       # 归档的对话包，默认本地；v0 不做对话删除
 FRIDAY/traces/        # 工具调用和过程 trace 明细
 FRIDAY/references/    # 每次回答的实际引用记录
 FRIDAY/state/         # workspace/canvas/session 状态
@@ -413,9 +537,155 @@ Git Profile：
 | `Conversation` | 对话标题、创建时间、关联产物、历史索引 | 本地 |
 | `Turn` | 单轮用户输入、FRIDAY 回复、确认事项 | 本地 |
 | `Artifact` | md、html、report 等产物文件和版本关系 | 本地；显式加入资料库或写入项目文件树后才成为项目资料 |
-| `Trace` | 工具调用、读写文件、命令执行、PI runtime event | 本地 |
-| `Reference` | 某次回答实际参考的文件清单 | 跟随对话本地保存 |
+| `Import` | `FRIDAY/imports/<conversationId>/<importId>/` 下的项目外文件 / 图片快照、原始来源、hash、所属 turn | 本地；只服务当前对话引用，后续显式加入资料库或写入项目文件树后才成为项目资料；归档时随 `conversationId` 整包移动 |
+| `Trace` | 工具调用、读写文件、命令执行、PI runtime event、审批和失败状态 | 本地 |
+| `Reference` | 用户显式添加的引用、发送时解析的引用、FRIDAY 实际使用后披露的参考来源 | 跟随 Turn 本地保存 |
 | `Workspace State` | 当前打开对话、窗口布局、画布状态、折叠状态 | 个人本地状态 |
+
+## 10.2.1 已确认方向：Conversation / Turn / Trace 文件切分
+
+已确认采用 **方案 B：Conversation 索引 + Turn 快照 + Trace 独立文件**。
+
+目录结构：
+
+```text
+FRIDAY/conversations/
+  <conversationId>/
+    conversation.json
+    turns/
+      <turnId>.json
+    traces/
+      <turnId>.jsonl
+
+FRIDAY/archive/
+  conversations/
+    <conversationId>/
+      conversation/
+      imports/
+```
+
+职责边界：
+
+- `conversation.json` 只作为对话索引，保存标题、项目 id、创建时间、更新时间、turn 顺序、当前主产物、打开状态和必要摘要。
+- `turns/<turnId>.json` 保存单轮稳定快照，包括用户消息、FRIDAY 回复、确认事项、Explicit Reference、Resolved Reference、Answer Reference 和产物关联。
+- `traces/<turnId>.jsonl` 保存过程事件流，包括工具调用、读取、写入、命令执行、失败重试、审批、runtime event 和状态更新。
+- 历史恢复默认先读取 `conversation.json` 和 `turns/*.json`；只有用户展开过程、调试、复盘或审计时才懒加载对应 `traces/<turnId>.jsonl`。
+- v0 不采用“一个对话一个大 JSON”，避免长对话导致单文件过大和恢复成本过高；也不采用全量事件流作为唯一事实源，避免早期 UI 恢复过度复杂。
+
+## 10.2.2 已确认方向：Reference / Turn / Trace 分层
+
+已确认原则：用户添加的 `@` 引用、FRIDAY 实际读取的文件、回答底部披露的参考文件、过程里展示的读取 / 写入 trace 必须分开存。它们可能指向同一个文件，但产品含义不同。
+
+四类事实：
+
+| 类型 | 含义 | 归属对象 | 展示位置 |
+| --- | --- | --- | --- |
+| `Explicit Reference` | 用户发送前通过 `@文件`、`@技能`、`@产物` 明确加入的材料 | 当前 Turn 的 user 部分 | 输入框 chip；发送后用户消息下方“已添加引用 x 个” |
+| `Resolved Reference` | 发送时被解析并进入 prompt / context package 的引用 | 当前 Turn 的 references 部分 | 历史恢复、调试和必要时的引用详情 |
+| `Trace Source` | FRIDAY 执行中实际读取、搜索、写入或运行的目标 | Trace / ToolRun / TurnEvent | 右侧过程区、工具 trace、审计记录 |
+| `Answer Reference` | FRIDAY 回复底部披露给用户的实际参考来源 | 当前 Turn 的 assistant 部分 | 回答底部“参考文件 x 个” |
+
+分层规则：
+
+- `Explicit Reference` 不等于 `Answer Reference`。用户点名一个文件，只表示用户希望 FRIDAY 关注它，不保证一定出现在回答底部。
+- `Trace Source` 不等于 `Answer Reference`。FRIDAY 可能读取、搜索、检查多个文件，但回答底部只展示真正支撑答案的用户可理解来源。
+- `Trace` 必须比 `Reference` 更完整，用于过程复盘、错误排查和权限审计。
+- `Reference` 必须比 `Trace` 更克制，用于用户理解“这条消息 / 这次回答用了哪些材料”。
+- 任何 Reference 都不自动改变项目资料库；只有用户明确选择“加入项目资料库”时，才写入 `Context` / 项目资料库。
+
+建议的 Turn 结构：
+
+```text
+Turn
+  id
+  conversationId
+  status
+  user
+    text
+    composerSnapshot
+    explicitReferences[]
+  assistant
+    text
+    answerReferences[]
+    artifactIds[]
+  runtime
+    contextSummary
+    eventLogPath
+    traceIds[]
+    toolRunIds[]
+```
+
+建议的 ReferenceRecord：
+
+```text
+ReferenceRecord
+  referenceId
+  conversationId
+  turnId
+  phase: user_explicit | resolved_context | assistant_cited
+  targetType: file | folder | skill | artifact | selection
+  targetUri
+  displayName
+  fileType
+  source: composer | mention_resolver | tool_trace | model_output | manual
+  relation: added_to_prompt | resolved_for_prompt | read_by_agent | written_by_agent | shown_as_reference
+  visibility: user_message | answer_footer | internal
+```
+
+回答底部“参考文件 x 个”由 `Answer Reference` 生成，已拍板采用 **方案 B：候选来源池 + 受限筛选**。
+
+候选来源池：
+
+- 用户显式 `@` 且已解析进入 prompt / context package 的文件、产物或选区。
+- FRIDAY 成功读取并实际用于回答的具体文件。
+- 当前产物、当前画布选区或截图被用于本轮回答时形成的 artifact / selection reference。
+- FRIDAY 本轮生成或修改的产物，如果最终回答正在解释、总结或交付该产物，也可以进入候选池。
+
+展示规则：
+
+- 折叠态显示 `参考文件 x 个`。
+- 展开后每项只显示文件类型图标、文件名和来源类型。
+- 来源类型先收敛为 `@引用`、`FRIDAY 读取`、`当前产物`、`选区`。
+- 默认不显示完整路径；点击文件在画布中打开，悬停或右键时可以查看路径、定位到文件树、加入项目资料库。
+
+排序和去重：
+
+- 用户显式 `@` 的文件按用户添加顺序优先。
+- 当前产物和选区次之。
+- FRIDAY 读取的文件按第一次实际使用顺序显示。
+- 同一目标按 `targetType + targetUri` 去重；如果同一文件同时来自多种来源，默认标签优先显示 `@引用`，详情里可以补充“同时被 FRIDAY 读取”。
+
+已确认：`AnswerReference` 随 Assistant Turn 落盘为稳定快照，不从 Trace 临时推导，也不在 v0 建完整 provenance graph。
+
+最小落盘结构：
+
+```text
+AnswerReference
+  id
+  turnId
+  targetType       // project_file | artifact | selection | external_file
+  targetUri
+  displayName
+  fileKind
+  primarySourceType // @引用 | FRIDAY读取 | 当前产物 | 选区
+  sourceTypes[]
+  order
+  createdAt
+  explicitReferenceIds?
+  traceIds?
+  artifactId?
+  selectionId?
+```
+
+必须落盘：`id`、`turnId`、`targetType`、`targetUri`、`displayName`、`fileKind`、`primarySourceType`、`sourceTypes`、`order`、`createdAt`。
+
+可选落盘：`explicitReferenceIds`、`traceIds`、`artifactId`、`selectionId`，用于解释“为什么它进入参考文件”。
+
+只属于 UI 状态、不进入快照：文件图标、展开 / 折叠状态、hover 文案、右键菜单、是否高亮、tooltip 里的完整路径。
+
+默认不进入回答底部的内容：Skill、模块和工具本身；失败或被拒绝的工具调用；只写入但未作为回答依据的工具调用；模型重试；权限检查；路径探测；目录枚举；审批事件；系统 prompt；内部规则；纯状态事件。
+
+历史恢复规则：Conversation 只恢复消息顺序；Turn 恢复某一轮的用户输入、FRIDAY 回复和引用快照；Trace 只在用户展开过程、调试或复盘时懒加载。
 
 ## 10.3 混合工作区与文件分类
 
@@ -697,7 +967,7 @@ docs/plans/friday-desktop/previews/project-library-v1.html
   - 显示当前项目名称和返回项目主页入口
   - 显示本项目对话列表，方便在同一项目内切换对话
   - 底部显示项目资料库、项目 Wiki、技能入口，不显示产物入口
-  - 产物入口只出现在对话页标题行右侧或产物画布相关区域
+  - 产物入口属于当前对话资源：入口放在对话标题行右侧；无画布时内容显示在右侧资源窗口，有画布时内容以悬浮窗口覆盖在 FRIDAY 过程区上方
   - 不继续显示全部项目列表；切换项目时再点击最左侧“项目”重新打开项目菜单
 
 中间 / 左侧主区域：当前工作对象
@@ -734,10 +1004,11 @@ docs/plans/friday-desktop/previews/project-library-v1.html
 - 项目主页还展示项目资料库、项目日历、项目技能、项目 Wiki、项目协作人员和项目远端配置情况的摘要。
 - 项目日历暂时作为项目管理视图占位，不在本轮定义任务、会议、排期、提醒或同步规则。
 - 项目 Wiki 板块展示当前项目已经建立的知识图谱，包括知识节点、关系和来源文件数量；点击后进入详细知识图谱界面。
-- 项目 Wiki 不替代项目资料库列表。项目资料库仍管理资料文件、快照、说明和启用状态；项目 Wiki 负责组织已经沉淀出的概念、决策、产物、技能和资料之间的关系。
+- 项目 Wiki 不替代项目资料库列表。项目资料库仍管理资料文件、登记、说明和启用状态；项目 Wiki 负责组织已经沉淀出的概念、决策、产物、技能和资料之间的关系。
+- 原 Obsidian 插件里的 Wiki 能力不成熟，不作为桌面端项目 Wiki 的成熟参考。桌面端项目 Wiki 需要重新定义产品语义、数据对象、节点 / 关系 schema 和图谱交互。
 - 进入对话页面后，主要页面内容继续沿用前面确认的结构：有产物时为画布 + 右侧 FRIDAY 过程区；没有产物时为对话主页面 + 靠右资源窗口。
 - 进入对话页面后，第二层从“项目列表”切换为“当前项目导航”：显示当前项目、本项目对话列表，并把项目资料库 / Wiki / 技能入口靠底部放置，尽量让对话列表展示更多条目。
-- 产物不放在当前项目导航的项目入口中；有画布时，产物入口保留在对话页标题行右侧或画布相关区域。
+- 产物不放在当前项目导航的项目入口中；它属于当前对话资源，入口放在对话标题行右侧；无画布时内容显示在右侧资源窗口，有画布时内容以悬浮窗口覆盖在 FRIDAY 过程区上方。
 - 对话页中不常驻显示全部项目列表；如果用户要切换项目，应重新点击最左侧“项目”入口展开项目菜单。
 
 Codex 桌面端参考结论：
@@ -763,15 +1034,27 @@ Codex 桌面端参考结论：
 - 右侧 FRIDAY 过程区不重复显示对话标题；对话标题由外层对话页面标题承担，项目主页中的对话列表只作为进入入口。
 - 资料库、Wiki、技能是当前项目导航底部的一组项目入口；产物不放在这组入口里。
 - 技能入口展开后默认显示项目技能，并允许切换查看全局技能。
-- 没有画布区时，资料库、Wiki、技能可以以靠右的资源窗口承载。
-- 画布区出现后，对话页标题行右侧只保留产物入口，资料库、Wiki、技能仍留在当前项目导航底部。
+- 没有画布区时，对话标题行右侧放一排资源 icon，分别代表资料库、项目文件树、技能和产物；下方靠右资源窗口承载当前对话资源。
+- 产物是当前对话资源的一种，默认可以显示当前对话已有产物列表；它不作为项目级入口出现。
+- 资源 icon 只负责切换资源类型；资源内容统一显示在同一个资源窗口中，避免每个入口各自带一个独立窗口。
+- 画布区出现后，同一排资源 icon 仍放在对话标题行右侧；用户点击后在右侧 FRIDAY 过程区上方以悬浮窗口展开，不作为固定面板挤占过程内容。产物本身继续通过画布标签、当前产物和产物列表进入。
 
 项目资源规则：
 
+- 当前对话资源入口最终采用“**标题行入口 + 共用资源窗口**”布局：入口是一排放在对话标题行右侧的资源 icon，内容统一显示在下方同一个资源窗口或浮层中。
 - 资料库、Wiki、技能不再作为固定右侧栏完整展示。
-- 它们作为当前项目导航底部的一组项目入口出现；没有画布时可以以靠右资源窗口承载，有画布时不挤占对话标题行。
-- 用户点击资料库、Wiki 或技能后，在主区域打开悬浮详情窗口。
-- 产物作为当前对话的画布相关入口处理，不进入当前项目导航底部的项目入口组。
+- 它们作为当前项目导航底部的一组项目入口出现；进入对话后，当前对话资源 icon 改为资料库、项目文件树、技能和产物。Wiki 保留为项目级知识图谱入口，不再放进当前对话资源窗口。
+- 当前对话资源窗口默认 tab 由对话状态决定：已有产物时默认打开产物；没有产物时默认打开资料库；用户手动切换后按当前对话记住选择。
+- 资料库 tab 只显示当前项目中已加入资料库的资料清单，每项只展示文件类型和文件名；不显示摘要、说明、路径、更新时间，也不完整展示项目文件树；窗口内预留“进入项目资料库”按钮，用于跳转到该项目资料库完整页面。
+- 文件树 tab 显示整个项目文件树；单击文件直接在画布中打开。右键文件只显示两个动作：**在画布中打开**、**添加到对话**。添加到对话等同于当前插件版本里的 `@` 功能：把该文件作为 `@文件` 加进当前消息 / 当前对话上下文，不改变项目资料库登记。
+- 技能 tab 默认显示项目技能，可切换查看全局技能；每项只显示技能名和一句短用途。点击技能不会直接执行，而是把该技能作为 `@技能` 加入当前输入，等待用户补充任务要求。
+- 产物 tab 显示当前对话产物清单；单击产物在画布中打开。右键产物显示：**在画布中打开**、**添加到对话**、**加入项目资料库**、**放入项目文件树**。
+- `添加到对话` 的语义沿用现有插件的 `@` 引用：引用先进入输入框，成为本轮消息的一部分，而不是直接修改项目资料库、技能库或产物状态。
+- 现有插件的实现证据是：`MentionComposer` 保存结构化 composer snapshot；发送时解析 snapshot 和 mention resolution；用户消息通过 `uiMeta.segments` 保留结构化展示；发送成功或加入队列后，`aiComposerSnapshot` 会被重置为空并回写到 composer。
+- 桌面端应继承这个行为：发送成功后输入框清空，上一轮 `@` 引用不自动延续到下一轮。已经发送的 Turn 保留显式引用快照，用于历史回放、引用展示和状态恢复。
+- 已发送用户消息可折叠显示“已添加引用 x 个”；FRIDAY 回复底部继续显示“参考文件 x 个”。用户添加的引用表示显式点名，FRIDAY 的参考文件表示实际使用，两者是不同披露层。
+- 用户点击项目导航里的资料库、Wiki 或技能后，在主区域打开对应详情窗口。
+- 产物作为当前对话的画布相关入口处理，不进入当前项目导航底部的项目入口组；无画布时在右侧资源窗口中以“当前对话产物”列表展示。
 - 技能入口默认显示项目技能，并提供切换到全局技能的控制。
 - 悬浮详情窗口不取代当前对话和产物画布，只作为临时查看和管理入口。
 
@@ -909,7 +1192,7 @@ docs/plans/friday-desktop/index.html
 ## 22. 当前待定问题
 
 - 桌面端技术栈选择。当前只记录约束，不在产品功能边界稳定前做最终选择。
-- 产物区的命名、文件组织和版本规则。
+- 当前对话产物列表的展示字段、版本规则和操作菜单。
 - 技能库中 Skill 的展示字段、编辑方式和冲突提示样式。
 - 模块与 Skill 的边界：哪些是轻量行为规则，哪些应该成为完整模块。
 - Soul 如何从 prompt/persona 扩展为可配置的 Agent 行为画像。
@@ -926,7 +1209,7 @@ docs/plans/friday-desktop/index.html
 - 常驻总模块栏：搜索、项目、团队、日历、模块、Soul、设置。
 - 项目主页：输入框、全部对话、项目资料库、项目日历、项目 Wiki、项目技能、协作与远端状态。
 - 对话页：第二层切换为当前项目导航，右侧是完整 FRIDAY 对话和过程区。
-- 有产物时：主区域切换为产物画布，右上角只保留产物入口。
+- 有产物时：主区域切换为产物画布，对话标题行右侧保留当前对话资源 icon，点击后在 FRIDAY 过程区上方悬浮展开共用资源窗口。
 
 技术栈应在核心产品能力和 Host 边界稳定后再最终确定，但不应等到所有细节完全定完。现在先记录技术约束：
 
@@ -950,11 +1233,11 @@ v0 必须跑通：
 - 右侧 FRIDAY 完整历史、过程 trace、工具调用和参考文件披露。
 - 生成或打开可显示文件后的产物画布。
 - 项目资料库 v1：以项目文件树为直接信息来源，登记文件成为资料，保存 metadata、启用 / 暂停。
-- 项目 Wiki 的摘要卡和详情入口。
 - 最小项目技能 / 全局技能列表和启用状态。
 
 v0 先占位：
 
+- 项目 Wiki / 知识图谱。
 - 团队总模块。
 - 总日历。
 - 项目日历。
@@ -997,3 +1280,192 @@ v0 的核心工作流不是页面堆叠，而是让一个泛文档任务形成�
 - 产物画布接管主区域后，右侧 FRIDAY 区域仍属于同一个对话，不变成独立聊天窗口。
 - 回答底部显示 `参考文件 x 个`，点击后展开本次实际参考文件。
 - 对话、产物、trace、引用记录和恢复状态都需要落盘。
+
+## 26. 现有能力到桌面端 v0 的映射方法
+
+已确认：下一轮规划先不继续展开团队、日历、完整模块市场。先做一张硬映射表，把 **现有能力 -> 当前代码位置 -> 桌面端产品落点 -> v0 是否需要 -> 缺口 -> 后续任务** 对齐；技术栈已在后续 M2 决策中收敛为 Electron-first。
+
+这个决策的目的不是证明所有东西都已经能直接复用，而是避免桌面端规划脱离现有 FRIDAY 能力基础。
+
+当前切分：
+
+- v0 必做：Desktop HostAdapter、项目主页、对话页、过程区、权限模式、项目资料库、Reference / Trace 分离、产物画布、ArtifactStore、状态恢复和归档。
+- v0 轻量做：项目 / 全局技能列表、现有 Soul 管理入口。
+- v0 暂缓：项目 Wiki / 知识图谱、完整模块协议、社区 marketplace、Module Builder、团队协作系统、完整日历系统、高级 Soul agent loop。
+
+对应的现有能力来源：
+
+- Agent Kernel、`FridayPiRuntime`、PI SDK adapter 是桌面端 runtime 主线。
+- `AgentRuntimeService`、AgentTurn contract、过程面板 view model 和 trajectory renderer 是对话 / 过程 / trace 的主要复用来源。
+- `ProjectEditorService`、`WorkbenchStateStore`、`SyncOrchestrator`、`SimpleGitOperator` 和 workspace policy 是项目、远端和本地边界的主要复用来源。
+- `PromptContextEngine`、`ContextAssembler`、`MentionResolver`、`MentionComposer`、`MemoryStoreV1` 和 `ProjectContentService` 是项目资料库、`@` 引用和回答参考文件的主要复用来源。
+- 旧 Wiki 相关代码，例如 `WikiIngestService`、`WikiLookupService`、`WikiKnowledgeProvider`、`RelationGraphBuilder`、`CapabilityIndexBuilder`，只作为历史探索参考，不作为项目 Wiki 和知识图谱的成熟复用来源。
+- `CapabilityPolicy`、`ToolGateway`、`ToolApprovalService`、`MutationPlanStore` 和 `MutationApplier` 是权限模式、工具审批和修改审查的主要复用来源。
+- `SkillCommandService`、`SkillRegistry`、`InvocationResolver`、`ExecutionOrchestrator` 和内置 skill packs 是技能库和未来模块平台的基础。
+- `SoulStore`、`SoulProfile` 和 Soul templates 是 v0 Soul 入口的基础，但高级 agent loop 定义后移。
+
+实施含义：
+
+- 第一阶段不应把“模块协议 v0”作为必须完成项；模块页可先占位，等 Desktop runtime shell、项目资料库、产物画布和权限闭环跑通后再单独设计模块协议。
+- 第一阶段也不应把旧插件 Wiki 管线作为项目 Wiki 的实现基线；项目 Wiki v0 暂缓，只保留项目主页占位入口，后续再定义产品语义、数据对象和详情页。
+- `DailyBoardView` 继续视为现有 Obsidian surface 的实现细节，不再作为桌面端产品语义中心。
+- 后续每一个桌面端功能，都应先回答它复用哪个现有能力、需要抽出哪个 host-neutral contract、是否进入 v0。
+
+## 27. 桌面端 v0 功能清单和对象表
+
+已确认：v0 先收束成一个可开发的本地桌面工作台闭环，而不是完整平台。
+
+v0 必须进入开发清单的功能区：
+
+- Desktop shell：独立窗口、最左侧总模块栏、项目入口、设置入口、上次项目恢复。
+- 项目主页：当前项目、输入框、对话列表、资料库摘要、技能摘要、协作 / 远端状态、Wiki / 团队 / 日历占位。
+- 项目创建 / 加入：新建文件夹、选择已有文件夹、已有文件夹先观察再加入。
+- 对话页：完整历史、右侧 FRIDAY 过程区、继续输入、任务状态、当前对话资源入口。
+- 输入框 / 权限栏：`+ · 模型名称 · 权限模式`；权限为当前对话级安全 / 标准 / 自主。
+- 项目资料库：项目文件树、已加入资料库列表、说明、启用 / 暂停、外部导入。
+- 产物画布：当前对话产物列表、Markdown / HTML 等可显示文件打开、标签切换、状态恢复。
+- Reference / Trace：回答底部 `参考文件 x 个` 和过程区 trace 分开展示。
+- Skill：项目技能 / 全局技能列表、启用状态、`@skill` 引用。
+- Soul / 设置：复用现有基础 Soul 管理入口和模型 / 权限设置。
+- 归档 / 恢复：只做归档，不做删除；`FRIDAY/imports/<conversationId>/` 随对话归档。
+
+v0 暂缓或占位：
+
+- 项目 Wiki / 知识图谱。
+- 团队、日历、完整模块市场、Module Builder、高级 Soul agent loop。
+- 云账号、组织权限、实时多人协作、移动端、自动更新和完整 Obsidian 替代品。
+
+v0 第一轮需要冻结的核心对象：
+
+| 对象 | v0 最小职责 |
+| --- | --- |
+| `Project` | 项目 id、名称、根目录、schema version、Git Profile、默认权限模式 |
+| `WorkspaceState` | 当前项目、当前对话、当前产物、布局、资源面板状态 |
+| `Conversation` | 对话标题、状态、turn 顺序、产物关联、归档状态 |
+| `Turn` | 单轮输入 / 回复、权限快照、显式引用、回答引用、产物关联 |
+| `Trace` | 工具调用、读写文件、命令执行、审批、失败和重试事件 |
+| `Reference` | 用户添加、发送时解析、回答披露三类引用事实 |
+| `Artifact` | 产物 manifest、可渲染类型、当前版本、版本文件、来源 turn |
+| `Import` | 项目外文件 / 图片快照、原始路径、hash、所属对话和 turn |
+| `Context` | 项目资料库登记、来源类型、说明、启用状态 |
+| `Skill` | 项目 / 全局 scope、说明、启用状态、来源路径 |
+| `PermissionProfile` | 安全 / 标准 / 自主三档、项目默认、对话覆盖、turn 快照 |
+| `GitProfile` | local-only / share-friday-layer / remote-managed 等同步策略 |
+
+剩余缺口排序：
+
+1. Desktop HostAdapter 工程包拆分。
+2. ArtifactStore 与产物画布状态。
+3. 项目资料库 metadata 和外部导入规则。
+4. Reference / Trace UI contract。
+5. Skill / Soul 最小边界。
+6. 技术栈选择。
+
+## 28. Desktop HostAdapter contract
+
+已确认：Desktop HostAdapter contract 是 FRIDAY Runtime 与桌面端真实环境之间的能力合同。它不等于 Electron / Tauri 的具体 API，也不等于 UI 组件；它定义 Runtime 可以向 host 请求什么、host 必须怎么执行、哪些动作要被权限系统拦截、哪些结果要进入 trace。
+
+核心原则：
+
+- Runtime 不直接读写桌面文件系统，不直接操作窗口、Git、系统命令或 UI。
+- Desktop HostAdapter 负责把 Runtime 请求翻译成桌面端真实动作，并返回结构化结果。
+- 所有可能影响本地文件、命令、网络、Git 或用户可见状态的动作，都必须经过权限模式和 trace。
+- Obsidian host 和 Desktop host 可以实现同一类 contract，但 Desktop 是 v0 主 host。
+- Contract 先按能力域定义，不在这一层绑定 Electron / Tauri 技术栈。
+
+v0 需要的能力域：
+
+| 能力域 | 主要职责 |
+| --- | --- |
+| Project | 当前项目、项目根目录、`FRIDAY/` 布局、Git Profile、项目状态 |
+| FileSystem | 项目文件读取、`FRIDAY/` 状态读写、外部导入快照、产物写入、路径安全 |
+| Runtime State | Conversation、Turn、Trace、Reference、Artifact、WorkspaceState 的保存和恢复 |
+| Permission | 安全 / 标准 / 自主三档、turn 权限快照、确认 / 拒绝 / 停止 |
+| Tool Execution | 命令、Git、文件工具、后续模块工具的真实执行入口 |
+| Trace / UI Event | 过程区事件、回答引用、确认事项、审计事件 |
+| Artifact Surface | ArtifactStore、画布打开、版本变更、写入项目文件树 |
+| Project Library | `FRIDAY/context/` metadata、项目文件登记、import 快照入库 |
+| Skill / Soul | 项目 / 全局技能列表、基础 Soul 状态 |
+| Git | status / diff、远端检测、同步动作、冲突检测 |
+
+最小接口形态可以先用规划名表达：
+
+```text
+getActiveProject()
+resolveProjectPath(pathIntent)
+readProjectFile(path)
+writeProjectFile(path, content, options)
+writeFridayState(kind, payload)
+readFridayState(kind, id)
+createImport(file)
+createArtifact(payload)
+openArtifact(artifactId)
+registerContextItem(payload)
+listSkills(scope)
+getPermissionSnapshot(conversationId)
+requestApproval(action)
+executeTool(invocation)
+emitTrace(event)
+persistTurn(turn)
+archiveConversation(conversationId)
+restoreConversation(conversationId)
+```
+
+这些名字不是最终 TypeScript 命名。真正实现时可以拆成多个 port，例如 `ProjectHostPort`、`FileSystemHostPort`、`ArtifactHostPort`、`PermissionHostPort`、`TraceHostPort`。
+
+不属于 HostAdapter 的职责：
+
+- 不决定 FRIDAY 怎么思考、怎么规划任务、怎么组织回复。
+- 不把 UI 文案或视觉状态写进 Runtime。
+- 不直接实现 PI SDK 的 agent loop。
+- 不承担完整模块市场、团队协作、云同步或高级 Soul 行为定义。
+
+因此，v0 应先定 HostAdapter contract，再选技术栈。Electron / Tauri 的比较要服务于 host 能力，而不是先选壳再反推能力。
+
+## 29. 桌面端 v0 实施计划与首轮顺序
+
+已确认：桌面端 v0 的下一步不是继续扩展产品范围，而是进入工程拆分。新的可执行计划记录在 `2026-06-11-friday-desktop-v0-implementation-plan.zh.md`。
+
+实施计划采用 HostAdapter 先行：
+
+- 先做 Baseline，确认当前分支 `npm install`、`npm test`、`npm run build` 的真实状态。
+- 再做 Desktop HostAdapter ports，冻结 Runtime 与桌面 host 的边界。
+- 然后做 ProjectHost、WorkspaceState、FileSystemHost、ImportStore、PermissionHost、TraceHost 和 ToolExecutionHost。
+- 在这些边界可跑后，证明 PI Runtime 可以通过 Desktop host 跑一个最小 session。
+- 之后再补 Conversation / Turn / Reference、ArtifactStore、ProjectLibrary、Skill / Soul 和 UI 集成。
+
+首轮执行顺序建议为：
+
+1. M0 Baseline and Constraints。
+2. M1 Desktop HostAdapter Ports。
+3. M2 Desktop Shell Tech Spike。
+4. M3 ProjectHost and WorkspaceState。
+5. M4 FileSystemHost and RuntimeState Store。
+6. M5 PermissionHost, TraceHost and ToolExecution Boundary。
+7. M10 PI Runtime Through Desktop Host。
+
+理由：M1 先定义 FRIDAY 需要的 host 能力，M2 立刻用真实 smoke 判断桌面壳，随后再回答“FRIDAY Desktop 是否真的能作为 PI-first Runtime host 跑起来”。如果这个闭环成立，再做产物画布、资料库、资源窗口和完整 UI，风险更低。
+
+技术栈选择不是在产品讨论阶段拍脑袋决定，但也不能无限后置。M2 是明确的技术栈决策门：M1 冻结 HostAdapter 能力后，必须用真实 smoke 判断桌面壳和 runtime ownership；未完成 Electron `BrowserWindow` + preload + renderer smoke 之前，不进入完整 UI integration。
+
+## 30. 桌面壳技术栈决策门
+
+已确认：v0 技术栈选择 **Electron-first**。定稿顺序仍然是 **HostAdapter contract -> 技术栈 spike -> v0 shell 决策**。M2 的结论是：先用 Electron main process 承载 Node/PI runtime，Tauri + Node sidecar 保留为后续平台化或迁移方向。
+
+Electron-first 的分工：
+
+- Electron main process：窗口、菜单、PI SDK、FRIDAY runtime、HostAdapter node implementations、文件读写、命令执行、Git、artifact、library、reference、trace 和 state persistence。
+- Preload bridge：只暴露 typed HostAdapter IPC，不泄漏 Node / Electron 全能力。
+- Renderer：项目主页、对话页、画布、资源窗口、输入框权限控件和过程展示。
+
+选择原因：
+
+- M2 smoke 已证明 Node 侧 PI SDK、最小 PI session、shell、文件系统和日志原语可跑，Electron main process 可以直接承载这些能力。
+- FRIDAY v0 的目标是先证明桌面端作为 PI-first Runtime host 可运行，而不是先建设 sidecar lifecycle、IPC、打包和崩溃恢复体系。
+- Electron main / preload / renderer 分层天然匹配 HostAdapter 边界：受信 host 在 main，受控 bridge 在 preload，UI 在 renderer。
+
+新增风险：
+
+- M11 前必须补真实 Electron `BrowserWindow` + preload + renderer smoke。
+- Electron main process 权限面更宽，renderer 必须严格隔离，所有 fs / shell / Git 走 HostAdapter 和 PermissionHost。
+- Tauri + Node sidecar 的长期价值仍然成立，但不进入 v0 主线，避免第一版被 sidecar 打包和 IPC 复杂度拖慢。

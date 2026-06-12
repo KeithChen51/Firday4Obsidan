@@ -448,6 +448,16 @@
       font-weight: 760;
     }
 
+    .resource-icon-mark svg {
+      width: 19px;
+      height: 19px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
     .page-body {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 320px;
@@ -538,14 +548,33 @@
       font-weight: 900;
     }
 
-    .resource-window {
+    .resource-side {
       border-left: 1px solid var(--soft-line);
       background: var(--shell-muted);
+      color: var(--brand-ink);
+    }
+
+    .resource-entry-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      padding: 18px;
+      border-bottom: 1px solid var(--soft-line);
+    }
+
+    .page-head .resource-entry-strip {
+      grid-template-columns: repeat(4, 34px);
+      justify-content: end;
+      padding: 0;
+      border-bottom: 0;
+    }
+
+    .resource-window {
       padding: 18px;
       display: grid;
-      grid-template-rows: auto auto 1fr;
+      grid-template-rows: auto 1fr;
       gap: 16px;
-      color: var(--brand-ink);
+      align-content: start;
     }
 
     .resource-window h2 {
@@ -554,20 +583,104 @@
       line-height: 1.16;
     }
 
-    .resource-tabs {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
+    .resource-icon {
+      border: 1px solid color-mix(in srgb, var(--muted-teal) 42%, var(--line));
+      border-radius: 8px;
+      min-height: 54px;
+      background: color-mix(in srgb, var(--panel) 82%, var(--shell-muted));
+      color: var(--brand-ink);
+      display: grid;
+      justify-items: center;
+      align-content: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 760;
     }
 
-    .resource-tab {
-      border: 1px solid color-mix(in srgb, var(--muted-teal) 42%, var(--line));
-      border-radius: 999px;
-      padding: 7px 10px;
+    .resource-icon-mark {
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      line-height: 1;
+      color: var(--muted-teal);
+    }
+
+    .resource-icon.active {
       background: var(--muted-teal-soft);
-      color: #315F5B;
+      border-color: var(--muted-teal);
+    }
+
+    .page-head .resource-icon {
+      width: 34px;
+      min-height: 34px;
+      gap: 0;
+      padding: 0;
+    }
+
+    .page-head .resource-icon span:not(.resource-icon-mark),
+    .page-head .resource-icon em {
+      display: none;
+    }
+
+    .resource-icon em {
+      font-style: normal;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .resource-section-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      color: var(--brand-ink);
+      font-size: 13px;
+      font-weight: 850;
+    }
+
+    .product-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .product-item {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      padding: 12px;
+      display: grid;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 720;
+    }
+
+    .product-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .product-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--ink);
+      font-weight: 850;
+    }
+
+    .product-action {
+      color: var(--muted-teal);
       font-size: 12px;
-      font-weight: 650;
+      font-weight: 850;
+    }
+
+    .product-meta {
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 700;
     }
 
     .resource-card {
@@ -680,7 +793,7 @@
       color: var(--paper);
     }
 
-    .resource-tab,
+    .resource-icon.active,
     .skill-switch .active {
       border-color: rgba(74, 127, 123, 0.34);
       background: rgba(74, 127, 123, 0.1);
@@ -718,9 +831,9 @@
       <div>
         <div class="eyebrow">No Canvas Conversation / 2026-06-09</div>
         <h1>没有画布时，对话仍是主页面。</h1>
-        <p>同一套桌面端层级保持不变：最左侧是常驻全局导航；进入对话页后，第二层切换为当前项目导航，优先显示本项目对话，底部放资料库、Wiki、技能入口。当前对话还没有可显示产物或用户没有打开文件时，中间不拆出画布，FRIDAY 对话占据主区域，资料库、Wiki、技能以靠右资源窗口承载。</p>
+        <p>同一套桌面端层级保持不变：最左侧是常驻全局导航；进入对话页后，第二层切换为当前项目导航，优先显示本项目对话，底部放资料库、Wiki、技能入口。当前对话还没有打开产物画布时，中间不拆出画布，FRIDAY 对话占据主区域；对话标题行右侧放资料库、文件树、技能和产物四个资源 icon，下方右侧资源窗口显示当前选中的资源内容。文件树中单击文件会打开到画布，右键只提供在画布中打开和添加到对话；添加到对话等同现有插件里的 @ 文件引用。技能 tab 点击后作为 @ 技能加入输入，不直接执行。产物 tab 右键可加入项目资料库或放入项目文件树。</p>
       </div>
-      <div class="note">这个状态不是另一个产品页，而是同一个对话页面在“没有画布”时的布局。用户仍然从项目主页进入对话；出现画布后，资源窗口收起到对话标题行右侧。</div>
+      <div class="note">这个状态不是另一个产品页，而是同一个对话页面在“没有画布”时的布局。资源入口与对话标题平行，内容窗口单独放在下方右侧；用户打开产物后，主区域再切换为画布。</div>
     </section>
 
     <section class="desktop-frame" aria-label="FRIDAY Desktop 无画布对话页">
@@ -842,7 +955,50 @@
               <div class="conversation-name">基于 PI 的桌面端</div>
               <div class="conversation-context">当前没有打开产物画布，主区域显示完整对话</div>
             </div>
-            <div class="conversation-context">资源窗口常驻靠右</div>
+            <div class="resource-entry-strip" aria-label="对话资源入口">
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M6 4.8h8.2l3.8 3.8v10.6H6Z"></path>
+                    <path d="M14.2 4.8v4h3.8"></path>
+                    <path d="M8.6 12.2h6.8M8.6 15.5h5.1"></path>
+                  </svg>
+                </span>
+                <span>资料库</span>
+                <em>12</em>
+              </div>
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M5 6.2h5.1l1.6 1.8H19v9.8H5Z"></path>
+                    <path d="M8 11h8M8 14h5.8"></path>
+                  </svg>
+                </span>
+                <span>文件树</span>
+                <em>全部</em>
+              </div>
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 4.8v14.4M4.8 12h14.4"></path>
+                    <path d="M7.2 7.2 16.8 16.8M16.8 7.2 7.2 16.8"></path>
+                    <circle cx="12" cy="12" r="3.4"></circle>
+                  </svg>
+                </span>
+                <span>技能</span>
+                <em>3</em>
+              </div>
+              <div class="resource-icon active">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="4.8" y="6" width="14.4" height="12.8" rx="2"></rect>
+                    <path d="M8.2 9.6h7.6M8.2 13h7.6M8.2 16.4h4.8"></path>
+                  </svg>
+                </span>
+                <span>产物</span>
+                <em>2</em>
+              </div>
+            </div>
           </div>
 
           <div class="page-body">
@@ -852,7 +1008,7 @@
                   先不生成文件，我们先把 FRIDAY Desktop 的产品结构讨论清楚。
                 </article>
                 <article class="bubble">
-                  可以。当前对话没有画布，所以我会把完整历史、过程和继续输入放在主区域；右侧保留资料库、Wiki、技能窗口，方便随时查看项目资源。
+                  可以。当前对话没有打开画布，所以我会把完整历史、过程和继续输入放在主区域；标题行右侧的资源 icon 用来切换资料库、文件树、技能和产物，下方右侧共用窗口只显示当前选中的资源内容。文件树里的文件单击打开到画布，右键可以用 @ 的方式添加到当前对话；技能也用 @ 的方式加入输入框。
                   <div class="event"><span>读取桌面端规划决策</span><span>完成</span></div>
                   <div class="event"><span>整理项目资料库规则</span><span>进行中</span></div>
                   <div class="event"><span>等待用户确认资源入口</span><span>待确认</span></div>
@@ -862,37 +1018,38 @@
               <div class="composer">
                 <div>继续输入，或拖入新的项目资料...</div>
                 <div class="composer-bottom">
-                  <span>＋ 本地资料 · 5.5 · 麦克风</span>
+                  <span>+ · 5.5 · 标准</span>
                   <span class="send">↑</span>
                 </div>
               </div>
             </section>
 
-            <aside class="resource-window">
-              <div>
-                <div class="eyebrow">Project Resources</div>
-                <h2>资料库、Wiki、技能</h2>
-              </div>
-              <div class="resource-tabs">
-                <span class="resource-tab">资料库 12</span>
-                <span class="resource-tab">Wiki 38</span>
-                <span class="resource-tab">技能 3</span>
-              </div>
-              <div>
-                <div class="resource-card">
-                  <b>项目资料库</b>
-                  会议记录、复盘、方案草稿和用户反馈都可以作为当前对话上下文。
+            <aside class="resource-side" aria-label="当前对话资源">
+              <div class="resource-window">
+                <div>
+                  <div class="eyebrow">Conversation Resources</div>
+                  <h2>当前对话资源</h2>
                 </div>
-                <div class="resource-card">
-                  <b>Wiki</b>
-                  当前项目已经沉淀出的概念、决策、资料和技能关系，可以进入知识图谱详情页。
-                </div>
-                <div class="resource-card">
-                  <b>技能</b>
-                  默认显示项目技能；用户可以切换到全局技能。
-                  <div class="skill-switch">
-                    <span class="active">项目技能</span>
-                    <span>全局技能</span>
+                <div>
+                  <div class="resource-section-title">
+                    <span>当前对话产物</span>
+                    <span>2 个</span>
+                  </div>
+                  <div class="product-list">
+                    <div class="product-item">
+                      <div class="product-row">
+                        <span class="product-name">桌面端产品规划.html</span>
+                        <span class="product-action">打开</span>
+                      </div>
+                      <div class="product-meta">HTML · 当前对话生成 · 未加入资料库</div>
+                    </div>
+                    <div class="product-item">
+                      <div class="product-row">
+                        <span class="product-name">项目资料库规则.md</span>
+                        <span class="product-action">打开</span>
+                      </div>
+                      <div class="product-meta">Markdown · 当前对话整理 · 可写入项目文件树</div>
+                    </div>
                   </div>
                 </div>
               </div>

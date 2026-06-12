@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRIDAY Desktop 输入框权限控件预览</title>
+  <style>
+    :root {
+      --graphite: #1E1F21;
+      --warm-bone: #F4F1EB;
+      --stone: #D9D5CA;
+      --paper: #FBFAF7;
+      --panel: #FBFAF7;
+      --ink: var(--graphite);
+      --line: rgba(30, 31, 33, 0.13);
+      --soft-line: rgba(30, 31, 33, 0.07);
+      --muted-teal: #4A7F7B;
+      --muted-teal-soft: #DDEBE8;
+      --accent: #E07A5F;
+      --accent-soft: #F5DDD5;
+      --brand-ink: #315F5B;
+      --shell-muted: #EDE8DF;
+      --ink-strong: rgba(30, 31, 33, 0.88);
+      --ink-body: rgba(30, 31, 33, 0.72);
+      --ink-muted: rgba(30, 31, 33, 0.56);
+      --font-latin-brand: "Avenir Next", "Segoe UI", Arial, sans-serif;
+      --font-cjk-display: "LXGW WenKai Screen", "LXGW WenKai", "Noto Serif SC", "Source Han Serif SC", "STFangsong", "FangSong", serif;
+      --font-cjk-body: "LXGW WenKai Screen", "LXGW WenKai", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      --font-cjk-ui: "MiSans", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+      font-family: var(--font-cjk-body);
+      color-scheme: light;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--warm-bone);
+      color: var(--ink-body);
+      line-height: 1.65;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    main {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 34px clamp(18px, 4vw, 56px) 64px;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 20px;
+      margin-bottom: 26px;
+    }
+
+    .brand {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--ink-strong);
+    }
+
+    .brand img { width: 26px; }
+
+    .nav-links {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .nav-links a {
+      color: var(--muted-teal);
+      font-size: 13px;
+      font-weight: 760;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      background: color-mix(in srgb, var(--panel) 82%, var(--muted-teal-soft));
+      font-family: var(--font-cjk-ui);
+    }
+
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 340px;
+      gap: 32px;
+      align-items: end;
+      margin-bottom: 28px;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-family: var(--font-latin-brand);
+      font-weight: 650;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--font-cjk-display);
+      font-weight: 500;
+      font-size: clamp(34px, 5vw, 58px);
+      line-height: 1.08;
+      letter-spacing: 0;
+    }
+
+    .intro p {
+      margin: 16px 0 0;
+      max-width: 880px;
+      color: var(--ink-muted);
+      font-weight: 650;
+      font-size: 18px;
+    }
+
+    .note {
+      border-left: 4px solid var(--muted-teal);
+      background: var(--muted-teal-soft);
+      padding: 16px 18px;
+      color: var(--brand-ink);
+      font-weight: 760;
+    }
+
+    .desktop-frame {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      min-height: 720px;
+    }
+
+    .os-bar {
+      height: 40px;
+      display: grid;
+      grid-template-columns: 340px minmax(0, 1fr) 110px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--warm-bone);
+      color: var(--ink-muted);
+      font-family: var(--font-cjk-ui);
+      font-size: 14px;
+      font-weight: 680;
+    }
+
+    .menu {
+      display: flex;
+      gap: 22px;
+      white-space: nowrap;
+    }
+
+    .window-title {
+      justify-self: center;
+      color: var(--ink-strong);
+      font-weight: 760;
+    }
+
+    .window-controls {
+      display: flex;
+      justify-content: flex-end;
+      gap: 16px;
+      color: var(--ink);
+      font-weight: 900;
+    }
+
+    .workspace {
+      min-width: 1160px;
+      min-height: 680px;
+      display: grid;
+      grid-template-columns: 72px 230px minmax(0, 1fr) 330px;
+      font-family: var(--font-cjk-ui);
+    }
+
+    .rail {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+      padding: 14px 8px;
+      border-right: 1px solid var(--line);
+      background: var(--paper);
+    }
+
+    .mini-brand {
+      width: 52px;
+      min-height: 44px;
+      display: grid;
+      place-items: center;
+    }
+
+    .mini-brand img {
+      width: 28px;
+      height: auto;
+    }
+
+    .rail-nav {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .rail-item {
+      width: 52px;
+      min-height: 56px;
+      display: grid;
+      place-items: center;
+      gap: 2px;
+      padding: 8px 4px;
+      border-radius: 8px;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .rail-item svg {
+      width: 21px;
+      height: 21px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .rail-item.active {
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--brand-ink);
+      border: 1px solid rgba(74, 127, 123, 0.24);
+    }
+
+    .project-nav {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      gap: 18px;
+      padding: 20px 14px;
+      border-right: 1px solid var(--line);
+      background: rgba(217, 213, 202, 0.32);
+    }
+
+    .project-title span,
+    .side-section-title {
+      display: block;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 760;
+      margin-bottom: 5px;
+    }
+
+    .project-title b {
+      display: block;
+      color: var(--ink-strong);
+      font-size: 18px;
+    }
+
+    .thread-list {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+    }
+
+    .thread {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-radius: 8px;
+      padding: 10px 10px;
+      color: var(--ink-body);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .thread.active {
+      background: rgba(74, 127, 123, 0.1);
+      border: 1px solid rgba(74, 127, 123, 0.24);
+      color: var(--ink-strong);
+    }
+
+    .project-entry {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+    }
+
+    .entry-button {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: var(--ink-body);
+      font-weight: 760;
+      font-size: 13px;
+    }
+
+    .chat-page {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-width: 0;
+      background: var(--paper);
+    }
+
+    .chat-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 18px;
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid var(--line);
+      background: var(--warm-bone);
+    }
+
+    .chat-head h2 {
+      margin: 0;
+      color: var(--ink-strong);
+      font-size: 18px;
+      line-height: 1.3;
+    }
+
+    .chat-head p {
+      margin: 2px 0 0;
+      color: var(--ink-muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .resource-icons {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .resource-icons button {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--brand-ink);
+    }
+
+    .resource-icons svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .chat-main {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      gap: 18px;
+      padding: 24px;
+      min-height: 580px;
+    }
+
+    .messages {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+
+    .bubble {
+      width: min(760px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 14px 16px;
+      color: var(--ink-body);
+      font-size: 16px;
+      font-weight: 560;
+    }
+
+    .bubble.user {
+      background: rgba(224, 122, 95, 0.1);
+      border-color: rgba(224, 122, 95, 0.34);
+      color: var(--ink-strong);
+    }
+
+    .event {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      border-top: 1px solid var(--line);
+      margin-top: 12px;
+      padding-top: 10px;
+      color: var(--ink-muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .event::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      margin-top: 7px;
+      border-radius: 50%;
+      background: var(--muted-teal);
+      flex: 0 0 auto;
+    }
+
+    .composer-wrap {
+      position: relative;
+    }
+
+    .composer {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      min-height: 108px;
+      display: grid;
+      grid-template-rows: 1fr auto;
+      overflow: hidden;
+    }
+
+    .composer-placeholder {
+      padding: 16px 18px 8px;
+      color: var(--ink-muted);
+      font-weight: 650;
+    }
+
+    .composer-bottom {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 12px;
+      color: var(--ink-strong);
+      font-size: 14px;
+      font-weight: 760;
+    }
+
+    .composer-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    .tool-trigger,
+    .model-trigger,
+    .permission-trigger {
+      border: 1px solid transparent;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      border-radius: 8px;
+      padding: 5px 7px;
+      min-height: 30px;
+    }
+
+    .tool-trigger {
+      width: 31px;
+      display: grid;
+      place-items: center;
+      color: var(--brand-ink);
+      border-color: rgba(74, 127, 123, 0.22);
+      background: rgba(74, 127, 123, 0.08);
+      font-size: 20px;
+      line-height: 1;
+    }
+
+    .model-trigger,
+    .permission-trigger {
+      color: var(--ink-body);
+    }
+
+    .permission-trigger.standard {
+      color: var(--brand-ink);
+      background: rgba(74, 127, 123, 0.1);
+      border-color: rgba(74, 127, 123, 0.22);
+    }
+
+    .permission-trigger.safe {
+      color: var(--ink-body);
+      background: rgba(217, 213, 202, 0.32);
+      border-color: rgba(30, 31, 33, 0.09);
+    }
+
+    .permission-trigger.auto {
+      color: #7A392A;
+      background: rgba(224, 122, 95, 0.14);
+      border-color: rgba(224, 122, 95, 0.36);
+    }
+
+    .divider {
+      color: rgba(30, 31, 33, 0.32);
+      font-weight: 520;
+    }
+
+    .send {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--muted-teal);
+      color: var(--paper);
+      font-weight: 900;
+    }
+
+    .popover {
+      position: absolute;
+      left: 12px;
+      bottom: 66px;
+      width: 272px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 8px;
+      box-shadow: 0 18px 40px rgba(30, 31, 33, 0.12);
+    }
+
+    .popover.permission {
+      left: 128px;
+      width: 340px;
+    }
+
+    .popover-title {
+      padding: 7px 8px 9px;
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .menu-option {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 8px;
+      border-radius: 8px;
+      color: var(--ink-body);
+      font-size: 14px;
+      font-weight: 690;
+    }
+
+    .menu-option.active {
+      background: rgba(74, 127, 123, 0.1);
+      color: var(--brand-ink);
+    }
+
+    .menu-option.warning {
+      color: #7A392A;
+    }
+
+    .menu-option svg {
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .option-copy {
+      display: grid;
+      gap: 1px;
+    }
+
+    .option-copy span {
+      color: var(--ink-muted);
+      font-size: 12px;
+      font-weight: 560;
+    }
+
+    .check {
+      color: var(--brand-ink);
+      font-weight: 900;
+    }
+
+    .right-panel {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      gap: 16px;
+      padding: 20px;
+      border-left: 1px solid var(--line);
+      background: rgba(217, 213, 202, 0.24);
+    }
+
+    .right-panel h3 {
+      margin: 0;
+      color: var(--ink-strong);
+      font-size: 17px;
+    }
+
+    .right-panel p {
+      margin: 4px 0 0;
+      color: var(--ink-muted);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .state-list {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .state-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 13px 14px;
+    }
+
+    .state-card b {
+      display: block;
+      color: var(--ink-strong);
+      margin-bottom: 7px;
+    }
+
+    .state-card .mini-composer {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 7px 9px;
+      color: var(--ink-body);
+      font-size: 13px;
+      font-weight: 760;
+      background: color-mix(in srgb, var(--panel) 88%, var(--shell-muted));
+    }
+
+    .decision-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 24px;
+    }
+
+    .decision-strip article {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 18px;
+    }
+
+    .decision-strip b {
+      display: block;
+      color: var(--ink-strong);
+      margin-bottom: 8px;
+    }
+
+    .decision-strip p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-weight: 650;
+    }
+
+    @media (max-width: 1100px) {
+      .intro,
+      .decision-strip {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 760px) {
+      main { padding-inline: 14px; }
+      .menu,
+      .window-controls {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topline">
+      <div class="brand"><img src="../../../../brand/logo/friday-icon.svg" alt=""> FRIDAY Desktop</div>
+      <nav class="nav-links" aria-label="页面导航">
+        <a href="../index.html#preview">返回规划首页</a>
+        <a href="./no-canvas-workbench.html">无画布预览</a>
+        <a href="./codex-reference-workbench.html">有画布预览</a>
+      </nav>
+    </div>
+
+    <section class="intro">
+      <div>
+        <div class="eyebrow">Composer Toolbar / 2026-06-11</div>
+        <h1>输入框底部只保留三个决策入口。</h1>
+        <p>底部工具栏固定为“+ · 模型名称 · 当前权限模式”。“+”统一承载添加文件、图片、Skill 和 @ 引用；权限模式是当前对话级状态。</p>
+      </div>
+      <div class="note">这个预览只定输入框工具栏和弹出菜单的信息结构，不改变前面确认的工作台布局。</div>
+    </section>
+
+    <section class="desktop-frame" aria-label="FRIDAY Desktop 输入框权限控件">
+      <div class="os-bar">
+        <div class="menu"><span>文件</span><span>编辑</span><span>查看</span><span>窗口</span><span>帮助</span></div>
+        <div class="window-title">FRIDAY Desktop · 产品规划工作区</div>
+        <div class="window-controls"><span>−</span><span>□</span><span>×</span></div>
+      </div>
+
+      <div class="workspace">
+        <aside class="rail" aria-label="全局导航">
+          <div class="mini-brand"><img src="../../../../brand/logo/friday-icon.svg" alt=""></div>
+          <div class="rail-nav">
+            <div class="rail-item">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg>
+              <span>搜索</span>
+            </div>
+            <div class="rail-item active">
+              <svg viewBox="0 0 24 24"><path d="M4 8h16v10H4z"></path><path d="M4 8l2.5-3h4L13 8"></path></svg>
+              <span>项目</span>
+            </div>
+            <div class="rail-item">
+              <svg viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"></rect><rect x="14" y="4" width="6" height="6"></rect><rect x="4" y="14" width="6" height="6"></rect><rect x="14" y="14" width="6" height="6"></rect></svg>
+              <span>模块</span>
+            </div>
+            <div class="rail-item">
+              <svg viewBox="0 0 24 24"><path d="M12 4a8 8 0 1 1-7.2 4.5"></path><path d="M12 8v5l3 2"></path></svg>
+              <span>SOUL</span>
+            </div>
+          </div>
+          <div class="rail-item">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.8 1.8 0 0 0 .36 2l.06.06-2.12 2.12-.06-.06a1.8 1.8 0 0 0-2-.36 1.8 1.8 0 0 0-1.1 1.66V20h-3v-.08A1.8 1.8 0 0 0 10.4 18a1.8 1.8 0 0 0-2 .36l-.06.06-2.12-2.12.06-.06a1.8 1.8 0 0 0 .36-2A1.8 1.8 0 0 0 5 13.5H4v-3h1a1.8 1.8 0 0 0 1.64-1.1 1.8 1.8 0 0 0-.36-2l-.06-.06 2.12-2.12.06.06a1.8 1.8 0 0 0 2 .36A1.8 1.8 0 0 0 11.5 4h3a1.8 1.8 0 0 0 1.1 1.64 1.8 1.8 0 0 0 2-.36l.06-.06 2.12 2.12-.06.06a1.8 1.8 0 0 0-.36 2A1.8 1.8 0 0 0 21 10.5h1v3h-1A1.8 1.8 0 0 0 19.4 15Z"></path></svg>
+            <span>设置</span>
+          </div>
+        </aside>
+
+        <aside class="project-nav" aria-label="项目导航">
+          <div class="project-title">
+            <span>当前项目</span>
+            <b>FRIDAY Desktop</b>
+          </div>
+          <div>
+            <span class="side-section-title">本项目对话</span>
+            <div class="thread-list">
+              <div class="thread active"><span>输入框权限控件</span><span>现在</span></div>
+              <div class="thread"><span>资源窗口结构</span><span>今天</span></div>
+              <div class="thread"><span>项目资料库规则</span><span>昨天</span></div>
+              <div class="thread"><span>产物画布交互</span><span>3 天</span></div>
+            </div>
+          </div>
+          <div class="project-entry">
+            <div class="entry-button">资料库</div>
+            <div class="entry-button">技能</div>
+          </div>
+        </aside>
+
+        <section class="chat-page" aria-label="当前对话">
+          <header class="chat-head">
+            <div>
+              <h2>输入框权限控件</h2>
+              <p>当前对话级权限 · 新对话继承项目默认值</p>
+            </div>
+            <div class="resource-icons" aria-label="当前对话资源">
+              <button aria-label="资料库"><svg viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"></path><path d="M14 4v4h4"></path><path d="M9 12h6M9 16h6"></path></svg></button>
+              <button aria-label="文件树"><svg viewBox="0 0 24 24"><path d="M4 6h6l2 3h8v9H4z"></path></svg></button>
+              <button aria-label="技能"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"></path></svg></button>
+              <button aria-label="产物"><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M8 10h8M8 14h5"></path></svg></button>
+            </div>
+          </header>
+
+          <div class="chat-main">
+            <div class="messages">
+              <article class="bubble user">把输入框底部工具栏定成 + · 模型名称 · 标准。</article>
+              <article class="bubble">
+                我会把添加入口、模型选择和权限模式分成三个相邻入口。权限切换只影响当前对话，新对话再继承项目默认值。
+                <div class="event"><span>更新产品决策日志</span><span>完成</span></div>
+              </article>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="popover add-menu" aria-label="添加入口菜单">
+                <div class="popover-title">添加到当前输入</div>
+                <div class="menu-option">
+                  <svg viewBox="0 0 24 24"><path d="M6 4h9l3 3v13H6z"></path><path d="M14 4v4h4"></path></svg>
+                  <div class="option-copy">文件或图片<span>项目外文件会复制到 FRIDAY/imports/当前对话/</span></div>
+                </div>
+                <div class="menu-option">
+                  <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"></path></svg>
+                  <div class="option-copy">Skill<span>把项目技能或全局技能加入本轮</span></div>
+                </div>
+                <div class="menu-option active">
+                  <svg viewBox="0 0 24 24"><path d="M7 12a5 5 0 1 1 5 5H9a4 4 0 1 1 0-8h7"></path></svg>
+                  <div class="option-copy">@ 引用<span>引用文件、产物、选区或资料库条目</span></div>
+                  <span class="check">当前</span>
+                </div>
+              </div>
+
+              <div class="popover permission" aria-label="权限模式菜单">
+                <div class="popover-title">当前对话权限</div>
+                <div class="menu-option">
+                  <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.5 2.8 8.2 7 10 4.2-1.8 7-5.5 7-10V6z"></path></svg>
+                  <div class="option-copy">安全<span>关键写入、命令、网络和删除前确认</span></div>
+                </div>
+                <div class="menu-option active">
+                  <svg viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>
+                  <div class="option-copy">标准<span>默认推荐，写真实项目文件前审查</span></div>
+                  <span class="check">当前</span>
+                </div>
+                <div class="menu-option warning">
+                  <svg viewBox="0 0 24 24"><path d="M13 2 5 14h6l-1 8 8-12h-6z"></path></svg>
+                  <div class="option-copy">自主<span>完整本地访问，不再逐项确认</span></div>
+                </div>
+              </div>
+
+              <div class="composer">
+                <div class="composer-placeholder">继续输入，或拖入新的项目资料...</div>
+                <div class="composer-bottom">
+                  <div class="composer-tools" aria-label="输入框底部工具栏">
+                    <button class="tool-trigger" aria-label="添加">+</button>
+                    <span class="divider">·</span>
+                    <button class="model-trigger">5.5</button>
+                    <span class="divider">·</span>
+                    <button class="permission-trigger standard">标准</button>
+                  </div>
+                  <span class="send">↑</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="right-panel" aria-label="状态示例">
+          <div>
+            <div class="eyebrow">Toolbar States</div>
+            <h3>同一个位置表达三件事</h3>
+            <p>添加入口、模型名称和当前对话权限保持同排，不再放麦克风或额外权限提示。</p>
+          </div>
+
+          <div class="state-list">
+            <div class="state-card">
+              <b>默认</b>
+              <div class="mini-composer"><span>+</span><span>·</span><span>5.5</span><span>·</span><span>标准</span></div>
+            </div>
+            <div class="state-card">
+              <b>安全</b>
+              <div class="mini-composer"><span>+</span><span>·</span><span>5.5</span><span>·</span><span>安全</span></div>
+            </div>
+            <div class="state-card">
+              <b>自主</b>
+              <div class="mini-composer"><span>+</span><span>·</span><span>5.5</span><span>·</span><span>自主</span></div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="decision-strip" aria-label="已确认决策">
+      <article>
+        <b>+ 是统一添加入口</b>
+        <p>文件、图片、Skill 和 @ 引用都从这里进入输入框，不在底栏散开；项目外文件默认按当前对话复制到 FRIDAY/imports/，对话归档时随 FRIDAY/imports/当前对话/ 一起归档。</p>
+      </article>
+      <article>
+        <b>权限是当前对话级</b>
+        <p>切换不会修改项目默认权限；发送 Turn 时冻结当时模式。</p>
+      </article>
+      <article>
+        <b>自主只在底部显示</b>
+        <p>不在标题区、过程区和设置区重复标识；过程仍保留 trace 和停止入口。</p>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

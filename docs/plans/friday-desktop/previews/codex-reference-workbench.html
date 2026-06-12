@@ -488,24 +488,142 @@
       font-weight: 900;
     }
 
-    .resource-dock {
-      border: 1px solid color-mix(in srgb, var(--muted-teal) 46%, var(--line));
-      border-radius: 999px;
-      background: var(--muted-teal-soft);
-      color: #2E615D;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 30px;
-      padding: 0 11px;
-      font-size: 12px;
-      font-weight: 650;
-      white-space: nowrap;
+    .resource-icon-mark svg {
+      width: 19px;
+      height: 19px;
+      stroke: currentColor;
+      fill: none;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     .thread-body {
       padding: 18px 20px 22px;
       overflow: hidden;
+    }
+
+    .thread-resource-panel {
+      position: absolute;
+      top: 12px;
+      right: 18px;
+      z-index: 8;
+      width: min(322px, calc(100% - 24px));
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--paper) 92%, var(--shell-muted));
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+      box-shadow: 0 18px 42px rgba(30, 31, 33, 0.13);
+    }
+
+    .thread-resource-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      color: var(--ink-strong);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .resource-entry-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .conversation-page-head .resource-entry-strip {
+      width: auto;
+      grid-template-columns: repeat(4, 34px);
+      justify-content: end;
+    }
+
+    .resource-icon {
+      border: 1px solid color-mix(in srgb, var(--muted-teal) 42%, var(--line));
+      border-radius: 8px;
+      min-height: 50px;
+      background: color-mix(in srgb, var(--panel) 84%, var(--shell-muted));
+      color: var(--brand-ink);
+      display: grid;
+      justify-items: center;
+      align-content: center;
+      gap: 3px;
+      font-size: 11px;
+      font-weight: 650;
+    }
+
+    .conversation-page-head .resource-icon {
+      width: 34px;
+      min-height: 34px;
+      gap: 0;
+      padding: 0;
+    }
+
+    .conversation-page-head .resource-icon span:not(.resource-icon-mark),
+    .conversation-page-head .resource-icon em {
+      display: none;
+    }
+
+    .resource-icon-mark {
+      display: grid;
+      place-items: center;
+      color: var(--muted-teal);
+      line-height: 0;
+    }
+
+    .resource-icon.active {
+      background: var(--muted-teal-soft);
+      border-color: var(--muted-teal);
+    }
+
+    .resource-icon em {
+      font-style: normal;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 780;
+    }
+
+    .resource-content {
+      display: grid;
+      gap: 8px;
+    }
+
+    .resource-section-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--ink-strong);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .product-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--paper);
+      padding: 8px 10px;
+      color: var(--ink-body);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .product-row b {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 650;
+    }
+
+    .product-row span {
+      color: var(--muted-teal);
+      font-size: 11px;
+      font-weight: 780;
     }
 
     .task-card {
@@ -915,7 +1033,6 @@
       font-weight: 650;
     }
 
-    .resource-dock,
     .state-resource-pill {
       border-color: rgba(74, 127, 123, 0.34);
       background: rgba(74, 127, 123, 0.1);
@@ -1124,9 +1241,49 @@
               <div class="conversation-name">基于 PI 的桌面端</div>
               <div class="conversation-context">对话页面包含当前画布和右侧 FRIDAY 过程区</div>
             </div>
-            <div class="conversation-actions">
-              <div class="resource-dock">产物 ▦</div>
-              <div class="mini-button">⋯</div>
+            <div class="resource-entry-strip" aria-label="对话资源入口">
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M6 4.8h8.2l3.8 3.8v10.6H6Z"></path>
+                    <path d="M14.2 4.8v4h3.8"></path>
+                    <path d="M8.6 12.2h6.8M8.6 15.5h5.1"></path>
+                  </svg>
+                </span>
+                <span>资料库</span>
+                <em>12</em>
+              </div>
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M5 6.2h5.1l1.6 1.8H19v9.8H5Z"></path>
+                    <path d="M8 11h8M8 14h5.8"></path>
+                  </svg>
+                </span>
+                <span>文件树</span>
+                <em>全部</em>
+              </div>
+              <div class="resource-icon">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M12 4.8v14.4M4.8 12h14.4"></path>
+                    <path d="M7.2 7.2 16.8 16.8M16.8 7.2 7.2 16.8"></path>
+                    <circle cx="12" cy="12" r="3.4"></circle>
+                  </svg>
+                </span>
+                <span>技能</span>
+                <em>3</em>
+              </div>
+              <div class="resource-icon active">
+                <span class="resource-icon-mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <rect x="4.8" y="6" width="14.4" height="12.8" rx="2"></rect>
+                    <path d="M8.2 9.6h7.6M8.2 13h7.6M8.2 16.4h4.8"></path>
+                  </svg>
+                </span>
+                <span>产物</span>
+                <em>3</em>
+              </div>
             </div>
           </div>
 
@@ -1162,6 +1319,22 @@
             </section>
 
             <section class="agent-column" aria-label="FRIDAY 工作过程">
+              <div class="thread-resource-panel" aria-label="当前对话资源浮层">
+                <div class="thread-resource-top">
+                  <span>当前对话资源</span>
+                  <span>3 个产物</span>
+                </div>
+                <div class="resource-content">
+                  <div class="resource-section-title">
+                    <span>当前对话产物</span>
+                    <span>3 个</span>
+                  </div>
+                  <div class="product-row"><b>评审提纲.md</b><span>当前</span></div>
+                  <div class="product-row"><b>预览.html</b><span>打开</span></div>
+                  <div class="product-row"><b>桌面端结构决策.md</b><span>打开</span></div>
+                </div>
+              </div>
+
               <div class="thread-body">
                 <article class="task-card user">
                   <b>用户</b>
@@ -1170,20 +1343,20 @@
 
                 <article class="task-card">
                   <b>FRIDAY</b>
-                  <p>这个对话页面拆成中间画布区和右侧过程区。资料库、Wiki、技能放在当前项目导航底部；产物入口保留在对话标题行右侧，和画布状态靠近。</p>
+                  <p>这个对话页面拆成中间画布区和右侧过程区。资料库、文件树、技能和产物统一放在对话标题行右侧；点击任一 icon 后，下方共用资源窗口以悬浮方式展开，不挤占过程内容。文件树中单击文件会打开到画布，右键只提供在画布中打开和添加到对话；添加到对话等同现有插件里的 @ 文件引用。技能 tab 点击后作为 @ 技能加入输入，不直接执行。产物 tab 右键可加入项目资料库或放入项目文件树。</p>
                   <div class="event-stack">
                     <div class="event-line"><span class="event-dot"></span><span>最左侧固定搜索、项目、团队、日历、模块、SOUL</span><small>完成</small></div>
                     <div class="event-line"><span class="event-dot"></span><span>对话页第二层显示当前项目导航</span><small>完成</small></div>
-                    <div class="event-line"><span class="event-dot"></span><span>资源入口收进标题行</span><small>待确认</small></div>
+                    <div class="event-line"><span class="event-dot"></span><span>标题行资源入口已拆出</span><small>确认</small></div>
                   </div>
-                  <div class="diff-card">项目导航底部只放资料库、Wiki 和技能；产物不放在这里，继续作为当前对话画布相关入口。</div>
+                  <div class="diff-card">项目导航底部保留资料库、Wiki 和技能；当前对话资源入口切换资料库、项目文件树、技能和产物。文件树可快速打开文件到画布，也可右键用 @ 的方式添加到当前对话；技能用 @ 技能进入输入框。</div>
                 </article>
               </div>
 
               <div class="composer">
                 <div>继续输入，或拖入新的项目资料...</div>
                 <div class="composer-bottom">
-                  <span>＋ 本地资料 · 5.5 · 麦克风</span>
+                  <span>+ · 5.5 · 标准</span>
                   <span class="send-button">↑</span>
                 </div>
               </div>
@@ -1195,8 +1368,8 @@
 
     <section class="state-grid" aria-label="资源入口在不同对话状态下的位置">
       <article class="state-card">
-        <b>无画布时：靠右资源窗口</b>
-        <p>用户只在对话里推进任务、暂时没有可显示产物时，资料库、Wiki、技能可以作为靠右窗口出现；产物不进入这个项目入口组。</p>
+        <b>无画布时：标题行入口 + 靠右资源窗口</b>
+        <p>用户只在对话里推进任务、暂时没有打开产物画布时，对话标题行右侧放资源 icon，右侧资源窗口承载当前选中的资源内容。</p>
         <div class="state-mock no-canvas">
           <div class="state-chat">
             <div class="state-line mid"></div>
@@ -1204,14 +1377,14 @@
             <div class="state-line short"></div>
           </div>
           <div class="state-resource-window">
-            资料库<br>Wiki<br>技能
+            资料库<br>Wiki<br>技能<br>产物
           </div>
         </div>
       </article>
 
       <article class="state-card">
-        <b>有画布时：标题行只保留产物</b>
-        <p>当对话页面拆出画布后，资料库、Wiki 和技能留在当前项目导航底部；标题行右侧只保留产物入口。</p>
+        <b>有画布时：标题行入口 + 过程区浮层</b>
+        <p>当对话页面拆出画布后，画布专注当前产物；同一排资源 icon 仍和对话标题平行，点击后在 FRIDAY 过程区上方以浮层显示共用资源窗口。</p>
         <div class="state-mock with-canvas">
           <div class="state-canvas">
             <div class="state-line"></div>
@@ -1219,7 +1392,7 @@
             <div class="state-line short"></div>
           </div>
           <div class="state-chat">
-            <div class="state-resource-pill">产物</div>
+            <div class="state-resource-pill">资源</div>
             <div class="state-line mid"></div>
             <div class="state-line"></div>
             <div class="state-line short"></div>
