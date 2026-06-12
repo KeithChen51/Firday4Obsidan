@@ -312,6 +312,19 @@ function createNoopSkillHost(): SkillHostPort {
 				enabled,
 			};
 		},
+		async setScopedSkillEnabled(
+			_projectId: string,
+			skillId: string,
+			scope: DesktopSkillScope,
+			enabled: boolean,
+		): Promise<DesktopSkillSummary> {
+			return {
+				id: skillId,
+				name: skillId,
+				scope,
+				enabled,
+			};
+		},
 		async buildComposerSkillReference(
 			_projectId: string,
 			skillId: string,

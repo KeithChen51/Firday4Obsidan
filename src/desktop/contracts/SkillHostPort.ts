@@ -21,5 +21,6 @@ export interface SkillHostPort {
 	listProjectSkills(projectId: string): Promise<DesktopSkillSummary[]>;
 	listGlobalSkills(): Promise<DesktopSkillSummary[]>;
 	setSkillEnabled(projectId: string, skillId: string, enabled: boolean): Promise<DesktopSkillSummary>;
+	setScopedSkillEnabled(projectId: string, skillId: string, scope: DesktopSkillScope, enabled: boolean): Promise<DesktopSkillSummary>;
 	buildComposerSkillReference(projectId: string, skillId: string, scope: DesktopSkillScope): Promise<ComposerSkillReference>;
 }

@@ -130,6 +130,7 @@ test("desktop host ports declare the M1 method surface without real IO behavior"
 			"listProjectSkills",
 			"listGlobalSkills",
 			"setSkillEnabled",
+			"setScopedSkillEnabled",
 			"buildComposerSkillReference",
 		],
 	};
@@ -172,6 +173,7 @@ test("artifact and skill contracts cover reviewer-required M1 wrapper surfaces",
 	assert.match(artifactSource, /openProjectFileArtifactWrapper\(/);
 
 	assert.match(skillSource, /export interface ComposerSkillReference/);
+	assert.match(skillSource, /setScopedSkillEnabled\([^)]*scope: DesktopSkillScope[^)]*enabled: boolean[^)]*\): Promise<DesktopSkillSummary>/);
 	assert.match(skillSource, /buildComposerSkillReference\(/);
 	assert.match(skillSource, /skillId: string/);
 	assert.match(skillSource, /scope: DesktopSkillScope/);
