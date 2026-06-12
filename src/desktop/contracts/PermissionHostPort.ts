@@ -1,5 +1,17 @@
 import type { DesktopPermissionMode, DesktopTurnContext } from "./DesktopHostAdapter";
 
+export type DesktopPermissionAction =
+	| "read_project_file"
+	| "write_project_file"
+	| "write_friday_artifact"
+	| "write_managed_file"
+	| "delete_project_file"
+	| "run_command"
+	| "network_access"
+	| "git_push"
+	| "install_dependency"
+	| "enable_skill";
+
 export interface DesktopPermissionSnapshot {
 	turnId: string;
 	mode: DesktopPermissionMode;
@@ -8,7 +20,7 @@ export interface DesktopPermissionSnapshot {
 }
 
 export interface PermissionApprovalRequest {
-	action: string;
+	action: DesktopPermissionAction;
 	summary: string;
 	target?: string;
 	risk?: "low" | "medium" | "high";
